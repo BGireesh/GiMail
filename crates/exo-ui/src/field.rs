@@ -1,9 +1,9 @@
-//! A bare one-line text field: an egui `TextEdit` whose text sits where CSS puts an input's (the
+//! A bare one-line text field, an egui `TextEdit` whose text sits where CSS puts an input's (the
 //! palette's and the shortcuts sheet's search fields, dialog inputs).
 //!
-//! A right-click in one opens the shell's menu for editable text: as on a Mac, it selects the word
-//! under it (or keeps the selection it's on), and the field reports it ([`take_field_menu`]) for
-//! the app to show the menu over.
+//! A right-click in one opens the shell's menu for editable text. As on a Mac, the click selects
+//! the word under it (or keeps the selection it's on), and the field reports it
+//! ([`take_field_menu`]) for the app to show the menu over.
 
 use std::ops::Range;
 
@@ -29,14 +29,14 @@ pub fn text_field(
     selection: Color32,
 ) -> egui::Response {
     let style = &style.without_ligatures();
-    // TextEdit puts a row's baseline where egui does; shift it to where CSS puts it.
+    // TextEdit puts a row's baseline where egui does, so shift it to where CSS puts it.
     let probe = style.single_line(ui.painter(), "x", color, None);
     let egui_baseline = probe
         .rows
         .first()
         .and_then(|row| row.row.glyphs.first())
         .map_or(0.0, |glyph| glyph.pos.y);
-    // TextEdit paints its text from a whole pixel; start the field there and the text at the
+    // TextEdit paints its text from a whole pixel. Start the field there and the text at the
     // line's sub-pixel phase, as `paint_job` does, so the text lands where Chromium puts it.
     let pixels_per_point = ui.ctx().pixels_per_point();
     let phase = (line.left() * pixels_per_point).fract() / pixels_per_point;
@@ -49,7 +49,7 @@ pub fn text_field(
         crate::text::layout(ui.ctx(), job)
     };
     // The selection is painted here, over the CSS line box (egui's would follow its own row, off
-    // by the baseline shift), behind the text: a slot now, filled once the edit has run.
+    // by the baseline shift), behind the text. It's a slot now, filled once the edit has run.
     let behind = ui.painter().add(Shape::Noop);
     // A right-click's press keeps the selection egui's caret move would lose.
     let ctx = ui.ctx().clone();
@@ -178,7 +178,7 @@ pub struct FieldMenu {
     pub text_size: f32,
 }
 
-/// The right-click a field reported since this was last asked (for `field`'s alone, given one).
+/// The right-click a field reported since this was last asked (only `field`'s, when one is given).
 pub fn take_field_menu(ctx: &Context, field: Option<Id>) -> Option<FieldMenu> {
     let key = crate::id(ctx, "exo_ui::field_menu");
     ctx.data_mut(|data| {
@@ -195,9 +195,10 @@ fn is_word_char(ch: char) -> bool {
     ch.is_alphanumeric() || matches!(ch, '\'' | '’')
 }
 
-/// A right-click at `point` in field `id` (`SelectClosestWordOrLinkFromMouseEvent`): on the
-/// selection its press found (`pressed`) it keeps it; else it selects the word under it, or puts
-/// the caret there off a word. Then the field has the keyboard and the menu is the app's.
+/// A right-click at `point` in field `id` (`SelectClosestWordOrLinkFromMouseEvent`). On the
+/// selection its press found (`pressed`), it keeps that selection. Otherwise it selects the word
+/// under it, or puts the caret there off a word. Then the field has the keyboard and the app shows
+/// the menu.
 fn right_click(
     ctx: &Context,
     id: Id,
@@ -209,7 +210,8 @@ fn right_click(
 ) {
     let chars: Vec<char> = text.chars().collect();
     let at = field_index(ctx, text, line, style, point.x);
-    // The character under the pointer: before the caret position when left of it.
+    // The character under the pointer is the one before the caret position when the pointer is
+    // left of that position.
     let under = if at > 0 && point.x < field_x(ctx, text, line, style, at) {
         at - 1
     } else {
@@ -278,9 +280,9 @@ mod tests {
     use super::*;
     use crate::{Family, Font};
 
-    /// The pixel the tessellator draws a text shape's first glyph from: it rounds the shape's
-    /// position to a whole pixel (`round_text_to_pixels`); where the glyph sits inside that pixel
-    /// is in its raster, the same for the same layout.
+    /// The pixel the tessellator draws a text shape's first glyph from. It rounds the shape's
+    /// position to a whole pixel (`round_text_to_pixels`), and where the glyph sits inside that
+    /// pixel is in its raster, the same for the same layout.
     fn first_glyph_x(text: &TextShape, pixels_per_point: f32) -> f32 {
         let row = &text.galley.rows[0];
         (text.pos.x * pixels_per_point).round() / pixels_per_point + row.pos.x + row.glyphs[0].pos.x
@@ -292,7 +294,7 @@ mod tests {
         crate::install(&ctx).expect("the system fonts load");
         let style = TextStyle::new(Font::new(Family::Sans, 400), 16.0, 24.0).without_ligatures();
         ctx.set_pixels_per_point(2.0);
-        // 3.5rem at 1280px wide: a quarter pixel past a whole one at 2×.
+        // 3.5rem at 1280px wide, which is a quarter pixel past a whole one at 2×.
         let line = |top: f32| Rect::from_min_size(pos2(47.25, top), vec2(300.0, 24.0));
         let mut text = "has:attachment".to_owned();
         let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {

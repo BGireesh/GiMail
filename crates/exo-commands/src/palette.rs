@@ -66,7 +66,7 @@ const SELECTION: Color32 = Color32::from_rgba_premultiplied(114, 192, 234, 254);
 const MAIN: &str = "COMMAND_PALETTE";
 
 /// A sub-palette: the palette with its own type (`LABEL`, `MOVE`), prompt and rows. Rows are
-/// commands, usually title and action only; the palette filters and ranks them with
+/// commands, usually with a title and action only. The palette filters and ranks them with
 /// `command-score`.
 #[must_use]
 pub struct SubPalette<A> {
@@ -100,22 +100,22 @@ enum Rows<A> {
     Ordered(RowsFor<A>),
 }
 
-/// A choice beside a sub-palette's input, such as Send later's `if no reply` / `regardless`: the
-/// rows are made for what it says. A key cycles it (`cycle`, as Send later's ⌘⇧L does), and Tab, or
-/// → at the end of the input, opens its menu.
+/// A choice beside a sub-palette's input, such as Send later's `if no reply` / `regardless`. The
+/// rows are made for what it says. A key cycles it (`cycle`, as Send later's ⌘⇧L does), and Tab,
+/// or → at the end of the input, opens its menu.
 #[derive(Clone, Debug)]
 #[must_use]
 pub struct Dropdown {
     options: Vec<&'static str>,
     selected: usize,
     cycle: &'static str,
-    /// The hint an option picked from the open menu shows, and that option.
+    /// An option, and the hint it shows when it's picked from the open menu.
     hint: Option<(usize, Hint)>,
 }
 
 impl Dropdown {
-    /// `options` in the menu's order, `selected` the one it starts on, cycled by `cycle` (a
-    /// binding as [`Command::key`] takes it).
+    /// A dropdown with `options` in the menu's order, starting on `selected` and cycled by `cycle`
+    /// (a binding as [`Command::key`] takes it).
     pub fn new(options: Vec<&'static str>, selected: usize, cycle: &'static str) -> Self {
         Self {
             options,
@@ -134,8 +134,8 @@ impl Dropdown {
 }
 
 impl<A: 'static> SubPalette<A> {
-    /// A sub-palette of type `id` (`LABEL`; reopening the same type restores an unfinished query)
-    /// with header `prompt` and `icon`.
+    /// A sub-palette of type `id` (`LABEL`) with header `prompt` and `icon`. Reopening the same
+    /// type restores an unfinished query.
     pub fn new(
         id: &'static str,
         prompt: impl Into<Cow<'static, str>>,
@@ -158,8 +158,8 @@ impl<A: 'static> SubPalette<A> {
         }
     }
 
-    /// A sub-palette whose rows `rows` matches and orders for each query, shown as it returns
-    /// them, for pickers with their own ranking rules (Label, Move).
+    /// A sub-palette for pickers with their own ranking rules (Label, Move). `rows` matches and
+    /// orders the rows for each query, and they're shown as it returns them.
     pub fn ordered(
         id: &'static str,
         prompt: impl Into<Cow<'static, str>>,
@@ -172,8 +172,8 @@ impl<A: 'static> SubPalette<A> {
         }
     }
 
-    /// [`ordered`](Self::ordered), with `dropdown` beside the input: `rows` takes its choice
-    /// too, by index.
+    /// [`ordered`](Self::ordered), with `dropdown` beside the input. `rows` also takes the
+    /// dropdown's choice, by index.
     pub fn ordered_with(
         id: &'static str,
         prompt: impl Into<Cow<'static, str>>,
@@ -201,13 +201,14 @@ impl<A: 'static> SubPalette<A> {
     }
 
     /// A later stage of the sub-palette whose row opens it, drawn as the same palette moving on
-    /// (New Split Inbox's `Edit Subject`): Escape goes back to the main palette if that one's did.
+    /// (New Split Inbox's `Edit Subject`). Escape goes back to the main palette if the earlier
+    /// stage's Escape did.
     pub fn stage(mut self) -> Self {
         self.stage = true;
         self
     }
 
-    /// No input: the rows follow the header (Move to Important / Other).
+    /// No input, so the rows follow the header (Move to Important / Other).
     pub fn hide_input(mut self) -> Self {
         self.hide_input = true;
         self
@@ -328,7 +329,7 @@ pub(crate) struct Palette<A> {
     open: Option<Open<A>>,
     /// The query a palette type was dismissed with, restored (selected) when it reopens.
     saved: Option<(&'static str, String)>,
-    /// A row ran this frame; a sub-palette opened in response goes back here on Escape.
+    /// A row ran this frame, so a sub-palette opened in response goes back here on Escape.
     ran_main: bool,
     /// A row of a sub-palette that goes back to the main palette ran this frame.
     ran_from_main: bool,
@@ -509,8 +510,8 @@ impl<A: Clone> Palette<A> {
         }
     }
 
-    /// Closes the palette; `save` keeps a non-empty query for the next time this type opens
-    /// (dismissing by ⌘K or a click outside does; running a row doesn't).
+    /// Closes the palette. `save` keeps a non-empty query for the next time this type opens.
+    /// Dismissing by ⌘K or a click outside saves it, and running a row doesn't.
     pub(crate) fn close(&mut self, save: bool) {
         let Some(open) = self.open.take() else {
             return;
@@ -540,7 +541,7 @@ impl<A: Clone> Palette<A> {
         } else {
             None
         };
-        // The dropdown's keys go first: they change the rows.
+        // The dropdown's keys go first, because they change the rows.
         let dropdown = sub.and_then(|sub| sub.dropdown.as_ref());
         if let Some(dropdown) = dropdown {
             dropdown_keys(ctx, state, dropdown);
@@ -665,8 +666,9 @@ fn run<'a, A>(
 /// The input's id.
 const INPUT_ID: &str = "exo_commands::palette_input";
 
-/// A dropdown's keys, before the palette's: its cycle key, and while its menu is open, the
-/// menu's: ↑ ↓ K J move, Enter picks, Escape, Tab and ← close it, and nothing reaches the input.
+/// A dropdown's keys, handled before the palette's: its cycle key and, while its menu is open, the
+/// menu's. ↑ ↓ K J move, Enter picks, and Escape, Tab and ← close it. While the menu is open,
+/// nothing reaches the input.
 fn dropdown_keys(ctx: &Context, state: &mut State, dropdown: &Dropdown) {
     let os = ctx.os();
     let cycle = crate::keys::Binding::parse(dropdown.cycle, os)
@@ -825,7 +827,7 @@ fn draw<A: Clone>(
         .order(Order::Foreground)
         .fixed_pos(area.min)
         .show(ctx, |ui| {
-            // The palette is a transparent layer over the whole content area: a click on it closes
+            // The palette is a transparent layer over the whole content area. A click on it closes
             // the palette, and nothing underneath gets the click.
             let backdrop = ui.allocate_rect(area, Sense::click());
             let layout = Layout::new(
@@ -890,7 +892,7 @@ impl Layout {
         let row_rects = rows[..shown]
             .iter()
             .map(|row| {
-                // The avatar is taller than a title line; a photo's box pulls itself 2px up
+                // The avatar is taller than a title line. A photo's box pulls itself 2px up
                 // (`margin-top: -2px`).
                 let avatar = row.command.avatar.as_ref().map_or(0.0, |avatar| {
                     if avatar.photo.is_some() {
@@ -931,7 +933,7 @@ impl Layout {
     }
 }
 
-/// How many lines a row's title takes (it wraps to two at most; one beside a description).
+/// How many lines a row's title takes. It wraps to two at most, or one beside a description.
 fn title_lines<A>(ui: &Ui, row: &Ranked<'_, A>) -> f32 {
     let galley = title_galley(ui, row, Color32::WHITE, title_width(ui, row));
     galley.rows.len().clamp(1, 2) as f32
@@ -994,7 +996,7 @@ fn meta_width<A>(ui: &Ui, command: &Command<A>) -> f32 {
     tick + keycaps.width() + if command.in_use { 4.0 } else { 0.0 }
 }
 
-/// Paints the palette and handles the mouse over it; returns the clicked row.
+/// Paints the palette and handles the mouse over it, and returns the clicked row.
 fn paint<A: Clone>(
     ui: &mut Ui,
     layout: &Layout,
@@ -1006,7 +1008,7 @@ fn paint<A: Clone>(
     let ctx = ui.ctx().clone();
     let tokens = palette(&ctx);
     let panel = layout.panel;
-    // 4px corners; Carbon's shadows are deeper.
+    // 4px corners. Carbon's shadows are deeper.
     let radius = CornerRadius::same(4);
     let painter = ui.painter().clone();
     let shadows = match tokens.theme {
@@ -1192,8 +1194,8 @@ fn paint<A: Clone>(
     ran
 }
 
-/// The dropdown's button and menu items: Exo Mono 14px, `-0.0225em`; the button in a 20px
-/// line, the menu's items in 28px ones.
+/// The dropdown's button and menu items: Exo Mono 14px, `-0.0225em`. The button sits in a 20px
+/// line, and the menu's items in 28px ones.
 const DROPDOWN: TextStyle =
     TextStyle::new(Font::new(Family::Mono, 400), 14.0, 20.0).letter_spacing(-0.315);
 const DROPDOWN_ITEM: TextStyle =
@@ -1234,10 +1236,10 @@ fn dropdown_width(ui: &Ui, dropdown: &Dropdown, choice: usize, open: bool) -> f3
     button.max(menu)
 }
 
-/// The dropdown's button in the input row `rect` (its box; the dropdown 10px down, the button 2px
-/// more, right-aligned): the choice and the arrow, at half opacity until hovered, open or flashed
-/// by its key, underlined while open. A click opens or closes the menu; with no rows it does
-/// nothing.
+/// The dropdown's button: the choice and the arrow, in the dropdown's box `rect` in the input row.
+/// The dropdown sits 10px down the row and the button 2px further, right-aligned. The button is at
+/// half opacity until it's hovered, open or flashed by its key, and it's underlined while open. A
+/// click opens or closes the menu, and with no rows it does nothing.
 fn paint_dropdown_button(
     ui: &Ui,
     painter: &Painter,
@@ -1280,8 +1282,8 @@ fn paint_dropdown_button(
     }
     let open = state.menu.is_some();
     let flashing = ctx.input(|input| input.time) - state.flashed < 0.05;
-    // `opacity: .5`, 1 on hover, open or flashed; `transition: opacity 150ms ease`, none while
-    // flashing.
+    // `opacity: .5`, or 1 on hover, open or flashed. `transition: opacity 150ms ease`, with none
+    // while flashing.
     let lit = enabled && (response.hovered() || open);
     let eased = exo_ui::motion::transition(
         ctx,
@@ -1309,8 +1311,8 @@ fn paint_dropdown_button(
         Color32::WHITE.gamma_multiply(opacity),
     );
     if open {
-        // `box-shadow: 0 2px #aeb1dd` under the inline button's box (its glyphs' 18px and the
-        // 2px bottom padding, measured: the line's bottom).
+        // `box-shadow: 0 2px #aeb1dd` under the inline button's box. The box is its glyphs' 18px
+        // plus the 2px bottom padding, which ends at the line's bottom (measured).
         painter.rect_filled(
             Rect::from_min_size(Pos2::new(line.left(), line.bottom()), Vec2::new(width, 2.0)),
             0.0,
@@ -1321,7 +1323,7 @@ fn paint_dropdown_button(
 
 /// The dropdown's open menu under its button (white, `padding: 8px 0`, `margin-top: 8px`), its
 /// items right-aligned in the dropdown's box `rect`, the highlighted one on `#e4e4e4`. A click
-/// picks one; the pointer moves the highlight.
+/// picks one, and the pointer moves the highlight.
 fn paint_dropdown_menu(
     ui: &Ui,
     dropdown: &Dropdown,
@@ -1381,15 +1383,16 @@ fn paint_dropdown_menu(
     }
 }
 
-/// The nudge's gradient: the input's background, `linear-gradient(90deg, #8ea6ff 0%, #ffbcd5 25%,
-/// #8ea6ff 75%, #ffbcd5 100%)` four times its `width` wide and sliding from its end to its start
-/// every 5s, shows through `galley`'s glyphs (`background-clip: text`), under the placeholder's 30%
-/// white.
+/// The nudge's gradient. The input's background, `linear-gradient(90deg, #8ea6ff 0%, #ffbcd5 25%,
+/// #8ea6ff 75%, #ffbcd5 100%)`, is four times its `width` wide and slides from its end to its start
+/// every 5s. It shows through `galley`'s glyphs (`background-clip: text`), under the placeholder's
+/// 30% white.
 fn gradient_text(galley: &Arc<Galley>, width: f32, time: f64) -> Arc<Galley> {
     const STOPS: [(f32, [f32; 3]); 4] = [(0.0, BLUE), (0.25, PINK), (0.75, BLUE), (1.0, PINK)];
     const BLUE: [f32; 3] = [142.0, 165.903_85, 255.0];
     const PINK: [f32; 3] = [255.0, 188.0, 212.512_2];
-    // `background-position` from 100% to 0%: the image `3 × width` left of the input at first.
+    // `background-position` goes from 100% to 0%, so the image starts `3 × width` left of the
+    // input.
     let position = 1.0 - (time % 5.0 / 5.0) as f32;
     let color = |x: f32| {
         let at = ((x + 3.0 * width * position) / (4.0 * width)).clamp(0.0, 1.0);
@@ -1480,8 +1483,8 @@ fn paint_row<A>(ui: &Ui, rect: Rect, row: &Ranked<'_, A>, active: bool, snap: f3
     if let Some(icon) = command.icon {
         // A white glyph at 70%, whole on the active row.
         let icon_color = Color32::WHITE.gamma_multiply(if active { 1.0 } else { 0.7 });
-        // `top: 2px`, from where layout put the row (see `Layout::snap`); the glyph at the box's
-        // top left (`background-repeat: no-repeat`).
+        // `top: 2px`, from where layout put the row (see `Layout::snap`). The glyph sits at the
+        // box's top left (`background-repeat: no-repeat`).
         let icon_top = content_top + 2.0 - snap;
         paint_icon(
             ui,
@@ -1493,9 +1496,9 @@ fn paint_row<A>(ui: &Ui, rect: Rect, row: &Ranked<'_, A>, active: bool, snap: f3
     } else if let Some(avatar) = &command.avatar {
         let rect = Rect::from_min_size(Pos2::new(x - 2.0, content_top), Vec2::splat(AVATAR));
         match &avatar.photo {
-            // The photo's ring: `border-width: 2.5px`, which Chromium floors to 2px, and its
-            // `margin-top: -2px` undone by `top: 2px`; it moves with the panel's snap (measured),
-            // and like the icons it's 70% opaque off the active row.
+            // The photo's ring has `border-width: 2.5px`, which Chromium floors to 2px, and its
+            // `margin-top: -2px` is undone by `top: 2px`. It moves with the panel's snap
+            // (measured), and like the icons it's 70% opaque off the active row.
             Some(photo) => exo_ui::paint_photo_avatar(
                 painter,
                 rect,
@@ -1504,7 +1507,7 @@ fn paint_row<A>(ui: &Ui, rect: Rect, row: &Ranked<'_, A>, active: bool, snap: f3
                 avatar.fill,
                 if active { 1.0 } else { 0.7 },
             ),
-            // An inline SVG: it moves with the panel's snap, as the tick does.
+            // An inline SVG, so it moves with the panel's snap, as the tick does.
             None => exo_ui::paint_initial_avatar(
                 painter,
                 rect,
@@ -1576,8 +1579,8 @@ fn paint_row<A>(ui: &Ui, rect: Rect, row: &Ranked<'_, A>, active: bool, snap: f3
                 ..KeycapColors::base(tokens)
             },
         );
-        // After a tick the caps are 4px further right and, the tick's box lowering the line,
-        // 1px lower (measured in the Accounts palette).
+        // After a tick the caps are 4px further right and 1px lower, because the tick's box
+        // lowers the line (measured in the Accounts palette).
         let (gap, drop) = if command.in_use {
             (4.0, 1.0)
         } else {

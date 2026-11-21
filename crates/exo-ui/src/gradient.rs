@@ -100,7 +100,7 @@ pub fn paint_field(
 
 /// `galley`'s glyphs filled with the horizontal gradient `stops` spans over a box `width` wide
 /// whose left edge is at the galley's origin (`background: linear-gradient(left, …)` with
-/// `background-clip: text`): each glyph's vertices take the color where they sit in the box.
+/// `background-clip: text`). Each glyph's vertices take the color where they sit in the box.
 pub fn tint_galley(galley: &Galley, width: f32, stops: &[Stop]) -> Arc<Galley> {
     let mut tinted = galley.clone();
     for placed in &mut tinted.rows {

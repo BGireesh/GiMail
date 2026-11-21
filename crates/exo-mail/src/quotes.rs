@@ -771,8 +771,8 @@ struct QuoteHeader {
     from_line: String,
 }
 
-/// Wraps text nodes in spans, then gives each node its `(class, other)`: sets `class`, clears
-/// `other`.
+/// Wraps text nodes in spans, then gives each node its `(class, other)`, setting `class` and
+/// clearing `other`.
 fn mark(nodes: Vec<NodeRef>, classes: &[(&str, &str)]) -> Vec<NodeRef> {
     let mut wraps: Vec<(NodeRef, NodeRef)> = Vec::new();
     let marked: Vec<NodeRef> = nodes

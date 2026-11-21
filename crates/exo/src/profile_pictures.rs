@@ -1,6 +1,6 @@
 //! The accounts' own Google profile photos, which show in the folder drawer's account row, the
-//! Accounts palette and the Accounts dialog, each account's initial on its color standing in
-//! while there's none to show.
+//! Accounts palette and the Accounts dialog, with each account's initial on its color standing
+//! in while there's none to show.
 //!
 //! Exo asks Google for the account's photo when an account comes on screen
 //! ([`ProfilePictures::refresh`]). The photo is saved with the account list
@@ -23,13 +23,13 @@ use exo_ui::AvatarPhoto;
 
 /// How long the photo may take to download.
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(30);
-/// People is asked again while it can't be reached: up to 7 tries, a second apart and twice as
+/// People is asked again while it can't be reached, up to 7 tries, a second apart and twice as
 /// long each time, at most 32 s.
 const ATTEMPTS: u32 = 7;
 const FIRST_WAIT: Duration = Duration::from_secs(1);
 const LONGEST_WAIT: Duration = Duration::from_secs(32);
 
-/// The photos decoded so far, by address: what the avatars draw. It lives in the context's
+/// The photos decoded so far, by address, which the avatars draw. It lives in the context's
 /// data, so whatever draws an avatar can find it ([`photo`]).
 type Shown = Arc<Mutex<HashMap<String, AvatarPhoto>>>;
 
@@ -50,8 +50,8 @@ pub(crate) struct ProfilePictures {
     shown: Shown,
     /// The accounts whose saved photo was asked for.
     loaded: HashSet<String>,
-    /// Shows saved photos one after another, so the photo saved last is the one shown; started
-    /// with the first.
+    /// Shows saved photos one after another, so the photo saved last is the one shown. It's
+    /// started with the first.
     loader: Option<mpsc::Sender<Load>>,
     /// Loads and fetches under way.
     busy: Arc<AtomicUsize>,
@@ -105,8 +105,8 @@ impl ProfilePictures {
         }
     }
 
-    /// Nothing is being loaded or fetched; a fetch waiting to try again doesn't count. For
-    /// screenshots and tests.
+    /// Whether nothing is being loaded or fetched. A fetch waiting to try again doesn't count.
+    /// For screenshots and tests.
     pub(crate) fn is_idle(&self) -> bool {
         self.busy.load(Ordering::SeqCst) == 0
     }
@@ -120,15 +120,15 @@ impl ProfilePictures {
         }
     }
 
-    /// `email` signed out, which deleted its photo: its initial shows from now on.
+    /// `email` signed out, which deleted its photo, so its initial shows from now on.
     pub(crate) fn forget(&mut self, auth: &Auth, email: &str) {
         self.loaded.remove(email);
         self.show_saved(auth, email);
     }
 
-    /// Asks Google for `email`'s photo, off the UI thread, and saves and shows what it gets: the
-    /// People API's primary photo, or none when that's Google's generated default. Meanwhile, and
-    /// when Google can't be reached, the saved one shows.
+    /// Asks Google for `email`'s photo, off the UI thread, and saves and shows what it gets, which
+    /// is the People API's primary photo, or none when that's Google's generated default.
+    /// Meanwhile, and when Google can't be reached, the saved one shows.
     pub(crate) fn refresh(&mut self, auth: &Auth, email: &str, tokens: exo_auth::Tokens) {
         self.load(auth, [email]);
         let (loader, busy) = (self.loader().clone(), Busy::new(&self.busy));
@@ -193,7 +193,7 @@ impl ProfilePictures {
     }
 }
 
-/// Fetches `email`'s photo and saves it. Whether that changed the saved one.
+/// Fetches `email`'s photo and saves it. Returns whether that changed the saved one.
 fn fetch_and_save(
     auth: &Auth,
     email: &str,
@@ -239,8 +239,8 @@ fn fetch_and_save(
     }
 }
 
-/// The account's photo: People's primary photo unless it's Google's generated default. Its URL
-/// asks for 100px (`=s100`), which loads as it is and is scaled down to the avatar.
+/// The account's photo, which is People's primary photo unless it's Google's generated default.
+/// Its URL asks for 100px (`=s100`), which loads as it is and is scaled down to the avatar.
 async fn fetch(
     google: &gmail::Client,
     http: &crate::remote_content::Client,

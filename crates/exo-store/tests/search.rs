@@ -80,7 +80,7 @@ async fn phrases_are_checked_as_typed_and_highlighted_whole() {
         ["sweet potato"],
         "the phrase in bold, not its words"
     );
-    // The index stems `potatoes` to `potato`: "sweet potato thing" matches it.
+    // The index stems `potatoes` to `potato`, so "sweet potato thing" matches it in the index.
     let page = search(&harness, "\"potatoes thing\"").await;
     assert!(
         !subjects(&page)
@@ -345,7 +345,7 @@ async fn filters_narrow_a_list_and_keep_sticky_rows() {
         "a sticky row stays"
     );
 
-    // A conversation unstarred in Starred stays where it was while it's held, even paging.
+    // A conversation unstarred in Starred stays where it was while it's held, even when paging.
     let starred = harness
         .store
         .list(&ListId::Starred, None, 500)
@@ -407,7 +407,7 @@ async fn filters_narrow_a_list_and_keep_sticky_rows() {
         ids(&starred)
     );
 
-    // Awaiting a reply: Sent threads whose last message is the user's.
+    // Awaiting a reply lists Sent threads whose last message is the user's.
     let no_reply = harness
         .store
         .list_filtered(&ListId::All, Some(Filter::NoReply), &[], &[], None, 500)

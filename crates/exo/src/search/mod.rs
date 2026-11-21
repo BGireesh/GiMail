@@ -75,8 +75,8 @@ pub(crate) enum Action {
     Key(Key),
 }
 
-/// The address book as the bar suggests people from it: as read, and indexed in two, the
-/// addresses `Remove Suggestion` took out (`excluded`) in their own.
+/// The address book as the bar suggests people from it, as read and indexed in two. The
+/// addresses `Remove Suggestion` took out (`excluded`) are in an index of their own.
 struct Book {
     contacts: Arc<Vec<ScoredContact>>,
     excluded: BTreeMap<String, String>,
@@ -99,38 +99,38 @@ pub(crate) struct Search {
     selected_by_mouse: bool,
     /// The history row picked with keys or the mouse.
     history_selected: Option<usize>,
-    /// Tab took a suggestion since the last other key.
+    /// Whether Tab took a suggestion since the last other key.
     used_autocomplete: bool,
     /// The search whose results show.
     query: Option<String>,
     /// The search to run ahead once the bar has rested on it (instant search), and when that
     /// is once [`poll_instant`](Self::poll_instant) has seen it.
     instant: Option<(String, Option<f64>)>,
-    /// The address book the bar suggests people from (`account.contacts`), indexed.
+    /// The account's address book, indexed, which the bar suggests people from.
     book: Option<Book>,
-    /// The address book was asked for.
+    /// Whether the address book was asked for.
     pub book_asked: bool,
     /// The thread the cursor was on when the bar took the keyboard.
     last_focused: Option<String>,
-    /// The bar has the keyboard; otherwise the results do.
+    /// Whether the bar has the keyboard. Otherwise the results do.
     focused: bool,
-    /// Select all of the bar's text on the next frame.
+    /// Whether to select all of the bar's text on the next frame.
     select_all: bool,
     /// The results take the keyboard once listed, on this thread if it's among them.
     focus_pending: Option<Option<String>>,
-    /// The caret is at the end of the text, with nothing selected.
+    /// Whether the caret is at the end of the text, with nothing selected.
     caret_at_end: bool,
-    /// The text the field last showed: when the bar's text changes otherwise (a suggestion
+    /// The text the field last showed. When the bar's text changes otherwise (a suggestion
     /// taken), the caret goes to its end, as a textarea's does.
     field_text: String,
     labels: Vec<LabelChoice>,
-    /// Whom the contact pane shows, as a suggestion or history row named them; `Some(None)` is
-    /// nobody. `None` once the results' cursor decides.
+    /// Whom the contact pane shows, as a suggestion or history row named them. `Some(None)` is
+    /// nobody, and `None` means the results' cursor decides.
     pub contact: Option<Option<Person>>,
 }
 
 impl Search {
-    /// Search mode, the bar holding `initial`.
+    /// Search mode, with the bar holding `initial`.
     pub fn new(initial: &str, labels: &[Label]) -> Self {
         let value = normalize_quotes(initial);
         Self {
@@ -167,19 +167,19 @@ impl Search {
         &self.value
     }
 
-    /// The bar has the keyboard.
+    /// Whether the bar has the keyboard.
     pub fn bar_focused(&self) -> bool {
         self.focused
     }
 
-    /// The suggestion list is open.
+    /// Whether the suggestion list is open.
     fn list_open(&self) -> bool {
         self.suggestions
             .as_ref()
             .is_some_and(|suggestions| !suggestions.is_empty())
     }
 
-    /// The history shows (no suggestions and no results).
+    /// Whether the history shows (no suggestions and no results).
     pub fn history_open(&self) -> bool {
         self.suggestions.is_none() && self.query.is_none()
     }
@@ -201,8 +201,8 @@ impl Search {
         self.focus_pending = Some(prefer);
     }
 
-    /// The results arrived: `Some(cursor)` when they take the keyboard now, on that thread (or
-    /// the first). An empty finished search leaves it with the bar.
+    /// The results arrived. Returns `Some(cursor)` when they take the keyboard now, on that
+    /// thread (or the first). An empty finished search leaves the keyboard with the bar.
     pub fn results_listed(&mut self, ids: &[&str], finished: bool) -> Option<Option<String>> {
         let prefer = self.focus_pending.as_ref()?;
         if ids.is_empty() {
@@ -254,7 +254,7 @@ impl Search {
         effects
     }
 
-    /// Sets the bar's text: smart quotes straightened; an empty query, or one ending in an
+    /// Sets the bar's text, with smart quotes straightened. An empty query, or one ending in an
     /// operator, stops showing results.
     fn set_value(&mut self, value: &str) -> Vec<Effect> {
         self.value = normalize_quotes(value);
@@ -268,7 +268,7 @@ impl Search {
         Vec::new()
     }
 
-    /// Enqueues an instant search: `value` runs ahead once the bar has rested on it for
+    /// Enqueues an instant search, so `value` runs ahead once the bar has rested on it for
     /// [`INSTANT_DELAY`], unless something else is enqueued or searched first.
     fn enqueue_instant(&mut self, value: &str) {
         let value = value.trim();
@@ -277,7 +277,7 @@ impl Search {
         }
     }
 
-    /// The instant search due by `now` (`Effect::Preload`, if it isn't what shows); otherwise
+    /// The instant search due by `now` (`Effect::Preload`, if it isn't what shows). Otherwise
     /// how long until one is, to look again then.
     pub fn poll_instant(&mut self, now: f64) -> (Vec<Effect>, Option<f64>) {
         let Some((_, due)) = &mut self.instant else {
@@ -322,7 +322,7 @@ impl Search {
         self.on_results(results)
     }
 
-    /// For one word, the address book's best five people, as `(email, name)`, those
+    /// For one word, the address book's best five people, as `(email, name)`, with those that
     /// `Remove Suggestion` took out after the rest.
     fn people(&self, word: &str) -> Vec<(String, Option<String>)> {
         if word.trim().is_empty() || word.contains('"') {
@@ -346,7 +346,7 @@ impl Search {
     }
 
     /// Indexes the account's address book once it's read (or read again), and again when
-    /// `Remove Suggestion` takes an address out or puts one back (`excluded`); suggestions
+    /// `Remove Suggestion` takes an address out or puts one back (`excluded`). Suggestions
     /// waiting on people are worked out again.
     pub fn set_book(
         &mut self,
@@ -371,9 +371,9 @@ impl Search {
         }
     }
 
-    /// Takes in the suggestions for the text: with the caret at the end (or the bar unfocused) the
-    /// first one completes it; with none, the word being typed is lozenged and the text waits to
-    /// run ahead.
+    /// Takes in the suggestions for the text. With the caret at the end (or the bar unfocused)
+    /// the first one completes it. With none, the word being typed is lozenged and the text waits
+    /// to run ahead.
     fn on_results(&mut self, mut results: Vec<Suggestion>) -> Vec<Effect> {
         if !results.is_empty() && (self.caret_at_end || !self.focused) {
             for suggestion in &mut results {
@@ -497,8 +497,8 @@ impl Search {
         format!("{}{inserted}", TRAILING_COLON.replace(head, ":"))
     }
 
-    /// Takes a suggestion (or the text as typed). An operator keeps the bar open for its value;
-    /// anything else searches.
+    /// Takes a suggestion (or the text as typed). An operator keeps the bar open for its value,
+    /// and anything else searches.
     fn on_added(&mut self, suggestion: Option<Suggestion>, focus_list: bool) -> Vec<Effect> {
         static BANG: LazyLock<Regex> =
             LazyLock::new(|| Regex::new(r"(?-u:\B)!\w+").expect("valid regex"));
@@ -545,9 +545,9 @@ impl Search {
         effects
     }
 
-    /// Starts the search: without `focus_list` (Tab), the search only runs ahead; with it, the
-    /// results show and take the keyboard, back on the thread they had if the search didn't change.
-    /// Either way the instant search waiting is dropped.
+    /// Starts the search. Without `focus_list` (Tab), the search only runs ahead. With it, the
+    /// results show and take the keyboard, back on the thread they had if the search didn't
+    /// change. Either way the instant search waiting is dropped.
     fn start_search(&mut self, focus_list: bool) -> Vec<Effect> {
         self.instant = None;
         if !focus_list {
@@ -573,7 +573,7 @@ impl Search {
         effects
     }
 
-    /// A key the bar handles; `history` is the account's recent searches.
+    /// A key the bar handles. `history` is the account's recent searches.
     pub fn key(&mut self, key: Key, history: &[SearchHistoryItem]) -> Vec<Effect> {
         match key {
             Key::Escape if self.list_open() => {
@@ -621,7 +621,7 @@ impl Search {
         self.on_added(picked, false)
     }
 
-    /// Steps through the suggestions: Down past the last leaves the list unpicked.
+    /// Steps through the suggestions. Down past the last leaves the list unpicked.
     fn step_suggestions(&mut self, step: isize) -> Vec<Effect> {
         let count = self.suggestions.as_ref().map_or(0, Vec::len);
         let current = self.selected.map_or(-1, |at| at as isize);
@@ -663,7 +663,7 @@ impl Search {
         self.on_added(picked, true)
     }
 
-    /// Steps through the history: past either end the bar empties.
+    /// Steps through the history. Past either end the bar empties.
     fn step_history(&mut self, step: isize, history: &[SearchHistoryItem]) -> Vec<Effect> {
         let count = history.len() as isize;
         let current = self.history_selected.map_or(-1, |at| at as isize);
@@ -781,8 +781,8 @@ fn ensure_trailing_space(value: &str) -> String {
     }
 }
 
-/// The bar's text when search opens over `list`: the view's own search, then the active filter's
-/// token.
+/// The bar's text when search opens over `list`, which is the view's own search, then the active
+/// filter's token.
 pub(crate) fn initial_query<'a>(
     list: &ListId,
     labels: &[Label],

@@ -12,8 +12,8 @@ use exo_store::{ListCount, ListId, Settings, SplitEntry, SplitLibrary, SystemSpl
 use crate::commands::Action;
 use crate::settings;
 
-/// The domain the account's Team split and template cover: its address's, unless that's a
-/// webmail one.
+/// The domain the account's Team split and template cover, which is its address's domain unless
+/// that's a webmail one.
 pub(crate) fn team_domain(email: &str) -> Option<String> {
     email
         .rsplit_once('@')
@@ -41,9 +41,9 @@ pub struct Tab {
     pub name: String,
     /// The list's conversations, when known.
     pub count: Option<ListCount>,
-    /// A `•` follows it: the first of exactly two shown tabs.
+    /// Whether a `•` follows it, as one follows the first of exactly two shown tabs.
     pub bullet: bool,
-    /// It hides while it's empty, and it is: it collapses out of the row.
+    /// Whether it hides while it's empty and is empty, so it collapses out of the row.
     pub hidden: bool,
     /// What its tooltip says it is ([`describe`]).
     pub description: Option<String>,
@@ -60,9 +60,10 @@ impl Tab {
     }
 }
 
-/// Gives `tabs` what their tooltips say they are: Important's and Other's own words; a split's
-/// template's description from `library` (by its template, else its kind, `splitTemplate_{kind}`;
-/// the Inbox's is `splitTemplate_inbox`); else the split's query.
+/// Gives `tabs` what their tooltips say they are: Important's and Other's own words, the
+/// description of a split's template from `library` (found by its template, or else by its kind
+/// as `splitTemplate_{kind}`, where the Inbox's is `splitTemplate_inbox`), or else the split's
+/// query.
 pub fn describe(tabs: &mut [Tab], settings: &Settings, library: Option<&SplitLibrary>) {
     for tab in tabs {
         let split = match &tab.list {
@@ -105,7 +106,7 @@ pub type Counts = HashMap<ListId, ListCount>;
 /// List counts show below this (`INBOX_COUNTS`).
 pub(crate) const INBOX_COUNTS: usize = 1000;
 
-/// How the tab title and the Dock badge show `count`: its conversations, with `+` while the
+/// How the tab title and the Dock badge show `count`, as its conversations, with `+` while the
 /// store doesn't have them all yet. None for an empty list and from [`INBOX_COUNTS`].
 pub(crate) fn count_label(count: &ListCount) -> Option<String> {
     (1..INBOX_COUNTS)
@@ -131,7 +132,7 @@ pub fn other(settings: &Settings) -> ListId {
     }
 }
 
-/// An inbox view: the header shows the tabs, Add Split and the split gear.
+/// Whether `list` is an inbox view, whose header shows the tabs, Add Split and the split gear.
 pub fn is_inbox_view(list: &ListId) -> bool {
     matches!(
         list,
@@ -139,7 +140,7 @@ pub fn is_inbox_view(list: &ListId) -> bool {
     )
 }
 
-/// The tabs: splits (and Other) that hide when empty are [hidden](Tab::hidden) while they're
+/// The tabs. Splits (and Other) that hide when empty are [hidden](Tab::hidden) while they're
 /// known to be empty, unless they're on screen.
 pub fn tabs(settings: &Settings, current: &ListId, counts: &Counts) -> Vec<Tab> {
     let hides = |entry: &SplitEntry<'_>| match entry {
@@ -174,8 +175,8 @@ pub fn tabs(settings: &Settings, current: &ListId, counts: &Counts) -> Vec<Tab> 
     tabs
 }
 
-/// The list `Tab` (`step` 1) or ⇧Tab (-1) goes to from `current`: the next or previous tab,
-/// wrapping around; from outside the inbox, the first tab.
+/// The list `Tab` (`step` 1) or ⇧Tab (-1) goes to from `current`, which is the next or previous
+/// tab, wrapping around, or from outside the inbox, the first tab.
 pub fn step(tabs: &[Tab], current: &ListId, step: isize) -> Option<ListId> {
     let tabs: Vec<&Tab> = tabs.iter().filter(|tab| !tab.hidden).collect();
     let len = isize::try_from(tabs.len()).ok().filter(|len| *len > 0)?;
@@ -187,9 +188,9 @@ pub fn step(tabs: &[Tab], current: &ListId, step: isize) -> Option<ListId> {
     tabs.get(next).map(|tab| tab.list.clone())
 }
 
-/// Whether the header shows Add Split: in an inbox view, until a split is first turned on, and
-/// not once the account `joined` (first signed in to Exo) over a week before `now`; with no join
-/// date, it shows.
+/// Whether the header shows Add Split. It shows in an inbox view until a split is first turned
+/// on, and not once the account `joined` (first signed in to Exo) over a week before `now`. With
+/// no join date, it shows.
 pub fn shows_add_split(
     settings: &Settings,
     current: &ListId,
@@ -225,7 +226,7 @@ pub(crate) const PALETTE: &[Region] = &[
 /// more than one tab, `go to {split} Inbox` for each enabled split once something is typed, and
 /// the split settings.
 pub fn register(commands: &mut Commands<Action>, settings: &Settings, visible_splits: usize) {
-    // Held, the highlight moves along the tabs; the list follows when the key goes up.
+    // Held, the highlight moves along the tabs, and the list follows when the key goes up.
     let hold = |id: &'static str, step: isize, key: &'static str| {
         Command::shortcut(id, Action::SplitTabHold(step))
             .key(key)

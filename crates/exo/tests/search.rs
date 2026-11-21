@@ -47,7 +47,7 @@ fn a_pause_in_typing_runs_the_search_ahead_for_enter() {
     // Typing settles for longer than the pause.
     app.type_text("kitchen");
     assert_eq!(app.mail().search_query(), None, "nothing shows yet");
-    // Enter shows what Gmail answered then (a page, all it has): it isn't asked again.
+    // Enter shows what Gmail answered then (a page, all it has), and Gmail isn't asked again.
     app.disconnect();
     app.key(Key::Enter);
     assert_eq!(app.subjects(), ["Offsite catering — Hudson, Dec 9–11"]);
@@ -192,7 +192,7 @@ fn a_copied_subject_pastes_into_search_as_its_search() {
         Some((subject.clone(), search.clone()))
     );
 
-    // `/`, then the paste egui makes of ⌘V: the subject's text.
+    // `/`, then the paste egui makes of ⌘V, which is the subject's text.
     app.key(Key::Slash);
     app.type_text("from:me ");
     app.harness

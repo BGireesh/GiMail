@@ -1,4 +1,4 @@
-//! The public API's shape: everything the UI calls can run on a spawned task.
+//! The public API's shape. Everything the UI calls can run on a spawned task.
 
 mod support;
 

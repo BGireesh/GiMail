@@ -41,13 +41,13 @@ const BODY_CSS: &str = include_str!("body.css");
 /// The personal-mail restyle that follows it.
 const RESTYLE_CSS: &str = include_str!("restyle.css");
 
-/// Shadow-root isolation, recreated in a plain document: a body never sees `html`/`body` rules from
-/// the sender's CSS (a shadow root has neither element), and `:host { all: initial }` stops
-/// inheritance at the boundary, which `all: initial` on `<body>` does here. User-agent `!important`
-/// beats any author rule, so senders can't undo it. The message column's width comes in through
-/// `--exo-width` (see [`BodyView::layout`]).
+/// Shadow-root isolation, recreated in a plain document. A body never sees `html`/`body` rules
+/// from the sender's CSS (a shadow root has neither element). `:host { all: initial }` stops
+/// inheritance at the boundary, and `all: initial` on `<body>` does that here. User-agent
+/// `!important` beats any author rule, so senders can't undo it. The message column's width comes
+/// in through `--exo-width` (see [`BodyView::layout`]).
 ///
-/// `.ShadowBody` doesn't clip a too-wide body or scroll it itself: the body is painted whole and
+/// `.ShadowBody` doesn't clip a too-wide body or scroll it itself. The body is painted whole, and
 /// the app shows the part scrolled into view (see [`Region::width`]). `flow-root` keeps the block
 /// formatting context `overflow-x: auto` would make.
 fn host_css(rem: f32) -> String {
@@ -59,12 +59,12 @@ fn host_css(rem: f32) -> String {
     )
 }
 
-/// The height of a too-wide body's horizontal scrollbar, which sits below its content
-/// (`.ShadowBody::-webkit-scrollbar { height: 11px }`: a custom scrollbar takes up space).
+/// The height of a too-wide body's horizontal scrollbar, which sits below its content because a
+/// custom scrollbar takes up space (`.ShadowBody::-webkit-scrollbar { height: 11px }`).
 pub const SCROLLBAR_HEIGHT: f32 = 11.0;
 
 /// Where relative URLs resolve. The pipeline leaves none in `src`/`href`, but a sender's CSS can
-/// still say `url(a.png)`; this reserved domain never resolves, and [`FetchProvider`] drops it.
+/// still say `url(a.png)`. This reserved domain never resolves, and [`FetchProvider`] drops it.
 pub(crate) const BASE_URL: &str = "https://exo.invalid/";
 
 /// The tallest band painted at once, in device pixels (the rasterizer's sizes are 16-bit).
@@ -85,8 +85,8 @@ pub enum Theme {
     /// `Theme-light` (also tagged `Theme-snow`).
     #[default]
     Light,
-    /// `Theme-dark` (`Theme-carbon`). Marketing mail stays dark-on-white: the app draws the
-    /// white card behind it.
+    /// `Theme-dark` (`Theme-carbon`). Marketing mail stays dark-on-white, on the white card the
+    /// app draws behind it.
     Dark,
 }
 
@@ -101,7 +101,7 @@ pub struct ViewOptions {
     /// and the `1.25rem` quote indent resolve against it.
     pub rem: f32,
     /// Nothing loads from the network (`Block all remote images`, until the message's images are
-    /// shown): remote images show as empty boxes, and CSS images, fonts and stylesheets stay
+    /// shown). Remote images show as empty boxes, and CSS images, fonts and stylesheets stay
     /// unloaded. Inline attachments and `data:` images still show.
     pub block_remote_content: bool,
 }
@@ -124,14 +124,14 @@ pub enum Hit {
     Link {
         /// Its `href`: absolute after the pipeline, or `#id` for an anchor within the message. The
         /// pipeline only drops script URLs, so any other scheme can come through (`file:`, app URL
-        /// schemes); open only the ones you trust.
+        /// schemes). Open only the ones you trust.
         href: String,
     },
     /// The `…` that shows or hides the quoted part.
     QuoteToggle,
     /// A detected date (`.sh-date`), which the app offers to make an event of.
     Date {
-        /// What it says (`tomorrow`, `Wed Nov 25`); [`crate::date_parts`] reads it.
+        /// What it says (`tomorrow`, `Wed Nov 25`), which [`crate::date_parts`] reads.
         text: String,
         /// Its border box, `[left, top, width, height]` in the column's CSS px.
         bounds: [f32; 4],
@@ -141,7 +141,7 @@ pub enum Hit {
         /// The attachment's `Content-ID`, without angle brackets.
         cid: String,
     },
-    /// Text that isn't any of the above: Chromium's `cursor: auto` shows the I-beam over it, and
+    /// Text that isn't any of the above. Chromium's `cursor: auto` shows the I-beam over it, and
     /// the arrow where there's no hit at all.
     Text,
 }
@@ -201,8 +201,8 @@ pub struct Region {
 /// What [`BodyView::animate`] changed.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Animated {
-    /// The boxes (`[left, top, width, height]` in CSS px, like [`BodyView::animations`]) of the
-    /// images that moved to a new frame: paint them again.
+    /// The boxes of the images that moved to a new frame (`[left, top, width, height]` in CSS px,
+    /// like [`BodyView::animations`]). Paint them again.
     pub changed: Vec<[f32; 4]>,
     /// When the next frame of an image on screen is due, on the clock `animate` was given.
     pub next: Option<Duration>,
@@ -228,10 +228,10 @@ pub struct Image {
 /// One message body, ready to lay out, paint and hit-test.
 ///
 /// Layout happens in CSS px and the result is scaled when painting, the way Chromium on macOS
-/// does it: line boxes and box edges snap to whole CSS px, not device pixels.
+/// does it. Line boxes and box edges snap to whole CSS px, not device pixels.
 ///
-/// Options are fixed for a view; to show or hide the quoted part, build a new one. A view isn't
-/// `Send` (Stylo's font metrics aren't): build, lay out and paint it on one thread, and send the
+/// Options are fixed for a view, so to show or hide the quoted part, build a new one. A view isn't
+/// `Send` (Stylo's font metrics aren't), so build, lay out and paint it on one thread, and send the
 /// [`Image`]s elsewhere if painting shouldn't block the UI.
 pub struct BodyView {
     document: HtmlDocument,
@@ -266,7 +266,7 @@ pub struct BodyView {
 
 impl BodyView {
     /// Builds the body for `render`. `fetch` loads what the message references (remote images,
-    /// inline attachments, imported CSS); without it those stay blank.
+    /// inline attachments, imported CSS). Without it, those stay blank.
     pub fn new(
         render: &Render,
         options: ViewOptions,
@@ -327,7 +327,7 @@ impl BodyView {
     /// Lays the body out `width` CSS px wide for a display with `scale` device pixels per CSS px,
     /// and returns its height in CSS px.
     ///
-    /// A body up to 25% wider than the column is shrunk to fit; wider ones keep their size and
+    /// A body up to 25% wider than the column is shrunk to fit. Wider ones keep their size and
     /// overflow ([`Self::content_width`]). Every coordinate this view takes or returns is in the
     /// column's (shrunk) CSS px.
     pub fn layout(&mut self, width: f32, scale: f32) -> f32 {
@@ -361,8 +361,8 @@ impl BodyView {
         self.width
     }
 
-    /// Shrinks a body that is a little too wide for the column (once: it isn't rescaled after
-    /// the images have loaded), and measures what's left wider than it.
+    /// Shrinks a body that is a little too wide for the column, and measures what's left wider
+    /// than it. It shrinks once, so the body isn't rescaled after the images have loaded.
     fn shrink_to_fit(&mut self) {
         let content = self.document_content_width();
         if self.zoom == 1.0
@@ -399,7 +399,7 @@ impl BodyView {
         (right as f32).max(self.width / self.zoom)
     }
 
-    /// Applies loaded resources and lays out, then undoes Taffy's rounding: Chromium keeps
+    /// Applies loaded resources and lays out, then undoes Taffy's rounding. Chromium keeps
     /// fractional box positions (text lands at subpixel offsets) and snaps only what it paints,
     /// which [`BodyView::paint`] does.
     fn resolve(&mut self) {
@@ -468,7 +468,7 @@ impl BodyView {
     }
 
     /// Moves the animated images showing in `visible` (CSS px from the body's top) to their
-    /// frames at `now` (any clock, as long as it's always the same one); the others wait until
+    /// frames at `now` (any clock, as long as it's always the same one). The others wait until
     /// they show. Paint the [`Animated::changed`] boxes again.
     pub fn animate(&mut self, now: Duration, visible: Range<f32>) -> Animated {
         let mut animated = Animated::default();
@@ -534,8 +534,8 @@ impl BodyView {
             }
     }
 
-    /// The laid-out content width in CSS px: wider than the column when the message is too
-    /// wide to shrink, and scrolls sideways.
+    /// The laid-out content width in CSS px. It's wider than the column when the message is too
+    /// wide to shrink, and then the body scrolls sideways.
     pub fn content_width(&self) -> f32 {
         self.content_width
     }
@@ -562,7 +562,7 @@ impl BodyView {
         true
     }
 
-    /// Paints `region` of the last layout onto `background` (premultiplied RGBA; `[0; 4]` for
+    /// Paints `region` of the last layout onto `background` (premultiplied RGBA, or `[0; 4]` for
     /// transparent, to composite over the message card).
     pub fn paint(&mut self, region: Region, background: [u8; 4]) -> Image {
         let width = device(region.width + region.phase[0], self.scale);
@@ -586,8 +586,8 @@ impl BodyView {
         }
     }
 
-    /// Paints `width` × `rows` device pixels whose top left is `[left, top]` CSS px into the
-    /// body into `out`.
+    /// Paints into `out` the `width` × `rows` device pixels whose top left is `[left, top]` CSS px
+    /// into the body.
     fn paint_band(
         &mut self,
         [left, top]: [f64; 2],
@@ -601,7 +601,7 @@ impl BodyView {
         let scale = f64::from(self.scale * self.zoom);
         let [phase_x, phase_y] = phase.map(|p| f64::from(p * self.scale));
         let [left, top] = [left, top].map(|edge| edge / f64::from(self.zoom));
-        // Blitz paints from a whole CSS px; the fractional rest becomes a translation.
+        // Blitz paints from a whole CSS px, and the fractional rest becomes a translation.
         let [first_column, first_row] = [left, top].map(|edge| edge.max(0.0).floor());
         let css_columns = (f64::from(width) / scale + left - first_column).ceil() as u32 + 1;
         let css_rows = (f64::from(rows) / scale + top - first_row).ceil() as u32 + 1;
@@ -658,7 +658,7 @@ impl BodyView {
         let node = self.document.get_node(hit.node_id)?;
         // Parley matches a point above or below every line box to the first or last line, so a
         // "text" hit can lie in the empty part of its block (down a table cell holding an
-        // `&nbsp;`, under a paragraph): that's a hit on the block, as in Chromium.
+        // `&nbsp;`, under a paragraph). That's a hit on the block, as in Chromium.
         let (node, is_text) = match node.inline_root_ancestor() {
             Some(root) if hit.is_text && !on_a_line(root, hit.y) => (root, false),
             _ => (node, hit.is_text),
@@ -748,9 +748,10 @@ impl BodyView {
     /// body's top: the first element, in document order, whose `id` or `name` is `name`
     /// (`querySelector("[id='…'], [name='…']")`). `None` if there's none.
     ///
-    /// An empty inline element (the usual `<a name="…"></a>`) lays nothing out, so it takes the
-    /// top of its block's first line's text, as Chromium puts it on its line (exact when it
-    /// starts the block, as it does before a heading), or else of the nearest box around it.
+    /// An empty inline element (the usual `<a name="…"></a>`) lays nothing out. It takes the top
+    /// of the text on its block's first line instead, where Chromium puts it on its line (exactly
+    /// so when it starts the block, as it does before a heading), or else the top of the nearest
+    /// box around it.
     pub fn anchor_top(&self, name: &str) -> Option<f32> {
         let mut stack = vec![self.root];
         while let Some(id) = stack.pop() {
@@ -799,8 +800,8 @@ impl BodyView {
         Some(top + (layout.padding.top + layout.border.top + text.block_offset + line) * self.zoom)
     }
 
-    /// Starts a text selection at `(x, y)` (a mouse press ending `granularity`'s clicks): a caret,
-    /// or the word or paragraph there. Returns whether there was text there.
+    /// Starts a text selection at `(x, y)` for a mouse press that ends `granularity`'s clicks. The
+    /// selection is a caret, or the word or paragraph there. Returns whether there was text there.
     pub fn select_from(&mut self, x: f32, y: f32, granularity: Granularity) -> bool {
         let (x, y) = (x / self.zoom, y / self.zoom);
         let selected = match granularity {
@@ -830,10 +831,10 @@ impl BodyView {
     }
 
     /// The word or paragraph at `(x, y)` (the document's CSS px). As in Chromium
-    /// (`SelectClosestWordFromHitTestResult`), it's the one after the caret the point puts down,
-    /// so the right half of a word's last letter selects the space after it, and past a line's
-    /// end its line break. A paragraph, or the break past a block's last line, runs to where
-    /// the next block's text starts.
+    /// (`SelectClosestWordFromHitTestResult`), it's the one after the caret the point puts down.
+    /// So the right half of a word's last letter selects the space after it, and a point past a
+    /// line's end selects its line break. A paragraph, or the break past a block's last line, runs
+    /// to where the next block's text starts.
     fn text_around(&self, x: f32, y: f32, granularity: Granularity) -> Option<Range<TextPoint>> {
         let (root, at) = self.document.find_text_position(x, y)?;
         let text = self
@@ -876,9 +877,9 @@ impl BodyView {
         Some(range)
     }
 
-    /// Extends the selection to `(x, y)` (a mouse drag): to the character there, or after a
-    /// double or triple click to the far end of the word or paragraph there, keeping the one
-    /// clicked (Chromium's `SelectionController`). Returns whether there was text there.
+    /// Extends the selection to `(x, y)` for a mouse drag. It extends to the character there or,
+    /// after a double or triple click, to the far end of the word or paragraph there, keeping the
+    /// one clicked (Chromium's `SelectionController`). Returns whether there was text there.
     pub fn select_to(&mut self, x: f32, y: f32) -> bool {
         let (x, y) = (x / self.zoom, y / self.zoom);
         if let Some((granularity, unit)) = self.selected_unit.clone() {
@@ -925,7 +926,8 @@ impl BodyView {
                 let children = in_layout_order(parent);
                 children.iter().position(|id| id == a) < children.iter().position(|id| id == b)
             }
-            // One holds the other (an inline block in a line): the outer one's text comes first.
+            // One holds the other (an inline block in a line), so the outer one's text comes
+            // first.
             _ => a.len() < b.len(),
         }
     }
@@ -1002,8 +1004,8 @@ fn on_a_line(root: &blitz_dom::Node, y: f32) -> bool {
 }
 
 /// Adjusts one painted command to where Chromium on macOS would draw it, given the transform
-/// that takes it to device pixels: boxes (fills, strokes and clips that are plain rectangles)
-/// snap to whole CSS px, glyphs to quarter device pixels.
+/// that takes it to device pixels. Boxes (fills, strokes and clips that are plain rectangles)
+/// snap to whole CSS px, and glyphs to quarter device pixels.
 fn match_chromium(command: &mut RenderCommand, to_device: Affine, scale: f64) {
     match command {
         RenderCommand::GlyphRun(run) => match_chromium_glyphs(run, to_device),
@@ -1023,17 +1025,17 @@ fn match_chromium(command: &mut RenderCommand, to_device: Affine, scale: f64) {
     }
 }
 
-/// Draws a glyph run the way Chromium (Skia over CoreText) does on macOS: unhinted (CoreText
-/// doesn't hint, and `-webkit-font-smoothing: antialiased` stops it emboldening, which is the
-/// only time Blitz turns hinting off), with each glyph's origin on the nearest quarter device
-/// pixel across and whole device pixel down (Skia's subpixel positioning of horizontal text,
-/// `SkGlyphPositionRoundingSpec`).
+/// Draws a glyph run the way Chromium (Skia over CoreText) does on macOS. The run is unhinted,
+/// and each glyph's origin sits on the nearest quarter device pixel across and whole device pixel
+/// down (Skia's subpixel positioning of horizontal text, `SkGlyphPositionRoundingSpec`). CoreText
+/// doesn't hint, and `-webkit-font-smoothing: antialiased` stops it emboldening, which is the only
+/// time Blitz turns hinting off.
 ///
-/// On macOS anyrender_vello_cpu moves an upright run's glyphs to CoreGraphics' grid instead,
-/// Safari's (x floored to 1/2 device px at body sizes, the baseline to the pixel below), which
-/// put words up to ½ device px left of Chromium's. It leaves skewed runs alone, so the run gets
-/// a skew no glyph can show (10⁻³⁰⁰ px per px of height), which Vello's glyph rasterizer treats
-/// as none.
+/// On macOS, anyrender_vello_cpu instead moves an upright run's glyphs to CoreGraphics' grid,
+/// which is Safari's: x floored to 1/2 device px at body sizes, and the baseline to the pixel
+/// below. That put words up to ½ device px left of Chromium's. It leaves skewed runs alone, so
+/// the run gets a skew no glyph can show (10⁻³⁰⁰ px per px of height), which Vello's glyph
+/// rasterizer treats as none.
 fn match_chromium_glyphs(run: &mut anyrender::recording::GlyphRunCommand, to_device: Affine) {
     run.hint = false;
     let transform = to_device * run.transform;
@@ -1126,7 +1128,7 @@ fn date_line(
     }))
 }
 
-/// A viewport `width` CSS px wide at 1×: layout happens in CSS px (see [`BodyView`]).
+/// A viewport `width` CSS px wide at 1×, because layout happens in CSS px (see [`BodyView`]).
 fn viewport(width: f32, theme: Theme) -> Viewport {
     let scheme = match theme {
         Theme::Light => ColorScheme::Light,
@@ -1140,18 +1142,18 @@ fn device(css: f32, scale: f32) -> u32 {
     (css * scale).ceil().max(1.0) as u32
 }
 
-/// Turns on Stylo's `:has()`, which Blitz leaves off and the body CSS uses (hiding
-/// Outlook's `Image removed by sender.` boxes, `body.css`): a process-wide preference, which has
-/// to be on before a body's stylesheets are parsed.
+/// Turns on Stylo's `:has()`, which Blitz leaves off and the body CSS uses to hide Outlook's
+/// `Image removed by sender.` boxes (`body.css`). It's a process-wide preference, and it has to be
+/// on before a body's stylesheets are parsed.
 fn enable_has_selector() {
     style_config::set_pref!("layout.css.has-selector.enabled", true);
 }
 
-/// Marks the images that would load from the network for `body.css`'s blocked-image box (the
-/// `img[src^="https://media-blocked"]` rules) and sizes each the way Chromium sizes the broken
-/// image (`HTMLImageFallbackHelper::CustomStyleForAltText`): one with both dimension attributes and
-/// no alt text keeps their size (and aspect ratio, which Blitz doesn't map from the attributes);
-/// one with alt text, or missing a dimension, is an inline box whose width and height are dropped,
+/// Marks the images that would load from the network (`data-exo-blocked`), for `body.css`'s
+/// blocked-image box, and sizes each the way Chromium sizes the broken image
+/// (`HTMLImageFallbackHelper::CustomStyleForAltText`). One with both dimension attributes and no
+/// alt text keeps their size, and their aspect ratio, which Blitz doesn't map from the attributes.
+/// One with alt text, or missing a dimension, is an inline box whose width and height are dropped,
 /// so it's 16px square unless it isn't laid out inline.
 fn mark_blocked_images(document: &mut HtmlDocument) {
     let images = document.query_selector_all("img").unwrap_or_default();

@@ -151,7 +151,7 @@ pub struct PhoneNumber {
 pub struct Photo {
     /// Field metadata.
     pub metadata: Option<FieldMetadata>,
-    /// URL; append `=s{size}` to resize.
+    /// URL. Append `=s{size}` to resize.
     pub url: Option<String>,
     /// Whether this is the generated default avatar.
     pub default: Option<bool>,

@@ -1,5 +1,6 @@
-//! The day's photo behind Inbox Zero and the full-screen alerts: open landscape photos
-//! (`assets/inbox-zero`), one a day, each with its own scrims and placement (`photos.json`).
+//! The day's photo behind Inbox Zero and the full-screen alerts. The photos are open landscape
+//! photos (`assets/inbox-zero`), one a day, each with its own scrims and placement
+//! (`photos.json`).
 
 use std::{
     path::{Path, PathBuf},
@@ -17,9 +18,9 @@ use crate::photo::Photo;
 /// What the palette does with the photo.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
-    /// `Download Inbox Zero Image`: the photo to the download folder.
+    /// `Download Inbox Zero Image`, which saves the photo to the download folder.
     Download,
-    /// `Inbox Zero: Disable/Enable Animated Images`: the Reduce Motion setting.
+    /// `Inbox Zero: Disable/Enable Animated Images`, which toggles the Reduce Motion setting.
     ToggleAnimatedImages,
 }
 
@@ -82,8 +83,8 @@ static PHOTOS: LazyLock<Vec<Entry>> = LazyLock::new(|| {
         .expect("photos.json is well-formed")
 });
 
-/// The day's photo: it changes once a day, at 2 AM local time, and is the same for everyone in a
-/// time zone.
+/// The day's photo, which changes once a day at 2 AM local time and is the same for everyone in
+/// a time zone.
 fn index(now: &Zoned) -> usize {
     let minutes =
         now.timestamp().as_second().div_euclid(60) + i64::from(now.offset().seconds()) / 60;
@@ -91,8 +92,8 @@ fn index(now: &Zoned) -> usize {
     day.rem_euclid(PHOTOS.len() as i64) as usize
 }
 
-/// Where the photos are: `Exo.app`'s `Contents/Resources/inbox-zero` (`fastlane build`), else
-/// the checkout's `assets/inbox-zero`.
+/// Where the photos are, which is `Contents/Resources/inbox-zero` in `Exo.app` (`fastlane
+/// build`), or else `assets/inbox-zero` in the checkout.
 fn photos_dir() -> PathBuf {
     let bundled = std::env::current_exe()
         .ok()
@@ -148,7 +149,7 @@ impl Backdrop {
         self.photo.wait();
     }
 
-    /// The photo is decoded. For screenshots and tests.
+    /// Whether the photo is decoded. For screenshots and tests.
     pub fn is_loaded(&self) -> bool {
         self.photo.is_loaded()
     }
@@ -170,9 +171,10 @@ impl Backdrop {
         self.photo.paint(painter, window, |free| free * at);
     }
 
-    /// Paints Inbox Zero's backdrop over `window`: the photo and its scrims, the bottom one
-    /// reaching further while the settings menu is open; with the menu open, the photo blurred
-    /// under black at .5 (`background: rgba(0,0,0,.5); backdrop-filter: blur(8px)`, at once).
+    /// Paints Inbox Zero's backdrop over `window`, which is the photo and its scrims, the bottom
+    /// one reaching further while the settings menu is open. With the menu open, the photo is
+    /// blurred under black at .5 (`background: rgba(0,0,0,.5); backdrop-filter: blur(8px)`, at
+    /// once).
     pub fn paint(&self, painter: &Painter, window: Rect, settings_open: bool) {
         if settings_open {
             let at = position(self.entry.position.as_deref());
@@ -250,7 +252,7 @@ impl crate::Mail {
                     .save_file(self.backdrop.file().display().to_string(), bytes),
                 Err(error) => log::warn!("reading the Inbox Zero photo: {error}"),
             },
-            // Exo's photos are all stills, so the setting has nothing to stop yet; its hint says
+            // Exo's photos are all stills, so the setting has nothing to stop yet. Its hint says
             // what it did.
             Action::ToggleAnimatedImages => {
                 let reduce = !self.account.settings().reduce_motion;

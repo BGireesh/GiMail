@@ -1,5 +1,6 @@
-//! A thread's source as the raw source viewer shows it: Gmail's `threads.get` response, its
-//! snippets' HTML entities decoded, as `JSON.stringify(thread, null, 4)` writes it.
+//! A thread's source as the raw source viewer shows it. This is Gmail's `threads.get` response
+//! with the HTML entities in its snippets decoded, written the way
+//! `JSON.stringify(thread, null, 4)` writes it.
 
 use std::fmt;
 

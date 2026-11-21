@@ -29,7 +29,7 @@ pub struct HighlightTarget {
 pub struct HighlightState {
     /// The list has keyboard focus, which shows the focus bar.
     pub focused: bool,
-    /// The cursor row is selected: no background, and a blue bar.
+    /// The cursor row is selected, so it has no background and a blue bar.
     pub selected: bool,
     /// Move without animating (list changes, resizes, jumps off-screen).
     pub jump: bool,
@@ -58,7 +58,7 @@ impl ListHighlight {
     }
 
     /// Paints the highlight's background on `target` in a list whose content starts at `origin`
-    /// and is `width` wide, under the rows; `None` hides it (no cursor). Returns its focus bar,
+    /// and is `width` wide, under the rows. `None` hides it (no cursor). Returns its focus bar,
     /// which goes over the rows, so a selected row's own fill doesn't hide it.
     pub fn paint(
         &self,

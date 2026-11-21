@@ -1,9 +1,9 @@
-//! The outbox: the user's changes as persisted, per-thread FIFO queues of Gmail calls.
+//! The outbox, which persists the user's changes as per-thread FIFO queues of Gmail calls.
 //!
 //! [`Store::apply`] writes a row and the UI sees its effect at once, because every read
 //! applies the pending steps on top of Gmail's copy. [`Store::flush`] sends rows one step at a
-//! time; each acknowledged step is folded into Gmail's copy and dropped from the row.
-//! Failures back off; a row that can't succeed is dropped, which rolls its overlay back.
+//! time, folding each acknowledged step into Gmail's copy and dropping it from the row.
+//! Failures back off. A row that can't succeed is dropped, which rolls its overlay back.
 
 use std::collections::HashSet;
 
@@ -23,7 +23,7 @@ use crate::store::{Inner, Store, load_view, reindex};
 use crate::sync::{Rows, fetch_rows};
 use crate::view::{Identity, ThreadView};
 
-/// Counted failures after which a mutation is given up.
+/// Counted failures after which a mutation is given up on.
 const MAX_ATTEMPTS: u32 = 300;
 /// Queues persisted at once.
 const CONCURRENCY: usize = 4;
@@ -31,14 +31,14 @@ const CONCURRENCY: usize = 4;
 /// What [`Store::unsent`] counts.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Unsent {
-    /// Messages being sent: held for undo, or due and not yet accepted.
+    /// Messages being sent, whether held for undo or due and not yet accepted.
     pub sends: usize,
     /// Everything else not yet acknowledged.
     pub changes: usize,
 }
 
-/// Undoes one [`Store::apply`]: pass it to [`Store::undo`], which consumes it, so nothing is
-/// undone twice.
+/// Undoes one [`Store::apply`]. Pass it to [`Store::undo`], which consumes it so that nothing
+/// is undone twice.
 #[derive(Debug)]
 pub struct Undo {
     entries: Vec<UndoEntry>,
@@ -56,8 +56,8 @@ struct UndoEntry {
 }
 
 impl Undo {
-    /// Nothing changed: every thread was already in the target state ("Already marked as
-    /// Done.").
+    /// Nothing changed, because every thread was already in the target state ("Already marked
+    /// as Done.").
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
@@ -76,9 +76,9 @@ impl Undo {
 pub struct FlushReport {
     /// Mutations Gmail fully acknowledged.
     pub completed: usize,
-    /// Mutations given up on; their optimistic changes are gone. Show the error.
+    /// Mutations given up on, whose optimistic changes are gone. Show the error.
     pub failed: Vec<FailedMutation>,
-    /// When the earliest postponed mutation is due again; flush then.
+    /// When the earliest postponed mutation is due again. Flush then.
     pub retry_at: Option<Timestamp>,
 }
 
@@ -114,7 +114,7 @@ enum Effect {
 }
 
 impl Store {
-    /// Applies `mutation` to `threads`: queued for Gmail and visible to reads immediately.
+    /// Applies `mutation` to `threads`, queued for Gmail and visible to reads immediately.
     /// Threads already in the target state are left alone. Call [`flush`](Self::flush) next.
     ///
     /// # Errors
@@ -124,8 +124,8 @@ impl Store {
         self.inner.apply(threads, mutation).await
     }
 
-    /// Undoes an [`apply`](Self::apply): a mutation Gmail hasn't been sent yet is simply
-    /// dropped, and one given up on has nothing to undo; otherwise its inverse is queued behind
+    /// Undoes an [`apply`](Self::apply). A mutation that hasn't been sent to Gmail yet is
+    /// dropped, and one given up on has nothing to undo. Otherwise its inverse is queued behind
     /// it.
     ///
     /// # Errors
@@ -134,9 +134,9 @@ impl Store {
         self.inner.undo(undo).await
     }
 
-    /// Sends queued mutations to Gmail: the head of every thread's queue, up to four queues at
-    /// once, until every queue is empty or waiting out a backoff. A flush already running is
-    /// waited for first.
+    /// Sends queued mutations to Gmail, taking the head of every thread's queue, up to four
+    /// queues at once, until every queue is empty or waiting out a backoff. It first waits for
+    /// a flush that's already running.
     ///
     /// # Errors
     /// On database failures. Gmail failures are retried later or reported in the result.
@@ -219,8 +219,8 @@ impl Store {
 impl Store {
     /// What the footer counts as on its way to Google: sends held for undo or due, and every
     /// change Gmail and Calendar can take now (queued mutations, the calendar's queued changes,
-    /// draft saves and discards). Not a send scheduled for later, nor a draft waiting for its
-    /// files.
+    /// draft saves and discards). It leaves out a send scheduled for later and a draft waiting
+    /// for its files.
     ///
     /// # Errors
     /// On database failures.
@@ -248,7 +248,7 @@ impl Store {
 
 /// Resolves `plan` against `view` and queues the steps on the thread's queue, as the undo of
 /// `mutation` when `undo` is set. A plan with a replace key takes the place of the queue's
-/// unstarted tail when that has the same key, so it's resolved as if the tail weren't there.
+/// unstarted tail when the tail has the same key, so it's resolved as if the tail weren't there.
 /// Returns the row, or `None` when there's nothing to send.
 pub(crate) async fn enqueue(
     exec: &mut dyn Executor,
@@ -346,7 +346,7 @@ impl Inner {
             });
             match op {
                 Some(op) if op.started_at.is_none() => op.delete().exec(write.exec()).await?,
-                // Nothing reached Gmail: its overlay is gone already.
+                // Nothing reached Gmail, so its overlay is gone already.
                 _ if entry.op.is_none() || given_up => {}
                 _ => {
                     let UndoEntry {
@@ -388,7 +388,8 @@ impl Inner {
         }
         write.commit().await?;
         while let Some(step) = row.steps.first().cloned() {
-            // A refresh fetches rows, and in full only what isn't stored yet.
+            // A refresh fetches the thread's rows, and fetches in full only the messages that
+            // aren't stored yet.
             let stored: HashSet<String> = match step {
                 Step::Refresh => MessageRow::filter_by_thread_id(&row.queue)
                     .select(MessageRow::fields().id())
@@ -424,8 +425,8 @@ impl Inner {
         Ok(Outcome::Done)
     }
 
-    /// One Gmail call (for a refresh, the rows of `thread`, whose `stored` messages aren't
-    /// fetched in full again).
+    /// One Gmail call. For a refresh, that call fetches the rows of `thread`, without fetching
+    /// its `stored` messages in full again.
     async fn send(
         &self,
         thread: &str,
@@ -478,7 +479,7 @@ impl Inner {
     }
 
     /// Backs off, or gives up and rolls the overlay back. Being offline, throttled or signed
-    /// out doesn't count toward giving up; an error retrying can't fix gives up at once.
+    /// out doesn't count toward giving up. An error that retrying can't fix gives up at once.
     async fn fail(&self, row: OutboxRow, failure: Failure) -> Result<Outcome> {
         let counted = matches!(failure, Failure::Transient(_) | Failure::Permanent(_));
         let attempts = row.attempts + u32::from(counted);

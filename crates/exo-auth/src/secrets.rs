@@ -7,8 +7,8 @@ use crate::Error;
 
 /// Keeps one secret (a refresh token) per account address.
 ///
-/// Calls are synchronous and may block: the Keychain can ask the user to allow access (macOS
-/// asks again whenever an unsigned build changes), so keep them off the UI thread.
+/// Calls are synchronous and may block, because the Keychain can ask the user to allow access
+/// (macOS asks again whenever an unsigned build changes). Keep them off the UI thread.
 pub trait SecretStore: Send + Sync + 'static {
     /// The secret for `account`, if one is stored.
     ///
@@ -132,7 +132,7 @@ mod keychain {
 
         #[test]
         fn a_garbled_item_stays_out_of_errors() {
-            // `FromUtf8Error`'s `Debug` lists its bytes: `[49, 47, 47, …]` is `1//`.
+            // The `Debug` of `FromUtf8Error` lists its bytes. `[49, 47, 47, …]` is `1//`.
             let error = text(b"1//secret\xff".to_vec()).unwrap_err();
             assert!(
                 !format!("{error} {error:?}").contains("49, 47, 47"),

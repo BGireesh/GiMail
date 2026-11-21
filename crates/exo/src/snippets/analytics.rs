@@ -1,6 +1,6 @@
-//! The folder's numbers, counted from the messages Exo sends with a snippet: a send each, when
-//! the last went, and a reply once someone else writes in that conversation after it. Opens need
-//! read statuses, which Exo hasn't got.
+//! The Snippets folder's numbers, counted from the messages Exo sends with a snippet. Each
+//! message counts a send and records when the last one went, and it counts a reply once someone
+//! else writes in its conversation after it. Opens need read statuses, which Exo hasn't got.
 
 use std::sync::mpsc::{Receiver, Sender, channel};
 
@@ -42,8 +42,8 @@ pub(super) fn percentage(part: u32, sends: u32) -> String {
 }
 
 impl crate::Mail {
-    /// A message that used the snippets `used` went out as `message` in `thread`: each counts a
-    /// send, sent now, whose replies the folder looks for.
+    /// A message that used the snippets `used` went out as `message` in `thread`. Each snippet
+    /// counts a send, sent now, and the folder looks for replies to it.
     pub(crate) fn snippets_sent(&mut self, used: &[String], thread: &ThreadId, message: &str) {
         if used.is_empty() {
             return;
@@ -66,7 +66,7 @@ impl crate::Mail {
         });
     }
 
-    /// Opening the folder: the store is asked which sends still waiting for a reply have one now.
+    /// On opening the folder, asks the store which sends still waiting for a reply have one now.
     pub(crate) fn check_snippet_replies(&mut self) {
         let waiting: Found = self
             .account
@@ -123,7 +123,7 @@ impl crate::Mail {
         );
     }
 
-    /// Counts the replies a check found: each send counts once, and is no longer looked at.
+    /// Counts the replies a check found. Each send counts once and is no longer looked at.
     pub(super) fn snippet_replies_arrived(&mut self) {
         while let Ok(found) = self.snippets.replies.found.1.try_recv() {
             self.account.update_settings(|settings| {

@@ -1,6 +1,6 @@
 //! The Split Inbox Library: a sidebar of categories and roles, a search, `Build your own`, and a
 //! grid of template cards per section. Picking a category scrolls to it (and scrolling highlights
-//! the section on top); picking a role shows only its templates.
+//! the section on top). Picking a role shows only its templates.
 
 use egui::{Color32, CornerRadius, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 use exo_store::{SplitLibrary, Template};
@@ -41,7 +41,7 @@ const GRID_GAP: f32 = 12.0;
 /// Classic's corners on the sidebar's selection, `Build your own` and hovered cards.
 const RADIUS: u8 = 4;
 
-/// The selected sidebar item and a hovered card: `#f2f4fa`, `#dee3f2` in Carbon.
+/// The fill of the selected sidebar item and a hovered card, `#f2f4fa` or `#dee3f2` in Carbon.
 fn highlight(ctx: &egui::Context) -> Color32 {
     match exo_ui::app_theme(ctx) {
         exo_ui::Theme::Snow => Color32::from_rgb(0xf2, 0xf4, 0xfa),
@@ -52,9 +52,9 @@ fn highlight(ctx: &egui::Context) -> Color32 {
 /// What the user did in the library.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LibraryEvent {
-    /// A template's card: its settings.
+    /// A template's card, which opens its settings.
     Open(String),
-    /// `Build Your Own` (or the no-results link): New Split Inbox.
+    /// `Build Your Own` (or the no-results link), which opens New Split Inbox.
     BuildYourOwn,
 }
 
@@ -71,13 +71,13 @@ pub(super) struct Library {
     role: Option<usize>,
     search_open: bool,
     search: String,
-    /// The search field wants the keyboard (it takes it as it opens).
+    /// Whether the search field wants the keyboard (it takes it as it opens).
     focus_search: bool,
     scrollbar: exo_ui::Scrollbar,
 }
 
 impl Library {
-    /// Searching: the search shows results in place of the sections.
+    /// Whether the search shows its results in place of the sections.
     fn searching(&self) -> bool {
         !self.search.trim().is_empty() && self.role.is_none() && self.category.is_none()
     }
@@ -307,8 +307,8 @@ pub(super) fn show(
         field_ui
             .painter()
             .rect_filled(rule, 0.0, tokens.ink(0.09, 0.09));
-        // The clear button (12×13, black at `opacity: .4` in Classic): clears, or
-        // closes the search when it's empty.
+        // The clear button (12×13, black at `opacity: .4` in Classic) clears the search, or
+        // closes it when it's empty.
         let clear = Rect::from_min_size(
             pos2(right - 12.0 - 12.0, search_top + 11.0),
             vec2(12.0, 13.0),
@@ -334,7 +334,7 @@ pub(super) fn show(
             }
         }
         if state.search != before {
-            // Typing searches everything: no role, no category.
+            // Typing searches everything, with no role or category.
             state.role = None;
             state.category = None;
             state.scroll = 0.0;
@@ -350,7 +350,7 @@ pub(super) fn show(
         pos2(left + 8.0, search_top + search_height),
         pos2(right - 8.0, search_top + search_height + 76.0),
     );
-    // `Build your own`: `1px solid rgba(0, 0, 0, .09)`; its subheader
+    // `Build your own` has a `1px solid rgba(0, 0, 0, .09)` border, and its subheader is
     // `rgba(0, 0, 0, .55)`.
     painter.rect_stroke(
         build,
@@ -452,7 +452,8 @@ pub(super) fn show(
         }
     }
     if let Some(target) = state.target {
-        // A smooth scroll: most of the way each frame, done within a pixel.
+        // A smooth scroll, which goes a quarter of the remaining way each frame and lands once
+        // it's within 2px.
         let step = (target - state.scroll) * 0.25;
         state.scroll = if step.abs() < 0.5 {
             target

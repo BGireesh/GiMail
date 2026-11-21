@@ -12,7 +12,7 @@ use sha2::{Digest, Sha256};
 /// Everything Gmail computes from a message's bytes.
 #[derive(Debug, Clone)]
 pub struct Parsed {
-    /// The `full` format payload; text bodies inline, attachments by ID.
+    /// The `full` format payload, with text bodies inline and attachments by ID.
     pub payload: MessagePart,
     /// Attachment bodies by attachment ID.
     pub attachments: HashMap<String, Vec<u8>>,
@@ -241,7 +241,7 @@ fn decode_header(raw: &str, parsed: &HeaderValue<'_>) -> String {
     }
 }
 
-/// Gmail's attachment IDs are long opaque strings; ours are stable per message and part.
+/// Gmail's attachment IDs are long opaque strings. Ours are stable per message and part.
 fn attachment_id(message_id: &str, part_id: &str) -> String {
     let digest = Sha256::digest(format!("{message_id}/{part_id}").as_bytes());
     format!("ANGjdJ{}", URL_SAFE_NO_PAD.encode(digest))

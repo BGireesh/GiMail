@@ -128,7 +128,7 @@ pub fn show(
         .take(MAIL_ROWS)
         .collect();
     if !is_me && !recent.is_empty() {
-        // The header searches their address; it spans the section.
+        // The header, which spans the section, searches their address.
         let header = Rect::from_min_size(pos2(left, section_top), vec2(width, 16.0));
         section_header(
             ui,
@@ -144,9 +144,9 @@ pub fn show(
         }
         for (i, thread) in recent.iter().enumerate() {
             let top = section_top + 25.0 + MAIL_PITCH * i as f32;
-            // A row spans the column, and while hovered shows how long ago the conversation was at
-            // its right (1rem clear of the subject, black or white at .5), the subject cut short of
-            // it.
+            // A row spans the column. While hovered, it shows how long ago the conversation was at
+            // its right (1rem clear of the subject, black or white at .5), with the subject cut
+            // short of that.
             let row = Rect::from_min_size(pos2(left, top), vec2(width, 16.0));
             let mut title_width = width;
             if ui.rect_contains_pointer(row) {
@@ -252,8 +252,9 @@ fn click(ui: &Ui, id: Id, rect: Rect) -> bool {
         .clicked()
 }
 
-/// A copy icon in the 14px box at `icon_top_left`, visible while `area` is hovered; copies `text`.
-/// The glyph is the 11×14 `legacy/DEPRECATED_clipboard`, centered. Returns whether it was clicked.
+/// A copy icon in the 14px box at `icon_top_left` that copies `text` and is visible while `area`
+/// is hovered. The glyph is the 11×14 `legacy/DEPRECATED_clipboard`, centered. Returns whether it
+/// was clicked.
 fn copy_button(
     ui: &Ui,
     painter: &Painter,

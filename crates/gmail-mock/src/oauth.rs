@@ -1,8 +1,8 @@
 //! Google OAuth 2.0 at Google's paths: consent (auto-approved), the token endpoint with PKCE,
 //! revocation, userinfo, and the bearer check every API request goes through.
 //!
-//! Consent signs in the mailbox's owner, or the address in `login_hint` when it's another one:
-//! that account shares the one mailbox but `userinfo` and Gmail's profile report its address,
+//! Consent signs in the mailbox's owner, or the address in `login_hint` when it's another one.
+//! That account shares the one mailbox, but `userinfo` and Gmail's profile report its address,
 //! which is enough for testing an app with several accounts on one mock.
 
 use std::collections::HashMap;
@@ -24,9 +24,9 @@ use crate::error::Failure;
 use crate::http::extract::Params;
 use crate::world::{App, World};
 
-/// An access token that is always valid, for tools, tests and the browser harness. Followed by
-/// `:` and an address (`ya29.mock-dev-token:bea@example.com`), it signs in that address
-/// instead, as a `login_hint` would.
+/// An access token that is always valid, for tools and tests. Followed by `:` and an address
+/// (`ya29.mock-dev-token:bea@example.com`), it signs in that address instead, as a `login_hint`
+/// would.
 pub const DEV_ACCESS_TOKEN: &str = "ya29.mock-dev-token";
 
 /// Access tokens live as long as Google's.

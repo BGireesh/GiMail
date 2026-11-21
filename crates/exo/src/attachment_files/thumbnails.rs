@@ -1,18 +1,18 @@
-//! Image attachments' card thumbnails: the image cover-cropped to the 3:2 card
-//! (`object-fit: cover`), at most as many pixels as the widest card takes on screen, with the
-//! card's resting overlay baked in (a radial gradient from white to black, both at .15, blended
-//! `overlay`), since it never changes.
+//! Card thumbnails for image attachments. Each is the image cover-cropped to the 3:2 card
+//! (`object-fit: cover`), at most as many pixels as the widest card takes on screen. The card's
+//! resting overlay (a radial gradient from white to black, both at .15, blended `overlay`) is
+//! baked in, since it never changes.
 
 use egui::ColorImage;
 
 use super::super::thread::attachments::MAX_THUMBNAIL_SIDE;
 
-/// A card's width at most, 3:2.
+/// A card's largest width, and its 3:2 aspect ratio.
 const CARD_WIDTH: f32 = 154.16;
 const ASPECT: f32 = 1.0 / 0.6666;
 
-/// `bytes`' thumbnail for a screen of `pixels_per_point`, or `None` when they aren't an image
-/// Exo decodes or it's 10,000px or more either way.
+/// `bytes`' thumbnail for a screen of `pixels_per_point`, or `None` when the bytes aren't an image
+/// Exo decodes or the image is 10,000px or more on either side.
 pub(crate) fn thumbnail(bytes: &[u8], pixels_per_point: f32) -> Option<ColorImage> {
     let image = image::load_from_memory(bytes).ok()?;
     if image.width() >= MAX_THUMBNAIL_SIDE
@@ -95,7 +95,7 @@ mod tests {
     #[test]
     fn an_image_is_cropped_to_the_card_and_kept_small() {
         let thumbnail = thumbnail(&png(1200, 400), 2.0).expect("a thumbnail");
-        // 3:2, at most the widest card's 308 device pixels.
+        // 3:2, at most the widest card's 309 device pixels.
         assert_eq!(thumbnail.size, [309, 206]);
         let small = super::thumbnail(&png(30, 30), 2.0).expect("a thumbnail");
         assert_eq!(small.size, [30, 20], "never enlarged");

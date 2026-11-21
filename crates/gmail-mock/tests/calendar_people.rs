@@ -335,7 +335,7 @@ async fn event_lifecycle_rsvp_sync_and_free_busy() {
         .unwrap_err();
     assert_eq!(expired.status(), Some(410));
 
-    // A colleague's free/busy comes from the meetings they're in; an outsider's is unknown.
+    // A colleague's free/busy comes from the meetings they're in, and an outsider's is unknown.
     let busy = calendar
         .free_busy(&FreeBusyRequest {
             time_min: Some("2026-11-17T00:00:00-05:00".into()),
@@ -360,7 +360,8 @@ async fn event_lifecycle_rsvp_sync_and_free_busy() {
         busy.calendars["someone@example.com"].errors[0].reason,
         "notFound"
     );
-    // A colleague's calendar lists those meetings, theirs marked `self`; an outsider's is gone.
+    // A colleague's calendar lists those meetings, theirs marked `self`, and an outsider's is
+    // gone.
     let day = EventsQuery {
         time_min: Some("2026-11-17T00:00:00-05:00".into()),
         time_max: Some("2026-11-18T00:00:00-05:00".into()),
@@ -425,7 +426,7 @@ async fn event_lifecycle_rsvp_sync_and_free_busy() {
             .is_err()
     );
 
-    // A Meet request comes back as a call; clearing it takes the link away.
+    // A Meet request comes back as a call, and clearing it takes the link away.
     let meet = Event {
         conference_data: Some(
             serde_json::json!({ "createRequest": { "requestId": "r1", "conferenceSolutionKey": { "type": "hangoutsMeet" } } }),

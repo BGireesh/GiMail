@@ -93,7 +93,7 @@ fn the_folder_drawer_goes_to_snippets_and_opens_on_it_there() {
     }
     app.key(Key::Enter);
     assert!(app.mail().snippets_folder_open());
-    // Opened again, its cursor is on Snippets: Enter keeps the folder.
+    // Opened again, the drawer has its cursor on Snippets, so Enter keeps the folder.
     app.key(Key::ArrowLeft);
     app.key(Key::Enter);
     assert!(app.mail().snippets_folder_open());
@@ -102,7 +102,7 @@ fn the_folder_drawer_goes_to_snippets_and_opens_on_it_there() {
 #[test]
 fn the_contact_panes_mail_header_searches_their_address() {
     let mut app = start("pane-mail-header");
-    // The first row's contact pane at 1280×800: its Mail header.
+    // The Mail header of the first row's contact pane, at 1280×800.
     app.click(Pos2::new(1100.0, 174.0));
     assert_eq!(
         app.mail().search_query().map(str::trim),
@@ -115,7 +115,7 @@ fn a_rows_right_click_menu_acts_on_it_or_on_the_selection_its_in() {
     let mut app = start("row-menu");
     let shown = choose_in_menus(&mut app, "Mark done");
     let subjects = app.subjects();
-    // The second row, right-clicked: it takes the cursor, and Mark done takes it away.
+    // The second row, right-clicked, takes the cursor, and Mark done takes the row away.
     app.right_click(row(1));
     app.wait(1.0);
     let menus = shown.lock().expect("not poisoned").clone();
@@ -141,7 +141,7 @@ fn a_rows_right_click_menu_acts_on_it_or_on_the_selection_its_in() {
         subjects[1]
     );
     assert!(app.subjects().contains(&subjects[0]));
-    // Two selected rows: the menu, on one of them, acts on both.
+    // With two rows selected, the menu on one of them acts on both.
     app.key(Key::Home);
     app.key(Key::X);
     app.key(Key::J);
@@ -162,7 +162,7 @@ fn a_rows_right_click_menu_acts_on_it_or_on_the_selection_its_in() {
 #[test]
 fn up_from_the_first_row_gives_the_header_the_keyboard() {
     let mut app = start_new_account("header-focus");
-    // K stays in the list; ↑ leaves it for Important's tab.
+    // K stays in the list, and ↑ leaves it for Important's tab.
     app.key(Key::K);
     assert!(!app.mail().inbox().header_focused());
     app.key(Key::ArrowUp);
@@ -172,7 +172,7 @@ fn up_from_the_first_row_gives_the_header_the_keyboard() {
     app.key(Key::Enter);
     assert_eq!(*app.mail().list(), ListId::Other);
     assert!(!app.mail().inbox().header_focused());
-    // ↓ comes back down; ← past the folders button opens the drawer, which takes the keyboard.
+    // ↓ comes back down. ← past the folders button opens the drawer, which takes the keyboard.
     app.key(Key::ArrowUp);
     app.key(Key::ArrowDown);
     assert!(!app.mail().inbox().header_focused());

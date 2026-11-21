@@ -1,11 +1,11 @@
 /*
- * The open conversation as it prints: the thread view's rules under its `@media print` ones and
- * the `display: none` that hides each part that doesn't print, written for the elements the print
- * document has. Only what prints is here: Carbon's rules are all `@media screen`, so a Carbon
- * account prints this too.
+ * The open conversation as it prints. These are the thread view's rules with its `@media print`
+ * ones on top, and the `display: none` that hides each part that doesn't print, written for the
+ * elements the print document has. Only what prints is here. Carbon's rules are all
+ * `@media screen`, so a Carbon account prints this too.
  *
- * Sizes in rem follow the page's width the way the window's set them on screen (`html` carries the
- * page's root font size and, at 1024px or narrower, `isNarrow`).
+ * Sizes in rem follow the page's width the way the window's width sets them on screen (`html`
+ * carries the page's root font size and, at 1024px or narrower, `isNarrow`).
  */
 
 * { box-sizing: border-box; }
@@ -18,8 +18,8 @@ body { margin: 0; padding-top: 41px; line-height: 0; color: #000; }
   -webkit-font-smoothing: antialiased;
 }
 
-/* The header: `.ThreadPane-header-container` centres it, the print rules give it `margin: 0 0
- * 32px`; actions, status line and summary don't print. */
+/* The header. `.ThreadPane-header-container` centres it, and the print rules give it
+ * `margin: 0 0 32px`. Its actions, status line and summary don't print. */
 .ThreadPane-header-container { display: flex; justify-content: center; }
 .ThreadPane-header {
   flex: 0 0 auto;
@@ -43,9 +43,9 @@ body { margin: 0; padding-top: 41px; line-height: 0; color: #000; }
   overflow-wrap: break-word;
 }
 .ThreadPane-header-labels { display: inline-block; position: relative; top: 3px; font-size: 21px; line-height: 32px; }
-/* A chip's background doesn't print; its white text prints darkened, as Chromium darkens light
- * text on a page without backgrounds. Its ellipsis doesn't either: the print rules make every
- * overflow visible. */
+/* A chip's background doesn't print, and its white text prints darkened, as Chromium darkens
+ * light text on a page without backgrounds. Its ellipsis doesn't print either, because the print
+ * rules make every overflow visible. */
 .ThreadLabel {
   display: inline-block;
   position: relative;
@@ -104,7 +104,7 @@ body { margin: 0; padding-top: 41px; line-height: 0; color: #000; }
 .MessagePane-datetime.isSent .DateTime { padding-left: 14px; }
 /* A failed, offline or scheduled send's status in the date's place. */
 .MessagePane-datetime .Status { font-weight: 700; letter-spacing: 0; }
-/* The paperclip prints black and whole: its `opacity: .4` is screen-only. */
+/* The paperclip prints black and whole, because its `opacity: .4` is screen-only. */
 .MessagePane-attachmentIcon { display: inline-block; margin-right: 8px; vertical-align: middle; line-height: 0; }
 
 .MessagePane-expanded { position: relative; margin: -12px 0 28px; padding: 12px 2rem 4px; }
@@ -127,8 +127,8 @@ body { margin: 0; padding-top: 41px; line-height: 0; color: #000; }
 .ContactName-fullName { color: rgba(0, 0, 0, .8); white-space: pre; }
 .ContactName-email { white-space: pre; }
 .MessagePane-emailHeader .Status { font-size: 12px; line-height: 16px; position: relative; top: 1px; }
-/* The chevron that folds it, 12px after the date (its button's margin and padding), its 8×11
- * glyph at the bottom of a 14px box 2px down. */
+/* The chevron that folds it, 12px after the date (its button's margin and padding), with its
+ * 8×11 glyph at the bottom of a 14px box 2px down. */
 .MessagePane-headerCollapse { display: inline-block; margin-left: 12px; line-height: 0; }
 .MessagePane-headerCollapse-icon { position: relative; top: 2px; width: 14px; height: 14px; }
 .MessagePane-headerCollapse-icon svg { position: absolute; left: 0; bottom: 0; }
@@ -147,9 +147,9 @@ body { margin: 0; padding-top: 41px; line-height: 0; color: #000; }
 
 /* The body, and under it the attachments, then the print rules' hairline. Chromium breaks a
  * body between its lines, two at least on either side (its default `orphans` and `widows`, which
- * WebKit only applies when they're set), and keeps the hairline's padding with the last of them:
- * a body of a few lines that doesn't fit with it starts on the next page. The print view marks
- * those (`isShort`, `macos::BEFORE_PRINT`). */
+ * WebKit only applies when they're set), and keeps the hairline's padding with the last of them.
+ * So a body of a few lines that doesn't fit with that padding starts on the next page. The print
+ * view marks those bodies (`isShort`, `macos::BEFORE_PRINT`). */
 html { orphans: 2; widows: 2; }
 .MessagePane-iframe-wrapper { margin: 20px 0 12px; padding-bottom: 12px; border-bottom: 1px solid rgba(0, 0, 0, .05); }
 .MessagePane-iframe-wrapper.isShort { break-inside: avoid; }

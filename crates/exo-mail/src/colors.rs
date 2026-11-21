@@ -2,7 +2,7 @@
 //! message column.
 //!
 //! Exo reads the inline styles and presentational attributes, not computed styles, and inherits
-//! them down the tree; colors set only by a `<style>` sheet aren't seen (they mostly matter in
+//! them down the tree. Colors set only by a `<style>` sheet aren't seen (they mostly matter in
 //! marketing mail, which isn't restyled).
 
 use std::sync::LazyLock;
@@ -24,7 +24,7 @@ const CARBON_COLORS: &[(&str, [u8; 3])] = &[
     ("grey", [176, 176, 176]),
 ];
 
-/// The colors author text snaps to, by name (module 3472's palette).
+/// The colors author text snaps to, by name.
 const PALETTE: &[(&str, &[[u8; 3]])] = &[
     (
         "black",
@@ -89,7 +89,7 @@ static VIEWPORT_UNIT: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)\d\s*(d|s|l)?(vh|vw|vmin|vmax)\b").expect("valid regex"));
 
 /// A CSS color value (`#rgb`, `rgb()`, `hsl()`, a named color, …) as sRGB with alpha, the way
-/// the pipeline reads colors; `None` if it isn't one.
+/// the pipeline reads colors, or `None` if it isn't one.
 pub fn css_color(value: &str) -> Option<[u8; 4]> {
     Rgba::parse(value).map(|color| color.0)
 }
@@ -162,7 +162,7 @@ impl Rgba {
         0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
     }
 
-    /// tinycolor's `readability` (WCAG contrast, alpha ignored) of at least 2.5.
+    /// A WCAG contrast ratio (alpha ignored) of at least 2.5.
     fn readable_on(self, background: Self) -> bool {
         let (a, b) = (self.luminance(), background.luminance());
         (a.max(b) + 0.05) / (a.min(b) + 0.05) >= 2.5
@@ -176,9 +176,9 @@ impl Rgba {
     }
 }
 
-/// The rule for a pasted text color: one unreadable on white becomes the light theme's color of its
-/// kind (grey, black); one that snaps to black or white then goes, so the text takes the theme's.
-/// `None` keeps `value`, `Some(None)` drops it.
+/// The rule for a pasted text color. One unreadable on white becomes the light theme's color of
+/// its kind (grey, black). Then one that snaps to black or white goes, so the text takes the
+/// theme's color. `None` keeps `value`, and `Some(None)` drops it.
 pub(crate) fn pasted_color(value: &str) -> Option<Option<String>> {
     let color = Rgba::parse(value)?;
     let readable = color.readable_on(Rgba::WHITE);
@@ -735,7 +735,7 @@ mod tests {
             !keeps("<img width=\"160\" height=\"90\" style=\"height: auto; width: 100%\">"),
             "height: auto"
         );
-        // Kickstarter's step icons: their width is `auto`, so they stay 39px tall.
+        // Kickstarter's step icons. Their width is `auto`, so they stay 39px tall.
         assert!(!keeps("<img style=\"min-width: 39px; height: 39px\">"));
         assert!(!keeps(
             "<img height=\"1\" style=\"min-width: 540px; height: 1px\">"

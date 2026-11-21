@@ -484,8 +484,8 @@ async fn send_with_reminder(
     save_with_reminder(harness, id, None, reminder, send_later).await;
 }
 
-/// A reply to Ann on an inbox thread carrying `reminder`, saved and written to Gmail, and that
-/// thread.
+/// Saves a reply to Ann that carries `reminder` on an inbox thread, writes it to Gmail, and
+/// returns that thread.
 async fn reply_with_reminder(
     harness: &Harness,
     id: &str,
@@ -612,7 +612,8 @@ async fn a_reply_shows_its_reminder_from_send_and_undo_send_puts_back_the_last()
         .unwrap();
     flush(&harness).await;
 
-    // Held for undo: the thread has the draft's reminder at once, not marked done.
+    // While the send is held for undo, the thread has the draft's reminder at once and isn't
+    // marked done.
     harness
         .store
         .send_draft(id, from_now(30.seconds()))
@@ -636,7 +637,7 @@ async fn a_reply_shows_its_reminder_from_send_and_undo_send_puts_back_the_last()
     flush(&harness).await;
     assert!(gmail_labels(&harness, &thread).await.contains(&snoozed));
 
-    // Undo send: the one it had comes back.
+    // Undo send brings back the reminder the thread had.
     assert!(harness.store.undo_send(id).await.unwrap());
     assert_eq!(
         harness
@@ -655,7 +656,8 @@ async fn a_reply_shows_its_reminder_from_send_and_undo_send_puts_back_the_last()
         "it still has one"
     );
 
-    // Sent this time: the draft's again, and Gmail sending it changes nothing more.
+    // Sent this time, the thread has the draft's reminder again, and Gmail sending it changes
+    // nothing more.
     harness
         .store
         .send_draft(id, Timestamp::now())
@@ -784,7 +786,7 @@ async fn a_scheduled_send_shows_its_reminder_from_scheduling() {
         "not given again"
     );
 
-    // A new message: its thread is stored once Gmail has its draft.
+    // For a new message, its thread is stored once Gmail has its draft.
     let id = "draft00000000000044";
     send_with_reminder(&harness, id, reminder, later()).await;
     harness.store.schedule_draft(id).await.unwrap();
@@ -876,7 +878,7 @@ async fn a_message_sent_with_a_reminder_gives_its_thread_one() {
         "Gmail sees the reminder's label"
     );
 
-    // Ann answers: "if no reply" ends it.
+    // Ann answers, so "if no reply" ends it.
     harness.deliver(json!({ "from": "Ann <ann@example.com>", "threadId": thread.as_str(), "text": "Love it", "labelIds": ["INBOX", "UNREAD"] })).await;
     harness.sync_all().await;
     assert!(matches!(

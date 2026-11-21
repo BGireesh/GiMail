@@ -2,7 +2,7 @@
 //! can use, else the unsubscribe link a rendered body has; whom that unsubscribes from; and how to
 //! find all of their mail.
 //!
-//! Every target is checked first, since someone else wrote it and Exo acts on it for you: a
+//! Every target is checked first, since someone else wrote it and Exo acts on it for you. A
 //! `mailto:` must name one valid address and nothing else to send to, and a web link must be
 //! `http`/`https` with no credentials and no control characters. Anything else is left out, as if
 //! the header didn't list it.
@@ -17,13 +17,14 @@ use crate::compose::recipients;
 pub(crate) struct Unsubscribe {
     /// How it unsubscribes.
     pub target: Target,
-    /// Whom from (`sender`): the mailing list the mail came to, else whoever sent it.
+    /// Whom it unsubscribes from (`sender`), which is the mailing list the mail came to, or else
+    /// whoever sent it.
     pub sender: String,
     /// The list's name, which the alerts name when there's no sender.
     pub list_name: String,
     /// The message it was found in, whose `Delivered-To` alias a `mailto:` goes from.
     pub message: String,
-    /// The search for all of their mail: `to:"{list}"` or `from:"{sender}"`.
+    /// The search for all of the sender's mail: `to:"{list}"` or `from:"{sender}"`.
     pub query: String,
 }
 
@@ -43,7 +44,7 @@ pub(crate) enum Target {
     Web(Url),
 }
 
-/// `{name} <{address}>` inside `List-Id`, and an address without its name.
+/// The address in `List-Id`, whether it's written `{name} <{address}>` or without its name.
 fn list_id_address(list_id: &str) -> &str {
     match list_id.split_once('<') {
         Some((_, rest)) => rest
@@ -54,8 +55,8 @@ fn list_id_address(list_id: &str) -> &str {
     }
 }
 
-/// The links of a `List-Unsubscribe` header: each `<…>` of the comma-separated list, scheme
-/// normalized, `http:`, `https:` and `mailto:` only.
+/// The links of a `List-Unsubscribe` header, which are each `<…>` of the comma-separated list,
+/// with its scheme normalized. Only `http:`, `https:` and `mailto:` links are kept.
 fn parse_links(header: &str) -> Vec<String> {
     let mut links = Vec::new();
     let mut depth = 0usize;
@@ -90,7 +91,8 @@ fn parse_links(header: &str) -> Vec<String> {
     links
 }
 
-/// `link` as a target Exo will act on, `one_click` when the message allows a one-click POST.
+/// `link` as a target Exo will act on. `one_click` says whether the message allows a one-click
+/// POST.
 fn target(link: &str, one_click: bool) -> Option<Target> {
     // A line break or other control character has no business in a link (`Url` would drop
     // tabs and newlines silently).
@@ -116,7 +118,7 @@ fn target(link: &str, one_click: bool) -> Option<Target> {
     })
 }
 
-/// A `mailto:` naming exactly one valid address and no Cc or Bcc: one is all an unsubscribe needs,
+/// A `mailto:` naming exactly one valid address and no Cc or Bcc. One is all an unsubscribe needs,
 /// and more would let the sender have your account write to whomever they like.
 fn mailto(link: &str) -> Option<Target> {
     let fields = crate::compose::mailto_fields(link)?;
@@ -143,8 +145,8 @@ fn mailto(link: &str) -> Option<Target> {
     })
 }
 
-/// The mailing list `message` came through: its last `X-BeenThere`, else its `Mailing-List`'s
-/// address.
+/// The mailing list `message` came through: its last `X-BeenThere`, or else the address in its
+/// `Mailing-List`.
 fn mailing_list(message: &MessageDetail) -> Option<String> {
     let header = |name: &'static str| {
         message
@@ -173,7 +175,8 @@ fn mailing_list(message: &MessageDetail) -> Option<String> {
 }
 
 /// Whom `message`'s unsubscribe is from, how the alerts name them, and the search for all
-/// their mail: the mailing list when the mail was addressed to it, else the sender.
+/// their mail. The unsubscribe is from the mailing list when the mail was addressed to it, or else
+/// from the sender.
 fn sender(message: &MessageDetail) -> (String, String, String) {
     let to_list = mailing_list(message).filter(|list| {
         message
@@ -197,9 +200,9 @@ fn sender(message: &MessageDetail) -> (String, String, String) {
     }
 }
 
-/// `message`'s header unsubscribe: none for a draft, or for a list of your own domains (`List-Id`
-/// at one of `own_domains`). A `mailto:` comes first; then, for one-click, an `https:` link; then
-/// whatever's first.
+/// `message`'s header unsubscribe. There's none for a draft, or for a list at one of your own
+/// domains (`List-Id` at one of `own_domains`). A `mailto:` comes first, then an `https:` link when
+/// one-click is allowed, then whatever link the header lists first.
 fn from_header(message: &MessageDetail, own_domains: &[String]) -> Option<Unsubscribe> {
     if message.is_draft() {
         return None;
@@ -243,9 +246,9 @@ fn from_header(message: &MessageDetail, own_domains: &[String]) -> Option<Unsubs
     })
 }
 
-/// What Unsubscribe does for `detail`: the first message's header unsubscribe, else the first
-/// rendered body's unsubscribe link (`body_link` of a message id), which is never one-click.
-/// `own_domains` are the account's.
+/// What Unsubscribe does for `detail`. That's the first header unsubscribe among its messages, or
+/// else the first unsubscribe link in a rendered body (`body_link` of a message id), which is
+/// never one-click. `own_domains` are the account's.
 pub(crate) fn find(
     detail: &ThreadDetail,
     own_domains: &[String],

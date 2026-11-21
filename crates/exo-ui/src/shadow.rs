@@ -53,8 +53,8 @@ impl BoxShadow {
             return;
         }
         // Layers composite with "over", so each gets the alpha that makes three of them add up
-        // to the shadow's own where they all cover. Along the edges that only approximates their
-        // average while the color is faint: an opaque one (Carbon's `#000`, a `#aeb1dd` glow)
+        // to the shadow's own where they all cover. Along the edges, that only approximates their
+        // average while the color is faint. An opaque color (Carbon's `#000`, a `#aeb1dd` glow)
         // would come out nearly solid where the blur is half done, so it's sampled instead.
         let sigma = self.blur / 2.0;
         let alpha = f32::from(self.color.a()) / 255.0;
@@ -71,17 +71,17 @@ impl BoxShadow {
     }
 
     /// Paints the shadow of a box at `rect` only outside it, as CSS clips a `box-shadow` to
-    /// outside its border box: for a box whose background doesn't cover it (a glowing button
-    /// with no fill). Corners are square.
+    /// outside its border box. This is for a box whose background doesn't cover the shadow (a
+    /// glowing button with no fill). Corners are square.
     pub fn paint_outside(&self, painter: &Painter, rect: Rect) {
         let shadow = rect.translate(self.offset).expand(self.spread);
         painter.add(self.sampled(shadow, (self.blur / 2.0).max(0.25), Some(rect)));
     }
 
-    /// The shadow of `rect` (already offset and spread) as a mesh: a Gaussian-blurred box is the
+    /// The shadow of `rect` (already offset and spread) as a mesh. A Gaussian-blurred box is the
     /// product of its blurred edges along each axis, sampled every σ/2 out to 3σ, less the box
     /// `hole` (whose edges join the grid). Corners are square, which the blur hides (the dense
-    /// ones are glows round 2px corners).
+    /// shadows are glows round 2px corners).
     fn sampled(&self, rect: Rect, sigma: f32, hole: Option<Rect>) -> Shape {
         let edge = |t: f32, lo: f32, hi: f32| {
             0.5 * (erf((hi - t) / (std::f32::consts::SQRT_2 * sigma))
@@ -143,9 +143,9 @@ fn erf(x: f32) -> f32 {
 }
 
 /// Carbon's raised-card highlight, `0.15px 0.5px 0 0 rgba(255, 255, 255, 0.1) inset`
-/// (an expanded message's), on a card at `rect` with corners `radius` filled with `fill`: white
-/// along the top, where the card shifted half a px down doesn't cover it. Its 0.15px on the left is
-/// too thin to show.
+/// (an expanded message's), on a card at `rect` with corners `radius` filled with `fill`. It's
+/// white along the top, where the card shifted half a px down doesn't cover it. Its 0.15px on the
+/// left is too thin to show.
 pub fn paint_carbon_highlight(painter: &Painter, rect: Rect, radius: CornerRadius, fill: Color32) {
     let band = (2.0 * f32::from(radius.nw.max(radius.ne))).max(1.0);
     let top = painter.with_clip_rect(Rect::from_min_max(
@@ -156,8 +156,8 @@ pub fn paint_carbon_highlight(painter: &Painter, rect: Rect, radius: CornerRadiu
     top.rect_filled(rect.translate(vec2(0.15, 0.5)), radius, fill);
 }
 
-/// `linear-gradient(to right, transparent 0, fill 12px)` over `rect`: `fill` fading in across
-/// its first 12px, then solid (a chip's tail, a suggestion's remove button).
+/// `linear-gradient(to right, transparent 0, fill 12px)` over `rect`, so `fill` fades in across
+/// its first 12px and is solid after (a chip's tail, a suggestion's remove button).
 pub fn paint_fade_in(painter: &Painter, rect: Rect, fill: Color32) {
     if fill == Color32::TRANSPARENT || rect.width() <= 0.0 {
         return;
@@ -179,9 +179,9 @@ pub fn paint_fade_in(painter: &Painter, rect: Rect, fill: Color32) {
 }
 
 /// The fade under a header once what's below it has scrolled (the list's header and others like
-/// it): an 8px `linear-gradient(0deg, transparent, rgba(0,0,0,.05))` from the header's bottom edge
-/// at `top_left`, under a 1px `box-shadow: 0 -1px 0 0 rgba(0,0,0,.05)` line. It fades in and out
-/// with `scrolled` over 600ms (`cubic-bezier(0.165, 0.84, 0.44, 1)`).
+/// it). It's an 8px `linear-gradient(0deg, transparent, rgba(0,0,0,.05))` from the header's bottom
+/// edge at `top_left`, under a 1px `box-shadow: 0 -1px 0 0 rgba(0,0,0,.05)` line. It fades in and
+/// out with `scrolled` over 600ms (`cubic-bezier(0.165, 0.84, 0.44, 1)`).
 pub fn scroll_shadow(painter: &Painter, id: Id, top_left: Pos2, width: f32, scrolled: bool) {
     let opacity = motion::transition(
         painter.ctx(),

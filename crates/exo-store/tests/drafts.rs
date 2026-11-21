@@ -45,7 +45,7 @@ fn raw(subject: &str, body: &str) -> String {
     raw_dated(subject, body, None)
 }
 
-/// [`raw`], dated `date` (by default, when it's written).
+/// [`raw`] dated `date`, or by default dated when it's written.
 fn raw_dated(subject: &str, body: &str, date: Option<jiff::Zoned>) -> String {
     let email = gmail::mime::Email {
         from: Some(gmail::mime::Mailbox::new("Maya Okafor", support::ACCOUNT)),
@@ -72,8 +72,8 @@ fn draft(id: &str, subject: &str, body: &str) -> Draft {
     }
 }
 
-/// [`draft`] as compose saves it again `secs` from now with nothing changed: the same message,
-/// dated anew.
+/// [`draft`] as compose saves it again `secs` from now with nothing changed. It's the same
+/// message, dated anew.
 fn saved_again(id: &str, subject: &str, body: &str, secs: i64) -> Draft {
     let date =
         (Timestamp::now() + SignedDuration::from_secs(secs)).to_zoned(jiff::tz::TimeZone::UTC);
@@ -108,7 +108,7 @@ async fn gmail_draft_subject(harness: &Harness, id: &str) -> String {
 
 #[tokio::test]
 async fn a_saved_draft_becomes_a_gmail_draft_and_updates_in_place() {
-    // Written again at once: the pace has tests of its own.
+    // Written again at once, since the pace has tests of its own.
     let harness = Harness::synced_with(support::unpaced()).await;
     let before = gmail_drafts(&harness).await.len();
     harness
@@ -207,7 +207,7 @@ async fn a_discarded_draft_leaves_gmail_and_undo_brings_it_back() {
     harness.store.push_drafts().await.expect("pushes");
     assert_eq!(gmail_drafts(&harness).await.len(), before);
 
-    // Undo: saving it again creates a new Gmail draft.
+    // Undo saves it again, which creates a new Gmail draft.
     harness.store.save_draft(saved).await.expect("restores");
     harness.store.push_drafts().await.expect("pushes");
     assert_eq!(gmail_drafts(&harness).await.len(), before + 1);
@@ -388,7 +388,7 @@ async fn unsent_counts_sends_and_every_other_change() {
 }
 
 /// Draft `id`, a reply saying `body` to the newest message of an inbox thread without drafts,
-/// and that thread.
+/// together with that thread.
 async fn reply(harness: &Harness, id: &str, body: &str) -> (Draft, ThreadId) {
     let inbox = harness.all(&ListId::Inbox).await;
     let thread = inbox
@@ -568,7 +568,7 @@ async fn kept_files_go_once_no_draft_refers_to_them() {
     assert!(!folder.join("orphan").exists());
 }
 
-/// Gmail's sent messages carrying Message-ID `id`.
+/// How many of Gmail's sent messages carry Message-ID `id`.
 async fn sent_with_id(harness: &Harness, id: &str) -> usize {
     let query = gmail::ListQuery {
         q: Some(format!("rfc822msgid:{id}")),
@@ -604,7 +604,7 @@ async fn undo_send_while_the_push_writes_the_final_version_keeps_it_unsent() {
         .send_draft("draft00000000000011", Timestamp::now())
         .await
         .expect("holds");
-    // The push writes the draft to Gmail before sending it; hold it on that write.
+    // The push writes the draft to Gmail before sending it. Hold the push on that write.
     gate.hold_after(0);
     let store = harness.store.clone();
     let push = tokio::spawn(async move { store.push_drafts().await.expect("pushes") });
@@ -691,7 +691,7 @@ async fn a_send_whose_answer_was_lost_is_not_reported_as_failed() {
         .send_draft("draft00000000000013", Timestamp::now())
         .await
         .expect("holds");
-    // Gmail sends it, but the answer never arrives; trying again finds it sent.
+    // Gmail sends it, but the answer never arrives. Trying again finds it sent.
     harness.fault(serde_json::json!({"method": "POST", "path": "/gmail/v1/users/me/drafts/send", "status": 503, "after": true})).await;
     let report = harness.store.push_drafts().await.expect("pushes");
     assert!(
@@ -886,7 +886,7 @@ async fn a_draft_taken_over_from_gmail_web_updates_that_draft_once_it_can_be_fou
         Some(message),
         "it holds the message it took over, so compose won't take it again"
     );
-    // Gmail's drafts can't be listed: the push waits rather than make a second draft.
+    // While Gmail's drafts can't be listed, the push waits rather than make a second draft.
     harness.fault(serde_json::json!({"method": "GET", "path": "/gmail/v1/users/me/drafts", "status": 503, "times": 3})).await;
     let report = harness.store.push_drafts().await.expect("pushes");
     assert!(
@@ -941,7 +941,7 @@ async fn a_draft_saved_without_its_files_waits_for_a_save_with_them() {
 
 #[tokio::test]
 async fn each_save_while_typing_costs_its_write_and_the_new_versions_row() {
-    // Every save written at once: what one write costs, apart from the pace.
+    // Every save is written at once, to measure what one write costs apart from the pace.
     let harness = Harness::synced_with(support::unpaced()).await;
     let id = "draft00000000000041";
     let (first, thread) = reply(&harness, id, "Sounds").await;
@@ -964,8 +964,8 @@ async fn each_save_while_typing_costs_its_write_and_the_new_versions_row() {
             "drafts.update and the new version's row (messages.get, metadata), not the thread in full (120)"
         );
     }
-    // The thread holds Gmail's latest version alone, as Exo's: nothing for compose to take up as
-    // a draft written elsewhere.
+    // The thread holds only Gmail's latest version, as Exo's draft, so compose finds nothing to
+    // take up as a draft written elsewhere.
     let stored = harness
         .store
         .draft(id)
@@ -995,7 +995,7 @@ async fn each_save_while_typing_costs_its_write_and_the_new_versions_row() {
         "{:?}",
         drafts[0].snippet
     );
-    // Nothing is fetched for it later: history finds it stored, and compose has its body.
+    // Nothing is fetched for it later, because history finds it stored and compose has its body.
     assert!(
         harness.store.bodies_stored(&thread).await.expect("reads"),
         "opening the thread fetches nothing"
@@ -1007,7 +1007,7 @@ async fn each_save_while_typing_costs_its_write_and_the_new_versions_row() {
 
 #[tokio::test]
 async fn a_new_messages_saves_cost_as_much_and_leave_sync_nothing_to_fetch() {
-    // Every save written at once: what one write costs, apart from the pace.
+    // Every save is written at once, to measure what one write costs apart from the pace.
     let harness = Harness::synced_with(support::unpaced()).await;
     let id = "draft00000000000044";
     harness
@@ -1042,8 +1042,8 @@ async fn a_new_messages_saves_cost_as_much_and_leave_sync_nothing_to_fetch() {
         (1, 1),
         "the latest version alone"
     );
-    // gmail-mock starts a new thread for each version of a message that isn't a reply; history's
-    // record of the earlier ones, added and gone since, isn't fetched.
+    // gmail-mock starts a new thread for each version of a message that isn't a reply. History
+    // records the earlier ones as added and since gone, and sync fetches nothing for them.
     let spent = units(&harness).await;
     harness.store.sync().await.expect("syncs");
     assert_eq!(units(&harness).await - spent, 2, "a history check alone");
@@ -1094,7 +1094,7 @@ async fn a_send_costs_the_send_and_the_sent_message() {
 
 #[tokio::test]
 async fn a_draft_with_files_shows_them_on_its_row() {
-    // Every save written at once: what one write costs, apart from the pace.
+    // Every save is written at once, to measure what one write costs apart from the pace.
     let harness = Harness::synced_with(support::unpaced()).await;
     let id = "draft00000000000043";
     harness
@@ -1133,7 +1133,8 @@ async fn a_draft_with_files_shows_them_on_its_row() {
     );
 }
 
-/// [`support::options`] with drafts paced `plain` apart, and `files` apart with files.
+/// [`support::options`] with drafts paced `plain` apart, and drafts with files paced `files`
+/// apart.
 fn paced(plain: Duration, files: Duration) -> Options {
     Options {
         draft_pace: plain,
@@ -1430,7 +1431,7 @@ async fn an_offline_search_finds_what_was_typed_in_a_draft() {
         "discarded"
     );
 
-    // Sent, it's found as the sent message, stored whole.
+    // Once sent, a reply is found as the sent message, which is stored whole.
     let (sent, thread) = reply(&harness, "draft00000000000059", "The xylophone is booked").await;
     harness.store.save_draft(sent).await.expect("saves");
     harness
@@ -1451,14 +1452,15 @@ async fn an_offline_search_finds_what_was_typed_in_a_draft() {
     assert_eq!(found_offline(&harness, "xylophone").await, [thread]);
 }
 
-/// A tenth of real time: compose's save a second is a save every 100 ms, and paces of 5 s and
-/// 30 s are 0.5 s and 3 s.
+/// A tenth of real time. Compose's one save a second becomes a save every 100 ms, and paces of
+/// 5 s and 30 s become 0.5 s and 3 s.
 const TENTH: u32 = 10;
 
-/// A minute of typing in draft `id` at a tenth of the time: once written to Gmail and the pace
-/// past, `version(n)` saved a second apart (compose's `SAVE_EVERY`) 60 times, pushed after each
-/// save and whenever a push asks to be woken, as the account's push loop does, until Gmail has
-/// the last. Returns the writes made while typing and in all, and the units they cost.
+/// A minute of typing in draft `id`, at a tenth of the time. Once the draft is written to Gmail
+/// and the pace is past, it saves `version(n)` 60 times a second apart (compose's `SAVE_EVERY`).
+/// It pushes after each save and whenever a push asks to be woken, as the account's push loop
+/// does, until Gmail has the last save. Returns the writes made while typing and in all, and the
+/// units they cost.
 async fn a_minute_of_typing(
     harness: &Harness,
     id: &str,
@@ -1522,7 +1524,7 @@ async fn a_minute_of_typing_writes_a_draft_about_twelve_times() {
     let id = "draft00000000000061";
     let (typing, writes, units) =
         a_minute_of_typing(&harness, id, |n| draft(id, &format!("Typing {n}"), "Hello")).await;
-    // At 0 s, 5 s, … 55 s, and the last save once the minute's last pace is up.
+    // At 0 s, 5 s, … 55 s, and the last save once the last pace of the minute is up.
     assert!(
         (11..=12).contains(&typing),
         "{typing} writes while typing, not 60"
@@ -1572,7 +1574,7 @@ async fn a_minute_of_typing_writes_a_draft_with_files_twice() {
     assert_eq!(gmail_draft_subject(&harness, &gmail_id).await, "Typing 60");
 }
 
-/// The message Gmail's draft `id` holds.
+/// The id of the message that Gmail's draft `id` holds.
 async fn gmail_draft_message(harness: &Harness, id: &str) -> Option<String> {
     harness
         .gmail
@@ -1603,7 +1605,8 @@ async fn a_save_gmail_has_already_writes_nothing() {
         .expect("a Gmail draft");
     let message = gmail_draft_message(&harness, &gmail_id).await;
     let spent = units(&harness).await;
-    // Saved again with nothing changed (left with Escape, quitting): only its Date differs.
+    // Saved again with nothing changed, as leaving with Escape or quitting does. Only its Date
+    // differs.
     harness
         .store
         .save_draft(saved_again(id, "Unchanged", "Hello", 60))
@@ -1638,7 +1641,7 @@ async fn a_save_gmail_has_already_writes_nothing() {
             .is_empty(),
         "quitting, switching away and signing out write nothing either"
     );
-    // Relaunched, when a write would go at once: the draft's row says what Gmail has.
+    // After a relaunch, when a write would go at once, the draft's row says what Gmail has.
     harness.reopen().await;
     harness
         .store
@@ -1948,7 +1951,7 @@ fn with_two_files(id: &str, subject: &str, body: &str) -> Draft {
     saved
 }
 
-/// How far `draft`'s file `uuid` has gone up, as the store says now.
+/// How far the file `uuid` of `draft` has gone up, as the store says now.
 fn upload_of(harness: &Harness, draft: &Draft, uuid: &str) -> Option<f32> {
     let attachment = draft
         .record
@@ -1985,7 +1988,7 @@ async fn a_file_is_up_once_a_write_carried_it_and_a_new_one_goes_at_once() {
     harness.store.push_drafts().await.expect("pushes");
     assert_eq!(upload_of(&harness, &first, "deck"), None, "Gmail has it");
 
-    // Within the pace for a draft with files, but a file Gmail lacks goes up at once.
+    // This save is within the pace for a draft with files, but a file Gmail lacks goes up at once.
     let second = with_two_files(id, "Deck", "Attached");
     harness
         .store

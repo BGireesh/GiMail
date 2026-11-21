@@ -1,8 +1,8 @@
-//! Exo as a Mac app: closing the window hides it and Exo keeps syncing, until the Dock icon,
-//! another launch or a click on a notification brings it back; ⌘Q quits. The window opens where
+//! Exo as a Mac app. Closing the window hides it and Exo keeps syncing, until the Dock icon,
+//! another launch or a click on a notification brings it back, and ⌘Q quits. The window opens where
 //! it was left (minimized into the Dock when macOS opens Exo at login), the Dock badge counts the
-//! list on screen, and one Exo runs at a time, a later launch handing its `mailto:` link over. The
-//! menu bar is [`menu`]'s. Quitting asks first ([`confirm_quit`]).
+//! list on screen, and one Exo runs at a time, so a later launch hands its `mailto:` link to the
+//! running one. [`menu`] builds the menu bar. Quitting asks first ([`confirm_quit`]).
 
 #[cfg(target_os = "macos")]
 pub mod applications;
@@ -30,10 +30,10 @@ pub use opening::Opening;
 pub use placement::Placement;
 pub use quit::QuitWarning;
 
-/// Asks before Exo quits for ⌘Q, the app menu's `Quit Exo` and the Dock's Quit while `warning`
-/// is on; the alert's `Do not ask again`, ticked with `Quit`, turns it off. macOS ending the
-/// session and Exo quitting by itself don't ask. Call on the main thread once the menu bar is up
-/// (in eframe's app creator).
+/// Asks before Exo quits for ⌘Q, the app menu's `Quit Exo` and the Dock's Quit while `warning` is
+/// on. Ticking the alert's `Do not ask again` and choosing `Quit` turns `warning` off. Exo doesn't
+/// ask when macOS ends the session or when Exo quits by itself. Call on the main thread once the
+/// menu bar is up (in eframe's app creator).
 pub fn confirm_quit(warning: QuitWarning) {
     #[cfg(target_os = "macos")]
     macos::confirm_quit_from(warning);
@@ -41,8 +41,8 @@ pub fn confirm_quit(warning: QuitWarning) {
     drop(warning);
 }
 
-/// Opens web link `url` without bringing the browser to the front (`NSWorkspace` with
-/// `activates` off). Returns whether it could: only on a Mac, from the main thread.
+/// Opens web link `url` without bringing the browser to the front (`NSWorkspace` with `activates`
+/// off). Returns whether it could, which it can only on a Mac and from the main thread.
 pub(crate) fn open_in_background(url: &str) -> bool {
     #[cfg(target_os = "macos")]
     return macos::open_in_background(url);
@@ -53,9 +53,9 @@ pub(crate) fn open_in_background(url: &str) -> bool {
     }
 }
 
-/// Shows a modal alert with `message`, `detail` and `buttons` (the default first), Exo in front,
-/// and waits for the button chosen, from 0. The main thread shows it: call from another. `None`
-/// where there's no Mac to ask.
+/// Shows a modal alert with `message`, `detail` and `buttons` (the default first), with Exo in
+/// front, and waits for a button to be chosen. Returns the chosen button's index, from 0, or `None`
+/// where there's no Mac to ask. The main thread shows the alert, so call this from another thread.
 pub(crate) fn ask(message: &str, detail: &str, buttons: &[&str]) -> Option<usize> {
     #[cfg(target_os = "macos")]
     return macos::ask(message, detail, buttons);
@@ -92,8 +92,8 @@ pub(crate) fn graphite_accent() -> bool {
     false
 }
 
-/// Whether this Mac's Escape is on its Touch Bar (the 2016–2019 MacBook Pros), which the Touch
-/// Bar's tip is for.
+/// Whether this Mac's Escape key is on its Touch Bar (the 2016–2019 MacBook Pros), the Macs that
+/// the Touch Bar tip is for.
 pub(crate) fn escape_on_touch_bar() -> bool {
     static ON_TOUCH_BAR: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON_TOUCH_BAR.get_or_init(|| {
@@ -112,7 +112,7 @@ enum Request {
     Show,
     /// A link to open, in front.
     Open(String),
-    /// A notification clicked: what it's about, in front.
+    /// A clicked notification. What it's about opens in front.
     Clicked(Click),
     /// The Help menu's `Clear Cache and Restart`, confirmed.
     ClearCache,
@@ -122,10 +122,10 @@ enum Request {
     ToggleAutocorrect,
 }
 
-/// What a menu item or macOS hands whatever has the keyboard, past the window's own events.
+/// What a menu item or macOS hands to whatever has the keyboard, on top of the window's own events.
 #[derive(Debug, PartialEq, Eq)]
 enum Input {
-    /// A menu item's keystroke, clicked.
+    /// The keystroke of a clicked menu item.
     Keystroke(menu::Keystroke),
     /// Text macOS inserted with no key behind it (Emoji & Symbols, dictation).
     Text(String),
@@ -133,8 +133,8 @@ enum Input {
 
 /// Hands the running Exo what other launches and macOS ask of it: the window (a click on the Dock
 /// icon, Exo opened again), a link (a `mailto:` one), or what a clicked notification is about.
-/// Cheap to clone, and usable from any thread; what's asked before the window exists waits for
-/// it.
+/// Cheap to clone, and usable from any thread. A request made before the window exists waits for
+/// the window.
 #[derive(Clone, Default)]
 pub struct Launcher(Arc<Mutex<Pending>>);
 
@@ -142,31 +142,32 @@ pub struct Launcher(Arc<Mutex<Pending>>);
 struct Pending {
     requests: Vec<Request>,
     input: Vec<Input>,
-    /// The window's context, woken for each request; none until the window exists.
+    /// The window's context, woken for each request, or `None` until the window exists.
     ctx: Option<egui::Context>,
-    /// Whether autocorrect is on for the account on screen, which Edit ▸ `Enable Autocorrect`
-    /// is checked by; `None` with no account's mail showing.
+    /// Whether autocorrect is on for the account on screen, which decides whether Edit ▸ `Enable
+    /// Autocorrect` shows checked. `None` when no account's mail is showing.
     autocorrect: Option<bool>,
-    /// The updater, behind the app menu's item and a ready update's notification.
+    /// The updater behind the app menu's item and the notification for a ready update.
     updates: Option<crate::update::Updates>,
 }
 
 impl Launcher {
-    /// Brings the window back and to the front, as a click on the Dock icon does (`activate`)
-    /// and another launch with nothing to open (`second-instance`).
+    /// Brings the window back and to the front, as a click on the Dock icon does and another launch
+    /// with nothing to open does.
     pub fn show(&self) {
         self.push(Request::Show);
     }
 
-    /// Opens `url`: the window comes to the front and, for a `mailto:` link, a new message to it
-    /// opens in the account on screen (once there's one, off the sign-in screen). The way in for
-    /// links macOS hands Exo (`kAEGetURL`) as for those another launch passes on.
+    /// Opens `url`. The window comes to the front and, for a `mailto:` link, a new message to the
+    /// link's address opens in the account on screen (once there's one, off the sign-in screen).
+    /// Links that macOS hands Exo (`kAEGetURL`) come in here, as do those that another launch
+    /// passes on.
     pub fn open_url(&self, url: &str) {
         self.push(Request::Open(url.to_owned()));
     }
 
-    /// A notification was clicked: the window comes to the front, shown and focused, and `click`
-    /// opens in its account.
+    /// A notification was clicked. The window comes to the front, shown and focused, and `click`
+    /// opens in the notification's account.
     pub fn clicked(&self, click: Click) {
         self.push(Request::Clicked(click));
     }
@@ -187,13 +188,14 @@ impl Launcher {
         self.push(Request::ToggleAutocorrect);
     }
 
-    /// Whether Edit ▸ `Enable Autocorrect` shows checked (`None`: there's no account to say).
+    /// Whether Edit ▸ `Enable Autocorrect` shows checked (`None` when there's no account to say).
     pub fn autocorrect(&self) -> Option<bool> {
         self.lock().autocorrect
     }
 
-    /// Updates Exo with `updates`: the app menu's item and the notification of an update ready go
-    /// there. Set it before the event loop starts, which builds the menu bar.
+    /// Updates Exo with `updates`, which the app menu's item and the notification of a ready update
+    /// go to. Set it before the event loop starts, because starting the event loop builds the menu
+    /// bar.
     pub fn set_updates(&self, updates: crate::update::Updates) {
         self.lock().updates = Some(updates);
     }
@@ -222,7 +224,7 @@ impl Launcher {
         self.give(Input::Keystroke(keystroke));
     }
 
-    /// Hands `text` to whatever has the keyboard, typed, as macOS's Emoji & Symbols does.
+    /// Hands `text` to whatever has the keyboard as if typed, as macOS's Emoji & Symbols does.
     pub fn text(&self, text: String) {
         self.give(Input::Text(text));
     }
@@ -243,7 +245,7 @@ impl Launcher {
         }
     }
 
-    /// Wakes `ctx` for each request from now on, and now for those waiting.
+    /// Wakes `ctx` for each request from now on, and wakes it now if requests are already waiting.
     fn attach(&self, ctx: &egui::Context) {
         let mut pending = self.lock();
         if !pending.requests.is_empty() || !pending.input.is_empty() {
@@ -265,17 +267,17 @@ impl Launcher {
     }
 }
 
-/// The window's life as a Mac app's (see the module docs), which [`App`](crate::App) drives.
+/// The window's life as a Mac app (see the module docs), which [`App`](crate::App) drives.
 pub struct Desktop {
     launcher: Launcher,
     placement: Placement,
     /// Saves the placement off the UI thread.
     files: fastframe_file::Writer,
-    /// Closed: the window is hidden, and Exo runs on.
+    /// Whether the window was closed. A closed window is hidden, and Exo runs on.
     hidden: bool,
-    /// Closing took the window out of full screen first; it hides once it's out.
+    /// Whether closing took the window out of full screen first. The window hides once it's out.
     leaving_full_screen: bool,
-    /// Says when the window is out of full screen; none off the main thread (tests).
+    /// Says when the window is out of full screen. `None` off the main thread (in tests).
     #[cfg(target_os = "macos")]
     full_screen_exits: Option<macos::FullScreenExits>,
     /// Links asked for, to open on the screen showing.
@@ -284,7 +286,7 @@ pub struct Desktop {
     clicks: Vec<Click>,
     /// The Dock's badge, as last set.
     badge: String,
-    /// Opened minimized, and not back on screen since.
+    /// Set when the window opened minimized, until it's back on screen.
     docked: Option<Docked>,
     /// The Help menu's `Clear Cache and Restart` was confirmed, for the app to do.
     clear_cache: bool,
@@ -292,23 +294,24 @@ pub struct Desktop {
     reload: bool,
     /// Edit ▸ `Enable Autocorrect` was chosen.
     toggle_autocorrect: bool,
-    /// The modifiers held before a clicked item's keystroke held its own, for the frame after.
+    /// The modifiers held before a clicked item's keystroke set its own, to restore on the frame
+    /// after.
     held: Option<Modifiers>,
 }
 
 /// A window opened minimized ([`Opening::Minimized`]), until it's back on screen.
 struct Docked {
-    /// Its first frame has minimized it.
+    /// Whether its first frame has minimized it.
     minimized: bool,
-    /// It goes back to full screen, as it was left.
+    /// Whether it goes back to full screen, as it was left.
     full_screen: bool,
 }
 
 impl Desktop {
-    /// The window of `ctx`, opened at `placement` as `opening` has it, shown again for what
-    /// `launcher` hands over. Make it in eframe's app creator, before the window's first frame:
-    /// Exo has finished launching there, and only from then on can a click on the Dock icon be
-    /// heard.
+    /// The window of `ctx`, opened at `placement` the way `opening` says, and shown again for what
+    /// `launcher` hands over. Make it in eframe's app creator, before the window's first frame,
+    /// because Exo has finished launching there and only from then on can it hear a click on the
+    /// Dock icon.
     pub fn new(
         ctx: &egui::Context,
         launcher: Launcher,
@@ -325,9 +328,9 @@ impl Desktop {
             minimized: false,
             full_screen: placement.full_screen(),
         });
-        // eframe orders a new window in for its first frame, and that frame minimizes it: with no
-        // animation for either, it never reaches the screen and goes straight to the Dock, as a
-        // window never shown does.
+        // eframe orders a new window in for its first frame, and that frame minimizes it. With no
+        // animation for either, the window never reaches the screen and goes straight to the Dock,
+        // as a window never shown does.
         #[cfg(target_os = "macos")]
         if docked.is_some() {
             macos::set_animations(false);
@@ -351,16 +354,17 @@ impl Desktop {
         }
     }
 
-    /// Puts what the menu items and macOS handed whatever has the keyboard since the last frame
-    /// in front of it, as egui-winit would have it: a clicked item's keystroke, its modifiers
-    /// held for that frame only, and text macOS inserted. eframe calls this before each frame
+    /// Adds what the menu items and macOS handed to whatever has the keyboard since the last frame
+    /// to this frame's input, as egui-winit would: a clicked item's keystroke, with its modifiers
+    /// held for that frame only, and text that macOS inserted. eframe calls this before each frame
     /// (`raw_input_hook`).
     pub(crate) fn input(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
         if let Some(held) = self.held.take() {
-            // Before anything egui-winit says changed since.
+            // First, so it comes before any change egui-winit reports since.
             raw.events.insert(0, egui::Event::ModifiersChanged(held));
         }
-        // A drag out (a card's, a selection's): AppKit's drag took the button's release.
+        // A drag out of the window (a card's or a selection's) ended in AppKit, which took the
+        // button's release, so add the release here.
         #[cfg(target_os = "macos")]
         if drag::take_release()
             && let Some(pos) = ctx.input(|input| input.pointer.latest_pos())
@@ -380,7 +384,7 @@ impl Desktop {
                             .and_then(|mut clipboard| clipboard.get_text())
                             .ok()
                     });
-                    // Copied attachments come with no text, and a draft pastes them all the same.
+                    // Copied attachments come with no text, but a draft still pastes them.
                     if events.is_empty()
                         && matches!(
                             keystroke,
@@ -401,16 +405,16 @@ impl Desktop {
         }
     }
 
-    /// Closes, shows and places the window, before the frame draws. eframe calls this part of
-    /// a frame for a hidden or minimized window too, so a close or a Dock click is seen
-    /// whatever state the window is in; `last_tab` says whether the window has one tab left,
-    /// which ⌘W closes with the window. Returns whether the window hid.
+    /// Closes, shows and places the window, before the frame draws. eframe calls this part of a
+    /// frame for a hidden or minimized window too, so Exo sees a close or a Dock click whatever
+    /// state the window is in. `last_tab` says whether the window has one tab left, which ⌘W closes
+    /// along with the window. Returns whether the window hid.
     pub(crate) fn logic(&mut self, ctx: &egui::Context, last_tab: bool) -> bool {
         let docked = self.dock(ctx);
         let hidden = self.hidden;
         let close = ctx.input_mut(|input| {
-            // ⇧⌘W closes the window (`Close Window`), its tabs kept; ⌘W its last tab, and with it
-            // the window (`Close Tab`). With more, ⌘W is the tabs'.
+            // ⇧⌘W closes the window (`Close Window`) and keeps its tabs. ⌘W closes the last tab,
+            // and the window with it (`Close Tab`). With more tabs open, ⌘W belongs to the tabs.
             let window =
                 !hidden && input.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::W);
             let tab = !hidden && last_tab && input.consume_key(Modifiers::COMMAND, Key::W);
@@ -421,10 +425,10 @@ impl Desktop {
             // first, or its Space would stay behind, empty.
             ctx.send_viewport_cmd(ViewportCommand::CancelClose);
             if self.leaving_full_screen {
-                // On its way out already.
+                // Already on its way out.
                 false
             } else if in_full_screen(ctx) {
-                // Only the exit this asks for counts.
+                // Only the exit that this asks for counts.
                 self.left_full_screen(ctx);
                 ctx.send_viewport_cmd(ViewportCommand::Fullscreen(false));
                 self.leaving_full_screen = true;
@@ -446,7 +450,7 @@ impl Desktop {
                 Request::Open(url) => self.links.push(url),
                 Request::Clicked(click) => self.clicks.push(click),
                 Request::ClearCache => self.clear_cache = true,
-                // What's on screen starts over, where it is.
+                // What's on screen starts over where it is, without showing the window.
                 Request::Reload => {
                     self.reload = true;
                     continue;
@@ -458,8 +462,9 @@ impl Desktop {
             }
             self.show(ctx);
         }
-        // Not as it animates out of full screen; out, its full screen is over, hidden or not. Nor
-        // in the Dock, which says nothing of where it goes back to.
+        // Don't save the placement while the window animates out of full screen. Once it's out, its
+        // full screen is over, hidden or not. Nor while it's in the Dock, which says nothing about
+        // where it goes back to.
         if !self.leaving_full_screen && !docked && self.placement.remember(ctx) {
             self.files.write(
                 self.placement.path(),
@@ -471,8 +476,9 @@ impl Desktop {
     }
 
     /// A window opened minimized goes to the Dock on its first frame, just after eframe orders it
-    /// in, and goes back to full screen if it was left there once it's on screen again (its
-    /// window in the Dock clicked, Exo's icon, Exo opened again). Whether it was in the Dock.
+    /// in. Once it's on screen again (its window in the Dock clicked, Exo's icon clicked, Exo
+    /// opened again), it goes back to full screen if it was left there. Returns whether it was in
+    /// the Dock.
     fn dock(&mut self, ctx: &egui::Context) -> bool {
         let Some(docked) = &mut self.docked else {
             return false;
@@ -482,8 +488,8 @@ impl Desktop {
             ctx.send_viewport_cmd(ViewportCommand::Visible(false));
             ctx.send_viewport_cmd(ViewportCommand::Minimized(true));
         } else if on_screen(ctx) {
-            // On the Mac egui hears of a minimized window only from Exo (it reads `minimized` when
-            // the window is made), and paints none.
+            // On the Mac, egui hears that the window is minimized only from Exo (it reads
+            // `minimized` when the window is made), and paints nothing while it is.
             ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
             if docked.full_screen {
                 ctx.send_viewport_cmd(ViewportCommand::Fullscreen(true));
@@ -495,7 +501,7 @@ impl Desktop {
         true
     }
 
-    /// The window is hidden: it was closed, and nothing has brought it back.
+    /// Whether the window is hidden, because it was closed and nothing has brought it back.
     pub(crate) fn is_hidden(&self) -> bool {
         self.hidden
     }
@@ -515,7 +521,8 @@ impl Desktop {
         std::mem::take(&mut self.toggle_autocorrect)
     }
 
-    /// Checks Edit ▸ `Enable Autocorrect` as `on` says, for the account on screen (`None`: none).
+    /// Checks Edit ▸ `Enable Autocorrect` as `on` says for the account on screen (`None` when
+    /// there's no account).
     pub(crate) fn set_autocorrect(&self, on: Option<bool>) {
         self.launcher.lock().autocorrect = on;
     }
@@ -530,7 +537,7 @@ impl Desktop {
         std::mem::take(&mut self.clicks)
     }
 
-    /// Something kept panicking (`recovery`): an alert says so, then Exo quits, without asking
+    /// Something kept panicking (`recovery`). An alert says so, then Exo quits without asking
     /// first.
     pub(crate) fn crashed_repeatedly(&self, gave_up: crate::recovery::GaveUp) {
         #[cfg(target_os = "macos")]
@@ -539,7 +546,7 @@ impl Desktop {
         let _ = gave_up;
     }
 
-    /// Shows `label` on the Dock icon; empty, none.
+    /// Shows `label` on the Dock icon, or no badge when `label` is empty.
     pub(crate) fn set_badge(&mut self, label: &str) {
         if self.badge == label {
             return;
@@ -549,7 +556,7 @@ impl Desktop {
         macos::set_badge(label);
     }
 
-    /// Whether the window has finished leaving full screen since the last call: as AppKit says
+    /// Whether the window has finished leaving full screen since the last call, as AppKit reports
     /// once the animation is over, or else as egui has it.
     fn left_full_screen(&self, ctx: &egui::Context) -> bool {
         #[cfg(target_os = "macos")]
@@ -571,12 +578,12 @@ impl Desktop {
 
 impl Drop for Desktop {
     fn drop(&mut self) {
-        // The placement is saved as Exo quits (`before-quit` flushes the window state).
+        // A placement still being written is saved before Exo quits.
         self.files.flush(fastframe_file::FLUSH_TIMEOUT);
     }
 }
 
-/// Whether the window is on screen, shown and out of the Dock: as AppKit has it on the Mac, else
+/// Whether the window is on screen, shown and out of the Dock, as AppKit has it on the Mac, or else
 /// as egui does.
 fn on_screen(ctx: &egui::Context) -> bool {
     let reported = ctx.input(|input| input.viewport().occluded == Some(false));
@@ -586,7 +593,7 @@ fn on_screen(ctx: &egui::Context) -> bool {
     reported
 }
 
-/// Whether the window is in full screen: as AppKit has it on the Mac, else as egui does.
+/// Whether the window is in full screen, as AppKit has it on the Mac, or else as egui does.
 fn in_full_screen(ctx: &egui::Context) -> bool {
     let reported = ctx.input(|input| input.viewport().fullscreen == Some(true));
     #[cfg(target_os = "macos")]

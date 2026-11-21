@@ -1,4 +1,4 @@
-//! Where the Mac draws its power from, which sets how often an account off screen syncs: it's
+//! Where the Mac draws its power from, which sets how often an account off screen syncs. It's
 //! plugged in unless it runs on its own battery, and a Mac without a battery counts as plugged in.
 
 use tokio::sync::watch;
@@ -14,8 +14,9 @@ pub enum Power {
 }
 
 impl Power {
-    /// The power source `IOPSGetProvidingPowerSourceType` names: `Battery Power`
-    /// (`kIOPMBatteryPowerKey`) is the battery; `AC Power`, `UPS Power` or nothing known isn't.
+    /// The power source `IOPSGetProvidingPowerSourceType` names. `Battery Power`
+    /// (`kIOPMBatteryPowerKey`) is the battery, and `AC Power`, `UPS Power` or nothing known
+    /// isn't.
     fn providing(source: Option<&str>) -> Self {
         if source == Some("Battery Power") {
             Self::Battery
@@ -25,7 +26,7 @@ impl Power {
     }
 }
 
-/// The Mac's power source, followed while any clone is alive; or a fixed one.
+/// The Mac's power source, followed while any clone is alive, or a fixed one.
 #[derive(Clone, Default)]
 pub struct PowerSource {
     power: watch::Sender<Power>,
@@ -54,7 +55,7 @@ impl PowerSource {
         Self::default()
     }
 
-    /// `power` until [`set`](Self::set) says otherwise: for tests and screenshots, which mustn't
+    /// `power` until [`set`](Self::set) says otherwise, for tests and screenshots, which mustn't
     /// depend on the Mac's.
     pub fn fixed(power: Power) -> Self {
         let source = Self::default();
@@ -88,7 +89,7 @@ mod macos {
 
     #[link(name = "IOKit", kind = "framework")]
     unsafe extern "C" {
-        /// A snapshot of the power sources, owned by the caller; null when there's none to read.
+        /// A snapshot of the power sources, owned by the caller. Null when there's none to read.
         fn IOPSCopyPowerSourcesInfo() -> *mut CFType;
         /// The source the Mac draws from in `snapshot`, owned by the snapshot.
         fn IOPSGetProvidingPowerSourceType(snapshot: &CFType) -> *const CFString;
@@ -113,7 +114,7 @@ mod macos {
 
     /// The power source now.
     pub(super) fn read() -> Power {
-        // SAFETY: takes no arguments; the snapshot it returns is ours to release.
+        // SAFETY: takes no arguments. The snapshot it returns is ours to release.
         let Some(snapshot) = NonNull::new(unsafe { IOPSCopyPowerSourcesInfo() }) else {
             return Power::Plugged;
         };

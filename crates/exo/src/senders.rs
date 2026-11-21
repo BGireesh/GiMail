@@ -1,4 +1,4 @@
-//! What triage does to everything from a sender or domain: a Gmail filter carries the choice to
+//! What triage does to everything from a sender or domain. A Gmail filter carries the choice to
 //! future mail (from them, adding Trash or a category), and the mail already there is relabelled.
 //! Both are undone together.
 
@@ -9,13 +9,13 @@ use regex::Regex;
 
 /// An address made only of characters that mean nothing to Gmail's search or filter criteria.
 /// The address comes from someone else's From header, and goes into a filter and a `from:"…"`
-/// search: a quote, space, brace or leading `-` in it could widen either to mail that isn't
+/// search. A quote, space, brace or leading `-` in it could widen either to mail that isn't
 /// theirs (`a@b.com" OR in:inbox`), so only addresses like this can be blocked or moved.
 static PLAIN_ADDRESS: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)^[a-z0-9_][a-z0-9._%+-]*@[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$").expect("valid regex")
 });
 
-/// Whether `email` can be blocked or moved: see [`PLAIN_ADDRESS`]. Its domain then can be too.
+/// Whether `email` can be blocked or moved (see [`PLAIN_ADDRESS`]). Its domain then can be too.
 pub(crate) fn is_plain_address(email: &str) -> bool {
     PLAIN_ADDRESS.is_match(email)
 }
@@ -31,16 +31,16 @@ const NOT_IMPORTANT: [&str; 4] = [
 /// A job on everything from `from`, an address or a domain.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SenderJob {
-    /// Block: their mail goes to Trash from now on, and what's there now does too, `thread`
-    /// included.
+    /// Block them. Their mail goes to Trash from now on, and so does the mail already there,
+    /// `thread` included.
     Block {
         /// The address or domain.
         from: String,
         /// The conversation it was blocked from.
         thread: String,
     },
-    /// Their mail goes to Other (or Important) from now on, and their inbox conversations now,
-    /// but `thread`, which moves on its own.
+    /// Their mail goes to Other (or Important) from now on, and so do their inbox conversations
+    /// now, except `thread`, which moves on its own.
     Importance {
         /// The address or domain.
         from: String,
@@ -64,7 +64,7 @@ pub struct Done {
 /// Runs `job`.
 ///
 /// # Errors
-/// When Gmail can't be reached or refuses the filter; what was done by then stays done.
+/// When Gmail can't be reached or refuses the filter. What was done by then stays done.
 pub async fn run(store: &Store, job: &SenderJob) -> exo_store::Result<Done> {
     let strings = |labels: &[&str]| {
         labels
@@ -84,7 +84,7 @@ pub async fn run(store: &Store, job: &SenderJob) -> exo_store::Result<Done> {
             }
             let (add, remove) = (strings(&["TRASH"]), strings(&["INBOX", "SPAM"]));
             let trashed = store.relabel(&all, &add, &remove).await?;
-            // Trash removed Inbox from every message; putting back is per thread.
+            // Trash removed Inbox from every message, so putting it back is per thread.
             let relabels = vec![
                 (trashed, add, Vec::new()),
                 (in_inbox, Vec::new(), strings(&["INBOX"])),

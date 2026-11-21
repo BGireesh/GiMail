@@ -13,8 +13,8 @@ const HEADING_HEIGHT: f32 = 32.0 + 24.0 + 24.0;
 /// The date: `min-width: 90px; margin-right: 12px`.
 const TITLE_MIN_WIDTH: f32 = 90.0;
 const TITLE_MARGIN: f32 = 12.0;
-/// The chevrons: `margin-top: -1px`; each is `padding: 0 7px` around the icon nudged `top: 2px`,
-/// which lands it 4px below the line's top.
+/// The chevrons have `margin-top: -1px`. Each is `padding: 0 7px` around the icon, nudged
+/// `top: 2px`, which lands the icon 4px below the line's top.
 const CHEVRON: f32 = 14.0;
 const CHEVRON_PADDING: f32 = 7.0;
 const CHEVRON_ICON_TOP: f32 = 4.0;
@@ -22,7 +22,7 @@ const CHEVRON_ICON_TOP: f32 = 4.0;
 const BUTTON_HEIGHT: f32 = 19.0;
 /// The form's day: 24px under the form and 20px in, a 12px/20px grey title nudged `top: 3px` (at
 /// least 80px wide this year, 100px otherwise), 20px chevrons (`margin-top: -3px`) with a 12px
-/// legacy chevron 7px in and 4px down, the grid 8px under the title.
+/// legacy chevron 7px in and 4px down, and the grid 8px under the title.
 pub(super) const COMPACT_TOP: f32 = 24.0;
 const COMPACT_LEFT: f32 = 20.0;
 const COMPACT_TITLE: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 12.0, 20.0);
@@ -94,8 +94,8 @@ pub fn paint_loading(ui: &Ui, pane: Rect) {
     );
 }
 
-/// The day under a new event's form in the right pane: the same heading 24px into `area`, the
-/// day's grid down to its bottom. The chevrons' keys take ⌘⇧ there.
+/// The day under a new event's form in the right pane: the same heading 24px into `area`, and the
+/// day's grid down to the bottom of `area`. The chevrons' keys take ⌘⇧ there.
 pub fn show_compact(
     ui: &Ui,
     area: Rect,
@@ -129,7 +129,7 @@ pub fn show_compact(
     ] {
         let hit = Rect::from_min_size(pos2(x, top), vec2(20.0, 23.0));
         let icon_rect = Rect::from_min_size(hit.min + vec2(7.0, 4.0), vec2(6.0, 16.0));
-        // The chevron black at `.3` (Carbon white).
+        // The chevron is black at `.3` (white in Carbon).
         let response = IconButton::new(icon)
             .colors(palette.ink(0.3, 0.3), palette.ink(0.5, 0.5))
             .show(
@@ -148,8 +148,8 @@ pub fn show_compact(
         }
         x = hit.right();
     }
-    // The grid `width: calc(100% + 40px - 1rem); margin-left: -20px` in the form's 20px padding:
-    // the pane's width less 1rem.
+    // The grid has `width: calc(100% + 40px - 1rem); margin-left: -20px` inside the form's 20px
+    // padding, which makes it the pane's width less 1rem.
     let calendar = Rect::from_min_max(
         pos2(area.left(), top + COMPACT_TITLE.line_height + COMPACT_GAP),
         pos2(area.right() - rem, area.bottom()),
@@ -220,7 +220,7 @@ fn heading(
         x = hit.right();
     }
 
-    // Today (`margin-left: auto`) and `+` (no right padding) at the heading's right, the
+    // Today (`margin-left: auto`) and `+` (no right padding) at the heading's right, with the
     // chevrons' look and nudges.
     let mut right = pane.right() - 2.0 * rem;
     for (icon, label, key, action, padding_right) in [

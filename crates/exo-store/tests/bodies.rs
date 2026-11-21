@@ -1,5 +1,5 @@
-//! Rows first, bodies after: sync stores threads for their rows (`format=metadata`, with
-//! messages that may hold files or invites in full), prefetches the inbox's bodies, and an
+//! Rows first, bodies after. Sync stores threads for their rows (`format=metadata`, with
+//! messages that may hold files or invites in full) and prefetches the inbox's bodies, and an
 //! opened thread fetches what it lacks.
 
 mod support;
@@ -147,7 +147,7 @@ async fn rows_read_the_same_as_threads_fetched_in_full() {
 #[tokio::test]
 async fn an_outlook_invite_shows_its_icon_unopened() {
     let harness = Harness::synced().await;
-    // Exchange's invite: `text/calendar` as the third alternative, no file.
+    // An invite as Exchange sends it, with `text/calendar` as the third alternative and no file.
     let invite = gmail::mime::Email {
         from: Some(gmail::mime::Mailbox { name: Some("Dana Whitfield".into()), email: "dana@contoso.example".into() }),
         to: vec![gmail::mime::Mailbox { name: None, email: support::ACCOUNT.into() }],
@@ -280,7 +280,7 @@ async fn a_body_arriving_reaches_the_search_index() {
             page.results.iter().any(|result| result.thread.id == thread)
         }
     };
-    // The longest word of the body the row's headers don't hold.
+    // The longest word of the body that the row's headers don't hold.
     let mut words: Vec<&str> = text
         .split(|c: char| !c.is_ascii_alphabetic())
         .filter(|word| word.len() >= 6)
@@ -317,7 +317,8 @@ async fn a_triage_refreshes_the_thread_for_its_rows() {
         .await
         .expect("applies");
     assert_eq!(harness.store.flush().await.expect("flushes").completed, 1);
-    // `messages.modify` and the refresh's `threads.get` metadata, nothing in full.
+    // The units pay for `messages.modify` and for a metadata `threads.get` that refreshes the
+    // thread, with nothing fetched in full.
     assert_eq!(units(&harness).await - spent, 5 + 40);
     assert!(
         harness
@@ -525,7 +526,7 @@ async fn every_row_the_list_on_screen_has_loaded_gets_its_bodies() {
         bodied(&harness, &done[100..120]).await < 20,
         "past the first hundred, not yet"
     );
-    // The app has read 200 rows of it: all of them.
+    // The app has read 200 rows of it, which is all of them.
     harness.store.loaded(200);
     harness.sync_all().await;
     assert_eq!(bodied(&harness, &done[..120]).await, 120);

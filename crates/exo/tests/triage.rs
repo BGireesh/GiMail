@@ -10,7 +10,7 @@ use support::{Fixture, start};
 /// ⌘ as the Mac sends it.
 const CMD: Modifiers = Modifiers::MAC_CMD.plus(Modifiers::COMMAND);
 
-/// Gmail's drafts' subjects.
+/// The subjects of Gmail's drafts.
 fn gmail_drafts(app: &Fixture) -> Vec<String> {
     let gmail = app.gmail();
     app.block_on(async {
@@ -37,7 +37,8 @@ fn gmail_drafts(app: &Fixture) -> Vec<String> {
     })
 }
 
-/// Writes a reply in the cursor's conversation and goes back to the list; returns its subject.
+/// Writes a reply in the cursor's conversation and goes back to the list. Returns the reply's
+/// subject.
 fn reply_draft(app: &mut Fixture) -> String {
     let subject = format!("Re: {}", app.cursor());
     app.key(Key::Enter);
@@ -116,7 +117,7 @@ fn several_selected_drafts_go_together_and_come_back_together() {
     );
 }
 
-/// The mock's filters' senders.
+/// The senders of the mock's filters.
 fn filtered(app: &Fixture) -> Vec<String> {
     let gmail = app.gmail();
     let filters = app
@@ -135,7 +136,7 @@ fn unblocking_takes_the_sender_off_the_list_and_deletes_its_filter() {
     app.press(Key::K, CMD);
     app.type_text("block sender");
     app.key(Key::Enter);
-    // `Block sender`'s Block.
+    // Block, in `Block sender`.
     app.key(Key::Enter);
     let sender = "tom@brightmoor.co".to_owned();
     assert_eq!(

@@ -1,10 +1,11 @@
-//! The file pickers behind Attach and Insert Image, the second limited to the image types: any
-//! number of files, no folders.
+//! The file pickers behind Attach and Insert Image, the second limited to the image types. Both
+//! pick any number of files and no folders.
 
 use std::path::PathBuf;
 
-/// The files the user picks, of the file `extensions` given (any, for none); empty when they
-/// cancel. Runs the panel modally: the window waits until it closes.
+/// The files the user picks, of the file `extensions` given (any file when there are none).
+/// Empty when the user cancels. Runs the panel modally, so the window waits until the panel
+/// closes.
 #[cfg(target_os = "macos")]
 pub(crate) fn pick_files(extensions: &[&str]) -> Vec<PathBuf> {
     use objc2_app_kit::{NSModalResponseOK, NSOpenPanel};
@@ -23,8 +24,8 @@ pub(crate) fn pick_files(extensions: &[&str]) -> Vec<PathBuf> {
             .iter()
             .map(|extension| NSString::from_str(extension))
             .collect();
-        // `allowedContentTypes` takes UTTypes, from a framework Exo doesn't link; extensions
-        // pick the same files.
+        // `allowedContentTypes` takes UTTypes, which come from a framework Exo doesn't link.
+        // Extensions pick the same files.
         #[expect(deprecated, reason = "the replacement needs UniformTypeIdentifiers")]
         panel.setAllowedFileTypes(Some(&NSArray::from_retained_slice(&types)));
     }
@@ -38,7 +39,7 @@ pub(crate) fn pick_files(extensions: &[&str]) -> Vec<PathBuf> {
         .collect()
 }
 
-/// No picker off macOS yet; files can still be dropped.
+/// No picker off macOS yet, but files can still be dropped.
 #[cfg(not(target_os = "macos"))]
 pub(crate) fn pick_files(_extensions: &[&str]) -> Vec<PathBuf> {
     log::warn!("no file picker on this platform");

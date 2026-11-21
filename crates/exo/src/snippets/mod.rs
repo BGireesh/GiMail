@@ -1,5 +1,5 @@
 //! Personal snippets: the Snippets folder (`G` `;`), their commands, and the ⌘; picker that uses
-//! one. They're kept in the account's settings; compose edits and applies them
+//! one. They're kept in the account's settings, and compose edits and applies them
 //! ([`crate::compose::snippets`]). Team snippets are left out.
 
 mod analytics;
@@ -20,7 +20,7 @@ use crate::{
 use folder::Folder;
 pub(crate) use pane::show as show_pane;
 
-/// The snippets' state in the app: the folder, and where ⌘; was pressed while its palette has
+/// The snippets' state in the app: the folder, and where ⌘; was pressed while the picker has
 /// the keyboard.
 #[derive(Default)]
 pub(crate) struct Snippets {
@@ -33,7 +33,7 @@ pub(crate) struct Snippets {
 }
 
 impl Snippets {
-    /// The read-only view's body is laid out and painted.
+    /// Whether the read-only view's body is laid out and painted.
     pub(crate) fn is_idle(&self) -> bool {
         self.preview.is_idle()
     }
@@ -57,40 +57,40 @@ pub(crate) enum Action {
     Pick,
     /// A snippet picked there.
     Use(String),
-    /// `;` outside the body (`Use Snippet Inline`): `;` typed in the body to open its picker.
+    /// `;` outside the body (`Use Snippet Inline`), which types `;` in the body to open its picker.
     Inline,
     /// J / K in the folder, or in the view, where the next snippet opens.
     Move(isize),
-    /// A column's header: the section sorts by it.
+    /// A click on a column's header, which sorts the section by that column.
     Sort(Column),
-    /// Enter or a click on a row: open it read-only (the cursor's, without one).
+    /// Enter or a click on a row, which opens the snippet read-only (the cursor's, without an id).
     Open(Option<String>),
-    /// `Edit Snippet` or the view's `Edit`: the editor, on this snippet, the one viewed, or the
-    /// cursor's.
+    /// `Edit Snippet` or the view's `Edit`, which opens the editor on this snippet, or else on the
+    /// one viewed or the cursor's.
     Edit(Option<String>),
-    /// Escape or the back gutter in the view: the folder again.
+    /// Escape or the back gutter in the view, which goes back to the folder.
     Back,
-    /// `Discard Snippet`: the one viewed, or the cursor's.
+    /// `Discard Snippet`, on the one viewed or the cursor's.
     Discard,
-    /// A file's card in the view: the file opens, previewed unless asked not to.
+    /// A file's card in the view, which opens the file, previewed unless asked not to.
     OpenFile { uuid: String, preview: bool },
-    /// The view's `Download all`: its files zipped.
+    /// The view's `Download all`, which downloads the snippet's files zipped.
     DownloadFiles,
 }
 
 /// Where ⌘; was pressed, which decides where the snippet goes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Origin {
-    /// A draft's form: into that draft.
+    /// A draft's form, so the snippet goes into that draft.
     Draft,
-    /// A thread: a Reply All with it.
+    /// A thread, so the snippet starts a Reply All.
     Thread,
-    /// Anywhere else: a new message with it.
+    /// Anywhere else, so the snippet starts a new message.
     Elsewhere,
 }
 
-/// The snippets as the folder orders them: by `sort`'s column and its tie-breaks, or by when each
-/// was last used then last saved, newest first.
+/// The snippets as the folder orders them. That's by `sort`'s column and its tie-breaks, or else
+/// by when each was last used, then last saved, newest first.
 pub(crate) fn ordered<'a>(
     snippets: &'a [Snippet],
     last_used: &BTreeMap<String, String>,
@@ -111,8 +111,8 @@ pub(crate) fn ordered<'a>(
     ordered
 }
 
-/// A column the folder sorts by, clicking its header.
-/// Author sorts only the team section's.
+/// A column the folder sorts by when its header is clicked.
+/// Author sorts only the team section.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Column {
     Sends,
@@ -120,7 +120,7 @@ pub(crate) enum Column {
     Replied,
 }
 
-/// The section's order: a column, either way.
+/// The section's order, by a column in either direction.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Sort {
     pub column: Column,
@@ -131,7 +131,7 @@ pub(crate) struct Sort {
 #[derive(Clone, Copy)]
 enum Key {
     Sends,
-    /// Opens per send: none, without read statuses.
+    /// Opens per send, which is always none without read statuses.
     Opens,
     /// Replies per send.
     Replies,
@@ -283,7 +283,7 @@ pub(crate) struct Context {
     pub draft_focused: bool,
     /// …in a field that takes text (the body, the subject, a recipient's).
     pub typing: bool,
-    /// …and it's a snippet being edited.
+    /// …and the draft is a snippet being edited.
     pub snippet: bool,
     /// A message of an open thread has the keyboard.
     pub message_focused: bool,
@@ -303,7 +303,8 @@ impl crate::Mail {
         match action {
             Action::Go => self.go_to_snippets(),
             Action::Create => {
-                // `Create Snippet`'s prompt, with no `Team Snippet` row: Exo has no team snippets.
+                // `Create Snippet`'s prompt, with no `Team Snippet` row because Exo has no team
+                // snippets.
                 let row = Command::new(
                     "PRIVATE_SNIPPET",
                     "Private Snippet",
@@ -351,8 +352,8 @@ impl crate::Mail {
         }
     }
 
-    /// `G` `;`: the folder, in the list's place, in its default order; the thread or new message
-    /// closes.
+    /// `G` `;` shows the folder in the list's place, in its default order, and closes the thread
+    /// or new message.
     pub(crate) fn go_to_snippets(&mut self) {
         if self.snippet_unsaved() {
             self.ask_leaving_snippet(Box::new(Self::go_to_snippets));
@@ -404,8 +405,8 @@ impl crate::Mail {
             self.ask_create_snippet();
             return;
         }
-        // Rows: the name (`—` when blank), the body's text (`–`), and `Me`; ranked by when each
-        // was last used, plus 10 for one's own.
+        // Each row has the name (`—` when blank), the body's text (`–`) and `Me`. Rows rank by
+        // when each was last used, plus 10 for one's own.
         let rows: Vec<Command<commands::Action>> = settings
             .snippets
             .iter()
@@ -490,8 +491,8 @@ impl crate::Mail {
                     body: String::new(),
                 };
                 self.compose_new(fields, Some(Field::Body));
-                // Recipients came with the fields; the rest (subject, body, variables, files)
-                // is applying it.
+                // The recipients came with the fields. Applying the snippet adds the rest
+                // (subject, body, variables, files).
                 let only = exo_store::Snippet {
                     to: Vec::new(),
                     cc: Vec::new(),
@@ -508,7 +509,8 @@ impl crate::Mail {
         });
     }
 
-    /// `Discard Snippet` on the snippet viewed, back in the folder, or the folder's highlighted one.
+    /// `Discard Snippet` on the snippet viewed, which returns to the folder, or on the folder's
+    /// highlighted one.
     fn discard_folder_snippet(&mut self) {
         let folder = &self.snippets.folder;
         let Some(id) = folder.viewing().or(folder.cursor()).map(str::to_owned) else {

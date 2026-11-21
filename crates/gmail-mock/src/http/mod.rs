@@ -23,7 +23,7 @@ use crate::error::Failure;
 use crate::world::App;
 use extract::Params;
 
-/// Gmail accepts uploads up to 35 MB; leave headroom for base64 in JSON bodies.
+/// Gmail accepts uploads up to 35 MB. The limit leaves headroom for base64 in JSON bodies.
 const BODY_LIMIT: usize = 64 * 1024 * 1024;
 
 /// The whole mock: every Google API on one origin, plus `/__mock/` admin endpoints.
@@ -107,8 +107,9 @@ async fn format_json(request: Request, next: Next) -> Response {
     Response::from_parts(parts, Body::from(text))
 }
 
-/// Answers matching requests with a canned error, as configured through `/__mock/faults`:
-/// instead of handling them, or after (`after`), so the change is made but the answer lost.
+/// Answers matching requests with a canned error, as configured through `/__mock/faults`. The
+/// error comes instead of handling them, or after it (`after`), so the change is made but the
+/// answer is lost.
 async fn inject_faults(State(app): State<Arc<App>>, request: Request, next: Next) -> Response {
     let fault = {
         let mut world = app.lock();

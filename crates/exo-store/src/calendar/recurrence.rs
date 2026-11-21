@@ -1,25 +1,25 @@
 //! A recurring event's rule as the event form makes it (a pattern and a range), read from and
-//! written as Calendar's `RRULE` lines, and the starts it gives: a new series Calendar hasn't got
-//! yet shows its instances, and a series cut for "this and following" counts the ones before the
-//! cut.
+//! written as Calendar's `RRULE` lines, and the starts the rule gives. With the starts, a new
+//! series that Calendar hasn't got yet shows its instances, and a series cut for "this and
+//! following" counts the ones before the cut.
 
 use gmail::calendar::{Event, EventDateTime};
 use jiff::civil::{Date, Weekday};
 use jiff::tz::TimeZone;
 use jiff::{Timestamp, ToSpan, Zoned};
 
-/// Most starts one expansion walks through, so an open-ended rule stays bounded.
+/// Most days one expansion walks through (about 30 years), so an open-ended rule stays bounded.
 const MAX_DAYS: i32 = 366 * 30;
 
 /// How a series repeats.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Frequency {
     Daily,
-    /// On these days, in this order; none means the start's.
+    /// On these days, in this order. None means the start's day.
     Weekly(Vec<Weekday>),
     /// On the start's day of the month.
     MonthlyOnDay,
-    /// On the start's weekday in this week of the month; none means the start's.
+    /// On the start's weekday in this week of the month. None means the start's week.
     MonthlyOnWeekday(Option<Nth>),
     /// On the start's day of the year.
     Yearly,
@@ -55,7 +55,7 @@ pub struct Recurrence {
 }
 
 impl Nth {
-    /// The week of the month `date` is in: its 29th to 31st days are the last.
+    /// The week of the month that `date` is in. A month's 29th to 31st days are in the last.
     #[must_use]
     pub fn of(date: Date) -> Self {
         match (date.day() - 1) / 7 {
@@ -79,7 +79,7 @@ impl Nth {
         }
     }
 
-    /// `BYDAY`'s ordinal: 1 to 4, or -1.
+    /// The ordinal in `BYDAY`, 1 to 4 or -1.
     fn ordinal(self) -> i8 {
         match self {
             Self::First => 1,
@@ -203,8 +203,8 @@ impl Recurrence {
         })
     }
 
-    /// The `RRULE` line for a series starting at `start`: an all-day one ends on a date, another
-    /// at the end day's last second in its zone, in UTC.
+    /// The `RRULE` line for a series starting at `start`. An all-day series ends on a date. Any
+    /// other ends at the last second of the end day in its zone, written in UTC.
     #[must_use]
     pub fn rule(&self, start: &Zoned, all_day: bool) -> String {
         let mut parts = vec![format!(
@@ -264,7 +264,8 @@ impl Recurrence {
         format!("RRULE:{}", parts.join(";"))
     }
 
-    /// The days a weekly rule repeats on: its own, or `first`'s.
+    /// The days a weekly rule repeats on, which are `days`, or the weekday of `first` when
+    /// `days` is empty.
     fn weekdays(&self, days: &[Weekday], first: Date) -> Vec<Weekday> {
         if days.is_empty() {
             vec![first.weekday()]
@@ -273,7 +274,7 @@ impl Recurrence {
         }
     }
 
-    /// Whether `date` is one of the series' days, the series starting on `first`.
+    /// Whether `date` is one of the days of a series that starts on `first`.
     fn matches(&self, first: Date, date: Date) -> bool {
         let interval = i64::from(self.interval.max(1));
         let months =
@@ -336,8 +337,8 @@ impl Recurrence {
             .collect()
     }
 
-    /// The first start at or after `start`: where a new series starts when its own day isn't one
-    /// of the rule's.
+    /// The first start at or after `start`. This is where a new series starts when its own day
+    /// isn't one of the rule's.
     #[must_use]
     pub fn first(&self, start: &Zoned) -> Option<Zoned> {
         let mut found = false;
@@ -346,8 +347,8 @@ impl Recurrence {
             .next()
     }
 
-    /// The rule for the part of a series from `day` on, the series starting at `first`: a count
-    /// less the starts before `day`.
+    /// The rule for the part of a series from `day` on, where the series starts at `first`. A
+    /// count goes down by the starts before `day`.
     #[must_use]
     pub fn from_day(&self, first: &Zoned, day: Date) -> Self {
         let end = match self.end {
@@ -364,8 +365,8 @@ impl Recurrence {
     }
 }
 
-/// A series' start or end as a time in its zone (`calendar_tz` for an all-day one or none
-/// given), and whether it's all-day.
+/// A series' start or end as a time in its zone, and whether it's all-day. The zone is
+/// `calendar_tz` for an all-day time or when none is given.
 pub(crate) fn zoned(time: &EventDateTime, calendar_tz: &TimeZone) -> Option<(Zoned, bool)> {
     if let Some(date) = &time.date {
         return Some((
@@ -391,7 +392,8 @@ pub(crate) fn zoned(time: &EventDateTime, calendar_tz: &TimeZone) -> Option<(Zon
     ))
 }
 
-/// Calendar's form of an instance's start: `2026-11-17` all-day, else the time with its offset.
+/// An instance's start in Calendar's form, which is `2026-11-17` for all-day, else the time with
+/// its offset.
 fn instance_time(at: &Zoned, all_day: bool, like: &EventDateTime) -> EventDateTime {
     if all_day {
         return EventDateTime {
@@ -406,8 +408,8 @@ fn instance_time(at: &Zoned, all_day: bool, like: &EventDateTime) -> EventDateTi
 }
 
 /// The instances of series `event` (which Calendar hasn't got) starting from `from` to `to`, as
-/// Calendar would list them: ids `{series}_{start}`, the series' id their `recurringEventId`, its
-/// rule kept on each so they can be described.
+/// Calendar would list them. Each has the id `{series}_{start}` and the series' id as its
+/// `recurringEventId`, and keeps the series' rule so it can be described.
 pub(crate) fn instances(event: &Event, from: Timestamp, to: Timestamp) -> Vec<Event> {
     let Some(rule) = Recurrence::from_rules(&event.recurrence) else {
         return vec![event.clone()];
@@ -458,7 +460,7 @@ pub(crate) fn instances(event: &Event, from: Timestamp, to: Timestamp) -> Vec<Ev
         .collect()
 }
 
-/// `UNTIL`'s day: as written for a date, else the UTC day of the time.
+/// The day of `UNTIL`, as written for a date, else the UTC day of the time.
 fn until_date(value: &str) -> Option<Date> {
     if value.len() == 8 {
         return Date::strptime("%Y%m%d", value).ok();

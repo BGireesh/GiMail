@@ -1,5 +1,5 @@
-//! The editor's state and its commands, with Squire's semantics. Everything here works without a
-//! UI; the widget ([`crate::view`]) turns input into these calls.
+//! The editor's state and its commands. Everything here works without a UI, and the widget
+//! ([`crate::view`]) turns input into these calls.
 
 mod drop;
 mod images;
@@ -31,7 +31,7 @@ pub enum Format {
 }
 
 impl Format {
-    /// The element Squire wraps text in.
+    /// The element the format wraps text in.
     pub const fn tag(self) -> &'static str {
         match self {
             Self::Bold => "b",
@@ -45,7 +45,7 @@ impl Format {
 /// A swatch of the colour subformatter, in order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Color {
-    /// `No color`: dark gray that renders as the theme's text colour.
+    /// `No color`, a dark gray that renders as the theme's text colour.
     None,
     /// `Lava Red`.
     LavaRed,
@@ -119,8 +119,8 @@ impl Color {
     }
 }
 
-/// The links autolinking makes in one text node: [`exo_mail::match_link`], then again on what
-/// follows each link.
+/// The links autolinking makes in one text node, by running [`exo_mail::match_link`] and then
+/// again on what follows each link.
 fn autolinks(text: &str) -> Vec<(Range<usize>, String)> {
     let mut found = Vec::new();
     let mut start = 0;
@@ -134,14 +134,15 @@ fn autolinks(text: &str) -> Vec<(Range<usize>, String)> {
     found
 }
 
-/// Whether autolinking leaves `text` alone outside a plain-text paste: a text node that is only an
-/// email address.
+/// Whether autolinking leaves `text` alone outside a plain-text paste, which it does for a text
+/// node that is only an email address.
 fn is_address(text: &str) -> bool {
     matches!(exo_mail::match_link(text), Some((range, href)) if range.len() == text.len() && href.starts_with("mailto:"))
 }
 
-/// `run` with the links `finder` finds in its text (`(byte range, href)`, in order) wrapped in
-/// `link(href)`, innermost (autolinking one text node). A run already in a link stays as it is.
+/// `run`, with the links that `finder` finds in its text wrapped in `link(href)` as the innermost
+/// mark. `finder` gives `(byte range, href)` pairs in order. This autolinks one text node, and a
+/// run already in a link stays as it is.
 pub(crate) fn link_run(
     run: Run,
     finder: impl Fn(&str) -> Vec<(Range<usize>, String)>,
@@ -178,9 +179,10 @@ fn autolink_element(href: &str) -> Element {
 /// Options that change what typing does, and where the editor is.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Settings {
-    /// `convertHyphenToBulletList`: `-` and Space at the start of a line starts a bulleted list.
+    /// With `convertHyphenToBulletList`, `-` and Space at the start of a line start a bulleted
+    /// list.
     pub hyphen_starts_list: bool,
-    /// `skipDateDetection`: dates aren't detected (a snippet's body, an event's About).
+    /// Dates aren't detected (a snippet's body, an event's About).
     pub skip_dates: bool,
     /// The draft is popped out, so its date tooltip keeps 7.5px from the window's left rather than
     /// 22.5px.
@@ -193,16 +195,17 @@ pub struct Settings {
 /// What the link button and ⌘K do with the current selection.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LinkAction {
-    /// Nothing selected and not in a link: ⌘K isn't the editor's (it opens the palette).
+    /// Nothing is selected and the caret isn't in a link, so ⌘K isn't the editor's (it opens the
+    /// palette).
     None,
-    /// The selection is inside one link: remove it.
+    /// The selection is inside one link, which ⌘K removes.
     Remove,
     /// Open the link input, prefilled with this (empty, or the `href` of a link the selection
     /// extends).
     Edit(String),
 }
 
-/// The editor: a document, a selection, Squire's undo stack, and the editing commands.
+/// The editor: a document, a selection, its undo stack, and the editing commands.
 pub struct Editor {
     pub(crate) doc: Document,
     pub(crate) selection: Selection,
@@ -211,13 +214,13 @@ pub struct Editor {
     pending: Option<Vec<Element>>,
     /// The trigger text of a list just made from markdown (`* `), restored by Backspace.
     auto_list: Option<String>,
-    /// Where the caret was after the last Unicode replacement: Backspace there undoes it.
+    /// Where the caret was after the last Unicode replacement. Backspace there undoes it.
     replacement: Option<Pos>,
     /// The inline trigger typed into, if it's still open.
     pub(crate) trigger: Option<Trigger>,
     trigger_dismissed: bool,
-    /// A trigger character was typed and nothing has been picked since: a `+` opens its contacts
-    /// once a name follows it.
+    /// Whether a trigger character was typed with nothing picked since, so a `+` opens its
+    /// contacts once a name follows it.
     trigger_armed: bool,
     /// Ghost text shown after the caret (a prediction), accepted with Tab or →.
     pub(crate) ghost: Option<String>,
@@ -242,8 +245,8 @@ impl Default for Editor {
 }
 
 impl Editor {
-    /// An empty body: one line. Its `div` carries the empty `class` outgoing HTML has on a draft's
-    /// first line.
+    /// An empty body of one line. Its `div` carries the empty `class` outgoing HTML has on a
+    /// draft's first line.
     pub fn new() -> Self {
         let mut first = Block::empty(Vec::new());
         first.element = Element::with("div", &[("class", "")]);
@@ -286,7 +289,7 @@ impl Editor {
         self.replace_document(load(body));
     }
 
-    /// Replaces the body with `body`, one undo step. The caret keeps its line counted from the
+    /// Replaces the body with `body` in one undo step. The caret keeps its line counted from the
     /// end, as an edit at the top of the body leaves it.
     pub fn modify_html(&mut self, body: &str) {
         self.undo.save(&self.doc, self.selection);
@@ -306,7 +309,7 @@ impl Editor {
         self.touch();
     }
 
-    /// The body as HTML: the draft body that's saved.
+    /// The body as HTML, which is the draft body that's saved.
     pub fn html(&self) -> String {
         html::write(&self.doc)
     }
@@ -392,8 +395,8 @@ impl Editor {
         self.selection = Selection::caret(pos);
     }
 
-    /// The caret, where text can go: on an atom (a rule, a table), which can't hold any, a new
-    /// line after it (before it, from its start) takes the caret.
+    /// The caret, where text can go. On an atom (a rule, a table), which can't hold text, a new
+    /// line after the atom (or before it, from its start) takes the caret.
     fn caret_for_text(&mut self) -> Pos {
         let caret = self.caret();
         let block = &self.doc.blocks[caret.block];
@@ -408,7 +411,7 @@ impl Editor {
         at
     }
 
-    /// Deletes the selection if there is one; returns where the caret is.
+    /// Deletes the selection if there is one, and returns where the caret is.
     fn delete_selection(&mut self) -> Pos {
         let (start, end) = (self.selection.start(), self.selection.end());
         if start == end {
@@ -495,7 +498,8 @@ impl Editor {
         self.complete();
     }
 
-    /// Enter, or Shift+Enter: a new line, and Enter finishes the word before it for autocorrect.
+    /// Enter, or Shift+Enter, which makes a new line. Enter also finishes the word before it for
+    /// autocorrect.
     pub fn enter(&mut self, shift: bool) {
         let before = self.selection.start();
         self.break_line(shift);
@@ -547,7 +551,7 @@ impl Editor {
             return self.changed();
         }
         if block.element.tag.is_empty() {
-            // Loose inline content (no block element): the browser inserts a `<br>`.
+            // In loose inline content (no block element), the browser inserts a `<br>`.
             let marks = block.marks_at(caret.offset);
             self.doc.blocks[caret.block].insert(
                 caret.offset,
@@ -560,8 +564,8 @@ impl Editor {
             return self.changed();
         }
         if block.is_empty() && block.list().is_some() {
-            // An empty item leaves its list (outdents); the line Squire keeps after the list
-            // stays after it.
+            // An empty item leaves its list (outdents). First the body gets an editable last line
+            // if it has none, so that line stays below the item.
             self.doc.ensure_bottom_line();
             self.doc
                 .modify_blocks(caret.block..caret.block + 1, Document::decrease_list_level);
@@ -615,10 +619,10 @@ impl Editor {
         true
     }
 
-    /// On a line of just ```` ``` ```` or `~~~~`, outside lists, Enter makes the line a code
-    /// block, empty, the caret in it. The fence's line is emptied: a space left where the fence
-    /// was, with the caret before it, would keep a second Enter at the end of the code from
-    /// leaving the block, and on a later line make it wrap the line above instead.
+    /// On a line of just ```` ``` ```` or `~~~~`, outside lists, Enter makes the line an empty
+    /// code block with the caret in it. The fence's line is emptied, because a space left where
+    /// the fence was, with the caret before it, would keep a second Enter at the end of the code
+    /// from leaving the block, and on a later line would make it wrap the line above instead.
     fn code_from_fence(&mut self) -> bool {
         let caret = self.caret();
         let block = &self.doc.blocks[caret.block];
@@ -648,8 +652,8 @@ impl Editor {
         true
     }
 
-    /// Enter in a code block (Squire's `enter` in a `PRE`): a line break (`\n`), or, on an
-    /// empty line without Shift, out of the block onto a plain line.
+    /// Enter in a code block. It's a line break (`\n`), or, on an empty line without Shift, a move
+    /// out of the block onto a plain line.
     fn code_enter(&mut self, caret: Pos, shift: bool) {
         let block = &self.doc.blocks[caret.block];
         let is_break = |offset: usize| {
@@ -706,7 +710,7 @@ impl Editor {
             let start = grapheme::backspace(&block.text(), caret.offset);
             let removed = block.slice(start..caret.offset);
             self.doc.delete(Pos::new(caret.block, start), caret);
-            // Squire keeps a one-character format alive for the next keystroke.
+            // Deleting a one-character format keeps it alive for the next keystroke.
             if let [run] = removed.as_slice()
                 && !run.marks.is_empty()
                 && self.doc.blocks[caret.block].marks_at(start) != run.marks
@@ -738,7 +742,7 @@ impl Editor {
             self.collapse_to(pos);
             return self.changed();
         }
-        // At the very start: leave the list or quote.
+        // At the very start, leave the list or quote.
         if block.list().is_some() {
             self.doc.modify_blocks(0..1, Document::decrease_list_level);
         } else if block.in_blockquote() {
@@ -763,7 +767,7 @@ impl Editor {
                 .is_some_and(|previous| previous.id == list.id)
     }
 
-    /// Forward delete (Squire's `delete`).
+    /// Forward delete.
     pub fn delete_forward(&mut self) {
         self.undo.save(&self.doc, self.selection);
         if !self.selection.is_collapsed() {
@@ -786,14 +790,15 @@ impl Editor {
         }
     }
 
-    /// Deletes the selection after it was copied (⌘X), one undo step.
+    /// Deletes the selection after it was copied (⌘X), in one undo step.
     pub(crate) fn cut(&mut self) {
         self.undo.save(&self.doc, self.selection);
         self.delete_selection();
         self.changed();
     }
 
-    /// Deletes from `start` to the caret (⌥⌫ to a word start, ⌘⌫ to a line start), one undo step.
+    /// Deletes from `start` to the caret (⌥⌫ to a word start, ⌘⌫ to a line start), in one undo
+    /// step.
     pub fn delete_back_to(&mut self, start: Pos) {
         self.undo.save(&self.doc, self.selection);
         let pos = self.doc.delete(start.min(self.caret()), self.caret());
@@ -801,7 +806,7 @@ impl Editor {
         self.changed();
     }
 
-    /// Deletes from the caret to `end` (⌥⌦), one undo step.
+    /// Deletes from the caret to `end` (⌥⌦), in one undo step.
     pub fn delete_forward_to(&mut self, end: Pos) {
         self.undo.save(&self.doc, self.selection);
         let pos = self.doc.delete(self.caret(), end.max(self.caret()));
@@ -867,9 +872,9 @@ impl Editor {
         false
     }
 
-    /// Whether `number.` starting block `index` continues a numbered list cut short before it:
-    /// the nearest `ol` among the block's earlier siblings, whose first number plus its items is
-    /// `number`.
+    /// Whether `number.` starting block `index` continues a numbered list cut short before it.
+    /// That's the nearest `ol` among the block's earlier siblings, if its first number plus its
+    /// items is `number`.
     fn continues_list(&self, index: usize, number: u32) -> bool {
         let path = &self.doc.blocks[index].path;
         let depth = path.len();
@@ -934,7 +939,7 @@ impl Editor {
     fn autolink(&mut self) {
         let caret = self.caret();
         let block = &mut self.doc.blocks[caret.block];
-        // The text node the caret is in: the run that ends at (or holds) the caret.
+        // The text node the caret is in, which is the run that ends at (or holds) the caret.
         let mut end = 0;
         let Some(index) = block.runs().iter().position(|run| {
             let start = end;
@@ -985,9 +990,9 @@ impl Editor {
         }
     }
 
-    /// Squire's `changeFormat`, without its undo step: on the selection, drops the marks
-    /// `remove` matches and wraps what isn't in `add` yet in it (innermost); at a caret, does
-    /// that to what's typed next.
+    /// Changes the format, without an undo step. On the selection, it drops the marks `remove`
+    /// matches and wraps what isn't in `add` yet in `add` (innermost). At a caret, it does that to
+    /// what's typed next.
     fn format(&mut self, add: Option<Element>, remove: impl Fn(&Element) -> bool) {
         let restyle = |marks: &mut Vec<Element>| {
             marks.retain(|mark| !remove(mark));
@@ -1037,7 +1042,7 @@ impl Editor {
             .collect()
     }
 
-    /// The swatch the selection (or caret) is coloured with: what the colour picker starts on.
+    /// The swatch the selection (or caret) is coloured with, which the colour picker starts on.
     pub fn color(&self) -> Color {
         let marks = if self.selection.is_collapsed() {
             self.typing_marks()
@@ -1058,8 +1063,8 @@ impl Editor {
         self.apply_color(color);
     }
 
-    /// Colours the selection without an undo step of its own: the picker recorded one when it
-    /// opened, and moving through swatches applies each live.
+    /// Colours the selection without an undo step of its own, because the picker recorded one when
+    /// it opened, and moving through swatches applies each live.
     pub(crate) fn apply_color(&mut self, color: Color) {
         self.format(Some(color.element()), |mark| {
             mark.is("span") && mark.attr("class") == Some("colour")
@@ -1068,8 +1073,8 @@ impl Editor {
 
     // Links
 
-    /// The link the caret is in, if any (for the link popover): the caret is in a
-    /// link when the text it types into is.
+    /// The link the caret is in, if any (for the link popover). The caret is in a link when the
+    /// text it types into is.
     pub fn link_at_caret(&self) -> Option<String> {
         if !self.selection.is_collapsed() {
             return None;
@@ -1115,10 +1120,10 @@ impl Editor {
         }
     }
 
-    /// Saves the link input: empty removes the link, `chrome://` is ignored, a missing scheme
-    /// becomes `http://`; then the selection links there with `target="_blank"`. A caret gets the
-    /// URL (without its scheme) as the link's text. A `data:` URL, which the sanitizer would strip
-    /// from the draft, is ignored too.
+    /// Saves the link input. An empty input removes the link, `chrome://` is ignored, and a
+    /// missing scheme becomes `http://`. Then the selection links there with `target="_blank"`. A
+    /// caret gets the URL (without its scheme) as the link's text. A `data:` URL, which the
+    /// sanitizer would strip from the draft, is ignored too.
     pub fn set_link(&mut self, input: &str) {
         let url = input.trim();
         if url.is_empty() {
@@ -1205,7 +1210,7 @@ impl Editor {
 
     // Blocks
 
-    /// The selected blocks, with the Tab rule: a selection ending at the very start of a later
+    /// The selected blocks, with the Tab rule that a selection ending at the very start of a later
     /// block doesn't take that block.
     fn selected_blocks(&self, pull_back: bool) -> Range<usize> {
         let (start, end) = (self.selection.start(), self.selection.end());
@@ -1236,7 +1241,7 @@ impl Editor {
         self.changed();
     }
 
-    /// Whether the selection is in a list: where Tab and Shift+Tab indent.
+    /// Whether the selection is in a list, where Tab and Shift+Tab indent.
     pub fn in_list(&self) -> bool {
         let range = self.selected_blocks(false);
         self.doc
@@ -1273,7 +1278,7 @@ impl Editor {
                     .path
                     .iter()
                     .any(|c| c.element.is(tag)));
-        // Squire drops the `style` of the selection's common ancestor first.
+        // First, the selection's common ancestor loses its `style`.
         if range.len() == 1 {
             self.doc.blocks[range.start]
                 .element
@@ -1295,8 +1300,8 @@ impl Editor {
         });
     }
 
-    /// Toggles a quote (⌘⇧9): inside any blockquote, removes them all; otherwise wraps the
-    /// selection in one.
+    /// Toggles a quote (⌘⇧9). Inside any blockquote, it removes them all, and otherwise it wraps
+    /// the selection in one.
     pub fn toggle_quote(&mut self) {
         let inside = self.in_any_blockquote();
         self.modify(false, true, |doc, range| {
@@ -1378,7 +1383,7 @@ impl Editor {
         self.set_selection(Selection::caret(self.selection.focus));
     }
 
-    /// Puts back an earlier state: an undo step, or the document as it was when the colour
+    /// Puts back an earlier state, either an undo step or the document as it was when the colour
     /// picker opened (Esc).
     pub(crate) fn restore(&mut self, doc: Document, selection: Selection) {
         self.doc = doc;
@@ -1407,7 +1412,7 @@ impl Editor {
         self.undo.mark(mark);
     }
 
-    /// Records an undo step now, as Squire does before inserting an emoji, mention or snippet.
+    /// Records an undo step now, before an emoji, mention or snippet goes in.
     pub fn save_undo(&mut self) {
         self.undo.save(&self.doc, self.selection);
     }
@@ -1421,7 +1426,7 @@ impl Editor {
         self.insert_fragment(fragment, false);
     }
 
-    /// `markup` cleaned as a paste is, its `data:` images taken as the draft's.
+    /// `markup` cleaned as a paste is, with its `data:` images taken as the draft's.
     pub(crate) fn pasted_html(&mut self, markup: &str) -> Document {
         let mut fragment = html::parse_paste(&exo_mail::sanitize_fragment(
             &exo_mail::prepare_paste(markup),
@@ -1430,7 +1435,7 @@ impl Editor {
         fragment
     }
 
-    /// Pastes plain text: each line a block, less one trailing newline. A single URL pasted over
+    /// Pastes plain text as a block per line, less one trailing newline. A single URL pasted over
     /// a selection links it instead.
     pub fn paste_text(&mut self, text: &str) {
         let trimmed = text.trim();
@@ -1446,9 +1451,10 @@ impl Editor {
         self.insert_fragment(plain_fragment(text), true);
     }
 
-    /// Inserts a document fragment at the selection: its URLs are linked (a text that is only an
-    /// email address too if `emails`, as for plain text), its blocks get their trailing `<br>`, its
-    /// first block's content joins the caret's line, and its last block's the rest of that line.
+    /// Inserts a document fragment at the selection. Its URLs are linked (a text that is only an
+    /// email address too if `emails`, as for plain text), and its blocks get their trailing
+    /// `<br>`. Its first block's content joins the caret's line, and the rest of that line joins
+    /// the end of its last block.
     pub(crate) fn insert_fragment(&mut self, mut fragment: Document, emails: bool) {
         for block in &mut fragment.blocks {
             if let Content::Inline(runs) = &mut block.content {
@@ -1472,7 +1478,7 @@ impl Editor {
         self.place_fragment(fragment);
     }
 
-    /// Puts `fragment`'s blocks in at the caret, the caret after them.
+    /// Puts `fragment`'s blocks in at the caret, leaving the caret after them.
     fn place_fragment(&mut self, fragment: Document) {
         let caret = self.caret_for_text();
         let mut blocks = fragment.blocks;
@@ -1481,7 +1487,7 @@ impl Editor {
         if inline_only {
             let mut runs = blocks.remove(0).runs().to_vec();
             for run in &mut runs {
-                // A pasted link inside a link replaces it: HTML can't nest them.
+                // A pasted link inside a link replaces it, because HTML can't nest links.
                 let linked = run.marks.iter().any(|mark| mark.is("a"));
                 run.marks.splice(
                     0..0,
@@ -1546,7 +1552,7 @@ impl Editor {
         self.changed();
     }
 
-    /// Replaces `start..end` with `text` in one undo step: how a caller resolves an inline
+    /// Replaces `start..end` with `text` in one undo step, which is how a caller resolves an inline
     /// trigger (an emoji for `:smile`, a name for `+ali`).
     pub fn replace(&mut self, start: Pos, end: Pos, text: &str) {
         let (start, end) = (
@@ -1565,18 +1571,18 @@ impl Editor {
         self.changed();
     }
 
-    /// Inserts an already-built HTML fragment at the caret (a snippet's body), one undo step.
+    /// Inserts an already-built HTML fragment at the caret (a snippet's body) in one undo step.
     pub fn insert_html(&mut self, markup: &str) {
         let fragment = html::parse(&exo_mail::sanitize_fragment(markup));
         self.insert_fragment(fragment, false);
     }
 
-    /// Opens the quote and signature into the body ("…"): the body is rebuilt around them
+    /// Opens the quote and signature into the body ("…"). The body is rebuilt around them
     /// ([`outgoing::inlined`](crate::outgoing::inlined)) and undo starts over. `signature` is the
-    /// signature block ([`crate::outgoing::signature`]); `quote` the reply or forward quote, `None`
-    /// for new mail.
+    /// signature block ([`crate::outgoing::signature`]), and `quote` is the reply or forward
+    /// quote, or `None` for new mail.
     ///
-    /// This doesn't sanitize, so `target="_blank"` stays on the quote's links: both parts must
+    /// This doesn't sanitize, so `target="_blank"` stays on the quote's links. Both parts must
     /// already be sanitized, as for [`outgoing::html`](crate::outgoing::html).
     pub fn reveal_quoted(&mut self, signature: Option<&str>, quote: Option<&str>) {
         let mut doc = html::parse(&crate::outgoing::inlined(&self.html(), signature, quote));
@@ -1586,10 +1592,10 @@ impl Editor {
         self.replace_document(doc);
     }
 
-    /// Swaps the signature, for a From changed after "…" was opened: the signature block draft
-    /// `draft_id` put in the body becomes `new`, unless its text no longer reads as `old` (it was
-    /// edited), when it's left alone. Both are [`crate::outgoing::signature`] blocks. Undo starts
-    /// over. Returns whether it was swapped.
+    /// Swaps the signature, for a From changed after "…" was opened. The signature block that
+    /// draft `draft_id` put in the body becomes `new`, unless its text no longer reads as `old` (it
+    /// was edited), in which case it's left alone. Both are [`crate::outgoing::signature`] blocks.
+    /// Undo starts over. Returns whether it was swapped.
     pub fn switch_signature(&mut self, draft_id: &str, old: &str, new: &str) -> bool {
         let body = self.html();
         let Some(range) = signature_range(&body, draft_id) else {
@@ -1642,7 +1648,7 @@ impl Editor {
     }
 
     /// Lets the next edit open the trigger before the caret as if its character had just been
-    /// typed: Backspace into a mention opens its contacts again.
+    /// typed, so Backspace into a mention opens its contacts again.
     pub fn arm_trigger(&mut self) {
         self.trigger_dismissed = false;
         self.trigger_armed = true;
@@ -1702,7 +1708,7 @@ impl Editor {
         self.ghost.as_deref()
     }
 
-    /// Accepts the ghost text (Tab or →): it's inserted as plain text, one undo step. Returns
+    /// Accepts the ghost text (Tab or →), inserting it as plain text in one undo step. Returns
     /// whether there was any.
     pub fn accept_ghost_text(&mut self) -> bool {
         let Some(text) = self.ghost.take() else {
@@ -1716,7 +1722,7 @@ impl Editor {
     }
 }
 
-/// A draft body as the editor holds it: sanitized (`exo_mail::sanitize_fragment`), read, and
+/// A draft body as the editor holds it, sanitized (`exo_mail::sanitize_fragment`), read, and
 /// given its trailing `<br>`s.
 fn load(body: &str) -> Document {
     let mut doc = html::parse(&exo_mail::sanitize_fragment(body));
@@ -1761,7 +1767,7 @@ fn fix_cursors(doc: &mut Document) {
     }
 }
 
-/// Plain text as a paste makes it: each line a block, less one trailing newline.
+/// Plain text as a paste makes it, with a block per line, less one trailing newline.
 pub(crate) fn plain_fragment(text: &str) -> Document {
     let text = text.replace("\r\n", "\n");
     let text = text.strip_suffix('\n').unwrap_or(&text);
@@ -1782,9 +1788,9 @@ pub(crate) fn plain_fragment(text: &str) -> Document {
     Document::new(blocks)
 }
 
-/// The Unicode replacement, shared with the subject field: after `typed` was typed, the replacement
-/// for the end of `before` (the text up to the caret, `typed` included) and how many characters it
-/// replaces: `->` becomes `→` and so on.
+/// The Unicode replacement, shared with the subject field. After `typed` was typed, returns the
+/// replacement for the end of `before` (the text up to the caret, `typed` included) and how many
+/// characters it replaces. For example, `->` becomes `→`.
 pub fn unicode_replacement(typed: char, before: &[char]) -> Option<(usize, &'static str)> {
     if !matches!(typed, '>' | '-' | '—' | '=' | '~' | '<' | '.') {
         return None;
@@ -1807,8 +1813,8 @@ pub fn unicode_replacement(typed: char, before: &[char]) -> Option<(usize, &'sta
         })
 }
 
-/// The Unicode replacements: the first rule that matches wins; a rule's longer alternatives are
-/// tried first, as a regex's leftmost match does.
+/// The Unicode replacements. The first rule that matches wins, and a rule's longer alternatives
+/// are tried first, as a regex's leftmost match does.
 const UNICODE_REPLACEMENTS: [(&[&str], &str); 11] = [
     (&["-->", "->", "—>"], "→"),
     (&["==>", "=>"], "⇒"),
@@ -1823,8 +1829,8 @@ const UNICODE_REPLACEMENTS: [(&[&str], &str); 11] = [
     (&["..."], "…"),
 ];
 
-/// `text` as a run can hold it: whitespace a browser shows as a space is one, and what it
-/// shows as nothing goes. Text enters the model already as it shows, so what's written reads
+/// `text` as a run can hold it. Whitespace a browser shows as a space becomes a space, and what
+/// it shows as nothing goes. Text enters the model already as it shows, so what's written reads
 /// back the same.
 fn plain(text: &str) -> String {
     text.chars()
@@ -1833,13 +1839,13 @@ fn plain(text: &str) -> String {
         .collect()
 }
 
-/// HTML whitespace other than a no-break space: what CSS shows as (at most) one space.
+/// HTML whitespace other than a no-break space, which CSS shows as (at most) one space.
 fn is_collapsible(ch: char) -> bool {
     matches!(ch, ' ' | '\t' | '\n' | '\r' | '\x0C')
 }
 
-/// Control characters (other than whitespace) and U+FEFF, Squire's caret placeholder, which the
-/// saved HTML drops.
+/// Control characters (other than whitespace) and U+FEFF, a zero-width caret placeholder a draft
+/// can carry, which the saved HTML drops.
 fn is_invisible(ch: char) -> bool {
     (ch.is_control() && !is_collapsible(ch)) || ch == '\u{FEFF}'
 }

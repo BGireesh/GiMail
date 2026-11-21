@@ -1,6 +1,6 @@
-//! Quick Tips: with the setting on, the status bar, when no other bar is up, teaches the keys of
-//! whatever has the keyboard, and its cross turns it off. It hides at Inbox Zero and while
-//! sharing availability.
+//! Quick Tips. With the setting on, and when no other bar is up, the status bar teaches the keys
+//! of whatever has the keyboard, and its cross turns the setting off. It hides at Inbox Zero and
+//! while sharing availability.
 
 use exo_commands::Region;
 use exo_store::ListId;
@@ -202,8 +202,8 @@ impl Context {
 }
 
 impl crate::Mail {
-    /// What the Quick Tips bar is about, while it shows: the setting's on, and it isn't Inbox
-    /// Zero or Share Availability. Only when no other bar shows does it.
+    /// What the Quick Tips bar is about, while it shows, which is when the setting's on and it
+    /// isn't Inbox Zero or Share Availability. It shows only when no other bar does.
     pub fn quick_tips(&self) -> Option<Context> {
         let calendar = self.calendar_region();
         let sharing = matches!(

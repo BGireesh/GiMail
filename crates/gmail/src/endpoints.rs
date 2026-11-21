@@ -1,4 +1,4 @@
-//! Where each Google service lives. Paths are fixed by the APIs; only origins are configurable,
+//! Where each Google service lives. Paths are fixed by the APIs. Only origins are configurable,
 //! which is what lets Exo switch between Google and the mock by swapping this one value.
 
 use url::Url;

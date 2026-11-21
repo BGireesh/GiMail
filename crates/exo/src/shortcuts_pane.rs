@@ -13,7 +13,7 @@ const SUBHEADER: TextStyle = TextStyle::new(Font::new(Family::Sans, 700), 12.0, 
 const NAME: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 12.0, 20.0);
 /// `td { padding-top: 4px }` above a 20px line.
 const ROW: f32 = 24.0;
-/// Measured: a row's keycaps sit 3px below its cell's content box (`top: 2px` on a line whose
+/// A row's keycaps sit 3px below its cell's content box, as measured (`top: 2px` on a line whose
 /// inline-blocks start 1px down).
 const KEYS_DOWN: f32 = 3.0;
 
@@ -51,7 +51,7 @@ const MULTI_SELECT: &[Line] = &[
 /// The actions that only work on loaded rows, which a select-all leaves out.
 const LOADED_ONLY: [&str; 3] = ["Remind Me (Snooze)", "Discard Draft", "Remove All Labels"];
 
-/// The Go to panel's rows with Important and Other on; the unified inbox names the first `Inbox`
+/// The Go to panel's rows with Important and Other on. The unified inbox names the first `Inbox`
 /// and leaves `Other` out.
 const GO_TO: &[Line] = &[
     Line::Shortcut("Important", "G then I"),
@@ -74,15 +74,15 @@ const UNIFIED_INBOX: Line = Line::Shortcut("Inbox", "G then I");
 /// Which panel.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Panel {
-    /// Conversations are selected; too many to act on row by row with `select_all`, which
-    /// leaves out what only works on loaded rows.
+    /// Conversations are selected. With `select_all` there are too many to act on row by row,
+    /// and the panel leaves out what only works on loaded rows.
     MultiSelect {
         /// A select-all reaching rows not loaded, or over 50 rows.
         select_all: bool,
     },
     /// A `g` sequence is pending.
     GoTo {
-        /// The unified inbox is on (`unifiedInbox`).
+        /// Whether the unified inbox is on (`unifiedInbox`).
         unified: bool,
     },
 }
@@ -135,8 +135,8 @@ pub fn show(painter: &Painter, pane: Rect, rem: f32, panel: Panel) {
             colors,
         )
     };
-    // `table { width: 100% }` in auto layout: each column gets its widest cell, and the room left
-    // over goes to them in proportion to those widths.
+    // `table { width: 100% }` in auto layout, where each column gets its widest cell and the room
+    // left over goes to them in proportion to those widths.
     let names = lines
         .iter()
         .map(|line| match line {

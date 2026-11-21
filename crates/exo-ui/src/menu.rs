@@ -6,7 +6,7 @@ use egui::{Color32, CornerRadius, Id, Order, Pos2, Rect, Sense, Ui, Vec2, pos2, 
 
 use crate::{BoxShadow, Family, Font, TextStyle, app_theme, pixel_snap};
 
-/// A row's name: 13px in 28px lines, padded `4px 16px 0`; 12px in a dialog's.
+/// A row's name: 13px in 28px lines, padded `4px 16px 0`, or 12px in a dialog's.
 const ITEM: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 13.0, 28.0);
 const DIALOG_ITEM: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 12.0, 28.0);
 /// A dialog's list is as wide as its names at the list's own 13.5px (measured).
@@ -14,8 +14,8 @@ const DIALOG_MEASURE: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 1
 /// A name's `min-width`, which a dialog's list keeps (the Reminders dialog's two short names).
 const DIALOG_MIN_WIDTH: f32 = 165.0;
 const ROW: f32 = 32.0;
-/// A tall list: the name's span 36px tall with its line centered, so the text sits where a 32px
-/// row's does; the list comes out 6.5px wider (measured on Notifications' `Notify me:`).
+/// A tall list, where the name's span is 36px tall with its line centered, so the text sits where
+/// a 32px row's does. The list comes out 6.5px wider (measured on Notifications' `Notify me:`).
 const TALL_ROW: f32 = 36.0;
 const TALL_EXTRA_WIDTH: f32 = 6.5;
 const ROW_PADDING_TOP: f32 = 4.0;
@@ -125,8 +125,8 @@ impl Menu<'_> {
         self.paint(ui, id, top_left, true, true, &DIALOG_MEASURE)
     }
 
-    /// [`Menu::show_in_dialog`] as wide as its names at their own 12px, padded: Auto Advance's
-    /// list of long names, measured 258px.
+    /// [`Menu::show_in_dialog`] as wide as its names at their own 12px, padded, for Auto Advance's
+    /// list of long names (measured 258px).
     pub fn show_fitted_in_dialog(&self, ui: &Ui, id: Id, top_left: Pos2) -> MenuResponse {
         self.paint(ui, id, top_left, true, false, &DIALOG_ITEM)
     }
@@ -288,9 +288,10 @@ impl Menu<'_> {
     }
 }
 
-/// A dialog's dropdown button: `value` at 12px/16px with its line box's top left at
-/// `value_top_left`, black at `.7`, and the down caret 10px after it, 10px wide, black at `.5`, the
-/// icon's 12×6.7 viewBox fitted to that, 5.4px down the line. Returns the button, for the pointer.
+/// A dialog's dropdown button. It draws `value` at 12px/16px with its line box's top left at
+/// `value_top_left`, black at `.7`, and the down caret 10px after it, 10px wide and black at `.5`,
+/// with the icon's 12×6.7 viewBox fitted to that width and 5.4px down the line. Returns the
+/// button, for the pointer.
 pub fn paint_dialog_dropdown(ui: &Ui, value_top_left: Pos2, value: &str) -> Rect {
     let palette = crate::palette(ui.ctx());
     paint_dialog_dropdown_with(

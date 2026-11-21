@@ -1,7 +1,7 @@
-//! Auto Bcc: the `autoBcc` addresses go into the Bcc of every new message, reply and forward,
-//! come out again while every other recipient matches an `autoBccExclusions` entry, and go back
-//! once one doesn't. An address the user put in or took out of Bcc themselves is theirs from then
-//! on.
+//! Auto Bcc. The `autoBcc` addresses go into the Bcc of every new message, reply and forward.
+//! They come out again while every other recipient matches an `autoBccExclusions` entry, and go
+//! back once one doesn't. An address the user put in or took out of Bcc themselves is theirs from
+//! then on.
 
 use std::collections::HashSet;
 
@@ -18,7 +18,7 @@ pub(crate) struct State {
     managed: HashSet<String>,
     /// Bcc as of the last update, to tell what the user changed since.
     seen: Option<Vec<Address>>,
-    /// The Auto Bcc addresses as of the last update, lowercased: a draft with only those in Bcc
+    /// The Auto Bcc addresses as of the last update, lowercased. A draft with only those in Bcc
     /// is still unmodified.
     pub emails: Vec<String>,
 }
@@ -102,8 +102,8 @@ impl crate::Mail {
         self.commands.open_sub_palette(exclusion_palette(email));
     }
 
-    /// `entry` joins the exclusions unless an entry for it is there, and a toast says which, with
-    /// a way to the Auto Bcc dialog.
+    /// Adds `entry` to the exclusions unless an entry for it is already there. A toast says which
+    /// happened, with a way to the Auto Bcc dialog.
     pub(super) fn exclude_from_auto_bcc(&mut self, entry: String) {
         let wanted = normalize(&entry);
         let known = self
@@ -126,8 +126,8 @@ impl crate::Mail {
         ));
     }
 
-    /// A draft just made, a new message, reply or forward, takes the Auto Bcc addresses (a
-    /// snippet doesn't).
+    /// A draft just made (a new message, reply or forward) takes the Auto Bcc addresses. A
+    /// snippet doesn't.
     pub(super) fn with_auto_bcc(&self, open: &mut Open) {
         if !open.is_snippet() {
             add(&mut open.record.bcc, &self.account.settings().auto_bcc);
@@ -160,9 +160,9 @@ impl crate::Mail {
 }
 
 /// What Bcc gains and loses for the recipients to match the settings.
-/// While every recipient but the Auto Bcc addresses matches an exclusion (its domain, or the
-/// address), the Auto Bcc addresses go, but for those in `managed`; otherwise each that isn't a
-/// recipient yet comes, unless it's in `managed`.
+/// While every recipient other than the Auto Bcc addresses matches an exclusion (its domain, or
+/// the address), the Auto Bcc addresses go, except those in `managed`. Otherwise each Auto Bcc
+/// address that isn't a recipient yet comes, unless it's in `managed`.
 fn difference(
     open: &Open,
     auto_bcc: &[String],
@@ -222,7 +222,7 @@ fn difference(
     (insertions, removals)
 }
 
-/// Run whenever the draft shows: takes what the user changed in Bcc since the last run as theirs,
+/// Run whenever the draft shows. Takes what the user changed in Bcc since the last run as theirs,
 /// brings Bcc in line with the settings, and returns the toast for what changed. A snippet has no
 /// Auto Bcc.
 pub(crate) fn update(
@@ -248,7 +248,8 @@ pub(crate) fn update(
     toast
 }
 
-/// Takes `open`'s Bcc as it is now as Auto Bcc's own doing, not the user's (Instant Intro's).
+/// Takes `open`'s Bcc as it is now as Auto Bcc's own doing, not the user's, as after Instant
+/// Intro changes it.
 pub(crate) fn settle(open: &mut Open) {
     open.auto_bcc.seen = Some(open.record.bcc.clone());
 }

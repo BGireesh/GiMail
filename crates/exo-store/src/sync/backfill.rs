@@ -1,6 +1,6 @@
-//! Backfill: walking a list's `threads.list` pages back in time, fetching only the threads
-//! that are missing or stale (for their rows: bodies come after, see `bodies`), and recording
-//! how far each list is covered.
+//! Backfill walks a list's `threads.list` pages back in time, fetches the rows of only the
+//! threads that are missing or stale (bodies come after, see `bodies`), and records how far each
+//! list is covered.
 
 use std::collections::{HashMap, HashSet};
 
@@ -18,8 +18,8 @@ use crate::split::{Me, gmail_search};
 use crate::store::{Inner, Store, load_views, reindex};
 use crate::view::Router;
 
-/// Threads per `threads.list` page: a page holds the sync lock, which the next history check
-/// waits for, and ten threads' rows are a few seconds of the budget's refill.
+/// Threads per `threads.list` page. A page holds the sync lock, which the next history check
+/// waits for, and the rows of ten threads take a few seconds of the budget's refill.
 const PAGE_SIZE: u32 = 10;
 /// `threads.get` calls in flight at once.
 const FETCH_CONCURRENCY: usize = 5;
@@ -55,8 +55,9 @@ const PLAN: [(ListId, Limit); 4] = [
 ];
 
 impl Inner {
-    /// One page of every background pass (Inbox, Important, Other and every split), then a page of
-    /// the bodies the app shows first (`bodies`). Returns whether any has more to do.
+    /// One page of every background pass (All Mail, Inbox, Important, Other and every split),
+    /// then a page of the bodies the app shows first (`bodies`). Returns whether any has more to
+    /// do.
     pub(super) async fn backfill_round(&self) -> Result<bool> {
         let splits = self.router().splits;
         let on_screen = self
@@ -99,8 +100,8 @@ impl Inner {
             .first()
             .exec(&mut db)
             .await?;
-        // Scrolled past what All Mail covers, a list without a pass of its own starts where that
-        // ends rather than listing it all again.
+        // When a list without a pass of its own is scrolled past what All Mail covers, it starts
+        // where the All Mail pass ends rather than listing everything again.
         if cursor.is_none() && matches!(limit, Limit::None) && *list != ListId::All {
             cursor = ListCursor::filter_by_id(ListId::All.key())
                 .first()
@@ -200,8 +201,8 @@ pub(super) struct Page {
 }
 
 impl Inner {
-    /// The rows ([`fetch_rows`]) for `lane` of the `(id, historyId)` pairs Gmail listed that are
-    /// missing locally or changed since they were stored.
+    /// Fetches in `lane` the rows ([`fetch_rows`]) of the `(id, historyId)` pairs Gmail listed
+    /// that are missing locally or changed since they were stored.
     pub(crate) async fn fetch_stale(
         &self,
         lane: Lane,
@@ -245,9 +246,9 @@ impl Inner {
 }
 
 impl Store {
-    /// Brings `email`'s latest conversations into the store from Gmail, for when local mail
-    /// doesn't reach back far enough: the newest [`RECENT_THREADS`] threads matching
-    /// `(from:… OR to:… OR cc:… OR bcc:…) AND -in:DRAFT`, fetched unless they're stored and
+    /// Brings the latest conversations with `email` into the store from Gmail, for when local
+    /// mail doesn't reach back far enough. It fetches the newest [`RECENT_THREADS`] threads
+    /// matching `(from:… OR to:… OR cc:… OR bcc:…) AND -in:DRAFT`, unless they're stored and
     /// current, through the store's retry policy. [`recent_threads`](Self::recent_threads) then
     /// lists them.
     ///
@@ -255,7 +256,7 @@ impl Store {
     /// As [`sync`](Self::sync).
     pub async fn fetch_recent_threads(&self, email: &str) -> Result<()> {
         let inner = &self.inner;
-        // Saving a thread needs the account's identity; it doesn't need the sync to wait.
+        // Saving a thread needs the account's identity, but it doesn't need to wait for a sync.
         inner.bootstrapped().await?;
         let query = ListQuery {
             q: Some(format!(
@@ -307,8 +308,8 @@ fn passes(splits: &[&str], on_screen: Option<&ListId>) -> Vec<(ListId, Limit)> {
     passes
 }
 
-/// `q` narrowed to threads with mail before `before` (epoch milliseconds), as Gmail's
-/// `before:` takes it: in seconds, rounded up so nothing before it is left out.
+/// `q` narrowed to threads with mail before `before` (epoch milliseconds). Gmail's `before:`
+/// takes seconds, so the time is rounded up to leave out nothing before it.
 fn listed_before(q: Option<&str>, before: i64) -> String {
     let seconds = before.saturating_add(999).div_euclid(1000);
     match q {

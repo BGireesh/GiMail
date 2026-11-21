@@ -13,7 +13,7 @@ const GAPS: &[u8] = br#"\/_+.#"@[({&"#;
 ///
 /// Matching is case-insensitive, with a tiny penalty for each case mismatch. Contiguous matches
 /// score highest, then matches at the start of a word (after a space or hyphen, then after
-/// punctuation), then matches inside a word; an abbreviation that covers only a prefix of the
+/// punctuation), then matches inside a word. An abbreviation that covers only a prefix of the
 /// string caps at 0.99.
 pub fn command_score(string: &str, abbreviation: &str) -> f64 {
     Matcher {
@@ -64,7 +64,7 @@ impl Matcher {
     /// The best score for matching `abbreviation[a..]` against `string[s..]`.
     fn score(&mut self, s: usize, a: usize) -> f64 {
         // JavaScript recurses past the end only in a case that can't arise (see the transposition
-        // check below); `>=` keeps that impossible case from indexing out of bounds.
+        // check below). `>=` keeps that impossible case from indexing out of bounds.
         if a >= self.abbreviation.len() {
             return if s == self.string.len() { 1.0 } else { 0.99 };
         }

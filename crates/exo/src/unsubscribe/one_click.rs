@@ -4,9 +4,9 @@
 //! The link is someone else's, so the POST is only `List-Unsubscribe=One-Click`: no cookies,
 //! no credentials, no proxy, no redirects followed, and only to an address the account may
 //! reach ([`Reach`]), checked on the addresses the name resolves to, which are the ones
-//! connected to. A redirect still counts as done: the sender got the POST, which is all RFC 8058
-//! asks of it. A failed POST shows nothing: a failure retrying could fix is retried for a week, any
-//! other is logged and dropped.
+//! connected to. A redirect still counts as done, because the sender got the POST, which is all
+//! RFC 8058 asks of it. A failed POST shows nothing. A failure that retrying could fix is retried
+//! for a week, and any other is logged and dropped.
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::time::Duration;
@@ -28,11 +28,11 @@ const GIVE_UP: SignedDuration = SignedDuration::from_hours(7 * 24);
 /// Which addresses an account's one-click unsubscribes may reach.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Reach {
-    /// The public internet, over HTTPS (RFC 8058's rule): never this machine or a private
+    /// The public internet, over HTTPS (RFC 8058's rule). Never this machine or a private
     /// network, which a crafted link could otherwise make Exo post to.
     Public,
-    /// This machine only, over HTTP too: an account on gmail-mock, whose mail points at local
-    /// test servers, never at the internet.
+    /// This machine only, over HTTP too. It's for an account on gmail-mock, whose mail points at
+    /// local test servers, never at the internet.
     Loopback,
 }
 
@@ -200,7 +200,7 @@ pub async fn post(url: &Url, reach: Reach) -> Outcome {
 }
 
 /// Posts the store's waiting unsubscribes that are due, as far as `reach` allows. Returns when
-/// the earliest left should be tried again.
+/// the earliest one left should be tried again.
 pub async fn push(store: &Store, reach: Reach) -> Option<Timestamp> {
     let pending = match store.pending_unsubscribes().await {
         Ok(pending) => pending,
@@ -428,7 +428,7 @@ mod tests {
             [(link("list.example/busy?answer=503").as_str(), 1)]
         );
         assert_eq!(retry, left[0].not_before, "it says when to try again");
-        // Not due yet: nothing goes again.
+        // The retry isn't due yet, so nothing goes again.
         push(&store, Reach::Loopback).await;
         assert_eq!(
             taken(&server).await.len(),

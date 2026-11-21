@@ -1,7 +1,7 @@
-//! The selection as HTML, for a reply that quotes it: what goes in the quote. That's the range's
-//! `cloneContents()`: the elements between the selection's common ancestor and its ends, partly,
-//! with the text selected; narrowed to the new part of the message when it reaches past it,
-//! without an empty first or last node, and list items put back in their kind of list.
+//! The selection as HTML, which is what goes in the quote of a reply that quotes it. That's the
+//! range's `cloneContents()`: the elements between the selection's common ancestor and its ends,
+//! partly, with the text selected. It's narrowed to the new part of the message when it reaches
+//! past it, it has no empty first or last node, and list items are put back in their kind of list.
 //!
 //! Blitz keeps a selection as byte ranges of its inline roots' text (the blocks' laid-out text,
 //! white space collapsed), so the text comes from there, and the inline elements around it from

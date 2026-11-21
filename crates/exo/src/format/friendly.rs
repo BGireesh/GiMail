@@ -1,10 +1,8 @@
-//! Dates for times ahead: the `exact-friendly` family a scheduled message's header shows, the
+//! Dates for times ahead: the `exact_friendly` family a scheduled message's header shows, the
 //! compact one a time picker's rows end with, and the compose form's `Send: {date}`.
 //!
-//! Sugar's tokens: `{Weekday}` Monday, `{Dow}` Mon, `{dow}` mon, `{Month}` November, `{Mon}` Nov,
-//! `{d}` 7, `{dd}` 07, `{ord}` 7th, `{h}:{mm} {TT}` 8:00 AM. "Within a week" is before the start
-//! of the day a week from now. All in `now`'s time zone. Remind me's `someday` and `never` are
-//! `Someday` and `Never`.
+//! "Within a week" is before the start of the day a week from now. All in `now`'s time zone.
+//! Remind me's `someday` and `never` show as `Someday` and `Never`.
 
 use jiff::{Timestamp, ToSpan as _, Zoned};
 
@@ -189,20 +187,21 @@ pub fn time_suggestor(at: Timestamp, now: &Zoned) -> String {
     )
 }
 
-/// The compose form's date formats, widest first.
+/// The compose form's date formats, widest first. Each is the time alone today, and all but the
+/// narrowest read `Wed 8:00 AM` tomorrow.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ComposeFormat {
-    /// `compose-form-friendly`.
+    /// `Fri Nov 20th, 8:00 AM` within a week, `Tue Dec 1st` after.
     Friendly,
-    /// `compose-form-compact`.
+    /// `Fri Nov 20, 8:00 AM` within a week, `Tue Dec 1` after.
     Compact,
-    /// `compose-form-extra-compact`.
+    /// `Nov 20, 8:00 AM` within a week, `Dec 1` after.
     ExtraCompact,
-    /// `compose-form-most-compact`.
+    /// `Nov 20…`, or `Wed…` tomorrow and within a week in another month.
     MostCompact,
 }
 
-/// The date in `Send: {date}`, its time's space a no-break one.
+/// The date in `Send: {date}`, with a no-break space in its time.
 pub fn compose_form(at: Timestamp, now: &Zoned, format: ComposeFormat) -> String {
     let day = Day::new(at, now);
     let ord = ordinal(day.at.day());

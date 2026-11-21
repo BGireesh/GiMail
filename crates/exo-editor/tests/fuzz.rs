@@ -1,7 +1,7 @@
 //! Random edits against the headless editor, checking what must always hold: nothing panics,
 //! the document stays well formed, its HTML reads back as itself, undo then redo changes
-//! nothing, and undoing every step gives back the HTML it started from. Deterministic: the same
-//! seeds run every time.
+//! nothing, and undoing every step gives back the HTML it started from. The run is deterministic,
+//! because the same seeds run every time.
 
 use std::collections::HashMap;
 
@@ -173,7 +173,7 @@ fn keys() -> Vec<(Key, Modifiers)> {
             out.push((key, modifiers));
         }
     }
-    // Backspace and arrows matter most: weight them up.
+    // Backspace and arrows matter most, so weight them up.
     for _ in 0..4 {
         out.push((Key::Backspace, Modifiers::NONE));
         out.push((Key::ArrowLeft, Modifiers::NONE));
@@ -269,8 +269,8 @@ fn check_well_formed(doc: &Document, selection: Selection) -> Result<(), String>
             return Err(format!("selection {pos:?} outside the document"));
         }
     }
-    // Every container is one element: the blocks in it are contiguous, at one depth, with one
-    // element and the same containers around it.
+    // Every container is one element, so the blocks in it are contiguous, at one depth, and agree
+    // on the container's element and the containers around it.
     let mut seen: HashMap<u32, (usize, usize)> = HashMap::new();
     for (index, block) in doc.blocks.iter().enumerate() {
         for (depth, container) in block.path.iter().enumerate() {
@@ -350,7 +350,7 @@ fn run_seed(seed: u64, steps: usize, trace: bool) {
             "the body doesn't read back as itself\n{}",
             context()
         );
-        // Undo then redo comes back to where it was: every change was recorded.
+        // Undo then redo comes back to where it was, which holds only if every change was recorded.
         if editor.can_undo() && rng.below(8) == 0 {
             editor.undo();
             editor.redo();
@@ -391,7 +391,8 @@ fn random_edits_keep_the_document_sound() {
     }
 }
 
-/// Replays one seed, printing every step: `FUZZ_SEED=… cargo test --test fuzz trace -- --ignored --nocapture`.
+/// Replays one seed, printing every step:
+/// `FUZZ_SEED=… cargo test --test fuzz trace -- --ignored --nocapture`.
 #[test]
 #[ignore = "a debugging aid"]
 fn trace() {

@@ -1,6 +1,6 @@
 //! Gmail's search language (`q`): parsing and evaluation against stored messages.
 //!
-//! Like Gmail, parsing never fails: unknown operators are searched as text and unresolvable
+//! As in Gmail, parsing never fails. Unknown operators are searched as text, and unresolvable
 //! values (an unknown label, a bad date) match nothing.
 
 use jiff::civil::Date;
@@ -304,7 +304,8 @@ impl Parser {
                         value: value.to_owned(),
                     }));
                 }
-                // `from:"a b"`, `from:(a OR b)`, `to:{a b}`: the operator applies to each term.
+                // In `from:"a b"`, `from:(a OR b)` and `to:{a b}`, the operator applies to each
+                // term.
                 let value = self.parse_primary()?;
                 Some(value.map(&mut |term: Term| {
                     Expr::Leaf(Term {

@@ -2,19 +2,19 @@
 //!
 //! While a search is on ([`search`]), each run of text [`crate::paint_text`] paints is searched
 //! as it's painted, and its matches are highlighted under it as Chromium highlights them: yellow,
-//! the current match orange, the text in them black. Screens register nothing for that. What
-//! one paints outside the page (the shell's tab strip) it paints inside [`unsearchable`]; what it
-//! paints some other way (a message body) adds its matches at that point with [`add_matches`], or
-//! says with [`pending`] that they're still to come.
+//! the current match orange, the text in them black. Screens register nothing for that. What a
+//! screen paints outside the page (the shell's tab strip) it paints inside [`unsearchable`]. What
+//! it paints some other way (a message body) adds its matches at that point with [`add_matches`],
+//! or says with [`pending`] that they're still to come.
 //!
-//! A screen that scrolls also paints what's out of view, as a page keeps it in its DOM, while
-//! [`searching`], inside a [`Scope`], and scrolls by what [`reveal`] says when a search moves to a
+//! While [`searching`], a screen that scrolls also paints what's out of view, as a page keeps it
+//! in its DOM, inside a [`Scope`]. It scrolls by what [`reveal`] says when a search moves to a
 //! match out of view, as Chromium scrolls it into view.
 //!
 //! Matches count in the order they're painted, which is the page's order, except where a screen
-//! paints out of it: a [`Slot`] keeps a place for what's painted later. Each frame's matches are
-//! settled at the start of the next ([`State::roll`]), so the count and the current match lag
-//! the screen by a frame.
+//! paints out of it. There, a [`Slot`] keeps a place for what's painted later. Each frame's
+//! matches are settled at the start of the next ([`State::roll`]), so the count and the current
+//! match lag the screen by a frame.
 
 use std::{ops::Range, sync::Arc};
 
@@ -57,8 +57,8 @@ pub fn search(ctx: &Context, query: Option<&str>) {
     }
 }
 
-/// Moves to the next match (or the previous), wrapping around, and scrolls it into view; with
-/// none current, to the first (or the last).
+/// Moves to the next match (or the previous), wrapping around, and scrolls it into view. With
+/// none current, it moves to the first (or the last).
 pub fn step(ctx: &Context, forward: bool) {
     with(ctx, |state| {
         if state.query.is_some() {
@@ -68,23 +68,24 @@ pub fn step(ctx: &Context, forward: bool) {
     ctx.request_repaint();
 }
 
-/// Whether a search is on: screens that scroll paint what's out of view.
+/// Whether a search is on, in which case screens that scroll paint what's out of view.
 pub fn searching(ctx: &Context) -> bool {
     with(ctx, |state| state.query.is_some())
 }
 
-/// What's searched for, if anything: for text Exo doesn't paint itself to find with [`matches`].
+/// What's searched for, if anything, so text Exo doesn't paint itself can be searched with
+/// [`matches`].
 pub fn query(ctx: &Context) -> Option<String> {
     with(ctx, |state| state.raw.clone())
 }
 
-/// The current match's place among the matches (from 1; 0 with none) and their number, once
-/// the search has looked at a frame: what Chromium's `found-in-page` reports.
+/// The current match's place among the matches (from 1, or 0 with none) and their number, once
+/// the search has looked at a frame. This is what Chromium's find in page reports.
 pub fn count(ctx: &Context) -> Option<(usize, usize)> {
     with(ctx, |state| state.query.as_ref().and(state.count))
 }
 
-/// Runs `paint` without searching what it paints: text outside the page (the tab strip).
+/// Runs `paint` without searching what it paints, for text outside the page (the tab strip).
 pub fn unsearchable<R>(ctx: &Context, paint: impl FnOnce() -> R) -> R {
     with(ctx, |state| state.unsearchable += 1);
     let painted = paint();
@@ -95,7 +96,7 @@ pub fn unsearchable<R>(ctx: &Context, paint: impl FnOnce() -> R) -> R {
 }
 
 /// A place in the page's order, kept for what's painted later (a header painted over what's
-/// under it): see [`in_slot`].
+/// under it). See [`in_slot`].
 #[derive(Clone, Copy, Debug)]
 #[must_use]
 pub struct Slot(u32);
@@ -119,8 +120,8 @@ pub fn in_slot<R>(ctx: &Context, slot: Slot, paint: impl FnOnce() -> R) -> R {
 }
 
 /// Adds matches Exo doesn't paint as text (in a message body, which `source` names) at this
-/// point in the page's order: `boxes`, on screen, in their own order. Returns which of them is
-/// the current match.
+/// point in the page's order. `boxes` are the matches on screen, in their own order. Returns which
+/// of them is the current match.
 pub fn add_matches(ctx: &Context, source: Id, boxes: &[Rect]) -> Option<usize> {
     with(ctx, |state| {
         if state.query.is_none() || state.unsearchable > 0 {
@@ -150,7 +151,7 @@ pub fn add_matches(ctx: &Context, source: Id, boxes: &[Rect]) -> Option<usize> {
 }
 
 /// Says that what's painted at this point has matches still to come (a message body still being
-/// searched): a new search waits for them before choosing its first match, so it starts where
+/// searched). A new search waits for them before choosing its first match, so it starts where
 /// the page's first match is rather than at whichever arrives first.
 pub fn pending(ctx: &Context) {
     with(ctx, |state| {
@@ -185,8 +186,8 @@ pub fn reveal(ctx: &Context, scope: Id) -> Option<Vec2> {
     (delta != Vec2::ZERO).then_some(delta)
 }
 
-/// What a scrolling screen paints, while it paints it: matches in it are its to scroll to, and
-/// order by where they are in it. Closes when dropped.
+/// What a scrolling screen paints, while it paints it. Matches in it are the screen's to scroll
+/// to, and order by where they are in it. Closes when dropped.
 #[must_use]
 pub struct Scope {
     ctx: Context,
@@ -380,7 +381,7 @@ pub(crate) fn text(painter: &Painter, origin: Pos2, galley: &mut Arc<Galley>, st
     }
 }
 
-/// The highlight of characters `chars` of `galley` (painted at `origin`): a box per row, over
+/// The highlight of characters `chars` of `galley` (painted at `origin`), as a box per row over
 /// the font's content area (`ascent` above the baseline, `descent` below, as Chromium bounds a
 /// text fragment), with the row and the glyphs in it. A match in text cut off by an ellipsis
 /// is a box as wide as nothing where it was cut.
@@ -441,7 +442,7 @@ fn recolor(placed: &mut egui::epaint::text::PlacedRow, glyphs: Range<usize>, col
     let row = Arc::make_mut(&mut placed.row);
     for index in glyphs {
         let glyph = &row.glyphs[index];
-        // A glyph egui draws nothing for has no quad: its `first_vertex` is the next glyph's.
+        // A glyph egui draws nothing for has no quad, and its `first_vertex` is the next glyph's.
         let first = glyph.first_vertex as usize;
         if glyph.uv_rect.is_nothing()
             || glyph.uv_rect.size.x <= 0.0
@@ -505,9 +506,9 @@ struct State {
     /// The frame `found` is from.
     pass: u64,
     found: Vec<Found>,
-    /// This frame's are for an older query.
+    /// Whether this frame's matches are for an older query.
     stale: bool,
-    /// Some of this frame's are still to come ([`pending`]).
+    /// Whether some of this frame's matches are still to come ([`pending`]).
     pending: bool,
     /// The last frame's matches, in order, and which is current.
     settled: Vec<Found>,
@@ -556,7 +557,7 @@ impl State {
             return false;
         }
         if stale {
-            // This frame searches for the new query; the next one settles it.
+            // This frame searches for the new query, and the next one settles it.
             return true;
         }
         if pending && self.request == Some(Request::Restart) {
@@ -808,7 +809,7 @@ mod tests {
                 .collect::<Vec<Shape>>()
         };
         search(&ctx, Some("AGENDA"));
-        // A frame searched for the new query, one settled it; the next paints it.
+        // One frame searched for the new query and another settled it, and the next paints it.
         frame(&ctx);
         frame(&ctx);
         let shapes = frame(&ctx);

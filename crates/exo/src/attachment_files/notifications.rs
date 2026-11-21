@@ -1,7 +1,7 @@
-//! The file notifications: a card per download over the toast, newest on top. While the file is
-//! fetched it reads its name and `{n}%`, with `Show` greyed; once saved, `Show` reveals it and its
-//! name previews it; when it fails, the failure and `Settings`. A finished one fades out after 6 s
-//! and goes at 8 s.
+//! The file notifications, a card per download over the toast, newest on top. While the file is
+//! fetched, its card reads its name and `{n}%`, with `Show` greyed. Once the file is saved, `Show`
+//! reveals it and a click on its name previews it. When it fails, the card shows the failure and
+//! `Settings`. A finished card fades out after 6 s and goes at 8 s.
 
 use std::path::PathBuf;
 
@@ -10,24 +10,24 @@ use exo_ui::{ToastActionView, ToastKind, ToastView, motion};
 
 use super::{AttachmentFiles, State};
 
-/// A notification is 48px tall with 12px above it: each card sits this far above the one below it.
+/// A notification is 48px tall with 12px above it, so each card sits this far above the one below.
 pub(crate) const STEP: f32 = 60.0;
 
 /// What a click on a file notification asks for.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Click {
-    /// `Show`: the saved file in Finder.
+    /// `Show`, which reveals the saved file in Finder.
     Show(PathBuf),
-    /// `Settings`, on a failure: the Downloads dialog.
+    /// `Settings`, on a failure, which opens the Downloads dialog.
     Settings,
-    /// The saved file's name: a preview of it.
+    /// The saved file's name, which previews the file.
     Preview(PathBuf, String),
 }
 
 impl AttachmentFiles {
-    /// Draws the downloads' notifications at the bottom left of `area`, the lowest `bottom` px
-    /// above its bottom edge (over the toast when one shows), and returns what was clicked. A
-    /// click on an action or the × lets that notification go.
+    /// Draws the downloads' notifications at the bottom left of `area`, with the lowest one
+    /// `bottom` px above the area's bottom edge (over the toast when one shows), and returns what
+    /// was clicked. A click on an action or the × lets that notification go.
     pub(crate) fn show_notifications(
         &mut self,
         ctx: &Context,
@@ -43,7 +43,7 @@ impl AttachmentFiles {
             let hovered = ctx
                 .data(|data| data.get_temp::<bool>(hover_id))
                 .unwrap_or(false);
-            // A finished card fades over 2 s `ease-in`; the pointer on it brings it back over .2 s.
+            // A finished card fades over 2 s `ease-in`. The pointer on it brings it back over .2 s.
             let out = download.fading(now) && !hovered;
             let opacity = 1.0
                 - motion::transition(

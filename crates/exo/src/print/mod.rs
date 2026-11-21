@@ -7,8 +7,9 @@
 //! account prints exactly as a Snow one.
 //!
 //! Exo writes the page as HTML ([`document`]) and hands it to WebKit, which lays it out, paginates
-//! it and prints it the way Chromium does ([`macos`]): through the macOS print panel, whose PDF
-//! button saves it as a PDF, or, for `Save as PDF`, straight to the file chosen in a save panel.
+//! it and prints it the way Chromium does ([`macos`]). It prints through the macOS print panel,
+//! whose PDF button saves it as a PDF, or, for `Save as PDF`, straight to the file chosen in a
+//! save panel.
 //! Bodies are the same markup Exo renders on screen ([`exo_mail::printable_body`]), and what they
 //! load goes through the same guarded fetches (`crate::remote_content`) and the same Images
 //! setting.
@@ -27,7 +28,7 @@ use crate::{account::Loader, body::Bodies, thread::ThreadView};
 /// A conversation as it prints.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Conversation {
-    /// The print job's title ([`title`]); also what `Save as PDF` names the file.
+    /// The print job's title ([`title`]), which `Save as PDF` also names the file after.
     pub title: String,
     pub subject: String,
     /// The header's label chips, as they're named on screen.
@@ -44,7 +45,7 @@ pub struct Conversation {
 
 /// A sheet of paper, in points, inside `@page { margin: .6in .2in }` (portrait, `size: portrait`).
 /// Chromium lays a printed page out 96 CSS px to the inch, and the thread view's widths follow the
-/// page's as they follow a window's.
+/// page's width as they follow a window's.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Page {
     /// Its width and height in points.
@@ -58,7 +59,7 @@ impl Default for Page {
 }
 
 impl Page {
-    /// US Letter, what `Save as PDF` prints on.
+    /// US Letter, which `Save as PDF` prints on.
     pub const LETTER: Self = Self {
         paper: [612.0, 792.0],
     };
@@ -80,9 +81,9 @@ impl Page {
         self.width() <= 1024.0
     }
 
-    /// A message's content width: `.ThreadPane-messages` (`max-width: calc(640px + 8rem)`), less
-    /// `.ThreadPane-table`'s margins (`0 2rem`, 4px more on the right when narrow) and the card's
-    /// `2rem` padding.
+    /// A message's content width, which is `.ThreadPane-messages`
+    /// (`max-width: calc(640px + 8rem)`) less the margins of `.ThreadPane-table` (`0 2rem`, 4px
+    /// more on the right when narrow) and the card's `2rem` padding.
     pub fn message_width(self) -> f32 {
         let rem = self.rem();
         let narrow = if self.narrow() { 4.0 } else { 0.0 };
@@ -104,8 +105,8 @@ pub enum Message {
     /// An expanded message (`.MessagePane-expanded`).
     Expanded {
         header: Header,
-        /// The body's shadow-root markup ([`exo_mail::printable_body`]); `None` while it's still
-        /// being rendered, which prints as nothing.
+        /// The body's shadow-root markup ([`exo_mail::printable_body`]), or `None` while it's
+        /// still being rendered, which prints as nothing.
         body: Option<String>,
         files: Vec<File>,
     },
@@ -132,8 +133,8 @@ pub enum When {
 pub enum Header {
     /// The participants and the date.
     Compact { participants: String, when: When },
-    /// Shift-H's: From, To, Cc and Bcc in full, then the full date and the chevron that folds it
-    /// (no chevron on a failed send).
+    /// The header that Shift-H shows, with From, To, Cc and Bcc in full, then the full date and
+    /// the chevron that folds it (no chevron on a failed send).
     Full {
         rows: Vec<Row>,
         when: When,
@@ -161,7 +162,7 @@ pub struct File {
     pub color: Color32,
 }
 
-/// Hears whether a print job went: the panel closed on Print, or the PDF was written.
+/// Hears whether a print job went out, meaning the panel closed on Print or the PDF was written.
 pub type Done = Box<dyn FnOnce(bool)>;
 
 /// How a print job goes out.
@@ -175,7 +176,7 @@ pub enum Destination {
 
 /// Prints the open conversation `thread` through the macOS print panel over Exo's window
 /// (⌘P, File ▸ Print, ⌘K `Print`). `bodies` has its messages' bodies, `loader` fetches what they
-/// load, and `title` is [`title`]'s. Returns at once; the panel runs on its own.
+/// load, and `title` comes from [`title`]. Returns at once, and the panel runs on its own.
 pub fn conversation(
     ctx: &egui::Context,
     thread: &ThreadView,
@@ -186,8 +187,8 @@ pub fn conversation(
     print(ctx, thread, bodies, loader, title, Destination::Panel, None);
 }
 
-/// `Save as PDF` (`Print to PDF`, `Save to PDF`, `Export to PDF`): a save panel titled `Save as
-/// PDF` proposing `{title}.pdf`, then the conversation printed into the file chosen, on US
+/// `Save as PDF` (`Print to PDF`, `Save to PDF`, `Export to PDF`). It opens a save panel titled
+/// `Save as PDF` proposing `{title}.pdf`, then prints the conversation into the chosen file on US
 /// Letter.
 pub fn save_as_pdf(
     ctx: &egui::Context,
@@ -246,7 +247,7 @@ pub fn print(
     }
 }
 
-/// The paper the print panel starts on: the default printer's.
+/// The paper the print panel starts on, which is the default printer's.
 fn default_page() -> Page {
     #[cfg(target_os = "macos")]
     return macos::default_page();
@@ -266,8 +267,8 @@ enum Resource<'a> {
     Inline(&'a Attachment),
 }
 
-/// What `url` loads, from `inline` (the thread's inline attachments by `Content-ID`); `None` for
-/// anything else, which fails, as does a relative URL a body's CSS names.
+/// What `url` loads, from `inline` (the thread's inline attachments by `Content-ID`). `None` for
+/// anything else, which fails, as does a relative URL that a body's CSS names.
 fn resource<'a>(url: &str, inline: &'a HashMap<String, Attachment>) -> Option<Resource<'a>> {
     if let Some(name) = url.strip_prefix(&format!("{}://font/", document::SCHEME)) {
         let name = name.strip_suffix(".ttf")?;
@@ -286,8 +287,8 @@ fn resource<'a>(url: &str, inline: &'a HashMap<String, Attachment>) -> Option<Re
         .then(|| Resource::Remote(parsed.into()))
 }
 
-/// The type of remote content from its first bytes: an image or a font WebKit decodes whatever
-/// it's called, but takes a stylesheet only as `text/css`, which is the rest.
+/// The type of remote content, from its first bytes. WebKit decodes an image or a font whatever
+/// it's called, but takes a stylesheet only as `text/css`, which is what everything else gets.
 fn sniff(bytes: &[u8]) -> &'static str {
     let start = String::from_utf8_lossy(&bytes[..bytes.len().min(256)])
         .trim_start()
@@ -321,9 +322,9 @@ fn sniff(bytes: &[u8]) -> &'static str {
     }
 }
 
-/// The title a print job takes from the tab: `{subject} • {who}`, or just `{who}` without a
-/// subject, with a leading emoji and Exo's own name taken off. `who` is the account's address with
-/// several accounts signed in, else Exo.
+/// The title a print job takes from the tab, `{subject} • {who}` (or just `{who}` without a
+/// subject), with a leading emoji and Exo's own name taken off. `who` is the account's address
+/// with several accounts signed in, else Exo.
 pub fn title(subject: &str, accounts: usize, email: &str) -> String {
     let who = if accounts > 1 { email } else { "Exo" };
     let title = if subject.is_empty() {
@@ -349,8 +350,8 @@ fn is_leading_emoji(word: &str) -> bool {
     matches!(u32::from(c), 0xE000..=0xF8FF | 0x1F000..=0x1F7FF | 0x1F910..=0x1F9FF)
 }
 
-/// The PDF's file name, `{title}.pdf`: `/ \ ? % * : | " < >` become `_`, control characters go,
-/// and a Windows reserved name (or only dots) gets `Exo – ` in front.
+/// The PDF's file name, `{title}.pdf`, in which `/ \ ? % * : | " < >` become `_`, control
+/// characters go, and a Windows reserved name (or only dots) gets `Exo – ` in front.
 fn file_name(title: &str) -> String {
     let mut name: String = title
         .chars()

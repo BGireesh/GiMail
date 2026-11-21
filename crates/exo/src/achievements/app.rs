@@ -1,5 +1,5 @@
-//! Where the app counts: marking done, sending, Get Me To Zero clearing, and reaching Inbox Zero;
-//! and the frame's popups, animation and dialog.
+//! Where the app counts marking done, sending, clearing with Get Me To Zero and reaching Inbox
+//! Zero, and where each frame shows the popups, the streak animation and the dialog.
 
 use egui::{Context, Rect};
 use exo_store::{Achievements, ListId, Statistics};
@@ -9,8 +9,8 @@ use super::{Reached, View, dialog, streak};
 use crate::Mail;
 
 impl Mail {
-    /// Counts with `count` (on the account's statistics and this device's celebrated levels)
-    /// and raises its popup, if it reached a level.
+    /// Runs `count` on the account's statistics and this device's celebrated levels, and raises
+    /// the popup for the level it reached, if any.
     fn celebrate<R>(
         &mut self,
         count: impl FnOnce(&mut Statistics, &mut Achievements, Date) -> R,
@@ -45,7 +45,8 @@ impl Mail {
         self.celebrate(super::sent, now);
     }
 
-    /// Get Me To Zero's progress: what each of its bulk actions has marked done since last frame.
+    /// Get Me To Zero's progress, which is what each of its bulk actions has marked done since
+    /// last frame.
     pub(crate) fn count_cleared(&mut self, bulk: &[crate::bulk::Summary], now: f64) {
         for action in bulk
             .iter()
@@ -65,9 +66,9 @@ impl Mail {
         }
     }
 
-    /// Inbox Zero in Inbox or Important counts once a day and moves the streak on once a week: when
-    /// the list empties or is switched to empty (`reached`), and when the window gets the keyboard
-    /// back. week's first plays `Week N`.
+    /// Inbox Zero in Inbox or Important counts once a day and moves the streak on once a week. It
+    /// counts when the list empties or is switched to empty (`reached`), and when the window gets
+    /// the keyboard back. The week's first hit plays `Week N`.
     pub(crate) fn count_inbox_zero(&mut self, ctx: &Context, zero: bool, reached: bool, now: f64) {
         let focused = ctx.input(|input| input.focused);
         let refocused = focused && !self.achievements.focused;
@@ -112,8 +113,8 @@ impl Mail {
         }
     }
 
-    /// Paints `Week N` over the photo (`window`), under the app; then the dim layer behind the
-    /// popups at Inbox Zero (150ms).
+    /// Paints `Week N` over the photo (`window`), under the app. When that isn't playing, paints
+    /// the dim layer behind the popups at Inbox Zero instead (150ms).
     pub(crate) fn paint_behind_app(
         &mut self,
         ctx: &Context,
@@ -147,7 +148,8 @@ impl Mail {
         }
     }
 
-    /// The dialog, then the popups over the page (below the tab strip), above the regular toast.
+    /// Shows the dialog, then the popups over the page (below the tab strip) and above the
+    /// regular toast.
     pub(crate) fn show_achievement_overlays(
         &mut self,
         ctx: &Context,
@@ -175,8 +177,8 @@ impl Mail {
             Some(dialog::Asked::Show(view)) => self.show_achievements(view),
             None => {}
         }
-        // First in the stack (`unshift`), so over the file notifications and the toast: 48px
-        // cards 12px apart.
+        // The popups go first in the stack (`unshift`), so they sit over the file notifications
+        // and the toast. Each card is 48px tall and 12px from the next.
         let step = 48.0 + 12.0;
         let under = usize::from(self.commands.toast_text().is_some())
             + self.attachment_files.downloads().len();

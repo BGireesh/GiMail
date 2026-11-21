@@ -1,5 +1,5 @@
-//! The AppKit side: winit's window delegate made a destination for text as well as files, and the
-//! source of a selection's drag.
+//! The AppKit side, which makes winit's window delegate a destination for text as well as files,
+//! and is the source of a selection's drag.
 
 use std::{cell::RefCell, sync::OnceLock};
 
@@ -23,7 +23,7 @@ use objc2_foundation::{
 
 /// The class of winit's window delegate, which AppKit asks about drags over its window.
 const DELEGATE: &std::ffi::CStr = c"WinitWindowDelegate";
-/// What leads the dragged HTML, so what reads it takes it as UTF-8.
+/// What the dragged HTML starts with, so that whatever reads it takes it as UTF-8.
 const HTML_HEADER: &str = "<meta http-equiv=\"Content-Type\" content=\"text/html;charset=UTF-8\">";
 
 /// The window as its last frame left it.
@@ -34,16 +34,16 @@ struct Window {
     targets: Vec<Rect>,
 }
 
-/// The drag of an editor's selection Exo started.
+/// A drag of an editor's selection that Exo started.
 struct Session {
     source: Retained<Source>,
     /// The editor it started in.
     editor: Id,
-    /// Let go in the window, as a move (not ⌥).
+    /// Whether it was let go in the window as a move (without ⌥).
     moved_here: bool,
     /// Who took that drop.
     taken: Option<Id>,
-    /// AppKit says it's over.
+    /// Whether AppKit says it's over.
     over: bool,
 }
 
@@ -55,14 +55,15 @@ struct State {
     over: Option<Over>,
     dropped: Option<Dropped>,
     session: Option<Session>,
-    /// A drag that couldn't start, or is over, for its editor's next frame: whether it moved.
+    /// A drag that couldn't start or is over, for its editor's next frame, with whether it moved.
     ended: Option<(Id, bool)>,
     /// A finished drag's source, let go of once AppKit is done with it.
     finished: Option<Retained<Source>>,
-    /// The window is a destination for text.
+    /// Whether the window is a destination for text.
     registered: bool,
-    /// What winit's delegate answered for files on entering (an `NSDragOperation`), which AppKit
-    /// asks again as the drag moves (winit has no `draggingUpdated:`).
+    /// What winit's delegate answered for files on entering (an `NSDragOperation`). AppKit asks
+    /// again as the drag moves, and winit has no `draggingUpdated:`, so Exo gives this answer
+    /// again.
     files: usize,
 }
 
@@ -74,7 +75,7 @@ fn with<R>(f: impl FnOnce(&mut State) -> R) -> R {
     STATE.with(|state| f(&mut state.borrow_mut()))
 }
 
-/// winit's own destination methods, which Exo's call for files.
+/// winit's own destination methods, which Exo's methods call for files.
 struct Winit {
     entered: unsafe extern "C-unwind" fn(&AnyObject, Sel, &AnyObject) -> Bool,
     perform: unsafe extern "C-unwind" fn(&AnyObject, Sel, &AnyObject) -> Bool,
@@ -83,7 +84,8 @@ struct Winit {
 
 static WINIT: OnceLock<Option<Winit>> = OnceLock::new();
 
-/// See [`super::begin`]. Whether it ran (on the main thread, once winit's delegate exists).
+/// See [`super::begin`]. Returns whether it ran, which it does on the main thread once winit's
+/// delegate exists.
 pub(super) fn begin(ctx: &egui::Context) -> bool {
     let Some(mtm) = MainThreadMarker::new() else {
         return false;
@@ -96,7 +98,7 @@ pub(super) fn begin(ctx: &egui::Context) -> bool {
         state.ctx = Some(ctx.clone());
         state.finished = None;
         let dropped = state.dropped.take();
-        // A drag's end reaches its editor once its drop has been taken, a frame after.
+        // A drag's end reaches its editor a frame after its drop has been taken.
         if dropped.is_none()
             && let Some(session) = state.session.take_if(|session| session.over)
         {
@@ -166,8 +168,8 @@ fn register(mtm: MainThreadMarker) {
     }
 }
 
-/// Points winit's delegate's destination methods at Exo's, which hand files on to winit's. `None`
-/// when the class or its methods aren't there.
+/// Points the destination methods of winit's delegate at Exo's, which hand files on to winit's.
+/// `None` when the class or its methods aren't there.
 fn install() -> Option<Winit> {
     let class = AnyClass::get(DELEGATE)?;
     let find = |sel: Sel| {
@@ -186,8 +188,8 @@ fn install() -> Option<Winit> {
     type Perform = unsafe extern "C-unwind" fn(&AnyObject, Sel, &AnyObject) -> Bool;
     type Exited = unsafe extern "C-unwind" fn(&AnyObject, Sel, Option<&AnyObject>);
     // SAFETY: each replacement has the signature AppKit calls the method with (`Q@:@`, `B@:@`,
-    // `v@:@`); winit declared `draggingEntered:` returning a BOOL, which is how Exo calls it.
-    // `draggingUpdated:` is added, winit having none.
+    // `v@:@`). winit declared `draggingEntered:` returning a BOOL, which is how Exo calls it.
+    // `draggingUpdated:` is added because winit has none.
     unsafe {
         let set = |method: &objc2::runtime::Method, imp: Imp| method.set_implementation(imp);
         let winit = Winit {
@@ -220,7 +222,7 @@ fn install() -> Option<Winit> {
     }
 }
 
-/// Whether the drag `info` describes carries files, which are winit's.
+/// Whether the drag that `info` describes carries files, which winit handles.
 fn has_files(info: &AnyObject) -> bool {
     // SAFETY: `info` is an `NSDraggingInfo`.
     let pasteboard: Retained<NSPasteboard> = unsafe { msg_send![info, draggingPasteboard] };
@@ -290,7 +292,7 @@ unsafe extern "C-unwind" fn dragging_exited(
 /// Where a drag is, in the window.
 struct Place {
     at: Pos2,
-    /// Over somewhere that takes text.
+    /// Whether it's over somewhere that takes text.
     target: bool,
     /// The editor whose selection it is, when the drag is Exo's.
     source: Option<Id>,
@@ -298,7 +300,7 @@ struct Place {
     operation: NSDragOperation,
 }
 
-/// Where in the window the drag `info` describes is, and what it would do there.
+/// Where the drag that `info` describes is in the window, and what it would do there.
 fn place(info: &AnyObject) -> Option<Place> {
     // SAFETY: `info` is an `NSDraggingInfo`.
     let (window, location, source, mask): (
@@ -347,7 +349,8 @@ fn place(info: &AnyObject) -> Option<Place> {
     })
 }
 
-/// Text dragged over the window: where, for its next frame, and what it would do.
+/// Records where text dragged over the window is, for its next frame, and returns what the drop
+/// would do.
 fn text_over(info: &AnyObject) -> NSDragOperation {
     let Some(place) = place(info) else {
         return NSDragOperation::None;
@@ -362,7 +365,8 @@ fn text_over(info: &AnyObject) -> NSDragOperation {
     place.operation
 }
 
-/// Text let go over the window: what, for its next frame. Whether something there takes it.
+/// Records the text let go over the window, for its next frame. Returns whether something there
+/// takes it.
 fn text_dropped(info: &AnyObject) -> bool {
     let Some(place) =
         place(info).filter(|place| place.target && place.operation != NSDragOperation::None)
@@ -426,7 +430,7 @@ define_class!(
     unsafe impl NSObjectProtocol for Source {}
 
     unsafe impl NSDraggingSource for Source {
-        // Within Exo it may move; other apps copy.
+        // Within Exo the drag can move the text. Other apps copy it.
         #[unsafe(method(draggingSession:sourceOperationMaskForDraggingContext:))]
         fn source_operation_mask(
             &self,
@@ -484,8 +488,8 @@ define_class!(
     }
 );
 
-/// Starts the Mac's drag of `outgoing` from the window, the key window, at the pointer. Whether it
-/// could.
+/// Starts the Mac's drag of `outgoing` from the window (the key window), at the pointer. Returns
+/// whether it could.
 fn start(mtm: MainThreadMarker, ctx: &egui::Context, outgoing: Outgoing) -> bool {
     let app = NSApplication::sharedApplication(mtm);
     let Some(window) = app.keyWindow() else {
@@ -537,8 +541,8 @@ fn start(mtm: MainThreadMarker, ctx: &egui::Context, outgoing: Outgoing) -> bool
         f64::from(pointer.x * zoom),
         height - f64::from(pointer.y * zoom),
     );
-    // AppKit wants the mouse event the drag comes from; egui has had it already, so a dragged
-    // event at the pointer stands in for it.
+    // AppKit wants the mouse event that the drag comes from. egui has had that event already, so a
+    // dragged event at the pointer stands in for it.
     let Some(event) = NSEvent::mouseEventWithType_location_modifierFlags_timestamp_windowNumber_context_eventNumber_clickCount_pressure(
         NSEventType::LeftMouseDragged,
         view.convertPoint_toView(point, None),

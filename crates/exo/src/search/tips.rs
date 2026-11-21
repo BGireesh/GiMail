@@ -1,4 +1,5 @@
-//! The right pane while searching with no one to show: Tips, the operators with what they do.
+//! The right pane while searching with no one to show, which is Tips: the operators with what
+//! they do.
 
 use egui::{Painter, Rect, pos2};
 use exo_ui::{Family, Font, TextStyle};

@@ -1,6 +1,6 @@
-//! Emoji by name: what compose's `:` picker searches. Every emoji goes by its Unicode (CLDR) short
-//! name as a shortcode (`grinning_face`), the face ones also without `_face` (`thinking`), and by
-//! Slack's shortcode (`+1`, `tada`), which ranks lower. The data is Unicode's and iamcal's
+//! Emoji by name, which compose's `:` picker searches. Every emoji goes by its Unicode (CLDR)
+//! short name as a shortcode (`grinning_face`), the face ones also without `_face` (`thinking`),
+//! and by Slack's shortcode (`+1`, `tada`), which ranks lower. The data is Unicode's and iamcal's
 //! (`crates/exo/data/emoji`).
 
 use std::{
@@ -115,8 +115,8 @@ pub(crate) struct Found {
     score: f64,
 }
 
-/// The names `query` fuzzily matches (`command-score`), best first, one per emoji, at most `limit`;
-/// the default eight for an empty query. `tone` dresses the emoji that take one.
+/// The names `query` fuzzily matches (`command-score`), best first, one per emoji, at most
+/// `limit`. The default eight for an empty query. `tone` dresses the emoji that take one.
 pub(crate) fn search(query: &str, limit: usize, tone: Option<EmojiSkinTone>) -> Vec<Found> {
     let query = query
         .to_lowercase()
@@ -257,8 +257,8 @@ fn qualify(emoji: &str) -> String {
     out
 }
 
-/// The rules that rank before the score: a default name the query starts wins; so does a name
-/// starting with a prefix rule's value when the query starts its key.
+/// The rules that rank before the score. A default name the query starts wins, and so does a
+/// name starting with a prefix rule's value when the query starts the rule's key.
 fn custom(query: &str, a: &Found, b: &Found) -> Ordering {
     for name in DEFAULT {
         if name.starts_with(query) && (a.name == name || b.name == name) {

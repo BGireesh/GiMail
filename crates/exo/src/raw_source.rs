@@ -1,6 +1,6 @@
-//! View Raw Email Data (`|`, the palette's row): the conversation as Gmail sends it
-//! ([`exo_store::Store::thread_source`]) in a read-only text area over the whole page, its text
-//! selected once it's in, until Escape.
+//! View Raw Email Data (`|`, the palette's row), which shows the conversation as Gmail sends it
+//! ([`exo_store::Store::thread_source`]) in a read-only text area over the whole page until
+//! Escape. Its text is selected once it's in.
 //!
 //! The text area: `12px monospace` (Courier), black or white at 90% on `#fff` or `#18191a`, no
 //! padding, soft-wrapped (`pre-wrap`, `break-word`), under the page's selection color.
@@ -83,7 +83,8 @@ struct Viewer {
     /// The page's height as last shown, a screenful for Page Down.
     height: f32,
     scroll: f32,
-    /// Everything is selected (the text area's `select()`); anything else is nothing.
+    /// Whether all the text is selected, as Select All and the text coming in leave it. Otherwise
+    /// nothing is.
     selected: bool,
 }
 
@@ -151,8 +152,8 @@ pub(crate) fn register(
     }
 }
 
-/// `text`'s rows `width` px wide, `pre-wrap` and `break-word`: a line breaks after the last space
-/// that fits (spaces at a row's end hang past it), else anywhere.
+/// `text`'s rows `width` px wide, wrapped as `pre-wrap` and `break-word` wrap it. A line breaks
+/// after the last space that fits (spaces at a row's end hang past it), or else anywhere.
 fn wrap(text: &str, width: f32, advance: &mut impl FnMut(char) -> f32) -> Vec<Row> {
     let mut rows = Vec::new();
     let mut line_start = 0;
@@ -267,7 +268,7 @@ impl Mail {
         );
     }
 
-    /// The conversation `|` is for: the open thread's, or the list's highlighted one.
+    /// The conversation `|` is for, which is the open thread's or the list's highlighted one.
     pub(crate) fn raw_source_thread(&self) -> Option<String> {
         match &self.thread {
             Some(thread) => Some(thread.id().to_owned()),
@@ -352,7 +353,7 @@ impl Mail {
                     let top = page.top() + at as f32 * TEXT.line_height - viewer.scroll;
                     let text = &viewer.text[row.start..row.end];
                     if viewer.selected {
-                        // The line break is selected too, a space wide; the box lands on whole px.
+                        // The line break is selected too, a space wide. The box lands on whole px.
                         let space = TEXT.width(ctx, " ");
                         let width = TEXT.width(ctx, text) + if row.breaks { space } else { 0.0 };
                         painter.rect_filled(

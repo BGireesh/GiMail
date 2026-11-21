@@ -1,8 +1,8 @@
-//! The Instant Intro dialog: the line Instant Intro starts a reply with
+//! The Instant Intro dialog edits the line that Instant Intro starts a reply with
 //! (`customInstantIntro`), which must name `{first_name}` and nothing else in braces. Save checks
-//! it (`Sorry!`); Reset puts the default line back in the field, after asking.
+//! it (`Sorry!`), and Reset puts the default line back in the field after asking.
 //!
-//! Metrics at a 1280×800 window.
+//! Metrics are at a 1280×800 window.
 
 use egui::{Color32, Context, Rect, Sense, Ui, pos2, vec2};
 use exo_store::Settings as AccountSettings;
@@ -11,23 +11,23 @@ use exo_ui::{
     Family, Font, KeycapColors, Keycaps, TextStyle,
 };
 
-/// 12px/20px text, 3px down (`top: 3px`); the input bold.
+/// 12px/20px text, 3px down (`top: 3px`), with the input bold.
 const TEXT: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 12.0, 20.0);
 const INPUT: TextStyle = TextStyle::new(Font::new(Family::Sans, 700), 12.0, 20.0);
 const NUDGE: f32 = 3.0;
-/// From the body's top: the subheader's line (`padding-top: 24px`), the input's (the
-/// subheader's 28px margin under it), the footer's (`padding-top: 28px` under the
-/// input), and the buttons' (`margin-top: 32px` under the footer, 3px down).
+/// Offsets from the body's top of the subheader's line (`padding-top: 24px`), the input's line
+/// (the subheader's 28px margin under it), the footer's (`padding-top: 28px` under the input), and
+/// the buttons' (`margin-top: 32px` under the footer, 3px down).
 const SUBHEADER_TOP: f32 = 24.0;
 const INPUT_TOP: f32 = 72.0;
 const FOOTER_TOP: f32 = 120.0;
 const ACTIONS_TOP: f32 = 172.0;
-/// The body: the buttons' 28px row and its 7px margin.
+/// The body ends after the buttons' 28px row and its 7px margin.
 const BODY_HEIGHT: f32 = 207.0;
-/// The subheader's `rgba(0, 0, 0, .85)`; the footer's `.6`.
+/// The subheader's `rgba(0, 0, 0, .85)`, and the footer's `.6`.
 const INK: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 217);
 const FOOTER_INK: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 153);
-/// The footer's keycaps: 19px caps 4px apart, 1px above the line; the period after them
+/// The footer's keycaps are 19px caps 4px apart, 1px above the line, and the period after them has
 /// `padding-left: 1px`.
 const KEY_HEIGHT: f32 = 19.0;
 /// Their labels' baseline, 14px down the cap (the footer's 20px line, measured).
@@ -54,15 +54,15 @@ pub enum Focus {
 pub enum Event {
     /// Tab (1) or ⇧Tab (-1).
     Tab(isize),
-    /// Enter: in the input, Save; on a button, that button.
+    /// Enter, which clicks Save from the input, or the button that has the keyboard.
     Enter,
     /// A button, clicked.
     Click(Focus),
     /// A click in the input.
     FocusInput,
-    /// The alert's action, by index (its first rightmost).
+    /// The alert's action, by index (the first is rightmost).
     AlertAction(usize),
-    /// Enter or Space in the alert: its selected action.
+    /// Enter or Space in the alert, which takes its selected action.
     AlertConfirm,
     /// ← / → in the alert.
     AlertCycle(isize),
@@ -73,9 +73,9 @@ pub enum Event {
 /// The alert up over the dialog.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Asking {
-    /// `Sorry!`: what's wrong with the line, `OK`.
+    /// `Sorry!`, which says what's wrong with the line, with `OK`.
     Invalid(&'static str),
-    /// `Reset Intro`: `OK` or `Cancel`.
+    /// `Reset Intro`, with `OK` or `Cancel`.
     Reset,
 }
 
@@ -100,8 +100,8 @@ pub struct Outcome {
 }
 
 impl State {
-    /// The dialog as it opens: the saved line, or the default one, the input with the
-    /// keyboard and Save selected.
+    /// The dialog as it opens, with the saved line or the default one, the keyboard in the input,
+    /// and Save selected.
     pub fn open(settings: &AccountSettings) -> Self {
         Self {
             text: settings.instant_intro().to_owned(),
@@ -112,7 +112,7 @@ impl State {
         }
     }
 
-    /// An alert is up: it has the keyboard.
+    /// Whether an alert is up, in which case it has the keyboard.
     pub fn alert_open(&self) -> bool {
         self.alert.is_some()
     }
@@ -217,7 +217,7 @@ impl State {
     }
 }
 
-/// What's wrong with `text`, in the alert's words; their stray spaces and mixed quotes are meant.
+/// What's wrong with `text`, in the alert's words. Their stray spaces and mixed quotes are meant.
 fn validate(text: &str) -> Option<&'static str> {
     if text.is_empty() {
         return Some(
@@ -342,7 +342,7 @@ fn show(ui: &mut Ui, body: Rect, state: &mut State) -> Option<Event> {
 
     // `To use Instant Intro, open a message and hit ⌘ shift i.`
     let footer = body.top() + FOOTER_TOP + NUDGE;
-    // The caps' `margin-left: 4px` after the text, its trailing space laid out as nothing.
+    // The caps' `margin-left: 4px` follows the text, whose trailing space takes no room.
     let x = left
         + TEXT.paint_line(
             &painter,
@@ -367,8 +367,8 @@ fn show(ui: &mut Ui, body: Rect, state: &mut State) -> Option<Event> {
         None,
     );
 
-    // Reset at the left (12px out), Cancel and Save at the right (13px out), 8px apart; Save
-    // selected unless a button has the keyboard.
+    // Reset sits at the left (12px out), and Cancel and Save at the right (13px out), 8px apart.
+    // Save is selected unless a button has the keyboard.
     let top = body.top() + ACTIONS_TOP + NUDGE;
     let selected = if state.focus == Focus::Input {
         Focus::Save

@@ -34,7 +34,7 @@ const FOOTER_HEIGHT: f32 = 72.0;
 /// A sender row: 32px, 4px apart.
 const SENDER_ROW: f32 = 32.0;
 
-/// The hero and sender rows: `#f2f4fa`, `#dee3f2` in Carbon.
+/// The fill of the hero and sender rows, `#f2f4fa` or `#dee3f2` in Carbon.
 fn highlight(ctx: &egui::Context) -> Color32 {
     match exo_ui::app_theme(ctx) {
         exo_ui::Theme::Snow => Color32::from_rgb(0xf2, 0xf4, 0xfa),
@@ -45,7 +45,7 @@ fn highlight(ctx: &egui::Context) -> Color32 {
 /// Which kind of template it is, for what its screen shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Kind {
-    /// `splitTemplate_importantOther`: turns Important and Other on or off.
+    /// `splitTemplate_importantOther`, which turns Important and Other on or off.
     ImportantOther,
     /// `splitTemplate_inbox`: the one Inbox, which can switch to Important and Other.
     Inbox,
@@ -62,7 +62,7 @@ pub enum TemplateAction {
     Toggle,
     /// `Delete Split Inbox`.
     Delete,
-    /// `Reset`: the template's senders again.
+    /// `Reset`, which brings back the template's senders.
     Reset,
 }
 
@@ -96,7 +96,7 @@ pub(super) struct TemplateForm {
     pub kind: Kind,
     /// The split the template set up, by list id, as the screen opened.
     pub split: Option<String>,
-    /// The split (or Important and Other) was on as the screen opened.
+    /// Whether the split (or Important and Other) was on as the screen opened.
     pub was_enabled: bool,
     /// The senders, as edited, and as they opened.
     pub senders: Vec<String>,
@@ -108,9 +108,9 @@ pub(super) struct TemplateForm {
     initial_leave: bool,
     pub hide: bool,
     initial_hide: bool,
-    /// The definition field wants the keyboard.
+    /// Whether the definition field wants the keyboard.
     pub focus: bool,
-    /// VIP's definition: a contact picker (`ContactPicker`) rather than the field.
+    /// VIP's definition, which is a contact picker (`ContactPicker`) rather than the field.
     pub picker: ContactPicker,
     /// The sender row with the keyboard (`tabIndex: 0` on an editable list's rows).
     row_focus: Option<usize>,
@@ -259,14 +259,14 @@ impl TemplateForm {
         true
     }
 
-    /// Picks `sender` from the suggestions: it goes first, unless it's there already.
+    /// Picks `sender` from the suggestions. It goes first, unless it's there already.
     pub(super) fn pick(&mut self, sender: String) {
         if !self.senders.contains(&sender) {
             self.senders.insert(0, sender);
         }
     }
 
-    /// `Reset`: the template's senders again.
+    /// `Reset`, which brings back the template's senders.
     pub(super) fn reset(&mut self, template: &Template) {
         self.senders = template
             .properties
@@ -277,7 +277,8 @@ impl TemplateForm {
         self.focus = true;
     }
 
-    /// The primary button can't be pressed: VIP, News or Documents without senders.
+    /// Whether the primary button can't be pressed, as for VIP, News or Documents without
+    /// senders.
     fn primary_disabled(&self, template: &Template) -> bool {
         self.senders.is_empty()
             && (matches!(template.kind.as_deref(), Some("vip" | "news"))
@@ -335,8 +336,9 @@ impl TemplateForm {
         }
     }
 
-    /// The sticky footer's height and the gap above it: 20px (the dialog's padding) over a
-    /// footer with its rule; Inbox's has no rule and sits 3px under its content (measured).
+    /// The sticky footer's height and the gap above it. The gap is 20px (the dialog's padding)
+    /// over a footer with its rule. Inbox's footer has no rule and sits 3px under its content
+    /// (measured).
     fn footer(&self) -> (f32, f32) {
         if self.kind == Kind::Inbox {
             (FOOTER_HEIGHT - 1.0, 3.0)
@@ -375,7 +377,7 @@ impl TemplateForm {
         }
     }
 
-    /// The checkboxes, label and state: leave in Important and Other (not for Calendar,
+    /// The checkboxes, with label and state: leave in Important and Other (not for Calendar,
     /// Reminders, Inbox or Important • Other), and hide when empty (not for Inbox).
     fn checkboxes(
         &self,
@@ -490,7 +492,7 @@ impl TemplateForm {
         }
     }
 
-    /// The sender row with the keyboard: Enter, Backspace and Delete remove it, and the
+    /// The sender row with the keyboard. Enter, Backspace and Delete remove it, and the
     /// definition takes the keyboard back.
     pub(super) fn focused_row(&self) -> Option<usize> {
         self.row_focus
@@ -674,7 +676,7 @@ impl TemplateForm {
                     vec2(CONTENT_WIDTH + 16.0, SENDER_ROW),
                 );
                 painter.rect_filled(row, CornerRadius::same(4), highlight(&ctx));
-                // An editable list's rows take the keyboard, in order after the field: the
+                // An editable list's rows take the keyboard, in order after the field. The
                 // focused one is ringed (`box-shadow: 0 0 0 2px #bec1e4`) and shows its trash.
                 let focused = editable
                     && content
@@ -807,7 +809,7 @@ impl TemplateForm {
             placed.push((button, rect));
         }
         for ((label, kind, action, enabled), rect) in placed {
-            // The primary button disabled: `rgba(0, 0, 0, .035)`.
+            // A disabled primary button is `rgba(0, 0, 0, .035)`.
             if DialogAction::new(label, kind)
                 .enabled(enabled)
                 .disabled_fill(tokens.ink(0.035, 0.035))
@@ -825,7 +827,7 @@ impl TemplateForm {
     }
 }
 
-/// VIP's template (`"vip" === type`), whose definition is a contact picker.
+/// VIP's template (its kind is `vip`), whose definition is a contact picker.
 fn is_vip(template: &Template) -> bool {
     template.kind.as_deref() == Some("vip")
 }

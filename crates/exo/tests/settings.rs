@@ -198,8 +198,8 @@ fn warn_before_quitting_toggles_and_the_alerts_do_not_ask_again_turns_it_off() {
     let warning = exo::desktop::QuitWarning::load(&app.folder("state"));
     app.harness.state_mut().set_quit_warning(warning.clone());
     app.click(GEAR);
-    // The menu scrolled to its end, `Advanced` its last section, this its only row in a bare
-    // binary (no `Open at Login`): its slider at the row's right.
+    // The menu scrolled to its end. `Advanced` is its last section, and in a bare binary (no
+    // `Open at Login`) this is the section's only row, with its slider at the row's right.
     let row = Pos2::new(1243.0, 662.0);
     app.hover(row);
     app.harness.input_mut().events.push(Event::MouseWheel {
@@ -218,7 +218,8 @@ fn warn_before_quitting_toggles_and_the_alerts_do_not_ask_again_turns_it_off() {
     );
     app.click(row);
     assert!(warning.is_on(), "on again: the alert is back");
-    // The alert's `Do not ask again`, ticked with `Quit`, turns it off; with `Cancel`, it stays.
+    // The alert's `Do not ask again`, ticked with `Quit`, turns it off. With `Cancel`, it stays
+    // on.
     assert!(!warning.answered(false, true));
     assert!(warning.is_on());
     assert!(warning.answered(true, true));

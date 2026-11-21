@@ -1,10 +1,11 @@
-//! The parts cache: Gmail's attachment and inline-image bytes kept on disk, one file each, so a
-//! conversation's images and files show offline and open without a round trip. What's prefetched
-//! ([`Store::prefetch_parts`]): the inline parts of every conversation whose bodies the store
-//! keeps, and the files of inbox conversations up to 25 MB each, never spam's or trash's, three
-//! at a time. Every part fetched for any other reason ([`Store::part_data`]) is kept too. Never
-//! remote images: only Gmail's parts are fetched ahead. The cache has a budget of its own, and a
-//! conversation's parts go when eviction lets its bodies go.
+//! The parts cache keeps Gmail's attachment and inline-image bytes on disk, one file each, so a
+//! conversation's images and files show offline and open without a round trip.
+//!
+//! [`Store::prefetch_parts`] fetches the inline parts of every conversation whose bodies the
+//! store keeps, and the files of inbox conversations up to 25 MB each (never those in spam or
+//! trash), three at a time. Every part fetched for any other reason ([`Store::part_data`]) is
+//! kept too. Remote images are never fetched ahead, only Gmail's parts. The cache has a budget
+//! of its own, and a conversation's parts go when eviction lets its bodies go.
 
 use std::path::{Path, PathBuf};
 
@@ -19,9 +20,10 @@ use crate::store::Store;
 const MAX_FILE: i64 = 25 << 20;
 /// Parts fetched at once.
 const CONCURRENCY: usize = 3;
-/// The parts the cache should have, newest message first, with their sizes: inline parts of
-/// messages with a body stored, and files of up to `?1` bytes in inbox conversations, none in
-/// spam or trash nor of Exo's drafts (whose files are in the draft files), `?2` of them.
+/// The parts the cache should have, newest message first, with their sizes, `?2` of them at
+/// most. These are the inline parts of messages with a body stored and the files of up to `?1`
+/// bytes in inbox conversations. None are in spam or trash or belong to Exo's drafts, whose
+/// files are in the draft files.
 const WANTED: &str = "SELECT a.message_id, a.part_id, a.attachment_id, a.size FROM attachments a JOIN messages m ON m.id = a.message_id WHERE NOT EXISTS (SELECT 1 FROM drafts d WHERE d.message_id = a.message_id) AND NOT EXISTS (SELECT 1 FROM list_ids s WHERE s.thread_id = m.thread_id AND s.list_id IN (?3, ?4)) AND ((a.inline AND EXISTS (SELECT 1 FROM bodies b WHERE b.message_id = a.message_id)) OR (NOT a.inline AND a.size <= ?1 AND EXISTS (SELECT 1 FROM list_ids i WHERE i.thread_id = m.thread_id AND i.list_id = ?5))) ORDER BY m.internal_date DESC LIMIT ?2";
 
 /// Where a store keeps its parts, and how much they may take.
@@ -29,12 +31,13 @@ const WANTED: &str = "SELECT a.message_id, a.part_id, a.attachment_id, a.size FR
 pub struct PartsCache {
     /// The folder, `~/Library/Caches/Exo/<account>/parts` for a real account.
     pub dir: PathBuf,
-    /// The most the files may take, in bytes; past it the oldest go, down to nine tenths.
+    /// The most the files may take, in bytes. Past it, the oldest go until the files are down to
+    /// nine tenths of it.
     pub budget: u64,
 }
 
 impl PartsCache {
-    /// `dir`, within 512 MB.
+    /// `dir`, with a budget of 512 MB.
     #[must_use]
     pub fn new(dir: PathBuf) -> Self {
         Self {
@@ -43,8 +46,8 @@ impl PartsCache {
         }
     }
 
-    /// The file part `part` of message `message` is kept in. Gmail's ids are hex and part ids
-    /// digits and dots, so they make a safe name.
+    /// The file that part `part` of message `message` is kept in. Gmail's ids are hex and part
+    /// ids are digits and dots, so they make a safe name.
     fn file(&self, message: &str, part: &str) -> Option<PathBuf> {
         let safe = |id: &str| {
             !id.is_empty()
@@ -57,21 +60,21 @@ impl PartsCache {
 }
 
 impl Store {
-    /// Keeps Gmail's parts in `cache` from now on: [`part_data`](Self::part_data) reads it first
-    /// and fills it, [`prefetch_parts`](Self::prefetch_parts) fills it ahead. A store without one
-    /// keeps nothing.
+    /// Keeps Gmail's parts in `cache` from now on. [`part_data`](Self::part_data) reads the
+    /// cache first and fills it, and [`prefetch_parts`](Self::prefetch_parts) fills it ahead. A
+    /// store without a cache keeps nothing.
     pub fn cache_parts(&self, cache: PartsCache) {
         let _ = self.inner.parts.set(cache);
     }
 
-    /// Part `part` of message `message` if it's kept, without asking Gmail: for drawing a
-    /// message's or a draft's inline image at once, and offline.
+    /// Part `part` of message `message` if it's kept, without asking Gmail. It's for drawing the
+    /// inline image of a message or a draft at once, and offline.
     #[must_use]
     pub fn cached_part(&self, message: &str, part: &str) -> Option<Vec<u8>> {
         std::fs::read(self.inner.parts.get()?.file(message, part)?).ok()
     }
 
-    /// Keeps `data` as part `part` of message `message`, best effort: a cache that can't be
+    /// Keeps `data` as part `part` of message `message`, best effort, since a cache that can't be
     /// written is only slower.
     pub(crate) fn keep_part(&self, message: &str, part: &str, data: &[u8]) {
         let Some(path) = self
@@ -86,7 +89,7 @@ impl Store {
             .parent()
             .map_or(Ok(()), std::fs::create_dir_all)
             .and_then(|()| {
-                // Whole or not at all: a reader never sees half a file.
+                // Write the whole file or nothing, so a reader never sees half a file.
                 let partial = path.with_extension("partial");
                 std::fs::write(&partial, data).and_then(|()| std::fs::rename(&partial, &path))
             });

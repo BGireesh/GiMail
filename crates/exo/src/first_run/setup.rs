@@ -29,17 +29,17 @@ const MESSAGE_FADE: f64 = 0.15;
 /// The last message shows for 2 s before the loading can end, and it ends regardless 20 s in.
 const LOADING_TIME: f64 = MESSAGES.len() as f64 * MESSAGE_TIME;
 const LOADING_TIMEOUT: f64 = 20.0;
-/// The splits the step shows: the three that take most of the inbox.
+/// The step shows the three splits that take most of the inbox.
 const SHOWN: usize = 3;
 /// The preview lists ten threads.
 const PREVIEW_THREADS: usize = 10;
 
-/// The page: `#f0edf5` under `checklist-background.png`, `cover`, centered; in Carbon plain
-/// `#f0edf5`.
+/// The page: `#f0edf5` under `checklist-background.png` (`cover`, centered), or plain `#f0edf5` in
+/// Carbon.
 const PAGE: Color32 = Color32::from_rgb(0xf0, 0xed, 0xf5);
-/// The left pane: half the window, at least 500px, padded 42px; its column 64px down,
-/// `calc(50vw - 84px)` wide within 416–514px and `calc(100vh - 134px)` tall, against the pane's
-/// right.
+/// The left pane takes half the window, at least 500px, padded 42px. Its column sits 64px down
+/// against the pane's right, `calc(50vw - 84px)` wide within 416–514px and `calc(100vh - 134px)`
+/// tall.
 const PANE_MIN: f32 = 500.0;
 const PANE_PADDING: f32 = 42.0;
 const COLUMN_TOP: f32 = 64.0;
@@ -58,11 +58,12 @@ const HEADER_MARGIN: f32 = 2.0;
 /// pixel down.
 const SUBCOPY: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 14.0, 20.0);
 const SUBCOPY_NUDGE: f32 = 4.0;
-/// The section's content 37px down; the rows 18px apart in Classic.
+/// The section's content sits 37px down, and the rows 18px apart in Classic.
 const SECTION_TOP: f32 = 37.0;
 const ROW_GAP: f32 = 18.0;
-/// A split's row: `padding: 14px 20px`, a 1px `#dedbd5` border with 12px corners; 12px between its
-/// text and its tag and toggle, 8px between those, 10px between the name and the description.
+/// A split's row has `padding: 14px 20px` and a 1px `#dedbd5` border with 12px corners. Its text
+/// is 12px from its tag and toggle, which are 8px apart, and the name and the description are 10px
+/// apart.
 const ROW_PADDING: Vec2 = vec2(20.0, 14.0);
 const ROW_BORDER: Color32 = Color32::from_rgb(0xde, 0xdb, 0xd5);
 const ROW_RADIUS: u8 = 12;
@@ -75,14 +76,14 @@ const NAME_NUDGE: f32 = 3.0;
 /// A row's description: 14px/16px at `.6`, `top: 1px`, `text-wrap: pretty`.
 const DESCRIPTION: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 14.0, 16.0);
 const DESCRIPTION_NUDGE: f32 = 1.0;
-/// A row's tag: 10px/12px semibold, `padding: 2px 4px 0`, 4px corners; black at `.55` on `.08`, or
-/// the category's violet.
+/// A row's tag: 10px/12px semibold, `padding: 2px 4px 0`, 4px corners, in black at `.55` on `.08`
+/// or the category's violet.
 const TAG: TextStyle = TextStyle::new(Font::new(Family::Sans, 600), 10.0, 12.0);
 const TAG_PADDING: Vec2 = vec2(4.0, 2.0);
 const CATEGORY_INK: Color32 = Color32::from_rgb(83, 49, 146);
 const CATEGORY_FILL: Color32 = Color32::from_rgb(232, 224, 255);
-/// A split's switch: a 36×20 pill, `rgba(0,0,0,.1)` off and `rgba(0,0,0,.85)` on; a 12px white
-/// thumb 4px in, sliding 16px; `.2s ease`.
+/// A split's switch is a 36×20 pill, `rgba(0,0,0,.1)` off and `rgba(0,0,0,.85)` on. Its 12px white
+/// thumb sits 4px in and slides 16px over `.2s ease`.
 const TOGGLE: Vec2 = vec2(36.0, 20.0);
 const THUMB: f32 = 12.0;
 const THUMB_INSET: f32 = 4.0;
@@ -97,9 +98,9 @@ const THUMB_SHADOW: BoxShadow = BoxShadow::new(
 /// The list's footer: 12px/16px at `.35`, 8px below the rows, `top: 1px`.
 const FOOTER: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 12.0, 16.0);
 const FOOTER_MARGIN: f32 = 8.0;
-/// The button's row: `padding-top: 17px`; the button 32px tall, `top: 1.5px`, centered, `#aeb1dd`
-/// with white 14px/18px semibold capitals `.2px` apart, `padding: 8px 12px 6px`, 2px corners,
-/// `0 2px 8px #aeb1dd` hovered.
+/// The button's row has `padding-top: 17px`. The button is 32px tall, `top: 1.5px`, centered and
+/// `#aeb1dd`, with white 14px/18px semibold capitals `.2px` apart, `padding: 8px 12px 6px`, 2px
+/// corners and `0 2px 8px #aeb1dd` when hovered.
 const BUTTONS_TOP: f32 = 17.0;
 const BUTTON_HEIGHT: f32 = 32.0;
 const BUTTON_NUDGE: f32 = 1.5;
@@ -110,15 +111,15 @@ const BUTTON_FILL: Color32 = Color32::from_rgb(0xae, 0xb1, 0xdd);
 const BUTTON_GLOW: BoxShadow = BoxShadow::new([0.0, 2.0], 8.0, 0.0, BUTTON_FILL);
 /// The step fades in over `.3s`.
 const FADE_IN: f32 = 0.3;
-/// `split-row-enter` and `split-tab-enter`: `.35s ease`, 150 ms apart; `email-preview-row-enter`
-/// the same, all at once.
+/// The split rows and the preview's tabs enter over `.35s ease`, 150 ms apart. The preview's
+/// threads enter the same way, all at once.
 const ENTER: f32 = 0.35;
 const STAGGER: f32 = 0.15;
 const ROW_ENTER: f32 = 8.0;
 const TAB_ENTER: f32 = 10.0;
 
-/// The preview window: 120px into the pane and 128px past its right and 80px past its bottom,
-/// white, its top left corner 16px, `padding: 20px 24px 0`.
+/// The preview window starts 120px into the pane and reaches 128px past its right and 80px past
+/// its bottom. It's white, with a 16px top left corner and `padding: 20px 24px 0`.
 const WINDOW_INSET: f32 = 120.0;
 const WINDOW_PAST: Vec2 = vec2(128.0, 80.0);
 const WINDOW_RADIUS: u8 = 16;
@@ -137,8 +138,8 @@ const WINDOW_SHADOWS: [BoxShadow; 2] = [
         Color32::from_rgba_premultiplied(2, 2, 2, 31),
     ),
 ];
-/// The preview's tabs: 48px with `padding: 8px 0 4px`; the 16×12 menu icon, 12px before the tabs;
-/// each tab `padding: 8px 12px`, its count 4px after its name.
+/// The preview's tabs are 48px with `padding: 8px 0 4px`, with the 16×12 menu icon 12px before
+/// them. Each tab has `padding: 8px 12px`, and its count sits 4px after its name.
 const TABS_HEIGHT: f32 = 48.0;
 const TABS_PADDING_TOP: f32 = 8.0;
 const TAB_HEIGHT: f32 = 36.0;
@@ -146,7 +147,7 @@ const MENU: Vec2 = vec2(16.0, 12.0);
 const MENU_GAP: f32 = 12.0;
 const TAB_PADDING: Vec2 = vec2(12.0, 8.0);
 const COUNT_GAP: f32 = 4.0;
-/// A preview tab's name: 14px/20px, `top: 3px`, `.4` (`.8` active); its count 12px/20px
+/// A preview tab's name: 14px/20px, `top: 3px`, `.4` (`.8` active). Its count: 12px/20px
 /// `all-petite-caps`, `.25` (`.35` active). Exo's font has no petite capitals, so Chromium
 /// synthesizes them as it does small capitals: every character at 70% of the size, on the line's
 /// baseline.
@@ -154,17 +155,17 @@ const TAB_NAME: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 14.0, 2
 const TAB_COUNT_LINE: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 12.0, 20.0);
 const TAB_COUNT: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 12.0 * 0.7, 20.0);
 const TAB_NUDGE: f32 = 3.0;
-/// A tab hiding: `max-width: 300px` to 0 over `.3s`, opacity over `.2s`, the tab sliding 10px left
-/// over `.25s`.
+/// A hiding tab goes from `max-width: 300px` to 0 over `.3s` and fades over `.2s`, sliding 10px
+/// left over `.25s`.
 const TAB_MAX: f32 = 300.0;
 /// The focus ring of a split's switch and a preview tab.
 const FOCUS_RING: Color32 = Color32::from_rgb(0x54, 0xac, 0xdc);
-/// The preview's threads 12px down; rows `padding: 12px 0` round a 16px line.
+/// The preview's threads start 12px down, and each row has `padding: 12px 0` around a 16px line.
 const THREADS_TOP: f32 = 12.0;
 const THREAD_PADDING: f32 = 12.0;
-/// `-from`: 12px/16px semibold at `.85`, 35% of the row with `padding-right: 8px`; `-subject`
-/// 12px/16px at `.5`; both `top: 1px`. `-date`: 10px/12px at `.4`, `padding-left: 8px`, on the
-/// row's baseline.
+/// `-from` is 12px/16px semibold at `.85`, 35% of the row with `padding-right: 8px`. `-subject` is
+/// 12px/16px at `.5`, and both have `top: 1px`. `-date` is 10px/12px at `.4`, `padding-left: 8px`,
+/// on the row's baseline.
 const FROM: TextStyle = TextStyle::new(Font::new(Family::Sans, 600), 12.0, 16.0);
 const SUBJECT: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 12.0, 16.0);
 const DATE: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 10.0, 12.0);
@@ -176,11 +177,11 @@ const EMPTY: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 12.0, 20.0
 const EMPTY_PADDING: Vec2 = vec2(16.0, 32.0);
 const EMPTY_WIDTH: f32 = 360.0;
 
-/// The loading screen (Classic): white under three soft ellipses, its column centered with 8px
-/// gaps; the title a pink-to-violet gradient (`background-clip: text`), 30px/40px semibold; the
-/// subtitle 16px/20px medium at `.9`, `top: 3px`; an 88px ring 80px above and below; the message
-/// 16px/20px at `.6`, `top: 2px`; the footer 12px/16px `#686868` 24px over the tab strip's height
-/// from the bottom.
+/// The loading screen (Classic) is white under three soft ellipses, with its column centered and
+/// 8px gaps. The title is a pink-to-violet gradient (`background-clip: text`), 30px/40px semibold.
+/// The subtitle is 16px/20px medium at `.9`, `top: 3px`. The 88px ring has 80px above and below
+/// it. The message is 16px/20px at `.6`, `top: 2px`. The footer is 12px/16px `#686868`, the tab
+/// strip's height plus 24px from the bottom.
 const LOADING_TITLE: TextStyle = TextStyle::new(Font::new(Family::Sans, 600), 30.0, 40.0);
 const LOADING_SUBTITLE: TextStyle = TextStyle::new(Font::new(Family::Sans, 500), 16.0, 20.0);
 const LOADING_MESSAGE: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 16.0, 20.0);
@@ -189,7 +190,7 @@ const LOADING_GAP: f32 = 8.0;
 const SPINNER: f32 = 88.0;
 const SPINNER_RING: f32 = 6.0;
 const SPINNER_MARGIN: f32 = 80.0;
-/// `gradient-loading-spin 1.2s linear infinite`.
+/// The ring turns once every 1.2s at a steady speed, for as long as it shows.
 const SPINNER_TURN: f64 = 1.2;
 const SPINNER_INK: Color32 = Color32::from_rgb(0xb6, 0x90, 0xf4);
 const LOADING_FOOTER_INK: Color32 = Color32::from_rgb(0x68, 0x68, 0x68);
@@ -220,13 +221,14 @@ pub(crate) struct Candidate {
     pub name: String,
     /// As it would be turned on.
     pub split: SplitInbox,
-    /// The account's own split it is, when it has one (its Calendar).
+    /// Whether it's the account's own split, when it has one (its Calendar).
     pub existing: bool,
 }
 
-/// The library's templates the step can offer: each one this account can use with a definition of
-/// its own (no Auto Labels) that isn't a built-in kind, and Calendar; the account's own split for
-/// one when it has it (its default Calendar, or what an earlier setup turned on).
+/// The library's templates that the step can offer. These are each one this account can use that
+/// has a definition of its own (no Auto Labels) and isn't a built-in kind, plus Calendar. Where the
+/// account already has a template's split (its default Calendar, or what an earlier setup turned
+/// on), the candidate is that split.
 pub(crate) fn candidates(
     library: &SplitLibrary,
     splits: &[SplitInbox],
@@ -334,7 +336,7 @@ pub(crate) struct Row {
     pub enabled: bool,
     /// What it takes of the inbox.
     list: PreviewList,
-    /// Times it was turned back on: its tab enters again each time.
+    /// Times it was turned back on. Its tab enters again each time.
     reentered: u32,
     /// When it was last turned on or off.
     toggled: Option<f64>,
@@ -356,7 +358,7 @@ pub(crate) struct Splits {
     important: PreviewList,
     other: PreviewList,
     tab: Tab,
-    /// When the tab on screen was picked: its rows enter then.
+    /// When the tab on screen was picked, which is when its rows enter.
     tab_since: f64,
     scroll: f32,
     /// What has the keyboard, and whether it shows (`:focus-visible`, once a key is pressed).
@@ -364,8 +366,8 @@ pub(crate) struct Splits {
     focus_visible: bool,
 }
 
-/// What has the keyboard in the split step: `Continue` from the start, else what was clicked or
-/// tabbed to.
+/// What has the keyboard in the split step. It's `Continue` from the start, then whatever was
+/// clicked or tabbed to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Focus {
     /// The content, which a click on a row or the page focuses.
@@ -382,9 +384,9 @@ enum Focus {
 }
 
 impl Splits {
-    /// The step over `preview`'s ranking of `candidates`: the three that take most of the inbox,
-    /// with Important's tab up unless it's empty and something else isn't. None when no candidate
-    /// takes anything (the step is skipped).
+    /// The step over `preview`'s ranking of `candidates`, showing the three that take most of the
+    /// inbox. Important's tab is up unless it's empty and something else isn't. None when no
+    /// candidate takes anything, which skips the step.
     pub(crate) fn new(candidates: &[Candidate], preview: SplitPreview, now: f64) -> Option<Self> {
         let mut ranked: Vec<(&Candidate, PreviewList)> = candidates
             .iter()
@@ -436,7 +438,7 @@ impl Splits {
         Some(splits)
     }
 
-    /// A tab's count: a split turned off gives its conversations back to Important (only News would
+    /// A tab's count. A split turned off gives its conversations back to Important (only News would
     /// go to Other, and News isn't offered).
     fn count(&self, tab: Tab) -> usize {
         match tab {
@@ -473,8 +475,8 @@ impl Splits {
             .collect()
     }
 
-    /// A row was turned on or off, `id` its split's new list id: a tab turned off that was up
-    /// gives way to Important.
+    /// A row was turned on or off, and `id` is its split's new list id. If the tab that was up is
+    /// turned off, it gives way to Important.
     pub(crate) fn toggled(&mut self, index: usize, id: String, now: f64) {
         let row = &mut self.rows[index];
         row.enabled = !row.enabled;
@@ -530,9 +532,9 @@ impl Splits {
     }
 }
 
-/// Where Tab (⇧Tab back) takes the keyboard from `focus`: round account setup's own stops (the
-/// content, the button's region, the active tab, the list), from the one holding it; the button's
-/// region has only the button, so it keeps it there.
+/// Where Tab (⇧Tab back) takes the keyboard from `focus`. It goes round account setup's own stops
+/// (the content, the button's region, the active tab, the list), starting from the one holding it.
+/// The button's region has only the button, so Tab keeps the keyboard there.
 fn tab_from(focus: Option<Focus>, active: Tab, back: bool) -> Option<Focus> {
     let ring = [
         Focus::Content,
@@ -554,7 +556,7 @@ fn tab_from(focus: Option<Focus>, active: Tab, back: bool) -> Option<Focus> {
 /// Where account setup is.
 #[derive(Debug)]
 pub(crate) enum Step {
-    /// Tailoring: the preview is being worked out (`None` until it is).
+    /// Tailoring, while the preview is being worked out (`None` until it is).
     Loading {
         since: Option<f64>,
         preview: Option<SplitPreview>,
@@ -566,7 +568,7 @@ pub(crate) enum Step {
 /// What happened on screen this frame.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Event {
-    /// The loading screen is done: the step decides what's next.
+    /// The loading screen is done, and the step decides what's next.
     Loaded,
     /// A row's toggle (or the row) was clicked.
     Toggle(usize),
@@ -592,7 +594,7 @@ impl std::fmt::Debug for Setup {
 }
 
 impl Setup {
-    /// Account setup opening now, its page's image from `images`.
+    /// Account setup opening now, with its page's image from `images`.
     pub(crate) fn new(ctx: &egui::Context, images: &Path, candidates: Vec<Candidate>) -> Self {
         let now = ctx.input(|input| input.time);
         Self {
@@ -638,13 +640,13 @@ impl Setup {
     ) -> Option<Event> {
         let ctx = ui.ctx().clone();
         let now = ctx.input(|input| input.time);
-        // Under the tab strip, over its bottom pixel, a window tall.
+        // The page sits under the tab strip, over its bottom pixel, and is a window tall.
         let page = Rect::from_min_size(
             pos2(window.left(), window.top() + strip_height - 1.0),
             window.size(),
         );
         let painter = ui.painter().with_clip_rect(window);
-        // Its clicks are its own; one on the page focuses the content.
+        // Its clicks are its own. A click on the page focuses the content.
         let cover = ui.interact(window, self.id.with("cover"), Sense::CLICK | Sense::DRAG);
         if cover.clicked()
             && let Step::Splits(splits) = &mut self.step
@@ -676,8 +678,8 @@ impl Setup {
 /// The loading screen over `page`, `elapsed` seconds in.
 fn paint_loading(painter: &Painter, page: Rect, strip_height: f32, elapsed: f64) {
     let ctx = painter.ctx();
-    // The loading screen's background (Classic, `top: 0`): three `radial-gradient` ellipses, each
-    // its color fading out by 70% of the way, over white; the first on top.
+    // The loading screen's background (Classic, `top: 0`) is three `radial-gradient` ellipses over
+    // white, the first on top. Each ellipse's color fades out by 70% of the way.
     let rgba = |r: u8, g: u8, b: u8, a: f32| {
         [
             f32::from(r) / 255.0,
@@ -761,7 +763,7 @@ fn paint_loading(painter: &Painter, page: Rect, strip_height: f32, elapsed: f64)
         Vec2::splat(SPINNER),
     );
     paint_ring(painter, spinner, (elapsed / SPINNER_TURN).fract() as f32);
-    // The message, changing every 2 s, out over 150 ms before it does and in after.
+    // The message changes every 2 s. It fades out over the 150 ms before it changes, and in after.
     let index = ((elapsed / MESSAGE_TIME) as usize).min(MESSAGES.len() - 1);
     let into = elapsed - index as f64 * MESSAGE_TIME;
     let fade = |t: f64| CubicBezier::EASE.at((t / MESSAGE_FADE).clamp(0.0, 1.0) as f32);
@@ -781,7 +783,7 @@ fn paint_loading(painter: &Painter, page: Rect, strip_height: f32, elapsed: f64)
         Color32::from_black_alpha(153).gamma_multiply(opacity),
         None,
     );
-    // The footer sits 24px over the tab strip's height from the bottom.
+    // The footer's bottom sits the tab strip's height plus 24px above the page's bottom.
     let footer_top =
         page.bottom() - LOADING_FOOTER_BOTTOM - strip_height - LOADING_FOOTER.line_height;
     LOADING_FOOTER.paint_line(
@@ -793,8 +795,8 @@ fn paint_loading(painter: &Painter, page: Rect, strip_height: f32, elapsed: f64)
     );
 }
 
-/// The loading ring: `conic-gradient(#b690f4 0deg 270deg, transparent 270deg)` masked to its outer
-/// 6px, `turn` of the way round.
+/// The loading ring, `conic-gradient(#b690f4 0deg 270deg, transparent 270deg)` masked to its outer
+/// 6px, turned `turn` of the way round.
 fn paint_ring(painter: &Painter, rect: Rect, turn: f32) {
     let radius = rect.width() / 2.0 - SPINNER_RING / 2.0;
     let start = turn * std::f32::consts::TAU;
@@ -811,8 +813,8 @@ fn paint_ring(painter: &Painter, rect: Rect, turn: f32) {
     ));
 }
 
-/// How far into a keyframe animation `duration` long, starting `delay` after `since`, `now` is
-/// (eased).
+/// How far `now` is into a keyframe animation `duration` long that starts `delay` after `since`,
+/// eased.
 fn entered(now: f64, since: f64, delay: f32, duration: f32) -> f32 {
     CubicBezier::EASE.at((((now - since) as f32 - delay) / duration).clamp(0.0, 1.0))
 }
@@ -921,8 +923,8 @@ fn show_splits(
             now,
             ring,
         );
-        // The row toggles as its switch does, but focuses the content where the switch takes the
-        // keyboard itself.
+        // A click on the row toggles it as the switch does. The row focuses the content, while the
+        // switch takes the keyboard itself.
         if let Some(split) = row.split {
             if ui
                 .interact(
@@ -1027,7 +1029,7 @@ struct RowLayout<'a> {
     name: &'a str,
     description_lines: Vec<String>,
     tag: Option<(&'static str, bool)>,
-    /// Which shown split it is; none for Important and Other.
+    /// Which shown split it is, or none for Important and Other.
     split: Option<usize>,
     enabled: bool,
     toggled: Option<f64>,
@@ -1223,8 +1225,8 @@ fn paint_focus_ring(painter: &Painter, rect: Rect, radius: u8) {
     );
 }
 
-/// The preview window in the right pane; returns what a click focused (a tab, which it picks,
-/// or the list).
+/// The preview window in the right pane. Returns what a click focused, which is a tab (which it
+/// picks) or the list.
 fn show_preview(
     ui: &mut Ui,
     painter: &Painter,
@@ -1278,7 +1280,7 @@ fn show_preview(
             + TAB_NAME.width(&ctx, name)
             + COUNT_GAP
             + TAB_COUNT.width(&ctx, &count);
-        // Entering (staggered at first, at once when turned back on), and collapsing when off.
+        // A tab enters (staggered at first, at once when turned back on) and collapses when off.
         let (mut opacity, mut slide, mut width) = (1.0, 0.0, natural);
         let row = match tab {
             Tab::Split(split) => Some(&splits.rows[*split]),

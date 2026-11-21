@@ -13,7 +13,7 @@ pub(super) const HEIGHT: f32 = 76.0;
 const TAB: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 16.0, 24.0);
 /// A tab's count: 12px/24px.
 const COUNT: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 12.0, 24.0);
-/// The padding before a tab's bullet: 8px, 5px after a count.
+/// The padding before a tab's bullet: 8px, or 5px after a count.
 const BULLET_PADDING: [f32; 2] = [8.0, 5.0];
 /// The margin after a tab with a bullet.
 const BULLET_MARGIN: f32 = 8.0;
@@ -21,11 +21,11 @@ const BULLET_MARGIN: f32 = 8.0;
 /// What the user did in the header.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HeaderAction {
-    /// The folders button, or the already-selected Inbox tab: open the folder drawer.
+    /// The folders button, or the already-selected Inbox tab, which opens the folder drawer.
     Folders,
     /// A split tab, by its index in [`View::tabs`](super::View::tabs).
     Tab(usize),
-    /// Add Split: open the split inbox templates.
+    /// Add Split, which opens the split inbox templates.
     AddSplit,
     /// The split settings gear.
     SplitSettings,
@@ -33,7 +33,8 @@ pub enum HeaderAction {
     Compose,
     /// Search.
     Search,
-    /// The select-all checkmark (multi-select only): select everything, or clear.
+    /// The select-all checkmark (multi-select only), which selects everything or clears the
+    /// selection.
     ToggleSelectAll,
     /// Mark the selection done (multi-select only).
     Done,
@@ -43,9 +44,9 @@ pub enum HeaderAction {
     Command,
     /// A click on the header's background, which clears the selection.
     Background,
-    /// The filter tab: open the filter picker.
+    /// The filter tab, which opens the filter picker.
     Filter,
-    /// The filter tab's ×: remove the filter.
+    /// The filter tab's ×, which removes the filter.
     ClearFilter,
 }
 
@@ -71,7 +72,7 @@ pub enum Focus {
 }
 
 impl Focus {
-    /// What Enter does on it: what a click does.
+    /// What Enter does on it, which is what a click does.
     pub(super) fn action(self) -> HeaderAction {
         match self {
             Self::Folders | Self::Title => HeaderAction::Folders,
@@ -113,11 +114,11 @@ pub(super) fn focusables(view: &super::View) -> Vec<Focus> {
     items
 }
 
-/// `box-shadow: 0 2px #aeb1dd`: a focused tab's, icon's or gear's underline, Classic's in both
+/// `box-shadow: 0 2px #aeb1dd`, the underline of a focused tab, icon or gear, Classic's in both
 /// themes.
 const FOCUS_INK: Color32 = Color32::from_rgb(0xae, 0xb1, 0xdd);
 
-/// Paints a focus underline: 2px under the `width`-wide box whose bottom is at `bottom`.
+/// Paints a 2px focus underline under the `width`-wide box whose bottom is at `bottom`.
 fn underline(painter: &Painter, left: f32, bottom: f32, width: f32) {
     painter.rect_filled(
         exo_ui::pixel_snap(Rect::from_min_size(pos2(left, bottom), vec2(width, 2.0))),
@@ -130,9 +131,9 @@ fn underline(painter: &Painter, left: f32, bottom: f32, width: f32) {
 pub(super) enum Mode {
     /// The folders button, compose and search.
     Normal,
-    /// The select-all checkmark (checked when everything is) and the selection's actions, Mark
-    /// Done offering Mark not Done when the selection is all `done`, Remind Me unless it's all
-    /// drafts.
+    /// The select-all checkmark (checked when everything is selected) and the selection's actions.
+    /// Mark Done offers Mark not Done when the selection is all `done`, and Remind Me shows unless
+    /// the selection is all drafts.
     Selecting {
         all: bool,
         done: bool,
@@ -142,7 +143,7 @@ pub(super) enum Mode {
 
 /// The selection's Remind Me button.
 pub(super) struct Remind {
-    /// Every selected thread has a reminder: the bolder clock.
+    /// Whether every selected thread has a reminder, which shows the bolder clock.
     pub set: bool,
     /// One thread's reminder, as its tooltip's status line says it.
     pub status: Option<String>,
@@ -150,7 +151,7 @@ pub(super) struct Remind {
 
 /// Paints the header for `view` in `rect` (the list view's width, [`HEIGHT`] tall) over the list's
 /// top, with the scroll shadow once the list has `scrolled`, and `focus` showing what has the
-/// keyboard; at Inbox Zero (`zero`) it's transparent.
+/// keyboard. At Inbox Zero (`zero`) the header is transparent.
 #[expect(
     clippy::too_many_arguments,
     reason = "one header, drawn from the list's state; a struct would only rename them"
@@ -177,7 +178,7 @@ pub(super) fn show(
         Sense::click(),
     );
     let id = ui.id().with("thread-list-header");
-    // After the header: its 1px line overlaps the header's last row of pixels.
+    // Below the header, with the shadow's 1px line over the header's last row of pixels.
     exo_ui::scroll_shadow(
         painter,
         id.with("shadow"),
@@ -186,8 +187,8 @@ pub(super) fn show(
         scrolled,
     );
     let mut action = None;
-    // Over Inbox Zero's photo the glyphs are white: the folders' lines at .3 (.5 hovered), search,
-    // compose and the split gear at .8 (1 hovered).
+    // Over Inbox Zero's photo the glyphs are white: the folders' lines at .3 (.5 hovered), and
+    // search, compose and the split gear at .8 (1 hovered).
     let glyphs = |icon: IconButton<'static>| {
         if zero {
             icon.colors(white(0.8), white(1.0))
@@ -196,8 +197,8 @@ pub(super) fn show(
         }
     };
     let lines = zero.then(|| (white(0.3), white(0.5)));
-    // Each with its tooltip under it (`placement: "bottom"`, `padding: 8px 0` less the tether's
-    // offset).
+    // Each button has its tooltip under it (`placement: "bottom"`, `padding: 8px 0` less the
+    // tether's offset).
     let button = |hit: Rect,
                   icon_rect: Rect,
                   icon: &str,
@@ -215,8 +216,8 @@ pub(super) fn show(
         tooltip.show_at(ui, &response, placement);
         response.clicked().then_some(clicked)
     };
-    // Compose and search with the keyboard: the icon in its hover color, a 14px underline under it
-    // (6px, 5px), and the tooltip as on hover.
+    // Compose and search when they have the keyboard: the icon in its hover color, a 14px underline
+    // 6px (compose) or 5px (search) under it, and the tooltip as on hover.
     let icon = |hit: Rect,
                 icon_rect: Rect,
                 icon: &'static str,
@@ -251,14 +252,14 @@ pub(super) fn show(
                 rect.left() + if compact { 9.0 } else { 2.5 * rem - 25.0 },
                 rect.top() + 36.0,
             );
-            // `Folders` (offset `2 0`): `Show folders` / `Hide folders` belong to the pinned folder
-            // drawer, behind a flag.
+            // `Folders` (offset `2 0`). `Show folders` / `Hide folders` belong to a pinned folder
+            // drawer, which Exo doesn't have.
             let folders = KeyTooltip {
                 text: "Folders",
                 keys: &[],
             };
             let glyph_box = Rect::from_min_size(hamburger, vec2(16.0, 12.0));
-            // Classic's `padding: 10px` around the lines: the tooltip sits 6px under that.
+            // Classic's `padding: 10px` around the lines, with the tooltip 6px under that padding.
             let hit = Rect::from_min_size(hamburger - vec2(10.0, 10.0), vec2(36.0, 32.0));
             if focus == Some(Focus::Folders) {
                 // Focused, its lines are `#bec1e4`.
@@ -289,9 +290,9 @@ pub(super) fn show(
                 ));
             }
 
-            // Search and compose float right, 14px glyphs 35px down: search's right edge
-            // `2rem - 7px` in, compose's box `2rem + 15px` in with 6px of padding on its right.
-            // Hidden while the settings menu is open at Inbox Zero.
+            // Search and compose float right, as 14px glyphs 35px down. Search's right edge is
+            // `2rem - 7px` in, and compose's box is `2rem + 15px` in with 6px of padding on its
+            // right. Both are hidden while the settings menu is open at Inbox Zero.
             if !(zero && view.settings_open) {
                 let search = pos2(rect.right() - 2.0 * rem + 5.0 - 14.0, rect.top() + 35.0);
                 let tooltip = KeyTooltip {
@@ -528,8 +529,8 @@ pub(super) fn show(
         let add_response = ui
             .interact(add, id.with("add-split"), Sense::click())
             .on_hover_cursor(CursorIcon::PointingHand);
-        // Add Split's icon and label; focused as hovered. Over the photo they're white, the button
-        // at .85.
+        // Add Split's icon and label, drawn as hovered when focused. Over the photo they're white,
+        // with the button at .85.
         let lit = add_response.hovered() || focus == Some(Focus::AddSplit);
         let color = ink(
             palette,
@@ -597,7 +598,7 @@ pub(super) fn show(
         );
         if gear_focused {
             // The gear's focus underline: 16px wide, 4px under the 16px icon box, which starts 1px
-            // above the gear's clickable's padding.
+            // above the padding of the gear's clickable.
             underline(painter, gear.x, gear.y - 1.0 + 16.0 + 4.0, 16.0);
         }
         // Offset `3 0`.
@@ -619,11 +620,11 @@ pub(super) fn show(
 /// The header's line of tabs: 24px tall.
 const LINE: f32 = 24.0;
 
-/// Where the header's row of tabs puts its items: tabs, the filter tab, Add Split and the split
-/// gear, left to right from `3.5rem` in, wrapping onto another 24px line when one doesn't fit
-/// with its margin before `8rem` from the right (`flex-wrap: wrap`).
+/// Where the header's row of tabs puts its items (tabs, the filter tab, Add Split and the split
+/// gear), left to right from `3.5rem` in. An item that doesn't fit, with its margin, before `8rem`
+/// from the right wraps onto another 24px line (`flex-wrap: wrap`).
 pub(super) struct Layout {
-    /// Each tab's place; none once it has gone.
+    /// Each tab's place, or `None` once the tab has gone.
     tabs: Vec<Option<PlacedTab>>,
     filter: Option<Pos2>,
     add_split: Option<Pos2>,
@@ -633,7 +634,7 @@ pub(super) struct Layout {
     pub(super) lines: usize,
 }
 
-/// Lays out the inbox header's row for `view` in `rect` (the header's).
+/// Lays out the inbox header's row for `view` in `rect` (the header's rect).
 pub(super) fn layout(ui: &Ui, rect: Rect, rem: f32, compact: bool, view: &super::View) -> Layout {
     let id = ui.id().with("thread-list-header");
     let left = rect.left() + if compact { 44.0 } else { 3.5 * rem };
@@ -653,8 +654,8 @@ pub(super) fn layout(ui: &Ui, rect: Rect, rem: f32, compact: bool, view: &super:
             tabs.push(None);
             continue;
         }
-        // `margin-right: 1.5rem` after a tab, 8px before a bullet's partner; a hidden tab's
-        // `max-width` falls from the whole label's (`100%`).
+        // `margin-right: 1.5rem` after a tab, or 8px before a bullet's partner. A hidden tab's
+        // `max-width` falls from the whole label's width (`100%`).
         let margin = if folder.bullet {
             BULLET_MARGIN
         } else {
@@ -713,7 +714,7 @@ pub(super) fn height(lines: usize) -> f32 {
     32.0 + LINE * lines as f32 + 20.0
 }
 
-/// The header's height on screen with `lines` lines of tabs: it grows at once, and shrinks over
+/// The header's height on screen with `lines` lines of tabs. It grows at once, and shrinks over
 /// 250ms (`ease`).
 pub(super) fn height_shown(ui: &Ui, lines: usize) -> f32 {
     #[derive(Clone, Copy)]
@@ -774,8 +775,8 @@ fn tab_width(ui: &Ui, id: egui::Id, folder: &crate::splits::Tab) -> f32 {
     label + count + bullet
 }
 
-/// A tab's name's width, its count's box's (`width 100ms 250ms ease-in-out` after it changes),
-/// and its count with whether it's incomplete.
+/// The width of a tab's name, the width of its count's box (`width 100ms 250ms ease-in-out` after
+/// the count changes), and its count with whether the count is incomplete.
 fn tab_parts(
     ui: &Ui,
     id: egui::Id,
@@ -786,7 +787,7 @@ fn tab_parts(
         .count
         .filter(|count| (1..crate::splits::INBOX_COUNTS).contains(&count.threads))
         .map(|count| (count.threads.to_string(), !count.exact));
-    // A count's box: 8px a character, the `+` one.
+    // A count's box: 8px per character, counting the `+` as one.
     let chars = count.as_ref().map_or(0, |(digits, incomplete)| {
         digits.len() + usize::from(*incomplete)
     });
@@ -806,10 +807,10 @@ fn filter_width(ui: &Ui, name: &str) -> f32 {
     1.0 + 8.0 + FILTER.width(ui.ctx(), name) + 8.0 + 8.0 + 8.0 + 1.0
 }
 
-/// A tab that hides while empty as it hides: its opacity (going over 250ms) and how far it has
-/// collapsed (0–1; its `max-width` and margin go after 50ms, over 250ms), on
-/// `cubic-bezier(0.19, 1, 0.22, 1)`. It comes back at once, the transition being the hidden
-/// state's; one hidden from the start doesn't animate.
+/// How far a tab that hides while empty has gone as it hides: its opacity (going over 250ms) and
+/// how far it has collapsed (0–1, as its `max-width` and margin go after 50ms, over 250ms), on
+/// `cubic-bezier(0.19, 1, 0.22, 1)`. It comes back at once, because the transition belongs to the
+/// hidden state. A tab hidden from the start doesn't animate.
 fn hiding(ui: &Ui, id: egui::Id, hidden: bool) -> (f32, f32) {
     const CURVE: CubicBezier = CubicBezier::new(0.19, 1.0, 0.22, 1.0);
     let elapsed = 0.3
@@ -821,12 +822,13 @@ fn hiding(ui: &Ui, id: egui::Id, hidden: bool) -> (f32, f32) {
     )
 }
 
-/// Paints a split tab (`Folder`) with its line box at `at`: the name, its count (12px, 5px after
-/// the name, `top: 1px`, in a box 8px wide per character that widens 250ms after the count
-/// does), a `+` while the count is incomplete, and its bullet. The selected tab is in the text
-/// color and its count subdued; the others are in the accent color, the name subdued while
-/// hovered. A tab collapsing as it hides is cut to `cut`'s width at its opacity. With `tooltip`, hovering it says
-/// what it is ([`crate::splits::describe`]). Returns the tab's box and whether it was clicked.
+/// Paints a split tab with its line box at `at`: the name, its count (12px, 5px after the name,
+/// `top: 1px`, in a box 8px wide per character that widens 250ms after the count does), a `+` while
+/// the count is incomplete, and its bullet. The name is ink at .8 (.85 in Carbon) on the selected
+/// tab, .6 while hovered and .4 otherwise, and the count is at .35 on the selected tab and .25
+/// otherwise. A tab collapsing as it hides is cut to `cut`'s width at its opacity. With `tooltip`,
+/// hovering it says what it is ([`crate::splits::describe`]). Returns the tab's box and whether it
+/// was clicked.
 #[expect(
     clippy::too_many_arguments,
     reason = "one tab of the header's row, drawn from its state"
@@ -930,8 +932,8 @@ fn white(alpha: f32) -> Color32 {
     Color32::from_white_alpha((alpha * 255.0).round() as u8)
 }
 
-/// [`exo_ui::Palette::ink`], or over Inbox Zero's photo (`zero`) white at Carbon's opacity: the
-/// tabs over the photo repeat Carbon's colors (a name is white at .4).
+/// [`exo_ui::Palette::ink`], or white at Carbon's opacity over Inbox Zero's photo (`zero`), because
+/// the tabs over the photo repeat Carbon's colors (a name is white at .4).
 fn ink(palette: &exo_ui::Palette, zero: bool, snow: f32, carbon: f32) -> Color32 {
     if zero {
         white(carbon)
@@ -973,8 +975,8 @@ fn filter_tab(
     let response = ui
         .interact(tab, id, Sense::click())
         .on_hover_cursor(CursorIcon::PointingHand);
-    // A 1px `#dee1e6` border, white at .3 in Carbon; hovered, the unread actions color. Focused,
-    // its border, name and × are `#aeb1dd`.
+    // A 1px `#dee1e6` border, white at .3 in Carbon, or the unread actions color when hovered.
+    // Focused, its border, name and × are `#aeb1dd`.
     let border = if focused {
         FOCUS_INK
     } else if response.hovered() || close_response.hovered() {
@@ -1003,7 +1005,7 @@ fn filter_tab(
         },
         None,
     );
-    // `Icons.close()`: two 1/12-wide diagonals of a 12px box, drawn 8px wide.
+    // The × is two diagonals 1px wide in a 12px box, scaled down to 8px.
     let color = if focused {
         FOCUS_INK
     } else if close_response.hovered() {

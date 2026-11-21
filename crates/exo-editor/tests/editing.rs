@@ -17,7 +17,7 @@ fn select(editor: &mut Editor, from: (usize, usize), to: (usize, usize)) {
 
 #[test]
 fn a_line_emptied_by_a_delete_keeps_its_br() {
-    // Without it the line has no height in the sent mail.
+    // Without its `<br>`, the line has no height in the sent mail.
     let mut editor = Editor::from_html("<div>a</div><div>bc</div><div>d</div>");
     select(&mut editor, (1, 0), (1, 2));
     editor.press(Key::Backspace, Modifiers::NONE);
@@ -55,7 +55,8 @@ fn pasted_blank_lines_stay_lines() {
 
 #[test]
 fn pasted_text_loses_one_trailing_newline() {
-    // A plain-text paste strips it, so a copied line pastes into the line, not after it.
+    // A plain-text paste strips one trailing newline, so a copied line pastes into the line, not
+    // after it.
     let mut editor = Editor::from_html("<div>ab</div>");
     at(&mut editor, 0, 1);
     editor.paste_text("x\r\n");
@@ -97,7 +98,7 @@ fn delete_at_the_end_of_a_rule_keeps_the_caret_in_the_document() {
 
 #[test]
 fn a_link_pasted_into_a_link_replaces_it() {
-    // HTML can't nest links: the draft would read back differently.
+    // HTML can't nest links, so a nested link would read back differently in the draft.
     let mut editor = Editor::from_html(r#"<div><a href="http://a.com">abc</a></div>"#);
     at(&mut editor, 0, 1);
     editor.paste_html(r#"<a href="http://b.com">B</a>"#);
@@ -204,8 +205,8 @@ fn the_link_input_ignores_what_the_sanitizer_strips() {
 
 #[test]
 fn pastes_are_autolinked_as_squire_does() {
-    // A paste links the URLs in the pasted fragment (a bare host gets its `/`); for HTML (not
-    // plain text) a text node that is only an address stays as it is.
+    // A paste links the URLs in the pasted fragment, and a bare host gets its `/`. In pasted HTML
+    // (not plain text), a text node that is only an address stays as it is.
     let mut editor = Editor::new();
     editor.paste_text("see http://x.com or a@b.co");
     assert_eq!(
@@ -228,7 +229,7 @@ fn space_links_the_url_before_it() {
         editor.html(),
         r#"<div class="">go <a href="http://x.com/" target="_blank">http://x.com</a> now</div>"#
     );
-    // As in Squire, a line that is only an address isn't linked by Space.
+    // A line that is only an address isn't linked by Space.
     let mut editor = Editor::new();
     editor.type_text("a@b.co ");
     assert_eq!(editor.html(), r#"<div class="">a@b.co&nbsp;</div>"#);
@@ -247,7 +248,7 @@ fn a_selection_between_two_rules_deletes_neither() {
 
 #[test]
 fn tab_then_shift_tab_over_items_gives_back_the_list() {
-    // The selection ends at the start of the third item, which Tab leaves out; it
+    // The selection ends at the start of the third item, which Tab leaves out. The selection
     // must stay there, so Shift+Tab takes the same two items back out.
     let mut editor =
         Editor::from_html("<ul><li>a<br></li><li>b<br></li><li>c<br></li></ul><div><br></div>");
@@ -269,7 +270,7 @@ fn tab_then_shift_tab_over_items_gives_back_the_list() {
 
 #[test]
 fn enter_after_dashes_in_a_longer_line_splits_it() {
-    // Enter reads the line's whole text, not what's before the caret: `---abc` isn't a rule.
+    // Enter reads the line's whole text, not what's before the caret, so `---abc` isn't a rule.
     let mut editor = Editor::from_html("<div>---abc</div>");
     at(&mut editor, 0, 3);
     editor.press(Key::Enter, Modifiers::NONE);
@@ -312,8 +313,8 @@ fn writing_doesnt_recurse_per_container() {
 
 #[test]
 fn a_mention_opens_once_a_name_follows_its_trigger() {
-    // `+` alone matches nothing; the name typed after it opens the contacts (the trigger was
-    // armed when it was typed).
+    // `+` alone matches nothing. The name typed after it opens the contacts, because the trigger
+    // was armed when `+` was typed.
     let mut editor = Editor::new();
     editor.type_text("Thanks +");
     assert!(editor.trigger().is_none());

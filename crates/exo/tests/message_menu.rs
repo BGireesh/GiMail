@@ -1,6 +1,6 @@
-//! A message body's right-click menu, end to end on gmail-mock: a word
-//! is selected and offers Look Up, Search with Google and Copy; a link offers Copy Link and Open
-//! Link, an address link Copy Email Address.
+//! A message body's right-click menu, end to end on gmail-mock. A right-clicked word is selected
+//! and offers Look Up, Search with Google and Copy. A link offers Copy Link and Open Link, and an
+//! address link offers Copy Email Address.
 
 mod support;
 
@@ -38,7 +38,8 @@ impl Menus {
         });
     }
 
-    /// Right-clicks `at`, choosing `choose`: the menu's titles, and the text it copied, if any.
+    /// Right-clicks `at` and chooses `choose`. Returns the menu's titles, and the text it copied,
+    /// if any.
     fn right_click(
         &self,
         app: &mut Fixture,

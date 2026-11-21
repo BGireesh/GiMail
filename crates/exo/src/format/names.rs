@@ -1,5 +1,5 @@
-//! How people are named: first names and display formats. Which participants a row lists is
-//! exo-store's.
+//! How people are named: first names and display formats. Which participants a row lists is up
+//! to exo-store.
 
 use std::sync::LazyLock;
 
@@ -10,7 +10,7 @@ use super::lists::{POPULAR_DOMAINS, ROLE_USERNAMES};
 /// A name and address, as a message header gives them.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Person {
-    /// Display name; empty if the header had none.
+    /// Display name, empty if the header had none.
     pub name: String,
     /// Email address.
     pub email: String,
@@ -123,7 +123,7 @@ pub fn first_name(name: &str, email: &str) -> String {
 pub enum NameFormat {
     /// The default: first name, or `Me`.
     First,
-    /// `fullname-excluding-me`: the whole name, or `Me`.
+    /// The whole name, or `Me`.
     Full,
 }
 

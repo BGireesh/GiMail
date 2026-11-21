@@ -2,18 +2,19 @@
 //! ([`crate::Spelling`], macOS's).
 //!
 //! With autocorrect on, a word is checked as it's finished (Space, Enter, `-`, or punctuation once
-//! typing pauses): a text replacement or a misspelling's correction replaces it (one undo step),
-//! marked with grey dots while the caret stays near it; a misspelling with no correction is marked
-//! with red dots. The caret resting on a marked word shows the suggestion pill: the original word
-//! to undo a correction, or up to three corrections and `Learn "…"`; resting at the end of a
-//! misspelled word being typed, its one correction. The body's own spellcheck is off meanwhile.
+//! typing pauses). A text replacement or a misspelling's correction replaces it in one undo step,
+//! marked with grey dots while the caret stays near it. A misspelling with no correction is marked
+//! with red dots. The caret resting on a marked word shows the suggestion pill, which offers the
+//! original word to undo a correction, or up to three corrections and `Learn "…"`. Resting at the
+//! end of a misspelled word being typed shows its one correction. The body's own spellcheck is off
+//! meanwhile.
 //!
-//! Autocomplete shows what's likely next at the end of a line as ghost text; Tab or → takes it.
-//! First the editor's own predictions: a draft's people's names, and on its first line a greeting
-//! to them (`Hi Priya`); else the rest of the word being typed, from the spellchecker's
-//! completions.
+//! Autocomplete shows what's likely next at the end of a line as ghost text, and Tab or → takes
+//! it. The editor's own predictions come first: the names of a draft's people, and on its first
+//! line a greeting to them (`Hi Priya`). Otherwise it offers the rest of the word being typed,
+//! from the spellchecker's completions.
 //!
-//! The marks aren't in the document: they're kept by block and characters, and follow edits by
+//! The marks aren't in the document. They're kept by block and characters, and follow edits by
 //! comparing the blocks' text before and after, as long as the word they mark still reads the
 //! same, whole.
 
@@ -33,7 +34,7 @@ const DEBOUNCE: f64 = 0.3;
 const PUNCTUATION: [char; 7] = ['.', ',', '!', '?', '"', ':', ';'];
 /// How many characters past a corrected word the caret can go before its dots go for good.
 const NEAR: usize = 3;
-/// At most this many corrections in the pill (`slice(0, 3)`).
+/// At most this many corrections in the pill.
 const SUGGESTIONS: usize = 3;
 /// Autocomplete waits for this many letters of a word.
 const COMPLETE_AFTER: usize = 3;
@@ -51,20 +52,22 @@ pub(crate) struct State {
     /// The blocks' text the marks were last placed against, and the document's revision then.
     texts: Vec<String>,
     revision: Option<u64>,
-    /// Words whose correction was undone, lower-cased: marked, never corrected again in this
-    /// body.
+    /// Words whose correction was undone, lower-cased. They're marked, and never corrected again
+    /// in this body.
     undone: HashSet<String>,
     /// Words people are named with, lower-cased, never corrected or marked (the people the draft
     /// may be to).
     names: HashSet<String>,
-    /// Punctuation was typed at this revision and caret: once typing pauses, the word before it
-    /// is finished.
+    /// The revision and caret where punctuation was typed. Once typing pauses, the word before the
+    /// punctuation is finished.
     punctuation: Option<(u64, Pos)>,
-    /// The blocks whose marks the edit last followed dropped one (it read otherwise).
+    /// The blocks where following the last edit dropped a mark (its word read otherwise).
     dropped: Vec<usize>,
-    /// Capitalisations the user undid by editing them, lower-cased: never made again in this body.
+    /// Capitalisations the user undid by editing them, lower-cased, which are never made again in
+    /// this body.
     rejected_capitals: HashSet<String>,
-    /// A snippet was just inserted: no word is finished until a key other than Space or Enter.
+    /// Whether a snippet was just inserted, so no word is finished until a key other than Space or
+    /// Enter.
     after_snippet: bool,
     pill: Option<Pill>,
     /// The revision and selection the pill was last looked for at.
@@ -74,15 +77,15 @@ pub(crate) struct State {
     skip: Option<(usize, Range<usize>)>,
     /// A word learned from the pill, for the app's hint.
     pub(crate) learned: Option<String>,
-    /// The ghost text as it was first shown: typing it takes it a letter at a time, Backspace gives
-    /// them back.
+    /// The ghost text as it was first shown. Typing it takes it a letter at a time, and Backspace
+    /// gives the letters back.
     pub(crate) completion: Option<Completion>,
     /// The people the draft is from and to, for names and greetings.
     people: People,
     /// The languages whose greetings are offered.
     languages: Vec<String>,
-    /// A greeting was the last thing taken, and only spaces and Backspace typed since: no name is
-    /// offered then.
+    /// Whether a greeting was the last thing taken, with only spaces and Backspace typed since, in
+    /// which case no name is offered.
     greeted: bool,
 }
 
@@ -93,7 +96,7 @@ pub(crate) struct Completion {
     start: usize,
     /// The text from `start` the prediction completes it to.
     full: String,
-    /// It's a greeting.
+    /// Whether it's a greeting.
     greeting: bool,
 }
 
@@ -102,13 +105,13 @@ pub(crate) struct Completion {
 pub struct Named {
     /// What they're called.
     pub first: String,
-    /// The rest of their name, or all of it if there's no more (`split(first)[1] || name`).
+    /// The rest of their name after the first, or all of it if there's no more.
     pub last: String,
     /// Their name as given.
     pub full: String,
 }
 
-/// The people a draft is from and to: `None` for one without a name.
+/// The people a draft is from and to, with `None` for one without a name.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct People {
     /// From.
@@ -381,7 +384,7 @@ fn is_mark(ch: char) -> bool {
 enum Local {
     /// Nothing yet, and no word completion either.
     Hold,
-    /// This follows the caret; a greeting if `.1`.
+    /// This follows the caret, and is a greeting if `.1`.
     Predict(String, bool),
 }
 
@@ -390,7 +393,7 @@ enum Local {
 struct Annotation {
     block: usize,
     range: Range<usize>,
-    /// The text marked: the mark goes once it reads otherwise.
+    /// The text marked. The mark goes once the text reads otherwise.
     word: String,
     mark: Mark,
     /// Its dots wait for typing to pause.
@@ -399,8 +402,8 @@ struct Annotation {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Mark {
-    /// A correction, from `original`; `near` while its dots show, which is until the caret leaves
-    /// it; `capital` for a capitalisation.
+    /// A correction, from `original`. `near` is set while its dots show, which is until the caret
+    /// leaves the word, and `capital` is set for a capitalisation.
     Corrected {
         original: String,
         near: bool,
@@ -432,7 +435,7 @@ pub struct Suggestions {
     pub items: Vec<String>,
     /// Whether `Learn "{word}"` follows them.
     pub learn: bool,
-    /// The item chosen with the keys (`Learn` after the items); none until ↓.
+    /// The item chosen with the keys (`Learn` after the items), or none until ↓.
     pub selected: Option<usize>,
 }
 
@@ -479,7 +482,7 @@ fn word_before(chars: &[char], end: usize) -> Option<Range<usize>> {
     (from < to && chars[from..to].iter().any(|ch| ch.is_alphabetic())).then_some(from..to)
 }
 
-/// Whether `range` of `chars` reads `word`, whole: no word characters run on past its ends.
+/// Whether `range` of `chars` reads `word` whole, with no word characters running on past its ends.
 fn reads(chars: &[char], range: &Range<usize>, word: &str) -> bool {
     if range.end > chars.len() || chars[range.clone()].iter().copied().ne(word.chars()) {
         return false;
@@ -508,7 +511,7 @@ fn common_ends(a: &[char], b: &[char]) -> (usize, usize) {
 }
 
 impl Editor {
-    /// Turns autocorrect on or off; its marks go either way.
+    /// Turns autocorrect on or off. Its marks go either way.
     pub fn set_autocorrect(&mut self, on: bool) {
         if self.autocorrect.on != on {
             self.autocorrect.on = on;
@@ -544,7 +547,7 @@ impl Editor {
         self.autocorrect.people = people;
     }
 
-    /// The languages whose greetings autocomplete offers (of [`GREETING_LANGUAGES`]; English
+    /// The languages whose greetings autocomplete offers (of [`GREETING_LANGUAGES`], and English
     /// until set).
     pub fn set_greeting_languages(&mut self, languages: Vec<String>) {
         self.autocorrect.languages = languages;
@@ -576,8 +579,8 @@ impl Editor {
         self.autocorrect.pill.as_ref().map(|pill| &pill.suggestions)
     }
 
-    /// Block `index`'s dotted words: each one's characters and whether it's a correction (grey)
-    /// rather than a misspelling (red).
+    /// The dotted words in block `index`, as each one's characters and whether it's a correction
+    /// (grey) rather than a misspelling (red).
     pub(crate) fn dotted_words(
         &self,
         index: usize,
@@ -595,7 +598,7 @@ impl Editor {
             })
     }
 
-    /// The pill's word's block and characters, for placing it.
+    /// The block and characters of the pill's word, for placing the pill.
     pub(crate) fn pill_word(&self) -> Option<(usize, Range<usize>)> {
         self.autocorrect
             .pill
@@ -643,7 +646,8 @@ impl Editor {
                         return Some((new_changed.start, annotation.range.clone()));
                     }
                 }
-                // Within the last, after it (and after what the first kept, if it's the same).
+                // Within the last block changed, after what changed (and after what the first
+                // block kept, if it's the same block).
                 if annotation.block + 1 == old_changed.end && !new_changed.is_empty() {
                     let last = new_changed.end - 1;
                     let after = &chars[last];
@@ -741,9 +745,9 @@ impl Editor {
         );
     }
 
-    /// Replaces the word at `range` of block `block` with `with`, one undo step, the caret kept
-    /// where it was in the text around it (after the word if it was in it). Returns the new
-    /// word's characters.
+    /// Replaces the word at `range` of block `block` with `with` in one undo step, keeping the
+    /// caret where it was in the text around the word (after the word if the caret was in it).
+    /// Returns the new word's characters.
     fn replace_word(&mut self, block: usize, range: Range<usize>, with: &str) -> Range<usize> {
         self.sync_marks();
         self.undo.save(&self.doc, self.selection);
@@ -764,7 +768,7 @@ impl Editor {
         range.start..range.start + len
     }
 
-    /// The word ending at `end` was finished: corrected, marked, or left be.
+    /// The word ending at `end` was finished, so it's corrected, marked, or left be.
     pub(crate) fn finish_word(&mut self, end: Pos) {
         if !self.autocorrect.on || self.spelling.engine.is_none() || self.autocorrect.after_snippet
         {
@@ -804,8 +808,8 @@ impl Editor {
         if replacement.is_none() && !engine.check(&text).contains(&range) {
             return;
         }
-        // A capitalisation: the correction, or else macOS's likeliest guess, is the word in other
-        // case.
+        // It's a capitalisation when the correction, or else macOS's likeliest guess, is the word
+        // in other case.
         let correction = replacement.or_else(|| {
             engine
                 .correction(&text, range.clone())
@@ -862,15 +866,15 @@ impl Editor {
         })
     }
 
-    /// A snippet was inserted at the caret: the words it ends with aren't corrected as Space or
+    /// A snippet was inserted at the caret, so the words it ends with aren't corrected as Space or
     /// Enter follow it, until another key is typed.
     pub fn snippet_inserted(&mut self) {
         self.autocorrect.after_snippet = true;
     }
 
-    /// An edit at the caret (a character, Backspace, Delete) inside a word, or onto a marked one:
-    /// the word is checked again, a misspelling marked (never corrected), its dots once typing
-    /// pauses.
+    /// An edit at the caret (a character, Backspace, Delete) inside a word, or onto a marked one.
+    /// The word is checked again, and a misspelling is marked (never corrected), with its dots
+    /// showing once typing pauses.
     pub(crate) fn recheck_edited_word(&mut self) {
         if !self.autocorrect.on || self.autocorrect.after_snippet || !self.selection.is_collapsed()
         {
@@ -933,8 +937,8 @@ impl Editor {
         }
     }
 
-    /// A character was typed at the caret: `-` finishes the word before it, punctuation does
-    /// once typing pauses; autocomplete follows.
+    /// A character was typed at the caret. `-` finishes the word before it, and punctuation does
+    /// once typing pauses. Autocomplete follows.
     pub(crate) fn typed_for_assistance(&mut self, ch: char) {
         if ch != ' ' {
             self.autocorrect.greeted = false;
@@ -957,16 +961,17 @@ impl Editor {
         self.complete();
     }
 
-    /// Backspace at the caret: an edited word is checked again, autocomplete follows.
+    /// Backspace at the caret. An edited word is checked again, and autocomplete follows.
     pub(crate) fn deleted_for_assistance(&mut self) {
         self.recheck_edited_word();
         self.complete();
     }
 
-    /// Ghost text at the end of the caret's line, after a character or a Backspace: while what's
-    /// typed is still the start of what shows, it stays (typing its next letter takes it, Backspace
-    /// gives it back); else the editor's own prediction, a name or a greeting; else the rest of the
-    /// first of the spellchecker's completions for the word being typed.
+    /// Ghost text at the end of the caret's line, after a character or a Backspace. While what's
+    /// typed is still the start of what shows, the ghost text stays (typing its next letter takes
+    /// that letter, and Backspace gives it back). Otherwise it's the editor's own prediction, a
+    /// name or a greeting, or else the rest of the first of the spellchecker's completions for the
+    /// word being typed.
     pub(crate) fn complete(&mut self) {
         self.ghost = None;
         let shown = self.autocorrect.completion.take();
@@ -1044,8 +1049,8 @@ impl Editor {
         }
     }
 
-    /// The editor's own prediction for `before`, the caret's line up to it: a name, then on the
-    /// body's `first_line` a greeting.
+    /// The editor's own prediction for `before`, the caret's line up to the caret. It tries a
+    /// name, then a greeting on the body's `first_line`.
     fn local_prediction(&self, first_line: bool, before: &str) -> Option<Local> {
         self.name_prediction(before).or_else(|| {
             first_line
@@ -1054,8 +1059,9 @@ impl Editor {
         })
     }
 
-    /// The word being typed, capitalised, as the start of a name of the draft's people, the first
-    /// of them, their last names and whole names in turn; with one letter typed, nothing yet.
+    /// Completes the word being typed, when it's capitalised, as the start of a name of the
+    /// draft's people, trying each person's first name, last name and whole name in turn. With one
+    /// letter typed, nothing yet.
     fn name_prediction(&self, before: &str) -> Option<Local> {
         if self.autocorrect.greeted {
             return None;
@@ -1094,9 +1100,9 @@ impl Editor {
         })
     }
 
-    /// A greeting to the one or two people the draft is to, all named, by first name (with one,
-    /// also with those it copies), or to one by last name, once its first word is typed; until
-    /// then, nothing.
+    /// A greeting to the one or two people the draft is to, all named, by first name (with one
+    /// person, also with those the draft copies), or to one person by last name. It's offered once
+    /// the greeting's first word is typed, and nothing is offered until then.
     fn greeting_prediction(&self, before: &str) -> Option<Local> {
         let people = &self.autocorrect.people;
         let to: Vec<&Named> = people
@@ -1168,8 +1174,8 @@ impl Editor {
         }
     }
 
-    /// Ghost text was taken: a greeting's keeps names from being offered until something but a
-    /// space or Backspace is typed.
+    /// Ghost text was taken. A taken greeting keeps names from being offered until something
+    /// other than a space or Backspace is typed.
     pub(crate) fn took_completion(&mut self) {
         self.autocorrect.greeted = self
             .autocorrect
@@ -1178,9 +1184,9 @@ impl Editor {
             .is_some_and(|completion| completion.greeting);
     }
 
-    /// The marks and the pill this frame, `idle` seconds since the caret or the document last
-    /// changed, the editor having the keyboard if `focused`. Returns how long until something
-    /// is due, if anything is.
+    /// Updates the marks and the pill this frame, `idle` seconds after the caret or the document
+    /// last changed. `focused` is whether the editor has the keyboard. Returns how long until
+    /// something is due, if anything is.
     pub(crate) fn assist(&mut self, focused: bool, idle: f64) -> Option<f64> {
         if !self.autocorrect.on {
             return None;
@@ -1312,7 +1318,7 @@ impl Editor {
                 range: annotation.range,
             });
         }
-        // The misspelled word just typed, its correction.
+        // For the misspelled word just typed, its correction.
         if !self.spelling.typing {
             return None;
         }
@@ -1346,9 +1352,9 @@ impl Editor {
         })
     }
 
-    /// A key while the pill shows: whether it took it. ↓ starts choosing, ←/→ go round the items,
-    /// Enter or Tab takes the chosen one, ↑ puts the pill away; Escape does too unless it offers
-    /// only `Learn`.
+    /// Handles a key while the pill shows, and returns whether the pill took it. ↓ starts
+    /// choosing, ←/→ go round the items, Enter or Tab takes the chosen one, and ↑ puts the pill
+    /// away. Escape does too, unless the pill offers only `Learn`.
     pub(crate) fn pill_key(&mut self, key: Key) -> bool {
         let Some(pill) = &mut self.autocorrect.pill else {
             return false;
@@ -1393,8 +1399,8 @@ impl Editor {
         }
     }
 
-    /// Puts the pill away: a word being typed is marked as a correction turned down; a marked
-    /// word's pill doesn't come back until the caret leaves it.
+    /// Puts the pill away. A word being typed is marked as a correction turned down, and a marked
+    /// word's pill doesn't come back until the caret leaves the word.
     fn dismiss_pill(&mut self) {
         let Some(pill) = self.autocorrect.pill.take() else {
             return;
@@ -1437,7 +1443,7 @@ impl Editor {
         let Some(item) = suggestions.items.get(index) else {
             if suggestions.learn {
                 self.sync_marks();
-                // `[data-incorrect="{word}"]`: the word wherever it's marked or was corrected.
+                // The word wherever it's marked or was corrected.
                 self.autocorrect
                     .annotations
                     .retain(|annotation| match &annotation.mark {

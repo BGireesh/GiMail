@@ -82,11 +82,12 @@ const ALERT: &[Region] = &[Region::Alert];
 pub enum Action {
     /// A key in a calendar's colour picker.
     PickerKey(exo_ui::PickerKey),
-    /// ⌘D with the right pane's form open: the keyboard to the next section.
+    /// ⌘D with the right pane's form open, which moves the keyboard to the next section.
     CycleFocus,
-    /// `-` / `=`: the day view on the day before (-1) or after (1) the one it shows.
+    /// `-` / `=`, which move the day view to the day before (-1) or after (1) the one it shows.
     Step(i64),
-    /// `t`, the day view's Today: the day view on today, unless an event is being made.
+    /// `t` or the day view's Today, which moves the day view to today unless an event is being
+    /// made.
     Today,
     /// `0`: the day view, or the contact pane when it shows.
     Cycle,
@@ -100,9 +101,9 @@ pub enum Action {
     ToggleDeclined,
     /// `Show Weekends` / `Hide Weekends`.
     ToggleWeekends,
-    /// `See Message` on a refused answer's toast: conversation `thread`.
+    /// `See Message` on a refused answer's toast, which opens conversation `thread`.
     SeeMessage(String),
-    /// `2`, `Open Week`, the rail's Calendar: the week view.
+    /// `2`, `Open Week` or the rail's Calendar, which open the week view.
     OpenWeek,
     /// The week view one week back (-1) or on (1).
     WeekStep(i64),
@@ -110,23 +111,25 @@ pub enum Action {
     WeekToday,
     /// Close the week view (`0`, `1`, Escape, the rail's Mail).
     CloseWeek,
-    /// Escape with the event details up: the recurring alert, else the menu, else the details.
+    /// Escape with the event details up, which closes the recurring alert, else the menu, else the
+    /// details.
     DetailsEscape,
-    /// Enter with the recurring alert up: its OK.
+    /// Enter with the recurring alert up, which is its OK.
     DetailsConfirm,
-    /// `b`, `shift+b`, `Create Empty Event`: a new event's form.
+    /// `b`, `shift+b` or `Create Empty Event`, which open a new event's form.
     Create,
     /// ⌘Enter, `Save Event`.
     Save,
-    /// ⌘⇧, (or ⌘⇧.), `Discard Event`: the form closed, asking first.
+    /// ⌘⇧, (or ⌘⇧.) or `Discard Event`, which closes the form, asking first.
     Discard,
-    /// Escape in the form: an open dropdown first, else Discard.
+    /// Escape in the form, which closes an open dropdown first and is otherwise Discard.
     FormEscape,
-    /// ⌘⇧= / ⌘⇧- with the form open: the draft a day (a week, in the week view) on or back.
+    /// ⌘⇧= / ⌘⇧- with the form open, which move the draft a day (a week, in the week view) on or
+    /// back.
     FormStep(i64),
-    /// ⌘⇧0 with the form open: the draft on today.
+    /// ⌘⇧0 with the form open, which moves the draft to today.
     FormToday,
-    /// The palette's `Edit …` rows: the keyboard to a field.
+    /// The palette's `Edit …` rows, which move the keyboard to a field.
     FormFocus(Field),
     /// `Make all day` / `Remove all day`.
     FormAllDay,
@@ -140,17 +143,17 @@ pub enum Action {
     Prompt(usize),
     /// ↑ (-1) / ↓ (1) in a dialog's options.
     PromptChoose(isize),
-    /// Undo on a toast: the held change `token` taken back.
+    /// Undo on a toast, which takes back the held change `token`.
     Undo(u64, Undone),
     /// Escape while dragging in the grid.
     CancelDrag,
-    /// `tab` in the messages: the keyboard to the focused message's invite card.
+    /// `tab` in the messages, which moves the keyboard to the focused message's invite card.
     InviteFocus,
     /// The invite card's next (1) or previous (-1) button.
     InviteMove(isize),
-    /// Enter or space in the invite card: its focused button's answer.
+    /// Enter or space in the invite card, which gives its focused button's answer.
     InviteSubmit,
-    /// `m`, `Meet With`: the keyboard to Meet's input.
+    /// `m` or `Meet With`, which move the keyboard to Meet's input.
     MeetFocus,
     /// Escape in Meet's input.
     MeetBlur,
@@ -162,27 +165,27 @@ pub enum Action {
     FindTime,
     /// `Cancel Find Time`, Escape while finding.
     CancelFindTime,
-    /// `Show next availability`: the week with the first free slot.
+    /// `Show next availability`, which goes to the week with the first free slot.
     ShowAvailability(Date),
-    /// Escape in the invite card: back to the messages.
+    /// Escape in the invite card, which goes back to the messages.
     InviteBlur,
-    /// `Jump to Date`: its palette.
+    /// `Jump to Date`, which opens its palette.
     OpenJumpToDate,
-    /// A Jump to Date row: the week view, else the day view, on this day.
+    /// A Jump to Date row, which moves the week view, else the day view, to this day.
     JumpTo(Date),
-    /// `Share Availability` from the list, a conversation or the week: the week picking free
-    /// times for the conversation's draft or a Reply All, or a new message.
+    /// `Share Availability` from the list, a conversation or the week. The week picks free times
+    /// for the conversation's draft or a Reply All, or for a new message.
     ShareAvailability,
-    /// Enter, ⌘Enter, Insert: the times into the draft.
+    /// Enter, ⌘Enter or Insert, which put the times into the draft.
     ShareInsert,
-    /// Cancel, `0`, `1`, ⌘⇧0, or Escape outside a field: the page closes.
+    /// Cancel, `0`, `1`, ⌘⇧0, or Escape outside a field, which close the page.
     ShareCancel,
-    /// Escape in a field: its text goes, or the page closes.
+    /// Escape in a field, which clears its text or else closes the page.
     ShareEscape,
 }
 
-/// What opened the day view: a command's stays as the cursor moves, any other goes when the right
-/// pane follows something else.
+/// What opened the day view. A day view that a command opened stays as the cursor moves, and any
+/// other goes when the right pane follows something else.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Source {
     Command,
@@ -233,7 +236,7 @@ pub(crate) struct Calendar {
     form_grid: GridView,
     /// An alert or dialog over the page.
     prompt: Option<Prompt>,
-    /// New events held for Undo, by token: their form opens again on Undo or a failure.
+    /// New events held for Undo, by token, whose form opens again on Undo or a failure.
     created: BTreeMap<u64, form::Values>,
     /// The address book, indexed for Who.
     book: Option<(
@@ -253,7 +256,7 @@ pub(crate) struct Calendar {
     options_open: bool,
     /// Calendar Settings' secondary time zone input.
     options_zone: timezones::ZoneInput,
-    /// Where's suggestions.
+    /// The Where field's suggestions.
     places: places::Places,
     /// A calendar account's sign-in in flight, and what it's for.
     signing_in: Option<accounts::SignInFor>,
@@ -541,7 +544,7 @@ impl crate::Mail {
         }
     }
 
-    /// Opens the week view around `date`, the settings menu and the right pane's day gone.
+    /// Opens the week view around `date`, closing the settings menu and the right pane's day.
     pub(crate) fn calendar_open_week(&mut self, date: Date) {
         self.settings.hide();
         self.calendar.day = None;
@@ -551,8 +554,8 @@ impl crate::Mail {
         }
     }
 
-    /// The day the account switched to opens the week view on: the middle of the week on screen,
-    /// if it's up, so either account's first weekday finds it.
+    /// The day the account switched to opens the week view on. It's the middle of the week on
+    /// screen, if the week view is up, so either account's first weekday finds it.
     pub(crate) fn calendar_week_to_keep(&self) -> Option<Date> {
         self.calendar_week()
             .map(|active| self.calendar_week_start(active) + 3.days())
@@ -564,8 +567,8 @@ impl crate::Mail {
         self.calendar_open_week(day);
     }
 
-    /// A calendar notification's click: the week view on `day` with event `key`'s details up once
-    /// it shows, scrolled to its end at `end_hour`.
+    /// A calendar notification's click opens the week view on `day`, with event `key`'s details up
+    /// once the event shows and the grid scrolled to its end at `end_hour`.
     pub(crate) fn calendar_open_event(&mut self, key: String, day: Date, end_hour: i8) {
         self.calendar.details = None;
         self.calendar_open_week(day);
@@ -591,7 +594,7 @@ impl crate::Mail {
         self.calendar_open_day(date, Source::Other);
     }
 
-    /// Moves the day view by `days`, or opens it on today moved by `days`; every third change
+    /// Moves the day view by `days`, or opens it on today moved by `days`. Every third change
     /// hints at the week view.
     fn calendar_step(&mut self, days: i64) {
         let today = self.now.clone().date();
@@ -646,7 +649,7 @@ impl crate::Mail {
                     self.calendar_open_day(today, Source::Other);
                 }
             }
-            // With the day view up, `0` and the footer's button open the week on its day; the
+            // With the day view up, `0` and the footer's button open the week on its day. The
             // first time `0` does, a hint says `2` does it now.
             Action::Cycle | Action::Footer if let Some(day) = self.calendar.day => {
                 if action == Action::Cycle && !self.calendar.week_hint_shown {
@@ -977,10 +980,10 @@ impl crate::Mail {
         }
     }
 
-    /// When the right pane follows something new: a day view opened by anything but a command
-    /// closes, and once the new thread's invite is read, the day view opens on its date; a
-    /// command's day view stays put. In the list the thread's invite is read from the store; an
-    /// open thread reads its own.
+    /// When the right pane follows something new, a day view opened by anything but a command
+    /// closes, and once the new thread's invite is read, the day view opens on its date. A
+    /// command's day view stays put. In the list the thread's invite is read from the store, while
+    /// an open thread reads its own.
     fn calendar_follow_context(&mut self, now: &Zoned) {
         // The settings menu holds the right pane until it goes.
         if self.settings.visible() {
@@ -1084,8 +1087,8 @@ impl crate::Mail {
             .collect()
     }
 
-    /// The signed-out calendar account whose `Add Calendar` takes the day view's place: the open
-    /// conversation's invite is to it, I could answer it, and it hasn't been answered.
+    /// The signed-out calendar account whose `Add Calendar` takes the day view's place, when the
+    /// open conversation's invite is to it, I could answer it, and it hasn't been answered.
     fn calendar_takeover(&self) -> Option<String> {
         let invite = self.calendar.invite.as_ref()?;
         let email = self.calendar_invite_needs_sign_in(invite)?;
@@ -1190,7 +1193,7 @@ impl crate::Mail {
             &mut self.calendar.grid,
             compose,
         );
-        // `this.props.events` unset: the day isn't in what Calendar has been read for.
+        // The day shows as loading until it's in what Calendar has been read for.
         if !self
             .account
             .calendar()
@@ -1414,7 +1417,7 @@ impl crate::Mail {
     }
 
     /// The event details over `window`, when they're up, and the recurring-RSVP alert over
-    /// `page`; also reports the calendar's failed changes.
+    /// `page`. Also reports the calendar's failed changes.
     pub(crate) fn calendar_show_details(&mut self, ui: &Ui, window: Rect, page: Rect) {
         for failure in self.account.calendar().failures() {
             self.calendar_failed(failure);
@@ -1478,7 +1481,7 @@ impl crate::Mail {
         if source.html_link.is_some() && event.title != "Busy" && !guest {
             menu.push(MenuItem::OpenInCalendar);
         }
-        // A guest's series has no rule Exo knows: `Repeats`.
+        // A guest's series has no rule Exo knows, so its line says `Repeats`.
         let rule = if guest {
             source
                 .recurring_event_id
@@ -1605,7 +1608,7 @@ impl crate::Mail {
     }
 
     /// Event `key` as the calendar shows it, Calendar's event behind it, and whether I can
-    /// answer it; an invite the calendar doesn't have stands in as its own event.
+    /// answer it. An invite the calendar doesn't have stands in as its own event.
     fn calendar_detailed(
         &self,
         key: &str,
@@ -1776,18 +1779,18 @@ impl crate::Mail {
         self.commands.toast(Toast::new(text));
     }
 
-    /// An invite card's answer: to the calendar's event with its UID, added from the invite if need
-    /// be. `invite` has my answer recorded; `mouse` says it came from a click, which earns the hint
-    /// that `tab` gets there. With `RSVP + Mark Done` on, the conversation is marked done too, with
-    /// that toast.
+    /// An invite card's answer, given to the calendar's event with its UID, which is added from
+    /// the invite if need be. `invite` has my answer recorded. `mouse` says it came from a click,
+    /// which earns the hint that `tab` gets there. With `RSVP + Mark Done` on, the conversation is
+    /// marked done too, with that toast.
     pub(crate) fn calendar_respond_to_invite(
         &mut self,
         invite: Invite,
         response: Response,
         mouse: bool,
     ) {
-        // To a signed-out calendar account, which signs in first: `RSVP`, or offline
-        // `You're Offline`.
+        // To a signed-out calendar account, which signs in first: the `RSVP` alert, or
+        // `You're Offline` while offline.
         if let Some(email) = self.calendar_invite_needs_sign_in(&invite) {
             if mouse {
                 self.commands.hint(
@@ -1892,8 +1895,8 @@ impl crate::Mail {
     }
 
     /// The calendars for the week view's list: the mail account's, then each other calendar
-    /// account's by address, each primary first and then by name; rooms, weather and deleted
-    /// calendars left out.
+    /// account's by address, each primary first and then by name. Rooms, weather and deleted
+    /// calendars are left out.
     pub(crate) fn calendar_list(&self) -> Vec<ListedCalendar> {
         let data = self.account.calendar().data();
         let email = self.account.email();
@@ -1945,9 +1948,9 @@ impl crate::Mail {
         listed.into_iter().map(|(_, calendar)| calendar).collect()
     }
 
-    /// Each calendar account's calendars switched on the first time its list comes: the mail
-    /// account's primary and the ones Google shows; another account's primary alone, as signing it
-    /// in does.
+    /// Switches on each calendar account's calendars the first time its list comes. For the mail
+    /// account that's its primary and the ones Google shows, and for another account its primary
+    /// alone, as signing it in does.
     fn calendar_enable_by_default(&mut self, calendars: &[AccountCalendar]) {
         let email = self.account.email().to_owned();
         let settings = self.account.settings();
@@ -1976,8 +1979,8 @@ impl crate::Mail {
         }
     }
 
-    /// ⌘D with the right pane's form open: the keyboard goes from the mail to the form (the field
-    /// it left), from the form to a popped-out draft if there is one, else back to the mail, and
+    /// ⌘D with the right pane's form open. The keyboard goes from the mail to the form (the field
+    /// it left), from the form to a popped-out draft if there is one or else back to the mail, and
     /// from the draft to the mail.
     fn calendar_cycle_focus(&mut self) {
         let popout = self.popout_focus();
@@ -1996,8 +1999,8 @@ impl crate::Mail {
         }
     }
 
-    /// A key in a calendar row's colour picker: the calendar takes the colour at once, and Enter or
-    /// Escape closes it, Escape putting back the colour it opened with.
+    /// A key in a calendar row's colour picker. The calendar takes the colour at once, and Enter or
+    /// Escape closes the picker, with Escape putting back the colour it opened with.
     fn calendar_picker_key(&mut self, key: exo_ui::PickerKey) {
         let Some((id, start)) = self
             .calendar
@@ -2157,7 +2160,7 @@ pub(crate) struct FormState {
     create: bool,
     all_day: bool,
     meet: bool,
-    /// About has the keyboard: the formatting keys that apply to it, by their place in
+    /// While About has the keyboard, the formatting keys that apply to it, by their place in
     /// [`FormatCommand::ALL`], and whether the editor takes Escape and Tab.
     about: Option<(u16, bool, bool)>,
 }
@@ -2183,7 +2186,8 @@ pub(crate) struct State {
     weekends: bool,
 }
 
-/// ⌘D while the right pane's form is open: after compose's, so it wins over the pop-out's own.
+/// ⌘D while the right pane's form is open, registered after compose's so it wins over the
+/// pop-out's own.
 pub(crate) fn register_focus_cycle(commands: &mut Commands<AppAction>) {
     const SECTIONS: &[Region] = &[
         Region::ThreadList,
@@ -2213,8 +2217,8 @@ pub(crate) const PICKER_ROW: usize = 5;
 pub(crate) const PICKER: &[Region] = &[Region::CalendarColorPicker];
 
 /// A colour picker's keys while it has the keyboard in `regions` (every picker's: the
-/// calendars', Notifications' and the Accounts dialog's): the arrows and Tab repeat while held,
-/// ⌘O / ⌘⇧O and ⌘ an arrow don't.
+/// calendars', Notifications' and the Accounts dialog's). The arrows and Tab repeat while held,
+/// but ⌘O / ⌘⇧O and ⌘ with an arrow don't.
 pub(crate) fn register_picker_keys<A: Clone + 'static>(
     commands: &mut Commands<A>,
     regions: &'static [Region],
@@ -2596,8 +2600,8 @@ pub(crate) fn register(
         .follow("SEE_YOUR_WEEK")
         .icon("data/calendar"),
     );
-    // The event details' own keys, registered last to win: Escape closes the alert, the menu or the
-    // details; Enter is the alert's OK.
+    // The event details' own keys, registered last to win. Escape closes the alert, the menu or
+    // the details, and Enter is the alert's OK.
     if let Some(alert) = details {
         commands.add(
             Command::shortcut("EVENT_DETAILS_CLOSE", action(Action::DetailsEscape)).key("esc"),
@@ -2626,8 +2630,8 @@ fn register_form(commands: &mut Commands<AppAction>, form: FormState) {
                 .regions(FORM),
         );
     }
-    // About's formatting keys, as compose's; outside a list Tab and ⇧Tab leave it (the editor
-    // keeps them otherwise, and Tab while it has ghost text or a chosen suggestion).
+    // About's formatting keys, as compose's. Outside a list, Tab and ⇧Tab leave About (the editor
+    // keeps them otherwise, and keeps Tab while it has ghost text or a chosen suggestion).
     let applies = |command: FormatCommand| {
         form.about.is_some_and(|(formats, _, _)| {
             FormatCommand::ALL
@@ -2936,7 +2940,7 @@ fn register_share(commands: &mut Commands<AppAction>) {
     );
 }
 
-/// The week view's keys; `b` waits while the details are up.
+/// The week view's keys. `b` waits while the details are up.
 fn register_week(commands: &mut Commands<AppAction>, details: bool) {
     let action = AppAction::Calendar;
     if !details {

@@ -46,7 +46,7 @@ fn the_field_takes_the_keys_until_escape_closes_it() {
     let before = app.subjects();
     find(&mut app, "agenda");
     assert!(count(&app).is_some());
-    // E would mark the conversation done; the field has the keyboard.
+    // E would mark the conversation done, but the field has the keyboard.
     app.key(Key::E);
     assert_eq!(app.subjects(), before, "the page got no key");
     app.key(Key::Escape);
@@ -84,7 +84,7 @@ fn the_text_to_find_is_shared_through_the_find_pasteboard() {
         "agenda",
         "typing shares it"
     );
-    // Another app finds something else; coming back adopts it, without searching.
+    // Another app finds something else. Coming back adopts it, without searching.
     "crit".clone_into(&mut pasteboard.lock().expect("lock"));
     app.sync();
     assert_eq!(count(&app), None);
@@ -129,8 +129,8 @@ fn a_match_in_a_body_out_of_view_scrolls_into_view() {
 #[test]
 fn a_match_past_a_widened_columns_edge_scrolls_it_sideways() {
     let mut app = start("find-wide");
-    // A 1200px-wide sale mail whose last column, past the column's right edge,
-    // is a link.
+    // A 1200px-wide sale mail whose last table column is a link, past the right edge of the
+    // message column.
     let html = "<table width=\"1200\" cellpadding=\"0\" cellspacing=\"0\"><tr>\
                 <td width=\"1000\" style=\"height:80px\">Black Friday</td>\
                 <td width=\"200\"><a href=\"https://example.com/deal\" style=\"display:block;height:80px\">Zebracorn deal</a></td>\

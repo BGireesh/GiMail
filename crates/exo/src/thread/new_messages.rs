@@ -1,6 +1,6 @@
-//! The Show New Messages bar: replies that arrived while the thread was open wait behind it, 12px
-//! under the messages, or pinned to the bottom of the column when that's out of view. A click,
-//! Enter on it, or ⇧N shows them.
+//! The Show New Messages bar. Replies that arrived while the thread was open wait behind it. It
+//! sits 12px under the messages, or pinned to the bottom of the column when that spot is out of
+//! view. A click, Enter on it, or ⇧N shows them.
 
 use egui::{Color32, CornerRadius, Rect, Sense, Ui, pos2, vec2};
 use exo_ui::{BoxShadow, Family, Font, KeyTooltip, Placement, TextStyle, motion};
@@ -15,18 +15,18 @@ const INK: Color32 = Color32::from_rgb(0x54, 0xac, 0xdc);
 const PADDING_X: f32 = 12.0;
 const PADDING_TOP: f32 = 8.0;
 const HEIGHT: f32 = 8.0 + 20.0 + 4.0;
-/// The tethered element: the bar less its `margin-top: -1px`. The bar sits `top: 3px` down in
-/// it, from 1px above its top.
+/// The tethered element, which is the bar less its `margin-top: -1px`. The bar sits `top: 3px`
+/// down in it, from 1px above the element's top.
 const TETHERED: f32 = HEIGHT - 1.0;
 const DROP: f32 = 3.0 - 1.0;
 const OFFSET: f32 = 12.0;
-/// `transition: opacity 96ms ease` as it shows; its shadow's `.4s` (hover) and `.2s` (focus)
-/// `cubic-bezier(0.25, 0.46, 0.45, 0.94)`.
+/// `transition: opacity 96ms ease` as it shows. Its shadow eases over `.4s` (hover) and `.2s`
+/// (focus) with `cubic-bezier(0.25, 0.46, 0.45, 0.94)`.
 const FADE: f32 = 0.096;
 const SHADOW_CURVE: motion::CubicBezier = motion::CubicBezier::new(0.25, 0.46, 0.45, 0.94);
 
 /// Paints the bar under the messages, whose end is at `end` on screen, in the column
-/// `messages`; `focused` while it has the keyboard.
+/// `messages`. `focused` is set while the bar has the keyboard.
 /// Returns whether it was clicked.
 pub(super) fn show(ui: &Ui, layout: &Layout, messages: Rect, end: f32, focused: bool) -> bool {
     let ctx = ui.ctx();
@@ -108,7 +108,8 @@ pub(super) fn show(ui: &Ui, layout: &Layout, messages: Rect, end: f32, focused: 
         INK,
         None,
     );
-    // Over the bar, its bottom on the bar's box, shown while it has the keyboard too.
+    // The tooltip sits over the bar, its bottom on the bar's box, and shows while the bar has the
+    // keyboard too.
     KeyTooltip {
         text: LABEL,
         keys: &["shift", "N"],

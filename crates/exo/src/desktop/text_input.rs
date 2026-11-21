@@ -1,14 +1,14 @@
-//! Text macOS inserts with no key behind it: Edit ▸ `Emoji & Symbols` (⌃⌘Space, or the globe
-//! key's E), dictation, and the Character Viewer. They send `insertText:replacementRange:` to the
-//! view that has the keyboard, which is winit's; winit keeps only the text that ends an input
-//! method's composition (marked text), so the rest never reached Exo. Exo's view now hands it to
+//! Text macOS inserts with no key behind it: Edit ▸ `Emoji & Symbols` (⌃⌘Space, or the globe key's
+//! E), dictation, and the Character Viewer. They send `insertText:replacementRange:` to the view
+//! that has the keyboard, which is winit's. winit keeps only the text that ends an input method's
+//! composition (marked text), so the rest never reached Exo. Exo's view now hands the rest to
 //! whatever has the keyboard, as typed text ([`super::Launcher::text`]), and leaves winit
-//! everything a key press or a composition inserts, which reaches egui as it always did.
+//! everything that a key press or a composition inserts, which reaches egui as it always did.
 //!
-//! The same `keyDown:` hands on ⌘V when the clipboard has no text (a screenshot, files copied in
-//! Finder): egui-winit turns ⌘V into a paste of the clipboard's text and drops the key, so with no
-//! text nothing reached egui, and compose never pasted the image ([`super::Launcher::keystroke`],
-//! as Edit ▸ Paste does).
+//! Exo's `keyDown:` on the same view hands on ⌘V when the clipboard has no text (a screenshot,
+//! files copied in Finder), as Edit ▸ Paste does ([`super::Launcher::keystroke`]). egui-winit turns
+//! ⌘V into a paste of the clipboard's text and drops the key, so with no text nothing reached egui,
+//! and compose never pasted the image.
 
 use std::cell::{Cell, OnceCell};
 use std::sync::OnceLock;
@@ -24,14 +24,14 @@ use super::macos::WINIT_VIEW as VIEW_CLASS;
 type InsertText = unsafe extern "C-unwind" fn(&AnyObject, Sel, &AnyObject, NSRange);
 type KeyDown = unsafe extern "C-unwind" fn(&AnyObject, Sel, &NSEvent);
 
-/// winit's own implementations, which Exo's call on.
+/// winit's own implementations, which Exo's call through to.
 static WINIT_INSERT_TEXT: OnceLock<InsertText> = OnceLock::new();
 static WINIT_KEY_DOWN: OnceLock<KeyDown> = OnceLock::new();
 
 thread_local! {
     /// Where the text goes.
     static LAUNCHER: OnceCell<Launcher> = const { OnceCell::new() };
-    /// winit's view is handling a key press, whose text it reports itself.
+    /// Whether winit's view is handling a key press, whose text winit reports itself.
     static IN_KEY_DOWN: Cell<bool> = const { Cell::new(false) };
 }
 
@@ -67,8 +67,9 @@ pub(super) fn listen(launcher: Launcher) {
     }
 }
 
-/// Points `class`'s own `sel` at `imp`, returning what it was. `None`, and nothing changed, when
-/// the class doesn't define it itself (a superclass's is left alone).
+/// Points the `sel` that `class` defines itself at `imp`, returning the implementation it had.
+/// Returns `None`, and changes nothing, when the class doesn't define `sel` itself (a superclass's
+/// method is left alone).
 ///
 /// # Safety
 /// `imp` has the method's signature.
@@ -82,8 +83,8 @@ unsafe fn replace(class: &AnyClass, sel: Sel, imp: Imp) -> Option<Imp> {
     Some(unsafe { method.set_implementation(imp) })
 }
 
-/// winit's `keyDown:`, noting that a key press is being handled, then ⌘V's keystroke when egui
-/// got nothing of it.
+/// Runs winit's `keyDown:`, noting that a key press is being handled, then hands on ⌘V's keystroke
+/// when egui got nothing from it.
 unsafe extern "C-unwind" fn key_down(view: &AnyObject, sel: Sel, event: &NSEvent) {
     let Some(winit) = WINIT_KEY_DOWN.get() else {
         return;
@@ -101,8 +102,9 @@ unsafe extern "C-unwind" fn key_down(view: &AnyObject, sel: Sel, event: &NSEvent
     }
 }
 
-/// ⌘V or ⇧⌘V, as egui-winit tells them (the key typing `v`, or the V key where the layout types
-/// no Latin letter), while the clipboard holds no text, which egui-winit then hands on as nothing.
+/// ⌘V or ⇧⌘V, recognized as egui-winit does (the key typing `v`, or the V key where the layout
+/// types no Latin letter), while the clipboard holds no text. egui-winit hands such a keystroke on
+/// as nothing.
 fn paste_without_text(event: &NSEvent) -> Option<super::menu::Keystroke> {
     use objc2_app_kit::NSEventModifierFlags;
     /// `kVK_ANSI_V`.
@@ -135,9 +137,9 @@ fn paste_without_text(event: &NSEvent) -> Option<super::menu::Keystroke> {
     })
 }
 
-/// winit's `insertText:replacementRange:`, except for text inserted with no key press behind
-/// it, nothing marked and nothing to replace: that goes to whatever has the keyboard. A
-/// replacement (the accent menu's) still goes to winit, which can't apply one either.
+/// winit's `insertText:replacementRange:`, except for text inserted with no key press behind it,
+/// nothing marked and nothing to replace, which goes to whatever has the keyboard instead. A
+/// replacement (from the accent menu) still goes to winit, which can't apply one either.
 unsafe extern "C-unwind" fn insert_text(
     view: &AnyObject,
     sel: Sel,

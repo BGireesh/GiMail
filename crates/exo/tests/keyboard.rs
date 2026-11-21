@@ -104,7 +104,7 @@ fn unstarring_in_starred_keeps_the_rows_until_the_list_changes() {
     );
     app.key(Key::S);
     assert_eq!(app.subjects(), starred);
-    // Marking it read or unread keeps it too; marking it done dismisses it.
+    // Marking it read or unread keeps it too, but marking it done dismisses it.
     app.press(Key::U, Modifiers::NONE);
     assert_eq!(app.subjects(), starred);
     app.key(Key::E);
@@ -203,8 +203,8 @@ fn going_to_done_and_straight_back_never_shows_inbox_zero() {
 
 #[test]
 fn shifted_g_sequences_go_to_their_lists_through_the_shift_key() {
-    // FastFrame's egui reports Shift as a key of its own, pressed between `g` and `!`; it used
-    // to end the sequence, so `!` opened Mark Spam, `#` trashed and `⇧M` muted.
+    // FastFrame's egui reports Shift as a key of its own, pressed between `g` and `!`. That
+    // press used to end the sequence, so `!` opened Mark Spam, `#` trashed and `⇧M` muted.
     for (key, list) in [
         (Key::Exclamationmark, ListId::Spam),
         (Key::Num3, ListId::Trash),

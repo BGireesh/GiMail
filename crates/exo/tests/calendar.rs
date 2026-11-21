@@ -316,7 +316,8 @@ fn an_answer_given_offline_goes_once_online() {
     );
     app.disconnect();
     app.mail().account().network_changed();
-    // Not settled: offline, the details' guests keep the app busy for longer than a toast shows.
+    // Not settled, because offline the details' guests keep the app busy for longer than a toast
+    // shows.
     let started = std::time::Instant::now();
     while app.mail().status_bar().is_none() && started.elapsed() < std::time::Duration::from_secs(5)
     {
@@ -442,7 +443,7 @@ fn a_new_event_is_held_for_undo_then_sent() {
     let mut app = start("calendar-create");
     app.key(Key::Num2);
     app.settle();
-    // `b`: the next half hour on the week's day, its title focused.
+    // `b` opens the next half hour on the week's day, with its title focused.
     app.key(Key::B);
     assert_eq!(app.mail().calendar_form(), Some(true));
     app.press(Key::Enter, CMD);
@@ -503,7 +504,7 @@ fn the_calendar_field_filters_the_calendars_as_typed_and_enter_takes_one_then_sa
     app.settle();
     app.key(Key::B);
     app.type_text("Standup");
-    // The writable calendars, the primary first: ↓ takes the highlight to the team's, and round
+    // The writable calendars, the primary first. ↓ takes the highlight to the team's, and round
     // to the primary again.
     palette(&mut app, "change calendar");
     app.key(Key::ArrowDown);
@@ -517,7 +518,7 @@ fn the_calendar_field_filters_the_calendars_as_typed_and_enter_takes_one_then_sa
         app.mail().calendar_form_calendar(),
         Some("maya@brightmoor.co")
     );
-    // What's typed that matches nothing leaves the field as it is; Escape empties it and the
+    // What's typed that matches nothing leaves the field as it is. Escape empties it and the
     // field keeps the keyboard.
     palette(&mut app, "change calendar");
     app.type_text("zzz");
@@ -541,8 +542,8 @@ fn the_calendar_field_filters_the_calendars_as_typed_and_enter_takes_one_then_sa
     );
 }
 
-/// Presses `key` and runs the frames it takes, without settling: offline, sync's retries keep
-/// the app busy for longer than a toast shows.
+/// Presses `key` and runs the frames it takes, without settling, because offline, sync's retries
+/// keep the app busy for longer than a toast shows.
 fn press_unsettled(app: &mut Fixture, key: Key, modifiers: Modifiers) {
     for pressed in [true, false] {
         app.harness.input_mut().events.push(Event::Key {
@@ -591,7 +592,7 @@ fn an_event_made_offline_waits_through_a_quit_and_goes_once_online() {
         );
     }
     // Past the hold, still offline, Undo on the toast (it stays while hovered) takes the last
-    // back: it hasn't gone.
+    // back, because it hasn't gone.
     std::thread::sleep(std::time::Duration::from_millis(10_500));
     app.harness.run_steps(2);
     press_unsettled(&mut app, Key::Z, Modifiers::NONE);
@@ -607,7 +608,7 @@ fn an_event_made_offline_waits_through_a_quit_and_goes_once_online() {
         "{shown:?}"
     );
 
-    // Quit offline, and open again online: the event Calendar didn't get goes then.
+    // Quit offline and open again online, and the event Calendar didn't get goes then.
     app.reconnect();
     app.relaunch();
     app.key(Key::Num2);
@@ -670,7 +671,7 @@ fn an_event_is_edited_moved_and_deleted() {
     app.key(Key::Num2);
     app.settle();
     let thursday = date(2026, 11, 19);
-    // A double click opens my dinner's form, the title focused.
+    // A double click opens my dinner's form, with the title focused.
     double_click(&mut app, at(4, 19.8));
     assert_eq!(app.mail().calendar_form(), Some(false));
     app.press(Key::End, Modifiers::NONE);
@@ -683,7 +684,7 @@ fn an_event_is_edited_moved_and_deleted() {
         shown_on(&app, thursday)
     );
 
-    // Dragging a recurring event of mine asks which events; Enter takes this one.
+    // Dragging a recurring event of mine asks which events. Enter takes this one.
     let wednesday = date(2026, 11, 18);
     drag(&mut app, at(3, 9.5), at(3, 10.5));
     assert_eq!(app.mail().calendar_prompt(), Some("Edit recurring event"));
@@ -695,7 +696,7 @@ fn an_event_is_edited_moved_and_deleted() {
         shown_on(&app, wednesday)
     );
 
-    // Deleting the weekly sync: which events, then whether to tell its guests.
+    // Deleting the weekly sync asks which events, then whether to tell its guests.
     let monday = date(2026, 11, 16);
     app.click(at(1, 10.2));
     assert_eq!(app.mail().calendar_details(), Some(false));
@@ -737,7 +738,7 @@ fn an_edited_events_date_times_and_zone_are_typed() {
     app.settle();
     double_click(&mut app, at(4, 19.8));
     assert_eq!(app.mail().calendar_form(), Some(false));
-    // `Edit Date & Time` takes the keyboard to the start's date; Enter takes a typed date and
+    // `Edit Date & Time` takes the keyboard to the start's date. Enter takes a typed date and
     // moves on to the start's time, then its end.
     palette(&mut app, "edit date");
     app.type_text("nov 20");
@@ -782,7 +783,8 @@ fn an_edited_events_date_times_and_zone_are_typed() {
 #[test]
 fn who_first_offers_everybody_in_the_conversation() {
     let mut app = start("calendar-everybody");
-    // The first conversation open, a new event's Who empty: its people, once each, me left out.
+    // With the first conversation open and a new event's Who empty, its people show, each once
+    // and without me.
     app.key(Key::Enter);
     app.settle();
     app.key(Key::B);
@@ -855,7 +857,7 @@ fn tab_answers_an_invite_and_the_card_reads_the_answer_back() {
     app.key(Key::Enter);
     app.settle();
     assert_eq!(app.mail().invite_answer(), Some("needsAction"));
-    // Tab takes the card's first button, → the next; Enter answers with it.
+    // Tab takes the card's first button and → the next. Enter answers with it.
     app.key(Key::Tab);
     app.key(Key::ArrowRight);
     app.key(Key::Enter);
@@ -923,7 +925,8 @@ fn find_time_offers_free_slots_and_a_slot_makes_the_meeting() {
     let mut app = start("calendar-find-time");
     app.key(Key::Num2);
     app.settle();
-    // `m`: Meet's input; Lena from the suggestions, then Enter finds time.
+    // `m` takes the keyboard to Meet's input. Lena comes from the suggestions, then Enter finds
+    // time.
     app.key(Key::M);
     app.type_text("lena");
     app.key(Key::Enter);
@@ -937,7 +940,8 @@ fn find_time_offers_free_slots_and_a_slot_makes_the_meeting() {
         (title.as_str(), guests),
         ("Maya / Lena", vec!["lena@brightmoor.co".to_owned()])
     );
-    // Escape asks before the meeting goes (it has a title and a guest); then Escape ends Find Time.
+    // Escape asks before the meeting goes (it has a title and a guest), then Escape ends Find
+    // Time.
     app.key(Key::Escape);
     assert_eq!(app.mail().calendar_prompt(), Some("Discard this event?"));
     app.key(Key::Enter);
@@ -951,7 +955,7 @@ fn the_right_pane_s_form_gives_the_keyboard_to_the_mail_and_cmd_d_takes_it_back(
     let mut app = start("calendar-form-away");
     app.key(Key::B);
     app.type_text("Lunch");
-    // A click in the list: the mail has the keyboard, the form says how to come back.
+    // After a click in the list, the mail has the keyboard and the form says how to come back.
     app.click(Pos2::new(300.0, 250.0));
     assert_eq!(app.mail().calendar_form_away(), Some(true));
     app.type_text("x");
@@ -963,7 +967,7 @@ fn the_right_pane_s_form_gives_the_keyboard_to_the_mail_and_cmd_d_takes_it_back(
         Some("Lunch"),
         "the title doesn't take the mail's keys"
     );
-    // ⌘D: back to the title, where typing goes on.
+    // ⌘D goes back to the title, where typing goes on.
     app.press(Key::D, CMD);
     assert_eq!(app.mail().calendar_form_away(), Some(false));
     app.type_text("!");
@@ -974,7 +978,7 @@ fn the_right_pane_s_form_gives_the_keyboard_to_the_mail_and_cmd_d_takes_it_back(
         "{:?}",
         app.mail().calendar_form_values()
     );
-    // ⌘D again: the mail's.
+    // ⌘D again gives the keyboard to the mail.
     app.press(Key::D, CMD);
     assert_eq!(app.mail().calendar_form_away(), Some(true));
 }
@@ -1110,7 +1114,7 @@ fn repeat_s_custom_dialog_makes_a_rule_and_escape_closes_it() {
         app.key(Key::ArrowDown);
     }
     app.key(Key::Enter);
-    // ⌘Enter is Done: weekly on the draft's day, said as a custom rule is.
+    // ⌘Enter is Done. The rule is weekly on the draft's day, said as a custom rule is.
     app.press(Key::Enter, CMD);
     assert_eq!(
         app.mail().calendar_form_repeat(),
@@ -1160,7 +1164,7 @@ fn this_and_following_events_take_an_edit_as_a_new_series() {
         "{:?}",
         shown_on(&app, friday)
     );
-    // Past the hold: the series ends before Wednesday's, and a new one takes over from it.
+    // Past the hold, the series ends before Wednesday's, and a new one takes over from there.
     std::thread::sleep(std::time::Duration::from_millis(10_500));
     app.wait(1.0);
     let gmail = app.gmail();
@@ -1312,7 +1316,7 @@ fn a_calendar_s_colour_picker_takes_the_keyboard() {
         app.mail().calendar_week().is_some(),
         "Escape closed the picker, not the week"
     );
-    // Enter keeps a new one and closes the picker; ← then is the week's again.
+    // Enter keeps a new one and closes the picker, after which ← is the week's again.
     app.click(egui::pos2(1256.0, 501.0));
     app.key(Key::ArrowLeft);
     let picked = color(&app);
@@ -1327,7 +1331,7 @@ fn a_calendar_s_menu_picks_its_colour() {
     let mut app = start("calendar-recolor");
     app.key(Key::Num2);
     app.settle();
-    // `maya@brightmoor.co`'s row: its `…` shows on hover, and opens the 25 colours.
+    // On `maya@brightmoor.co`'s row, the `…` shows on hover and opens the 25 colours.
     app.hover(egui::pos2(1100.0, 501.0));
     app.click(egui::pos2(1256.0, 501.0));
     // Red, the first, at the picker's top left (its box 16px past the button, 8px under it).

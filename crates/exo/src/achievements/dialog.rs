@@ -1,5 +1,5 @@
-//! The Achievements dialog: a banner with the category's ribbon over its statistic cards, the main
-//! view's cards opening their category, and a back button out of one.
+//! The Achievements dialog, with a banner showing the category's ribbon over its statistic cards.
+//! In the main view each card opens its category, and a category has a back button out of it.
 //!
 //! The ribbons' art is the system's emoji.
 
@@ -37,13 +37,13 @@ const BACKDROP: Color32 = Color32::from_black_alpha(128);
 /// What a frame of the dialog asked for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Asked {
-    /// A click outside: close it.
+    /// A click outside, which closes it.
     Close,
     /// A card in the main view, or the back button (to [`View::Main`]).
     Show(View),
 }
 
-/// What the dialog shows: the counts on `today`.
+/// What the dialog shows, which is the counts as of `today`.
 pub struct Shown<'a> {
     pub view: View,
     pub statistics: &'a Statistics,
@@ -73,7 +73,7 @@ pub fn show(ctx: &Context, area: Rect, open: bool, shown: &Shown<'_>) -> Option<
         .inner
 }
 
-/// A card's colors: Snow's or Carbon's.
+/// Picks a card's color for Snow or for Carbon.
 fn pick(theme: Theme, snow: Color32, carbon: Color32) -> Color32 {
     if theme == Theme::Snow { snow } else { carbon }
 }
@@ -94,8 +94,8 @@ fn card(ui: &mut Ui, area: Rect, shown: &Shown<'_>) -> Option<Asked> {
         .iter()
         .map(|row| row.height(&ctx, text_width))
         .collect();
-    // The Inbox Zero and Send views' cards have 16px under them; the dialog's foot is `32px 0 16px`
-    // under the main view's cards and in Carbon, else `22px 0 24px`.
+    // The cards in the Inbox Zero and Send views have 16px under them. The dialog's foot is
+    // `32px 0 16px` under the main view's cards and in Carbon, and `22px 0 24px` otherwise.
     let after_cards = if matches!(shown.view, View::InboxZero | View::Send) {
         16.0
     } else {
@@ -113,7 +113,8 @@ fn card(ui: &mut Ui, area: Rect, shown: &Shown<'_>) -> Option<Asked> {
     ));
     ui.allocate_rect(modal, Sense::click());
     let painter = ui.painter().with_clip_rect(modal);
-    // `box-shadow: 0 15px 75px 0 rgba(0,0,0,.18)`; `#fafcff`, `#1f1e1d` in Carbon.
+    // `box-shadow: 0 15px 75px 0 rgba(0,0,0,.18)` under a `#fafcff` background (`#1f1e1d` in
+    // Carbon).
     BoxShadow::new([0.0, 15.0], 75.0, 0.0, Color32::from_black_alpha(46)).paint(
         ui.painter(),
         modal,
@@ -132,7 +133,7 @@ fn card(ui: &mut Ui, area: Rect, shown: &Shown<'_>) -> Option<Asked> {
         theme,
     );
 
-    // The ribbon: centered, its middle 60% down the banner.
+    // The ribbon is centered, with its middle 60% down the banner.
     let ribbon = match shown.view {
         View::Main => "💎",
         View::InboxZero => "🔥",
@@ -197,8 +198,8 @@ fn card(ui: &mut Ui, area: Rect, shown: &Shown<'_>) -> Option<Asked> {
     asked
 }
 
-/// The value's color for the card at `index` of `view`: the main view's first, second and
-/// third in Inbox Zero's, Mark Done's and Send's; a category's all in its own.
+/// The value's color for the card at `index` of `view`. The main view's first, second and third
+/// cards take the colors of Inbox Zero, Mark Done and Send. A category's cards all take its own.
 fn accent(view: View, index: usize, theme: Theme) -> Color32 {
     let orange = pick(
         theme,
@@ -222,8 +223,8 @@ fn accent(view: View, index: usize, theme: Theme) -> Color32 {
     }
 }
 
-/// The back button: a 40px circle, white (`#1f1e1d` in Carbon), its 14px arrow 13px in and 12.5px
-/// down. Returns whether it was clicked.
+/// The back button, a 40px white circle (`#1f1e1d` in Carbon) with its 14px arrow 13px in and
+/// 12.5px down. Returns whether it was clicked.
 fn back_button(ui: &Ui, painter: &Painter, at: Pos2, theme: Theme) -> bool {
     let rect = Rect::from_min_size(at, Vec2::splat(40.0));
     let response = ui
@@ -259,8 +260,8 @@ fn back_button(ui: &Ui, painter: &Painter, at: Pos2, theme: Theme) -> bool {
     response.clicked()
 }
 
-/// The banner's background: a 115° gradient under a radial veil at its bottom middle and a fade
-/// into the dialog over its last 96px.
+/// The banner's background, a 115° gradient under two layers: a radial veil at its bottom middle,
+/// and a fade into the dialog over its last 96px.
 fn paint_banner(painter: &Painter, rect: Rect, theme: Theme) {
     let rgba = |r: u8, g: u8, b: u8, a: f32| {
         [
@@ -294,8 +295,8 @@ fn paint_banner(painter: &Painter, rect: Rect, theme: Theme) {
     let color_at = |point: Pos2| {
         let t = (point - rect.center()).dot(direction) / length + 0.5;
         let mut color = gradient::ramp(stops, t);
-        // `radial-gradient(80.67px 51.3px at 50% 100%, #fcfaf7 30%, rgba(252,250,247,.2) 72%)`;
-        // Carbon's `ellipse 270px 180px`, `#1f1e1d 35%, rgba(31,30,29,.88) 75%, transparent`.
+        // `radial-gradient(80.67px 51.3px at 50% 100%, #fcfaf7 30%, rgba(252,250,247,.2) 72%)`.
+        // In Carbon, `ellipse 270px 180px` with `#1f1e1d 35%, rgba(31,30,29,.88) 75%, transparent`.
         let (radii, veil): (Vec2, &[(f32, [f32; 4])]) = if snow {
             (
                 vec2(80.67, 51.3),
@@ -326,8 +327,8 @@ fn paint_banner(painter: &Painter, rect: Rect, theme: Theme) {
             (color[2] * 255.0).round() as u8,
         )
     };
-    // A grid fine enough that interpolating between its vertices doesn't show; its top rows a
-    // pixel apart, narrowed to the dialog's rounded corners.
+    // A grid fine enough that interpolating between its vertices doesn't show. Its top rows are a
+    // pixel apart and narrowed to the dialog's rounded corners.
     let radius = f32::from(RADIUS);
     let columns = 46;
     let mut ys: Vec<f32> = (0..RADIUS).map(f32::from).collect();
@@ -519,8 +520,8 @@ impl Row {
         SUBHEADER.wrap_pretty(ctx, &text, width)
     }
 
-    /// `padding: 16px 0`, less the separator's pixel; the content `margin-top: 4px`, under a
-    /// 32px header.
+    /// `padding: 16px 0`, less the separator's pixel, around content at `margin-top: 4px` that
+    /// starts with a 32px header.
     fn height(&self, ctx: &Context, width: f32) -> f32 {
         16.0 + 4.0
             + HEADER.line_height
@@ -580,7 +581,8 @@ impl Row {
             .peekable();
         for line in self.lines(ctx, width) {
             let mut x = rect.left();
-            // Each line's characters in the subheader's order, past the spaces it broke at.
+            // Walks each line's characters in the subheader's order, skipping the spaces the line
+            // broke at.
             while runs
                 .peek()
                 .is_some_and(|(c, _)| c.is_whitespace() && !line.starts_with(' '))
@@ -602,8 +604,8 @@ impl Row {
             style(segment_bold).paint_line(painter, pos2(x, y), &segment, ink, None);
             y += SUBHEADER.line_height;
         }
-        // The number, centered in its column (`text-align: center`): 120px in the main view,
-        // at least 50px in a category's.
+        // The number is centered in its column (`text-align: center`), which is 120px wide in the
+        // main view and at least 50px in a category's.
         let column = Rect::from_min_size(
             pos2(rect.right() - numbers, rect.top() + 16.0),
             vec2(numbers, VALUE.line_height + UNIT.line_height),

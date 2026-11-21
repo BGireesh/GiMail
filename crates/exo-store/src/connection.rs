@@ -1,10 +1,11 @@
 //! Whether Exo can reach Gmail, as the offline bar tells it.
 //!
 //! A service is marked down when a call to it finally fails, and up again when a check of it
-//! gets through: every Gmail call reports how it ended, one that gets through counts as a check,
-//! [`Store::check_connection`] is the poller's check and [`Store::network_changed`] the OS's
-//! word that the network changed. A service isn't believed back until it has been down a while,
-//! nor soon after it last came back ([`Debounce`]), so a flaky network doesn't flicker the bar.
+//! gets through. Every Gmail call reports how it ended, and one that gets through counts as a
+//! check. [`Store::check_connection`] is the poller's check, and [`Store::network_changed`] is
+//! the OS's word that the network changed. A service isn't believed back until it has been down
+//! a while, nor soon after it last came back ([`Debounce`]), so a flaky network doesn't flicker
+//! the bar.
 //!
 //! [`Store::check_connection`]: crate::Store::check_connection
 //! [`Store::network_changed`]: crate::Store::network_changed
@@ -16,11 +17,11 @@ use std::time::Duration;
 use tokio::sync::watch;
 use tokio::time::Instant;
 
-/// What's keeping Exo from Gmail: the service the offline bar names.
+/// The service the offline bar names as keeping Exo from Gmail.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Outage {
-    /// The network is down: a check after the OS reported a change got no answer, or several
-    /// things are down at once.
+    /// The network is down. Either a check after the OS reported a change got no answer, or
+    /// several things are down at once.
     Offline,
     /// Google's sign-in didn't answer a token refresh.
     Auth,
@@ -45,7 +46,7 @@ impl Outage {
 /// The connection to Gmail as the offline bar shows it. `Default` is online.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Connection {
-    /// What's down, if anything; when several things are, the one the bar names.
+    /// What's down, if anything. When several things are, this is the one the bar names.
     pub outage: Option<Outage>,
     /// The disk holding the store had less than 10 MB free when the connection last changed
     /// while down.
@@ -60,9 +61,9 @@ impl Connection {
     }
 }
 
-/// How sure Exo must be that something that went down is back: it has been down at least
-/// `down`, and it didn't come back less than `bounce` ago: 10 s and 60 s unless tests shorten
-/// them.
+/// How sure Exo must be that something that went down is back. It must have been down at least
+/// `down` and must not have come back less than `bounce` ago. These are 10 s and 60 s unless
+/// tests shorten them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Debounce {
     /// The least an outage lasts.
@@ -83,7 +84,7 @@ impl Default for Debounce {
 /// Less free space than this, and the bar blames the disk.
 const LOW_DISK: u64 = 10 << 20;
 
-/// The account's connection: what's down, shared with whoever watches it.
+/// The account's connection, which tracks what's down and shares it with whoever watches.
 pub(crate) struct Network {
     state: Mutex<State>,
     sender: watch::Sender<Connection>,
@@ -114,8 +115,9 @@ impl Network {
         }
     }
 
-    /// A call got through: what's been down long enough is back. A Gmail call (`gmail`) answers
-    /// for every service; another Google API's only for the network and Google's sign-in.
+    /// A call got through, so what's been down long enough is back. A Gmail call (`gmail`)
+    /// answers for every service. A call to another Google API answers only for the network and
+    /// Google's sign-in.
     pub fn reached(&self, gmail: bool) {
         let services: &[Outage] = if gmail {
             &Outage::ALL
@@ -145,7 +147,7 @@ impl Network {
     }
 }
 
-/// Each outage: since when it's down, and when it last came back.
+/// For each outage, when it went down and when it last came back.
 #[derive(Debug, Default)]
 struct State {
     services: [Service; Outage::ALL.len()],
@@ -158,8 +160,8 @@ struct Service {
 }
 
 impl State {
-    /// Marks `outage` down at `now`; whether that changed anything. Already down, it stays down
-    /// since then.
+    /// Marks `outage` down at `now`, and returns whether that changed anything. An outage that's
+    /// already down keeps the time it first went down.
     fn down(&mut self, outage: Outage, now: Instant) -> bool {
         let service = &mut self.services[outage as usize];
         let changed = service.down_since.is_none();
@@ -167,8 +169,8 @@ impl State {
         changed
     }
 
-    /// Brings back, at `now`, those of `services` that have been down for `debounce.down` and
-    /// didn't come back in the last `debounce.bounce`; whether any did.
+    /// Brings back, at `now`, the `services` that have been down for `debounce.down` and didn't
+    /// come back in the last `debounce.bounce`. Returns whether any came back.
     fn reached(&mut self, services: &[Outage], now: Instant, debounce: Debounce) -> bool {
         let mut changed = false;
         for outage in services {
@@ -190,8 +192,8 @@ impl State {
         changed
     }
 
-    /// The outage the bar names: the only one down, or with several, a disabled Gmail over
-    /// everything else, which together read as being offline.
+    /// The outage the bar names. With one down, it's that one. With several, a disabled Gmail
+    /// wins, and any other mix reads as being offline.
     fn shown(&self) -> Option<Outage> {
         let mut down = Outage::ALL
             .into_iter()
@@ -226,7 +228,7 @@ fn disk_low(dir: &Path) -> bool {
     }
     // SAFETY: `statvfs` returned 0, so it filled `stats`.
     let stats = unsafe { stats.assume_init() };
-    // Widened past either field, whose widths differ between platforms.
+    // Widen past both fields, because their widths differ between platforms.
     u128::from(stats.f_bavail) * u128::from(stats.f_frsize) < u128::from(LOW_DISK)
 }
 
@@ -279,7 +281,8 @@ mod tests {
         assert!(state.reached(&Outage::ALL, at(start, 10), DEBOUNCE));
         assert_eq!(state.shown(), None);
 
-        // Down again 20 s later and answering 10 s after that: it came back too recently.
+        // It goes down again 20 s later and answers 10 s after that, but it came back too
+        // recently.
         state.down(Outage::Gmail, at(start, 30));
         assert!(
             !state.reached(&Outage::ALL, at(start, 45), DEBOUNCE),

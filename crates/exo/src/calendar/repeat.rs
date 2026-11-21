@@ -13,7 +13,7 @@ pub enum Preset {
     None,
     Daily,
     Weekly,
-    /// `Monthly on the {nth} {Weekday}`: the anchor's week, or the last.
+    /// `Monthly on the {nth} {Weekday}`, for the anchor's week or the last.
     Monthly(Option<Nth>),
     Annually,
     Weekdays,
@@ -21,7 +21,7 @@ pub enum Preset {
 }
 
 impl Preset {
-    /// Its rule: none for `Does not repeat` and `Custom`.
+    /// Its rule, which is none for `Does not repeat` and `Custom`.
     pub fn rule(self) -> Option<Recurrence> {
         let frequency = match self {
             Preset::None | Preset::Custom => return None,
@@ -331,7 +331,7 @@ impl Custom {
         }
     }
 
-    /// Done is enabled: a weekly rule has a day.
+    /// Whether Done is enabled. A weekly rule needs a day.
     fn can_finish(&self) -> bool {
         self.unit != Unit::Week || !self.days.is_empty()
     }
@@ -366,7 +366,7 @@ impl Custom {
         })
     }
 
-    /// Escape: an open list or the date's picker first. Returns whether something closed.
+    /// Escape closes an open list or the date's picker first. Returns whether something closed.
     pub fn escape(&mut self) -> bool {
         self.open.take().is_some()
     }
@@ -394,13 +394,14 @@ impl Custom {
         let palette = exo_ui::palette(ctx);
         let carbon = palette.theme == exo_ui::Theme::Carbon;
         let mut action = None;
-        // Over the form and its modal, as the prompts are; what it opens stays on top of it.
+        // Over the form and its modal, as the prompts are. What the dialog opens stays on top of
+        // it.
         egui::Area::new(exo_ui::id(ctx, "calendar-repeat-backdrop"))
             .order(egui::Order::Tooltip)
             .fixed_pos(page.min)
             .constrain(false)
             .show(ctx, |ui| {
-                // The backdrop; a click on it cancels.
+                // The backdrop, where a click cancels.
                 let backdrop = ui.allocate_rect(page, Sense::click());
                 ui.painter()
                     .rect_filled(page, 0.0, Color32::from_black_alpha(128));
@@ -520,7 +521,8 @@ impl Custom {
 
                 // Weekly: On [Sun] … [Sat], from the week's first day.
                 if self.unit == Unit::Week {
-                    // The row's items centred (`align-items: center`), the prefix nudged `top: 1px`.
+                    // The row's items are centred (`align-items: center`), and the prefix is
+                    // nudged `top: 1px`.
                     FIELD.paint_line(&painter, pos2(left, y + CHIP_TEXT_TOP), "On", ink, None);
                     let first = DAYS
                         .iter()
@@ -701,8 +703,8 @@ impl Custom {
                 // Cancel, Done, nudged `top: 3px`.
                 let footer_top = card.bottom() - FOOTER + 16.0 + 3.0;
                 let mut right = card.right() - 20.0;
-                // Classic's uppercase dialog buttons; on Carbon's dark card Cancel is white at `.4`
-                // and Done keeps its white label.
+                // Classic's uppercase dialog buttons. On Carbon's dark card, Cancel is white at
+                // `.4` and Done keeps its white label.
                 for (label, primary) in [("Done", true), ("Cancel", false)] {
                     let kind = if primary {
                         exo_ui::ActionKind::Primary
@@ -738,8 +740,8 @@ impl Custom {
                     let labels: Vec<&str> = items.iter().map(String::as_str).collect();
                     let id = exo_ui::id(ctx, ("calendar-repeat-list", which as u8));
                     ctx.move_to_top(egui::LayerId::new(egui::Order::Tooltip, id));
-                    // The frequency list (the monthly pattern list): padded `4px 0`, names 12px (20px)
-                    // in, at least 35px (128px) wide.
+                    // The frequency list (the monthly pattern list) is padded `4px 0`, with names
+                    // 12px (20px) in, and is at least 35px (128px) wide.
                     let (cell, min) = if which == Open::Frequency {
                         (12.0, 35.0 + 24.0)
                     } else {
@@ -803,7 +805,8 @@ const BODY_BOTTOM: f32 = 8.0;
 const FIELDS_TOP: f32 = 24.0;
 const FIELDS_GAP: f32 = 12.0;
 const ROW: f32 = 24.0;
-/// A row's text line: at its top, nudged `top: 1px`; a day's label centred in its 24px.
+/// A row's text line sits at its top, nudged `top: 1px`, and a day's label is centred in its
+/// 24px.
 const TEXT_TOP: f32 = 1.0;
 const CHIP_TEXT_TOP: f32 = 5.0;
 /// The Ends column: three 16px lines 8px apart.
@@ -822,7 +825,7 @@ const RADIO: f32 = 12.0;
 const TITLE: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 16.0, 24.0);
 const FIELD: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 12.0, 16.0);
 
-/// A Classic radio, its ring white at `.4` in Carbon.
+/// A Classic radio, with its ring white at `.4` in Carbon.
 fn paint_radio(painter: &egui::Painter, at: Pos2, selected: bool, carbon: bool) {
     if !carbon {
         return exo_ui::paint_radio(painter, at, selected);
@@ -862,8 +865,8 @@ fn dropdown(ui: &egui::Ui, id: Id, at: Pos2, value: &str, carbon: bool) -> egui:
         .on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
-/// A count's input: a centred number on a hairline, `#aeb1dd` and 2px focused, `.4` while its
-/// option isn't picked.
+/// A count's input: a centred number on a hairline (`#aeb1dd` and 2px while focused), at `.4`
+/// while its option isn't picked.
 fn number_input(
     ui: &mut egui::Ui,
     id: Id,
@@ -930,8 +933,8 @@ fn date_input(
     response
 }
 
-/// An input's bottom border under its line: `rgba(0,0,0,.1)` (Carbon's too), 2px `#aeb1dd`
-/// focused.
+/// An input's bottom border under its line: `rgba(0,0,0,.1)` (Carbon's too), or 2px `#aeb1dd`
+/// while focused.
 fn hairline(ui: &egui::Ui, line: Rect, focused: bool) {
     let (height, color) = if focused {
         (2.0, Color32::from_rgb(0xae, 0xb1, 0xdd))

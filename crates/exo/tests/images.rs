@@ -110,8 +110,8 @@ fn blocking_tracking_pixels_loads_the_images_but_not_the_read_receipt() {
         &server,
     );
     assert_eq!(server.paths(), CONTENT);
-    // Shift-H's header: the eye after From takes the pointer (`cursor: default`) where the
-    // header's text would show the I-beam.
+    // In the header that Shift-H shows, the eye after From takes the pointer (`cursor: default`)
+    // where the header's text would show the I-beam.
     app.press(Key::H, Modifiers::SHIFT);
     assert_eq!(
         app.hover(EYE),

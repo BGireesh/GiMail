@@ -1,6 +1,6 @@
-//! Send later: a draft scheduled for a time stays a Gmail draft, listed in Scheduled and shown in
-//! its thread, until the push sends it then (or at the next launch), dated when it goes. An
-//! `if no reply` send is called off by a reply.
+//! Send later. A draft scheduled for a time stays a Gmail draft, listed in Scheduled and shown in
+//! its thread, until the push sends it at that time (or at the next launch), dated when it goes.
+//! An `if no reply` send is called off by a reply.
 
 mod support;
 
@@ -183,7 +183,7 @@ async fn a_scheduled_message_waits_in_scheduled_as_a_gmail_draft() {
             .exact
     );
 
-    // Its thread shows it as a message to go then, with its body.
+    // Its thread shows it as a message to go at that time, with its body.
     let detail = harness
         .store
         .thread(&thread)
@@ -318,7 +318,7 @@ async fn taking_a_scheduled_send_back_makes_it_a_draft_again() {
     );
 }
 
-/// A reply to `thread`'s last message, scheduled `if no reply` for tomorrow.
+/// A reply to the last message of `thread`, scheduled `if no reply` for tomorrow.
 async fn scheduled_reply(harness: &Harness, thread: &ThreadId, id: &str) -> Draft {
     let detail = harness
         .store
@@ -442,7 +442,7 @@ async fn a_reply_sync_missed_still_calls_it_off_when_due() {
     reply.record.send_later.as_mut().expect("scheduled").at =
         Timestamp::now() + SignedDuration::from_secs(1);
     schedule(&harness, reply).await;
-    // Ann replies while Exo is closed; the push runs before sync at the next launch.
+    // Ann replies while Exo is closed, and the push runs before sync at the next launch.
     harness.deliver(json!({ "from": "Ann <ann@example.com>", "threadId": thread.as_str(), "text": "Actually, never mind" })).await;
     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
     let report = harness.store.push_drafts().await.expect("pushes");
@@ -558,8 +558,8 @@ async fn a_scheduled_reply_with_a_reminder_sets_it_on_the_messages_it_was_schedu
         "in Reminders from scheduling"
     );
 
-    // Ann answers before it goes: the send goes all the same, and the reminder, set on the
-    // messages it was scheduled with, is over, and isn't given again.
+    // Ann answers before it goes. The send goes all the same. The reminder, set on the messages
+    // the reply was scheduled with, is over and isn't given again.
     harness.deliver(json!({ "from": "Ann <ann@example.com>", "threadId": thread.as_str(), "text": "Already on it" })).await;
     harness.store.sync().await.expect("syncs");
     tokio::time::sleep(std::time::Duration::from_secs(2)).await;

@@ -1,10 +1,10 @@
 //! The search query language, as the search bar and Split Inbox read it: the parse tree, the
 //! Gmail query and the local match.
 //!
-//! [`SplitQuery`] is a split's definition: constrained to the inbox, with the validation the New
-//! and Edit dialogs run; free text never matches a split (it can't be matched locally, which the
-//! router treats as no match).
-//! [`SearchQuery`] is what the search bar runs; the local index it's looked up in is
+//! [`SplitQuery`] is a split's definition. It's constrained to the inbox and has the validation
+//! the New and Edit dialogs run. Free text never matches a split, because it can't be matched
+//! locally, which the router treats as no match.
+//! [`SearchQuery`] is what the search bar runs. The local index it's looked up in is in
 //! `crate::search`.
 //!
 //! A few of the parser's and matcher's rules look like slips but are deliberate: a negated
@@ -38,9 +38,9 @@ enum Kind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Token {
     kind: Kind,
-    /// `from`, `subject`, `in`, `is`, `label`…; empty for the kinds without one.
+    /// The operator (`from`, `subject`, `in`, `is`, `label`…), empty for the kinds without one.
     field: String,
-    /// The value with its double quotes removed; `None` for `has:attachment` and `is:shared`,
+    /// The value with its double quotes removed, or `None` for `has:attachment` and `is:shared`,
     /// which carry none.
     value: Option<String>,
     quoted: bool,
@@ -54,7 +54,7 @@ impl Token {
         self.value.as_deref().unwrap_or_default()
     }
 
-    /// The empty text token: what `in:inbox` becomes, and what an empty group simplifies to.
+    /// The empty text token, which `in:inbox` becomes and an empty group simplifies to.
     fn empty() -> Self {
         Self {
             kind: Kind::Text,
@@ -94,11 +94,11 @@ impl Node {
     }
 }
 
-/// The Gmail labels a query can name, by label slug ([`label_slug`]): a split's own `labels`
-/// first, then the account's, then the built-in lists, Inbox, Starred and the Primary category,
-/// each under the slug of its name and of its id; later entries win. Exo's own lists (`Done`,
-/// `Reminders`…) are among the built-in ones, so `important`, `done` and the like resolve to
-/// them.
+/// The Gmail labels a query can name, keyed by label slug ([`label_slug`]). It holds a split's
+/// own `labels` first, then the account's, then the built-in lists, Inbox, Starred and the
+/// Primary category, each under the slug of its name and the slug of its id. Later entries win.
+/// Exo's own lists (`Done`, `Reminders`…) are among the built-in ones, so `important`, `done` and
+/// the like resolve to them.
 #[derive(Debug, Clone, Default)]
 pub struct LabelIndex {
     by_slug: HashMap<String, LabelRef>,
@@ -135,8 +135,8 @@ const BUILTIN_LABELS: [(&str, &str); 17] = [
 ];
 
 impl LabelIndex {
-    /// The index for a split carrying `own` labels, in an account with `account` labels
-    /// (`(id, name)`, Gmail's).
+    /// The index for a split that carries the `own` labels, in an account whose Gmail labels are
+    /// `account` (as `(id, name)`).
     pub fn new<'a>(
         own: impl IntoIterator<Item = LabelRef>,
         account: impl IntoIterator<Item = (&'a str, &'a str)>,
@@ -190,7 +190,8 @@ impl LabelIndex {
     }
 }
 
-/// A label's slug: quotes dropped, `&`, parentheses and whitespace to `-`, lower-cased.
+/// A label's slug: quotes dropped, `&`, parentheses and whitespace turned into `-`, and all of it
+/// lower-cased.
 pub fn label_slug(name: &str) -> String {
     name.chars()
         .filter(|&c| c != '"')
@@ -208,7 +209,8 @@ pub fn label_slug(name: &str) -> String {
 /// Why a query can't define a split: what the alert says, and the offending part.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Invalidity {
-    /// The alert's text (title `Sorry!`), lines separated by `\n`, indentation included.
+    /// The alert's text (its title is `Sorry!`), with lines separated by `\n` and their
+    /// indentation included.
     pub text: String,
     /// The tokens or label names at fault.
     pub problem: String,
@@ -222,8 +224,8 @@ pub struct SplitQuery {
 }
 
 impl SplitQuery {
-    /// Parses `raw` as a split's definition: everything is constrained to `in:inbox`, and a
-    /// bare address means `from:` or `to:` it.
+    /// Parses `raw` as a split's definition. Everything is constrained to `in:inbox`, and a bare
+    /// address means `from:` or `to:` that address.
     pub fn parse(raw: &str) -> Self {
         let mut tree = parse_tree(raw);
         if let Node::And(children, _) | Node::Or(children, _) = &mut tree {
@@ -318,8 +320,8 @@ impl SplitQuery {
             .collect()
     }
 
-    /// The Gmail search for this split, drafts and chats excluded, with `me` spelled out as `me`
-    /// (the account's addresses).
+    /// The Gmail search for this split, with drafts and chats excluded and `me` spelled out as
+    /// the account's addresses (`me`).
     pub fn to_gmail(&self, labels: &LabelIndex, me: &[String]) -> String {
         let body = gmail_query(&self.tree, true, labels, me, None);
         format!("-in:DRAFT -in:CHAT {body}").trim().to_owned()
@@ -347,16 +349,17 @@ impl SplitQuery {
     }
 }
 
-/// Words the index's porter stemming matches other words for (`w1`, `wedding` for `wed`), so
-/// local results are checked for them as typed.
+/// Words for which the index's porter stemming also matches other words (`w1`, `wedding` for
+/// `wed`), so local results are checked for them as typed.
 const STEMMED: [&str; 4] = ["wedding", "news", "university", "universal"];
 
-/// A phrase or word local results are checked for as typed.
+/// A phrase or word that local results are checked for, as typed.
 #[derive(Debug, Clone)]
 pub(crate) struct Recheck {
-    /// The text as a whole word (where it starts and ends with one), ignoring case.
+    /// The text as a whole word, ignoring case. An end of the text only has to fall on a word
+    /// boundary where it is a word character.
     pub regex: Regex,
-    /// A `subject:` operator's: only the subject counts.
+    /// The text came from a `subject:` operator, so only the subject counts.
     pub subject_only: bool,
     /// Results must not have it.
     pub negated: bool,
@@ -374,9 +377,9 @@ pub struct SearchQuery {
 pub struct LastToken {
     /// What it is.
     pub kind: TokenKind,
-    /// Its operator, lower-cased (`from`, `in`, `is`, `label`…); empty for text.
+    /// Its operator, lower-cased (`from`, `in`, `is`, `label`…), or empty for text.
     pub field: String,
-    /// Its value as typed after the operator, without quotes; empty for `has:attachment`.
+    /// Its value as typed after the operator, without quotes, or empty for `has:attachment`.
     pub value: String,
     /// The value was in double quotes.
     pub quoted: bool,
@@ -420,14 +423,14 @@ impl SearchQuery {
             .all(|c| c.is_whitespace() || "-!$%^&*()_+|~=`{}[]:\";'<>?,./\\@#".contains(c))
     }
 
-    /// The Gmail search, drafts and chats excluded, with `me` spelled out as the account's
-    /// addresses and `in:important` as `important`, the Important split's definition.
+    /// The Gmail search, with drafts and chats excluded, `me` spelled out as the account's
+    /// addresses and `in:important` spelled out as `important`, the Important split's definition.
     pub fn to_gmail(&self, labels: &LabelIndex, me: &[String], important: &str) -> String {
         let body = gmail_query(&self.tree, false, labels, me, Some(important));
         format!("-in:DRAFT -in:CHAT {body}").trim().to_owned()
     }
 
-    /// The words and subject phrases a result's subject and snippet show in bold.
+    /// The words and subject phrases that show in bold in a result's subject and snippet.
     pub fn highlightable_tokens(&self) -> Vec<String> {
         fn walk(node: &Node, out: &mut Vec<String>) {
             match node {
@@ -449,9 +452,10 @@ impl SearchQuery {
         out
     }
 
-    /// What local results are checked for again: the quoted phrases and the words the index's
-    /// stemming matches too loosely ([`STEMMED`]), among the words and subject operators. With
-    /// `all`, they are every word there is, and results' highlights are redone with them.
+    /// What local results are checked for again: among the words and subject operators, the
+    /// quoted phrases and the words that the index's stemming matches too loosely ([`STEMMED`]).
+    /// When `all` is true, they are every word there is, and the results' highlights are redone
+    /// with them.
     pub(crate) fn rechecks(&self) -> (Vec<Recheck>, bool) {
         fn walk<'a>(node: &'a Node, out: &mut Vec<&'a Token>) {
             match node {
@@ -506,7 +510,7 @@ impl SearchQuery {
         (rechecks, all)
     }
 
-    /// The values of address operators and words, which results' names show highlighted where
+    /// The values of address operators and words, which are highlighted in results' names where
     /// they match.
     pub fn highlightable_contact_tokens(&self) -> Vec<String> {
         fn walk(node: &Node, out: &mut Vec<String>) {
@@ -528,7 +532,7 @@ impl SearchQuery {
         out
     }
 
-    /// The last token, which autocomplete completes; `None` for an empty query.
+    /// The last token, which autocomplete completes, or `None` for an empty query.
     pub fn last_token(&self) -> Option<LastToken> {
         let mut node = &self.tree;
         while let Node::And(children, _) | Node::Or(children, _) = node {
@@ -554,9 +558,9 @@ impl SearchQuery {
         })
     }
 
-    /// Why a bulk action can't run on this search's results, as the alert says it: a word,
-    /// which Gmail and Exo match differently, or anything else Gmail can't search for as Exo
-    /// means it (Exo's own lists, a label that doesn't exist).
+    /// Why a bulk action can't run on this search's results, in the alert's words. The cause is
+    /// a word, which Gmail and Exo match differently, or anything else that Gmail can't search
+    /// for the way Exo means it (Exo's own lists, a label that doesn't exist).
     pub fn bulk_refusal(&self, labels: &LabelIndex) -> Option<String> {
         let mut invalid = Vec::new();
         invalid_tokens(&self.tree, &mut invalid, false);
@@ -565,7 +569,7 @@ impl SearchQuery {
         }
         Some(match invalid.iter().find(|token| token.kind == Kind::Text) {
             Some(word) => {
-                // At most 20 characters: whitespace collapsed, cut at a word.
+                // At most 20 characters, with whitespace collapsed and the cut made at a word.
                 let value = word.value().split_whitespace().collect::<Vec<_>>().join(" ");
                 let cut = if value.chars().count() <= 20 {
                     value
@@ -579,7 +583,7 @@ impl SearchQuery {
         })
     }
 
-    /// The label ids the query asks for: a result that loses one leaves the results.
+    /// The label ids the query asks for. A result that loses one of them leaves the results.
     pub(crate) fn included_labels(&self, labels: &LabelIndex) -> Vec<String> {
         let mut tokens = Vec::new();
         label_tokens(&self.tree, &mut tokens);
@@ -622,8 +626,8 @@ impl SearchQuery {
         Matcher::search(thread, attachments, labels, me).excludes(&self.tree)
     }
 
-    /// Whether `thread` matches, at thread level: `None` when the query has a token only the
-    /// index can answer (text, headers).
+    /// Whether `thread` matches, at thread level, or `None` when the query has a token that only
+    /// the index can answer (text, headers).
     pub(crate) fn is_match(
         &self,
         thread: &ThreadView,
@@ -639,8 +643,9 @@ impl SearchQuery {
     }
 
     /// The local index lookup for this query. It reads every token as if they were all joined by
-    /// AND (an `OR` query only finds threads matching both sides locally; Gmail's results add the
-    /// rest), and leaves out Trash, Spam and Snippets unless the query names them or `in:all`.
+    /// AND, so an `OR` query only finds threads that match both sides locally, and Gmail's results
+    /// add the rest. It leaves out Trash and Spam unless the query names them or `in:all`, and
+    /// Snippets unless the query names them.
     pub(crate) fn fts(&self, labels: &LabelIndex, me: &[String]) -> Fts {
         let mut tokens: Vec<&Token> = Vec::new();
         let (mut anywhere, mut trash, mut spam, mut snippets) = (false, false, false, false);
@@ -696,11 +701,11 @@ impl SearchQuery {
     }
 }
 
-/// The local index lookup for a [`SearchQuery`]: FTS5 expressions over the whole table (all
-/// must hold, or for a negated one, not hold) and bounds on the thread's date.
+/// The local index lookup for a [`SearchQuery`]: FTS5 expressions over the whole table, and
+/// bounds on the thread's date. Every expression must hold, except a negated one, which must not.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(crate) struct Fts {
-    /// `(negated, expression)`; the first is never negated.
+    /// `(negated, expression)`. The first is never negated.
     pub matches: Vec<(bool, String)>,
     /// `(before, epoch ms)`: `sort < ms` when `before`, else `sort >= ms`.
     pub dates: Vec<(bool, i64)>,
@@ -713,10 +718,10 @@ struct Term {
     text: String,
 }
 
-/// The index's anchor term, which every row has: what an all-negative expression starts from.
+/// The index's anchor term, which every row has, so an all-negative expression starts from it.
 pub(crate) const FTS_ANCHOR: &str = "thread";
 
-/// The terms joined by `AND`/`NOT`, a positive one first.
+/// The terms joined by `AND`/`NOT`, with a positive one first.
 fn full_table_match(mut terms: Vec<Term>) -> String {
     match terms.iter().position(|term| !term.negated) {
         Some(0) => {}
@@ -832,13 +837,13 @@ fn fts_token(
         }),
         Kind::Label => terms.push(column("labels", labels.id(token.value()))),
         Kind::Category => terms.push(column("labels", labels.id(category_label(token).value()))),
-        // Auto Labels, which Exo hasn't got: none to look up.
+        // Exo hasn't got Auto Labels, so there are none to look up.
         Kind::AutoLabel => {}
     }
 }
 
-/// An address the way the index stores it whole: every non-letter replaced by the token
-/// character, so the address is one token.
+/// An address as the index stores it whole, with every non-letter replaced by the token
+/// character so the address is one token.
 pub(crate) fn tokenize_email(email: &str) -> String {
     email
         .chars()
@@ -860,7 +865,7 @@ static EMAIL: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"[^\s<@]+@[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)+").expect("valid regex")
 });
 
-/// The index column for a header or contact field; the parser only produces these.
+/// The index column for a header or contact field. The parser only produces these fields.
 fn fts_column(field: &str) -> &'static str {
     match field {
         "subject" => "subject",
@@ -875,7 +880,7 @@ fn fts_column(field: &str) -> &'static str {
     }
 }
 
-/// A quoted value is a phrase looked up on its own; any other is a column term.
+/// A quoted value is a phrase looked up on its own, and any other value is a column term.
 fn column_or_phrase(column: &str, token: &Token, terms: &mut Vec<Term>, fts: &mut Fts) {
     if token.quoted {
         fts.matches.push((
@@ -891,7 +896,7 @@ fn column_or_phrase(column: &str, token: &Token, terms: &mut Vec<Term>, fts: &mu
     }
 }
 
-/// `column:value`, the value as [`fts5_value`] writes it.
+/// `column:value`, with the value as [`fts5_value`] writes it.
 fn column_term(column: &str, value: &str) -> String {
     format!("{column}:{}", fts5_value(value))
 }
@@ -924,7 +929,7 @@ fn fts5_prefix_or_phrase(value: &str) -> String {
     }
 }
 
-/// An FTS5 string literal, double quotes doubled.
+/// An FTS5 string literal, with its double quotes doubled.
 fn fts5_phrase(value: &str) -> String {
     format!("\"{}\"", value.replace('"', "\"\""))
 }
@@ -1066,7 +1071,7 @@ fn has_non_alphanumeric(value: &str) -> bool {
     value.chars().any(|c| !c.is_ascii_alphanumeric())
 }
 
-/// Whether a yes/no value says yes: it starts with `yes` or contains `true`.
+/// Whether a yes/no value says yes, meaning it starts with `yes` or contains `true`.
 fn says_yes(value: &str) -> bool {
     value.starts_with("yes") || value.contains("true")
 }
@@ -1233,7 +1238,7 @@ fn parse_leaf(text: &str, negated: bool) -> Token {
                 .iter()
                 .any(|category| lower == format!("category_{category}"))
         {
-            // The prefix goes whatever its case; the name keeps its own.
+            // The prefix goes whatever its case, and the name keeps its own case.
             let name = value["category_".len()..].to_owned();
             return Token {
                 kind: Kind::Category,
@@ -1302,8 +1307,8 @@ const CATEGORIES: [&str; 8] = [
     "personal",
 ];
 
-/// Constrains a split below its top level: an explicit `in:inbox` is dropped (the top adds its
-/// own).
+/// Constrains a split below its top level, where an explicit `in:inbox` is dropped because the
+/// top level adds its own.
 fn constrain_to_inbox(node: Node) -> Node {
     match node {
         Node::And(children, negated) => Node::And(
@@ -1323,7 +1328,7 @@ fn constrain_to_inbox(node: Node) -> Node {
     }
 }
 
-/// A bare address is `from:` it or `to:` it.
+/// Rewrites a bare address as `from:` or `to:` that address.
 fn convert_email_addresses(node: &mut Node) {
     static ADDRESS: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(r"[^\s<@]+@[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)+").expect("valid regex")
@@ -1349,7 +1354,7 @@ fn convert_email_addresses(node: &mut Node) {
     }
 }
 
-/// Nested groups of the same kind flattened, empty text dropped, one-child groups unwrapped.
+/// Flattens nested groups of the same kind, drops empty text and unwraps one-child groups.
 fn simplify(node: Node) -> Node {
     let (children, negated, is_and) = match node {
         Node::And(children, negated) => (children, negated, true),
@@ -1392,7 +1397,7 @@ fn simplify(node: Node) -> Node {
 
 /// The tokens that can't define a split (`for_splits`) or be acted on in bulk.
 fn invalid_tokens<'a>(node: &'a Node, out: &mut Vec<&'a Token>, for_splits: bool) {
-    // Exo's own lists; a split can't be defined on Unread or All either.
+    // Exo's own lists. A split can't be defined on Unread or All either.
     const UNSEARCHABLE: [&str; 9] = [
         "done",
         "other",
@@ -1432,7 +1437,7 @@ fn invalid_tokens<'a>(node: &'a Node, out: &mut Vec<&'a Token>, for_splits: bool
     }
 }
 
-/// The label (and category) names in `node` no label answers to.
+/// The label (and category) names in `node` that no label answers to.
 fn missing_labels(node: &Node, labels: &LabelIndex) -> Vec<String> {
     let mut tokens = Vec::new();
     label_tokens(node, &mut tokens);
@@ -1444,7 +1449,7 @@ fn missing_labels(node: &Node, labels: &LabelIndex) -> Vec<String> {
 }
 
 /// Label tokens, with categories as the `in:category_…` labels they are. (Auto Labels aren't
-/// among them: Exo hasn't got any.)
+/// among them, because Exo hasn't got any.)
 fn label_tokens(node: &Node, out: &mut Vec<Token>) {
     match node {
         Node::And(children, _) | Node::Or(children, _) => {
@@ -1469,7 +1474,7 @@ fn category_label(token: &Token) -> Token {
     }
 }
 
-/// The Gmail search for `node`. `top` is a split's top level, whose AND isn't parenthesized;
+/// The Gmail search for `node`. `top` marks a split's top level, whose AND isn't parenthesized.
 /// `important` is the Important split's definition, which `in:important` and `in:other` stand
 /// for in a search.
 fn gmail_query(
@@ -1528,7 +1533,7 @@ fn gmail_query(
                 _ => format!("{minus}{}:{value}", token.field),
             }
         }
-        // Auto Labels; Exo has none to name.
+        // Exo has no Auto Labels to name.
         Kind::AutoLabel => String::new(),
         Kind::Contact if token.value().eq_ignore_ascii_case("me") && !token.quoted => {
             format!("{}:{minus}{{{}}}", token.field, me.join(" "))
@@ -1553,8 +1558,8 @@ fn is_dot_me(value: &str) -> bool {
     })
 }
 
-/// A thread as a query matches it. A split queries the messages that aren't drafts one by one;
-/// a search queries every message, and a group matches when its parts match anywhere in the
+/// A thread as a query matches it. A split queries the messages that aren't drafts one by one.
+/// A search queries every message, and a group matches when its parts match anywhere in the
 /// thread.
 struct Matcher<'a> {
     thread: &'a ThreadView,
@@ -1612,7 +1617,8 @@ impl<'a> Matcher<'a> {
             .filter(move |row| row.message_id == id)
     }
 
-    /// Whether `message` has an attachment that shows: not inline, and not a calendar file.
+    /// Whether `message` has an attachment that shows, meaning one that isn't inline or a
+    /// calendar file.
     fn has_visible_attachment(&self, message: &ViewMessage) -> bool {
         self.attachments_of(message).any(|row| {
             !row.inline
@@ -1623,7 +1629,8 @@ impl<'a> Matcher<'a> {
         })
     }
 
-    /// The thread's time for `after:`: its latest message's, drafts aside.
+    /// The thread's time for `after:`, which is the time of its latest message that isn't a
+    /// draft.
     fn thread_time(&self) -> i64 {
         self.thread
             .messages
@@ -1660,7 +1667,7 @@ impl<'a> Matcher<'a> {
                 let id = self.labels.id(token.value());
                 self.messages.iter().any(|m| m.has(id))
             }
-            // Auto Labels: unknown here, so excluded.
+            // Auto Labels are unknown here, so they're excluded.
             Kind::AutoLabel => true,
             // No thread is shared without teams.
             Kind::Shared => !token.negated,
@@ -1668,8 +1675,8 @@ impl<'a> Matcher<'a> {
         }
     }
 
-    /// The messages `node` matches, message by message for a split. `None` is a token that
-    /// can't be matched locally.
+    /// The messages `node` matches, message by message for a split. `None` means `node` has a
+    /// token that can't be matched locally.
     fn find(&self, node: &Node) -> Option<Found> {
         let found = match node {
             Node::Leaf(token) if token.value.as_deref() == Some("") => return Some(self.all()),
@@ -1708,7 +1715,8 @@ impl<'a> Matcher<'a> {
         })
     }
 
-    /// Thread-level matching: every message when the node matched (or didn't, negated).
+    /// Thread-level matching, which gives every message when the node matched (or, negated, when
+    /// it didn't) and none otherwise.
     fn whole(&self, matched: bool, negated: bool) -> Found {
         if matched != negated {
             self.all()
@@ -1790,7 +1798,7 @@ impl<'a> Matcher<'a> {
         }
     }
 
-    /// Whether one of `message`'s addresses in `token`'s field matches its value.
+    /// Whether an address of `message`, in the field `token` names, matches the token's value.
     fn contact_matches(&self, token: &Token, message: &ViewMessage) -> bool {
         let values: Vec<String> = if token.value().eq_ignore_ascii_case("me") && !token.quoted {
             self.me.to_vec()
@@ -1840,7 +1848,7 @@ impl<'a> Matcher<'a> {
     }
 }
 
-/// Whether `mailbox` matches one of `values`: its whole name or address, a part of the address,
+/// Whether `mailbox` matches one of `values` by its whole name or address, a part of its address,
 /// or words of its name.
 fn contact_matches_field(values: &[String], mailbox: &Mailbox) -> bool {
     let name = mailbox.name.as_deref().unwrap_or_default().to_lowercase();
@@ -1879,8 +1887,8 @@ fn canonical_gmail_address(email: &str) -> String {
     parts.join("@").to_lowercase()
 }
 
-/// Runs of anything but ASCII letters and digits separate words, and one at either end leaves an
-/// empty word there.
+/// Runs of ASCII characters other than letters and digits separate words, and a run at either
+/// end leaves an empty word there. Non-ASCII characters are part of a word.
 fn words(text: &str) -> Vec<&str> {
     let mut words = Vec::new();
     let mut start = 0;
@@ -1899,8 +1907,8 @@ fn words(text: &str) -> Vec<&str> {
     words
 }
 
-/// Whether attachment `row` is the one `wanted` names: its whole filename or MIME type, or words
-/// of them.
+/// Whether attachment `row` is the one `wanted` names, by its whole filename or MIME type or by
+/// words of them.
 fn filename_matches(wanted: &str, row: &AttachmentRow) -> bool {
     let name = row.filename.to_lowercase();
     let mime = row.mime_type.to_lowercase();
@@ -1918,7 +1926,8 @@ fn collapse_whitespace(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// A subject as `subject:` compares it: punctuation to spaces, whitespace collapsed.
+/// A subject as `subject:` compares it, with punctuation turned into spaces and whitespace
+/// collapsed.
 fn normalize_subject(text: &str) -> String {
     const PUNCTUATION: &str = "`~!@#$%^*)(+-={\\:;'<>,.?/";
     collapse_whitespace(
@@ -1936,8 +1945,8 @@ fn word_match(needle: &str, haystack: &str) -> bool {
         .is_ok_and(|pattern| pattern.is_match(haystack))
 }
 
-/// An `after:`/`before:` value in epoch milliseconds: nine or ten digits are seconds; ISO
-/// `YYYY-MM-DD` is UTC midnight, and `YYYY/M/D`, `YYYY-M-D` and `M/D/YYYY` local midnight.
+/// An `after:`/`before:` value in epoch milliseconds. Nine or ten digits are seconds. ISO
+/// `YYYY-MM-DD` is UTC midnight, and `YYYY/M/D`, `YYYY-M-D` and `M/D/YYYY` are local midnight.
 /// Anything else is an invalid date.
 fn parse_date(value: &str) -> Option<i64> {
     static SECONDS: LazyLock<Regex> =

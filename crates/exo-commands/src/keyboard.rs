@@ -1,6 +1,6 @@
 //! Turning key presses into commands: sequences, key repeat and the "Go to…" panel timer.
 //!
-//! The live registrations come in already filtered to the active region, newest last; the newest
+//! The live registrations come in already filtered to the active region, newest last. The newest
 //! binding for a key wins.
 
 use egui::{Key, Modifiers, os::OperatingSystem};
@@ -70,7 +70,7 @@ pub(crate) struct Keyboard {
 }
 
 /// The held key of a repeating registration. Registrations are rebuilt every frame, so this
-/// tracks the key, not the registration; whoever saw the press knows what repeats.
+/// tracks the key, not the registration. Whoever saw the press knows what repeats.
 struct Repeating {
     /// The key as egui reports it, which is what its key-up and `keys_down` use.
     key: Key,
@@ -80,9 +80,9 @@ struct Repeating {
 }
 
 impl Keyboard {
-    /// Advances the clock to `now`: drops a sequence that timed out, and ticks the held key on
-    /// its own clock (not the OS's), or lets it go when it's up (`held` says whether a key is
-    /// still down) or the failsafe expires.
+    /// Advances the clock to `now`. It drops a sequence that timed out, and ticks the held key on
+    /// its own clock (not the OS's), or lets it go when it's up or the failsafe expires. `held`
+    /// says whether a key is still down.
     pub(crate) fn tick(&mut self, held: impl Fn(Key) -> bool, now: f64) -> Option<Fire> {
         if !self.pending.is_empty() && now - self.pending_at > SEQUENCE_TIMEOUT {
             self.pending.clear();
@@ -92,7 +92,7 @@ impl Keyboard {
             self.repeating = None;
             return Some(Fire::Release);
         }
-        // Catch up one tick at a time: a slow frame shouldn't flood the list.
+        // Catch up one tick at a time, because a slow frame shouldn't flood the list.
         (now >= repeating.next).then(|| {
             repeating.next = (repeating.next + REPEAT_INTERVAL).max(now);
             Fire::Repeat
@@ -131,8 +131,8 @@ impl Keyboard {
                 }
                 self.update_go_menu(key, modifiers, live, now);
                 // FastFrame's egui reports Shift, Ctrl, Alt and ⌘ as keys of their own. Bindings
-                // skip them: the Shift on its way to `!` mustn't end `g`'s sequence and let `!`
-                // mark spam. (The Go to… panel still hides, as it does on any key-down.)
+                // skip them, because the Shift on its way to `!` mustn't end `g`'s sequence and
+                // let `!` mark spam. (The Go to… panel still hides, as it does on any key-down.)
                 if is_modifier(key) {
                     return None;
                 }
@@ -209,8 +209,8 @@ impl Keyboard {
         Some(Fire::Press(found.index))
     }
 
-    /// The Go to… panel's timer: an unmodified `g` where `g` sequences are bound starts the panel's
-    /// 200ms timer; any other key, or `g` while it shows, hides it.
+    /// The Go to… panel's timer. An unmodified `g` where `g` sequences are bound starts the
+    /// panel's 200ms timer, and any other key, or `g` while the panel shows, hides it.
     fn update_go_menu(&mut self, key: Key, modifiers: Modifiers, live: &[Live], now: f64) {
         let visible = self.go_menu_visible(now);
         let g = Chord::from_event(Key::G, Modifiers::NONE);
@@ -229,8 +229,8 @@ impl Keyboard {
         })
     }
 
-    /// When something changes next without input (a repeat tick, a timeout), to repaint then; `now`
-    /// if a repeat tick is already due.
+    /// When something changes next without input (a repeat tick, a timeout), to repaint then.
+    /// It's `now` if a repeat tick is already due.
     pub(crate) fn next_change(&self, now: f64) -> Option<f64> {
         let repeat = self.repeating.as_ref().map(|repeating| repeating.next);
         let sequence = (!self.pending.is_empty()).then_some(self.pending_at + SEQUENCE_TIMEOUT);
@@ -271,8 +271,8 @@ fn newest(live: &[Live], test: impl Fn(&Binding) -> bool) -> Option<&Live> {
         .find(|entry| entry.bindings.iter().any(&test))
 }
 
-/// Whether a single-chord binding matches `chord`, Escape matching its stand-ins too (a
-/// backtick only where `backtick`).
+/// Whether a single-chord binding matches `chord`. Escape also matches its stand-ins, and a
+/// backtick only where `backtick` is set.
 fn matches_single(binding: &Binding, chord: Chord, os: OperatingSystem, backtick: bool) -> bool {
     match binding.chords.as_slice() {
         [only] => {
@@ -554,7 +554,7 @@ mod tests {
 
     #[test]
     fn a_command_can_leave_backtick_to_be_typed() {
-        // Compose's Escape with Backtick as Escape off, under the list's.
+        // Compose's Escape, with Backtick as Escape off, registered after the list's.
         let live = [
             live(0, &["esc"], false),
             Live {

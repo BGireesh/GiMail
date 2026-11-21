@@ -1,10 +1,10 @@
-//! `mailto:` links: the fields of the new message a click on one opens.
+//! Reads `mailto:` links into the fields of the new message that a click on one opens.
 
 use super::{factory::Fields, recipients};
 
 /// The new message `url` asks for: its addresses (the path and `to=`), `cc`, `bcc`, `subject`
-/// and `body` (HTML-escaped, newlines as `<br>`, as compose takes it). `None` for a
-/// URL that isn't `mailto:`.
+/// and `body` (HTML-escaped, newlines as `<br>`, as compose takes it). `None` for a URL that
+/// isn't `mailto:`.
 pub(crate) fn fields(url: &str) -> Option<Fields> {
     let rest = url
         .get(..7)

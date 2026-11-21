@@ -1,6 +1,7 @@
-//! A conversation's one-click actions: what its messages declare (schema.org) or link to that Exo
-//! recognizes (an issue, an order, a Google file), as exo-mail finds them. The header's status line
-//! and the palette offer the last one; ⌘O lists them all above the links.
+//! A conversation's one-click actions, as exo-mail finds them in its messages: the actions they
+//! declare (schema.org) and their links to things Exo recognizes (an issue, an order, a Google
+//! file). The header's status line and the palette offer the last one. ⌘O lists them all above
+//! the links.
 
 use exo_mail::Action;
 use exo_store::ThreadDetail;
@@ -18,8 +19,8 @@ const DOMAINS: [&str; 4] = [
     "info.ms.aa.com",
 ];
 
-/// Whether the conversation's actions show: it has no List-Unsubscribe header, or its sender is one
-/// of the few whose actions matter more.
+/// Whether the conversation's actions show, which they do when it has no List-Unsubscribe header
+/// or its sender is one of the few whose actions matter more.
 pub(crate) fn have_priority(detail: &ThreadDetail, own_domains: &[String]) -> bool {
     if crate::unsubscribe::find(detail, own_domains, |_| None).is_none() {
         return true;
@@ -40,8 +41,9 @@ pub(crate) fn have_priority(detail: &ThreadDetail, own_domains: &[String]) -> bo
     })
 }
 
-/// The actions of messages `ids` of `detail`, in order and each once (the same text and URL),
-/// `actions` giving a message's; none without priority.
+/// The actions of the messages `ids` in `detail`, in order and each once (actions with the same
+/// text and URL count as one). `actions` gives a message's actions. Empty when the conversation's
+/// actions don't have priority.
 pub(crate) fn of(
     detail: &ThreadDetail,
     ids: &[&str],

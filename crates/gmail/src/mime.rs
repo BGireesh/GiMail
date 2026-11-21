@@ -53,7 +53,7 @@ impl Mailbox {
     }
 
     /// mail-builder encodes the name but writes the address verbatim, and addresses come from
-    /// `mailto:` links and other people's headers: control characters are dropped, so a line
+    /// `mailto:` links and other people's headers. So control characters are dropped, and a line
     /// break can't start a header (say, `Bcc:`) of the sender's choosing.
     fn to_builder(&self) -> Address<'_> {
         Address::new_address(self.name.as_deref(), one_line(&self.email))
@@ -102,19 +102,19 @@ pub struct Email {
     pub subject: String,
     /// Plain-text body.
     pub text: Option<String>,
-    /// HTML body; sent as an alternative to `text` when both are set.
+    /// HTML body, sent as an alternative to `text` when both are set.
     pub html: Option<String>,
     /// An iCalendar object (invite or RSVP) sent as a third `text/calendar` alternative.
     pub calendar: Option<String>,
     /// Attachments and inline images.
     pub attachments: Vec<Attachment>,
-    /// `Message-ID:` without angle brackets; generated when absent.
+    /// `Message-ID:` without angle brackets, generated when absent.
     pub message_id: Option<String>,
     /// `In-Reply-To:` without angle brackets.
     pub in_reply_to: Option<String>,
     /// `References:`, oldest first, without angle brackets.
     pub references: Vec<String>,
-    /// `Date:`; the current time when absent.
+    /// `Date:`, or the current time when absent.
     pub date: Option<jiff::Zoned>,
     /// Extra headers, written verbatim (ASCII only).
     pub headers: Vec<(String, String)>,
@@ -140,8 +140,8 @@ impl Email {
     #[must_use]
     pub fn to_rfc822(&self) -> Vec<u8> {
         // mail-builder writes the subject verbatim, so a line break in it (from a `mailto:` link,
-        // say) would start a header of the sender's choosing, such as `Bcc:`. Dropped, as a
-        // browser's single-line input drops them.
+        // say) would start a header of the sender's choosing, such as `Bcc:`. So line breaks are
+        // dropped, as a browser's single-line input drops them.
         let subject: String = self
             .subject
             .chars()
@@ -260,7 +260,7 @@ fn text_part(mime: &str, text: String, method: Option<String>) -> MimePart<'stat
 }
 
 /// An attachment's part. Its type, name and Content-ID come from files and from other people's
-/// mail, and mail-builder writes the type and Content-ID verbatim: a line break in them would
+/// mail, and mail-builder writes the type and Content-ID verbatim. A line break in them would
 /// start a header of the sender's choosing, so control characters are dropped.
 fn part(attachment: &Attachment) -> MimePart<'static> {
     MimePart::new(
@@ -270,8 +270,8 @@ fn part(attachment: &Attachment) -> MimePart<'static> {
     )
 }
 
-/// `text` without control characters: what this module writes in a header from someone else's
-/// text, so a line break in it can't start a header of their choosing.
+/// `text` without control characters, which is how this module writes someone else's text in a
+/// header. A line break in it then can't start a header of their choosing.
 #[must_use]
 pub fn one_line(text: &str) -> String {
     text.chars().filter(|c| !c.is_control()).collect()
@@ -297,7 +297,7 @@ fn strip_angles(id: &str) -> String {
         .to_owned()
 }
 
-/// 64-bit FNV-1a: stable across Rust versions, unlike `DefaultHasher`.
+/// 64-bit FNV-1a, which is stable across Rust versions, unlike `DefaultHasher`.
 fn fnv1a(bytes: &[u8]) -> u64 {
     bytes.iter().fold(0xcbf2_9ce4_8422_2325, |hash, &byte| {
         (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)

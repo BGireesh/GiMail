@@ -33,7 +33,7 @@ pub fn time(at: &Zoned) -> String {
     format!("{hour}:{:02} {meridiem}", at.minute())
 }
 
-/// Remind me's `someday` and `never` (`ca.d0H`, `ca.tmp`), which dates name.
+/// Remind me's `someday` and `never`, which dates show by name.
 pub const SOMEDAY: i64 = 4_000_000_000_000;
 pub const NEVER: i64 = 5_000_000_000_000;
 
@@ -182,8 +182,8 @@ pub fn calendar_range(start: Timestamp, end: Timestamp, now: &Zoned) -> String {
     format!("{} – {}", full(&start), full(&end))
 }
 
-/// A calendar notification's times: notification's times: `10:00 – 10:30AM` on one day, else both
-/// ends as `Tue, Nov 17 11:00PM`.
+/// A calendar notification's times: `10:00 – 10:30AM` on one day, else both ends as
+/// `Tue, Nov 17 11:00PM`.
 pub fn calendar_range_compact(start: Timestamp, end: Timestamp, tz: &TimeZone) -> String {
     let (start, end) = (start.to_zoned(tz.clone()), end.to_zoned(tz.clone()));
     // `{h}:{mm}`, and `{TT}` without a space.
@@ -216,8 +216,9 @@ pub fn calendar_range_compact(start: Timestamp, end: Timestamp, tz: &TimeZone) -
     format!("{} – {}", full(&start), full(&end))
 }
 
-/// A calendar notification's `in 2 mins`: Sugar's `relative()` from `now` (`in 1 hour`,
-/// `3 minutes ago`) with the first `minute` and `hours` shortened, and anything in seconds `now`.
+/// A calendar notification's `in 2 mins`: how far `at` is from `now` (`in 1 hour`,
+/// `3 minutes ago`) with the first `minute` and `hours` shortened, and anything in seconds shown
+/// as `now`.
 pub fn relative_compact(at: Timestamp, now: Timestamp) -> String {
     let (count, unit, ahead) = adjusted_unit(at, now);
     let plural = if count == 1.0 { "" } else { "s" };
@@ -234,7 +235,7 @@ pub fn relative_compact(at: Timestamp, now: Timestamp) -> String {
         .replacen("hours", "hrs", 1)
 }
 
-/// Sugar's `relative()`: `5 minutes ago`, `1 hour ago`, `3 days from now`.
+/// How far `at` is from `now` in words: `5 minutes ago`, `1 hour ago`, `3 days from now`.
 pub fn relative(at: Timestamp, now: Timestamp) -> String {
     let (count, unit, ahead) = adjusted_unit(at, now);
     let plural = if count == 1.0 { "" } else { "s" };
@@ -244,10 +245,10 @@ pub fn relative(at: Timestamp, now: Timestamp) -> String {
     )
 }
 
-/// How far `at` is from `now` in Sugar's terms: the largest unit it's at least one of, rounded to a
-/// tenth then down, and whether it's ahead.
+/// How far `at` is from `now`. Returns the count of the largest unit the distance holds at least
+/// once, rounded to a tenth then down, that unit, and whether `at` is ahead.
 fn adjusted_unit(at: Timestamp, now: Timestamp) -> (f64, &'static str, bool) {
-    // Sugar's units, largest first (a month is 30.4375 days, a year 365.25).
+    // The units, largest first (a month is 30.4375 days, a year 365.25).
     const UNITS: [(&str, f64); 7] = [
         ("year", 31_557_600_000.0),
         ("month", 2_629_800_000.0),
@@ -326,7 +327,7 @@ enum Kind {
 
 struct Separator {
     label: String,
-    /// The last instant the separator covers; it sits above items at or before it.
+    /// The last instant the separator covers. The separator sits above items at or before it.
     until: Timestamp,
     kind: Kind,
 }
@@ -397,13 +398,13 @@ fn separators(oldest: Timestamp, now: &Zoned) -> Vec<Separator> {
 }
 
 /// `items` (newest first, with their sort time) interleaved with date separators. Empty groups are
-/// dropped; runs of sparse days within the last week merge into `Last 7 days`; the list never
+/// dropped, and runs of sparse days within the last week merge into `Last 7 days`. The list never
 /// starts with a separator.
 pub fn segment<T>(items: Vec<(Timestamp, T)>, now: &Zoned) -> Vec<Segment<T>> {
     let Some(oldest) = items.last().map(|(at, _)| *at) else {
         return Vec::new();
     };
-    // Merge separators into the list: a separator goes before the first item at or before it.
+    // Merge separators into the list. A separator goes before the first item at or before it.
     let mut entries: Vec<Entry<T>> = Vec::new();
     let mut pending = separators(oldest, now).into_iter().peekable();
     for (at, item) in items {
@@ -578,7 +579,8 @@ mod tests {
     fn relative_times_as_sugar_rounds_them() {
         let start = at("2026-11-17T10:00");
         let before = |seconds: i64| start - jiff::SignedDuration::from_secs(seconds);
-        // Two minutes' lead, with the notifications' 30 s nudge: 150 s, and up to 30 s late.
+        // A two-minute lead plus the notifications' 30 s nudge is 150 s, and a notification may
+        // come up to 30 s late.
         assert_eq!(
             relative_compact(start + 30.seconds(), before(120)),
             "in 2 mins"

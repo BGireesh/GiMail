@@ -1,10 +1,11 @@
 //! Recipient chips beyond typing them: editing one in place, selecting several, removing, copying
 //! and moving them between To, Cc and Bcc, and their undo and redo.
 //!
-//! A list's selection is [`Input::selected`] and [`Input::anchor`], the edge a ⇧← or ⇧→ moves;
-//! nothing selected is the caret in the input at the end. Editing a chip puts the input in its
-//! place ([`Input::editing`]), its text the chip's `Name <address>`, all selected; finishing puts
-//! it back as a chip, or removes it if it's emptied. Chips have no menu or hover card.
+//! A list's selection is [`Input::selected`] and [`Input::anchor`], the edge that ⇧← or ⇧→
+//! moves. With nothing selected, the caret is in the input at the end. Editing a chip puts the
+//! input in the chip's place ([`Input::editing`]), holding the chip's `Name <address>`, all
+//! selected. Finishing turns the input back into a chip, or removes the chip if its text was
+//! emptied. Chips have no menu or hover card.
 //!
 //! [`Input::selected`]: super::draft::Input::selected
 //! [`Input::anchor`]: super::draft::Input::anchor
@@ -33,8 +34,8 @@ fn set(open: &mut Open, [to, cc, bcc]: Recipients) {
     open.record.bcc = bcc;
 }
 
-/// A draft's recipient undo and redo: every change the user makes, whichever way (typing, removing,
-/// moving, Instant Intro, a mention), is one step; Auto Bcc's own changes aren't.
+/// A draft's recipient undo and redo. Every change the user makes, whichever way (typing,
+/// removing, moving, Instant Intro, a mention), is one step, but Auto Bcc's own changes aren't.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct History {
     undo: Vec<Recipients>,
@@ -88,25 +89,25 @@ pub(crate) fn redo(open: &mut Open) -> bool {
 /// What a key does to a list's chips.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Key {
-    /// Enter with chips selected: the first is edited.
+    /// Enter with chips selected edits the first.
     Edit,
-    /// Backspace or Delete with chips selected: they go.
+    /// Backspace or Delete with chips selected removes them.
     Remove,
-    /// ⇧← (-1) or ⇧→ (1): the selection grows or shrinks at its edge.
+    /// ⇧← (-1) or ⇧→ (1) grows or shrinks the selection at its edge.
     Extend(isize),
-    /// ⌘A with nothing typed: every chip.
+    /// ⌘A with nothing typed selects every chip.
     SelectAll,
-    /// ⌘C: the selected chips as `Name <address>, …`.
+    /// ⌘C copies the selected chips as `Name <address>, …`.
     Copy,
-    /// ⌘X: copied, then removed.
+    /// ⌘X copies the selected chips, then removes them.
     Cut,
-    /// ⌥↑ (-1) or ⌥↓ (1): the selected chips go to the field before or after (To, Cc, Bcc).
+    /// ⌥↑ (-1) or ⌥↓ (1) moves the selected chips to the field before or after (To, Cc, Bcc).
     MoveField(isize),
     /// ⌘Z.
     Undo,
     /// ⌘⇧Z or ⌘Y.
     Redo,
-    /// Escape with something typed: it becomes a chip.
+    /// Escape with something typed turns the text into a chip.
     Finish,
 }
 
@@ -127,7 +128,7 @@ pub(super) fn register(commands: &mut Commands<commands::Action>, open: &Open, l
         commands.add(key("CHIP_COPY", Key::Copy, &["mod+c"]));
         commands.add(key("CHIP_CUT", Key::Cut, &["mod+x"]));
     }
-    // In typed text, ⇧← and ⇧→ select text but at its edges.
+    // In typed text, ⇧← and ⇧→ select text, except at the text's edges.
     if !typed || input.caret == Some(0) {
         commands.add(key("CHIP_EXTEND_LEFT", Key::Extend(-1), &["shift+left"]));
     }
@@ -136,7 +137,7 @@ pub(super) fn register(commands: &mut Commands<commands::Action>, open: &Open, l
     }
     commands.add(key("CHIP_MOVE_UP", Key::MoveField(-1), &["alt+up"]));
     commands.add(key("CHIP_MOVE_DOWN", Key::MoveField(1), &["alt+down"]));
-    // Right after `Remove Suggestion`, ⌘Z brings it back, typed text or not.
+    // Right after `Remove Suggestion`, ⌘Z brings the suggestion back, typed text or not.
     if let Some(excluded) = &input.just_excluded {
         let undo = commands::Action::Compose(Action::UndoRemoveSuggestion(excluded.email.clone()));
         commands.add(
@@ -169,7 +170,7 @@ pub(crate) fn edge(open: &Open) -> Option<&Address> {
     open.list(list).get(at)
 }
 
-/// Chip `index` of `list` becomes the input, its text all selected.
+/// Turns chip `index` of `list` into the input, with its text all selected.
 pub(crate) fn start_edit(open: &mut Open, list: List, index: usize) {
     let Some(address) = open.list(list).get(index) else {
         return;
@@ -183,9 +184,9 @@ pub(crate) fn start_edit(open: &mut Open, list: List, index: usize) {
     input.select_text = true;
 }
 
-/// Finishes a chip edited in place: emptied, it goes; otherwise the highlighted suggestion or
-/// what's typed takes its place, selected (an edit doesn't advance to the end). Returns whether a
-/// chip was being edited.
+/// Finishes a chip edited in place. An emptied chip goes. Otherwise the highlighted suggestion or
+/// what's typed takes the chip's place, selected (an edit doesn't advance to the end). Returns
+/// whether a chip was being edited.
 pub(crate) fn finish_in_place(
     open: &mut Open,
     list: List,
@@ -216,7 +217,7 @@ pub(crate) fn finish_in_place(
         if address.name.is_none() && !address.email.is_empty() {
             address.name = book.and_then(|book| book.name_for(&address.email));
         }
-        // The address once, in the edited chip's place.
+        // The address appears once, in the edited chip's place.
         chips[index] = address.clone();
         let mut at = index;
         let mut kept = 0;
@@ -238,8 +239,8 @@ pub(crate) fn finish_in_place(
     true
 }
 
-/// A mouse-down on chip `index`: ⇧ extends the selection to it, ⌘ adds or takes it, otherwise it
-/// alone is selected (unless it already is).
+/// A mouse-down on chip `index`. ⇧ extends the selection to the chip, and ⌘ adds the chip to the
+/// selection or takes it out. Otherwise the chip alone is selected, unless it's already selected.
 pub(crate) fn press(
     open: &mut Open,
     list: List,
@@ -315,7 +316,7 @@ pub(crate) fn run(
                 .filter(|next| *next < open.list(list).len())?;
             let input = open.input_mut(list);
             if input.selected.contains(&next) {
-                // Shrinking: the edge comes off.
+                // When shrinking, the edge comes off.
                 input.selected.retain(|selected| *selected != edge);
                 input.anchor = Some(next);
             } else {
@@ -363,8 +364,8 @@ pub(crate) fn run(
     None
 }
 
-/// `remove({ranks: selection})`: the selected chips go, and the one before them is selected (the
-/// first chip, or the caret at the end when there are none left).
+/// `remove({ranks: selection})`. The selected chips go, and the chip before them is selected (the
+/// first chip, or the caret at the end when none are left).
 fn remove_selected(open: &mut Open, list: List, now: f64) {
     let selected = std::mem::take(&mut open.input_mut(list).selected);
     let Some(first) = selected.first().copied() else {
@@ -383,8 +384,8 @@ fn remove_selected(open: &mut Open, list: List, now: f64) {
     open.touch(now);
 }
 
-/// The selected chips go to the end of the field before or after, selected there, which gets the
-/// keyboard with Cc and Bcc showing.
+/// Moves the selected chips to the end of the field before or after, where they stay selected.
+/// That field gets the keyboard, with Cc and Bcc showing.
 fn move_field(open: &mut Open, list: List, delta: isize, now: f64) {
     let Some(target) = (list as usize)
         .checked_add_signed(delta)
@@ -407,7 +408,7 @@ fn move_field(open: &mut Open, list: List, delta: isize, now: f64) {
     });
     open.input_mut(list).anchor = None;
     let into = open.list_mut(target);
-    // Each address once; one already there makes way.
+    // Each address appears once, so one already there makes way.
     into.retain(|kept| {
         !moved.iter().any(|address| {
             !address.email.is_empty() && address.email.eq_ignore_ascii_case(&kept.email)
@@ -423,8 +424,8 @@ fn move_field(open: &mut Open, list: List, delta: isize, now: f64) {
     open.touch(now);
 }
 
-/// A paste while chips are selected: what's pasted replaces them, split into addresses as a
-/// pasted list is, and the selection moves past what came in.
+/// A paste while chips are selected replaces them with what's pasted, split into addresses as a
+/// pasted list is. The selection moves past what came in.
 pub(crate) fn paste_over(
     ui: &egui::Ui,
     open: &mut Open,
@@ -457,7 +458,7 @@ pub(crate) fn paste_over(
         });
         let text = text.replace("mailto:", "");
         let mut parts = recipients::split_pasted(&text);
-        // What doesn't make an address at the end stays typed.
+        // Trailing text that doesn't make an address stays typed.
         let mut leftover = Vec::new();
         while parts
             .last()
@@ -498,7 +499,7 @@ pub(crate) fn paste_over(
 }
 
 impl crate::Mail {
-    /// The draft with the keyboard's To, Cc and Bcc addresses (for tests).
+    /// The To, Cc and Bcc addresses of the draft with the keyboard (for tests).
     pub fn compose_recipients(&self) -> Option<[Vec<String>; 3]> {
         let open = self.compose.focused()?;
         let emails = |list: &[Address]| list.iter().map(|address| address.email.clone()).collect();
@@ -509,8 +510,8 @@ impl crate::Mail {
         ])
     }
 
-    /// `Remove Suggestion` on the focused field's suggestion `index`, as its button does (for
-    /// tests).
+    /// Runs `Remove Suggestion` on suggestion `index` of the focused field, as the suggestion's
+    /// button does (for tests).
     pub fn compose_remove_suggestion(&mut self, index: usize) {
         self.remove_suggestion(index);
     }
@@ -536,7 +537,7 @@ impl crate::Mail {
             .collect()
     }
 
-    /// The draft with the keyboard's body, a line per block, and what its To field's input
+    /// The body of the draft with the keyboard, a line per block, and what the draft's To input
     /// holds (for tests).
     pub fn compose_text(&self) -> Option<(String, String)> {
         let open = self.compose.focused()?;
@@ -552,20 +553,21 @@ impl crate::Mail {
     }
 }
 
-/// Chips being dragged: the list they're from and which, and how the drag image follows the
-/// pointer.
+/// Chips being dragged: the list they're from, which chips they are, and how the drag image
+/// follows the pointer.
 #[derive(Clone, Debug)]
 pub(crate) struct Drag {
     pub list: List,
     /// The chips, by index, sorted.
     pub chips: Vec<usize>,
-    /// The grabbed chip's label and size, and where in it the pointer went down: one chip's
-    /// image is that chip, kept under the pointer as grabbed.
+    /// The grabbed chip's label and size, and where in the chip the pointer went down. Dragging
+    /// one chip shows that chip as the image, kept under the pointer where it was grabbed.
     pub grabbed: (String, egui::Vec2, egui::Vec2),
 }
 
-/// A drag starting on chip `index` of `list`: an edit finishes, the chip is selected unless it
-/// is already (with the rest of the selection), and Cc and Bcc show to drop into.
+/// Starts a drag on chip `index` of `list`. An edit in the list finishes, the chip is selected
+/// unless it already is (along with the rest of the selection), and Cc and Bcc show so chips can
+/// be dropped into them.
 pub(crate) fn start_drag(
     open: &mut Open,
     list: List,
@@ -590,7 +592,7 @@ pub(crate) fn start_drag(
     });
 }
 
-/// Whether two chips are one address: the same email, or with none, the same text.
+/// Whether two chips are one address: the same email, or the same text when neither has an email.
 fn same_chip(a: &Address, b: &Address) -> bool {
     if a.email.is_empty() || b.email.is_empty() {
         a.email.is_empty() && b.email.is_empty() && a.name == b.name
@@ -599,9 +601,9 @@ fn same_chip(a: &Address, b: &Address) -> bool {
     }
 }
 
-/// The drop: chips `chips` of `from` go to `into` at `at`, the drop cursor's place, as one undo
-/// step. The target keeps each address once; the dropped chips are selected there. `at` is
-/// counted after the chips that make way are taken out, so a chip dragged right within its list
+/// Drops chips `chips` of `from` into `into` at `at`, the drop cursor's place, as one undo step.
+/// The target keeps each address once, and the dropped chips are selected there. `at` is
+/// recounted once the chips that make way are taken out, so a chip dragged right within its list
 /// lands at the cursor.
 pub(crate) fn drop(open: &mut Open, from: List, chips: &[usize], into: List, at: usize, now: f64) {
     let moved: Vec<Address> = chips

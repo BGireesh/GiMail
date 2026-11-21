@@ -14,7 +14,7 @@ use crate::profile_pictures::ProfilePictures;
 use crate::sign_in::{self, Grant, Purpose};
 use crate::{Account, ClientConfig, Error, SecretStore, Tokens};
 
-/// Exo's signed-in accounts. Cheap to clone; clones share everything.
+/// Exo's signed-in accounts. Cheap to clone, and clones share everything.
 #[derive(Clone)]
 pub struct Auth(Arc<Inner>);
 
@@ -90,8 +90,8 @@ impl Auth {
         self.state().registry.use_account(email)
     }
 
-    /// Google refused `email`'s grant ([`Tokens::needs_sign_in`]): it stays listed but opens
-    /// the sign-in screen until it signs in again.
+    /// Google refused `email`'s grant ([`Tokens::needs_sign_in`]). The account stays listed but
+    /// opens the sign-in screen until it signs in again.
     ///
     /// # Errors
     /// [`Error::UnknownAccount`], or [`Error::Accounts`] when the list can't be saved.
@@ -99,7 +99,7 @@ impl Auth {
         self.state().registry.sign_out(email)
     }
 
-    /// Sets the color `email` shows in, by name (`None`: computed from its address).
+    /// Sets the color `email` shows in, by name. `None` computes it from the address.
     ///
     /// # Errors
     /// [`Error::UnknownAccount`], or [`Error::Accounts`] when the list can't be saved.
@@ -107,7 +107,7 @@ impl Auth {
         self.state().registry.set_color(email, color)
     }
 
-    /// `email`'s profile photo as last saved ([`Auth::set_profile_picture`]), `None` without
+    /// `email`'s profile photo as last saved ([`Auth::set_profile_picture`]), or `None` without
     /// one.
     ///
     /// # Errors
@@ -116,14 +116,14 @@ impl Auth {
         self.0.pictures.get(email)
     }
 
-    /// Saves `email`'s profile photo, the image as Google serves it (`None`: Google has none
-    /// for it). It stays until it's replaced or the account signs out ([`Auth::forget`]).
+    /// Saves `email`'s profile photo, the image as Google serves it. `None` means Google has none
+    /// for it. The photo stays until it's replaced or the account signs out ([`Auth::forget`]).
     ///
     /// # Errors
     /// [`Error::UnknownAccount`], also for an account that signed out while its photo was
     /// fetched, or [`Error::ProfilePicture`] when it can't be written.
     pub fn set_profile_picture(&self, email: &str, photo: Option<&[u8]>) -> Result<(), Error> {
-        // Under the list's lock, so a sign-out can't come between the check and the write.
+        // This holds the list's lock, so a sign-out can't come between the check and the write.
         let state = self.state();
         if !state.registry.contains(email) {
             return Err(Error::UnknownAccount(email.to_owned()));
@@ -133,9 +133,9 @@ impl Auth {
 
     /// Signs an account in: opens Google's consent screen with `open` (which should show the URL
     /// in the system browser), waits up to [`TIMEOUT`](crate::TIMEOUT) for the redirect, and saves
-    /// the account. A new account goes at the end of the list; one that's already listed (a
-    /// re-authentication) keeps its place, and its [`Tokens`] pick up the new grant. Either way
-    /// it becomes the account used last.
+    /// the account. A new account goes at the end of the list. An account that's already listed
+    /// (a re-authentication) keeps its place, and its [`Tokens`] pick up the new grant. Either
+    /// way it becomes the account used last.
     ///
     /// `login_hint` preselects an account at Google (`Sign in as {email}`). The user can still
     /// pick another one, which is the account returned. Drop the future to cancel.
@@ -161,16 +161,17 @@ impl Auth {
         .await
     }
 
-    /// Signs a Google account in for mail account `owner`'s calendar: the same flow as
-    /// [`Auth::sign_in`], asking for [`CALENDAR_SCOPES`](crate::CALENDAR_SCOPES) alone. Its grant
-    /// is `owner`'s, kept until [`Auth::forget_calendar`] or `owner` signs out; signing it in again
-    /// replaces it, and its [`Tokens`] pick the new one up. Returns the address Google signed in;
-    /// `owner`'s own needs no grant of its own (its mail's covers its calendar), so nothing is
-    /// saved for it.
+    /// Signs a Google account in for the calendar of mail account `owner`. It's the same flow as
+    /// [`Auth::sign_in`], asking for [`CALENDAR_SCOPES`](crate::CALENDAR_SCOPES) alone. The grant
+    /// belongs to `owner` and is kept until [`Auth::forget_calendar`] or until `owner` signs out.
+    /// Signing the account in again replaces the grant, and its [`Tokens`] pick the new one up.
+    /// Returns the address Google signed in. When that's `owner`'s own address, nothing is saved,
+    /// because the mail grant already covers its calendar.
     ///
     /// # Errors
     /// [`Error::WrongAccount`] when `login_hint` names an account and the user picked another,
-    /// [`Error::UnknownAccount`] for an `owner` that isn't listed, and [`Auth::sign_in`]'s.
+    /// [`Error::UnknownAccount`] for an `owner` that isn't listed, and the errors of
+    /// [`Auth::sign_in`].
     pub async fn sign_in_calendar(
         &self,
         owner: &str,
@@ -214,7 +215,7 @@ impl Auth {
         .await
     }
 
-    /// Calendar account `email`'s access tokens, for `owner`'s Calendar calls; every call
+    /// The access tokens of calendar account `email`, for `owner`'s Calendar calls. Every call
     /// returns the same provider. Reads the Keychain the first time, as [`Auth::tokens`] does.
     ///
     /// # Errors
@@ -248,8 +249,9 @@ impl Auth {
             .clone())
     }
 
-    /// Forgets `owner`'s grant for calendar account `email`: its Keychain item goes and its
-    /// [`Tokens`] stop working. Google's grant is left alone, as [`Auth::forget`] leaves it.
+    /// Forgets `owner`'s grant for calendar account `email`. The grant's Keychain item is deleted
+    /// and its [`Tokens`] stop working. Google's grant is left alone, as [`Auth::forget`] leaves
+    /// it.
     ///
     /// # Errors
     /// [`Error::UnknownAccount`] for an `owner` that isn't listed, or a storage error.
@@ -319,9 +321,10 @@ impl Auth {
     }
 
     /// Signs `email` out of Exo: forgets its refresh token and its calendar accounts' grants,
-    /// drops it from the list and deletes its profile photo. Its [`Tokens`] stop working. Google's grant is left alone: nothing
-    /// here holds it any more, and revoking it would also sign out other copies of Exo on the
-    /// same OAuth client. The account's local mail store is the caller's to delete.
+    /// drops it from the list and deletes its profile photo. Its [`Tokens`] stop working. Google's
+    /// grant is left alone, because nothing here holds it any more, and revoking it would also
+    /// sign out other copies of Exo on the same OAuth client. The account's local mail store is
+    /// the caller's to delete.
     ///
     /// # Errors
     /// [`Error::UnknownAccount`], or a storage error.
@@ -338,7 +341,7 @@ impl Auth {
         for calendar in calendars {
             self.forget_calendar(email, &calendar)?;
         }
-        // The secret goes first: a failure after that leaves a listed account that needs a
+        // The secret goes first, so a failure after that leaves a listed account that needs a
         // sign-in, never a refresh token nobody can see.
         self.0.secrets.delete(email)?;
         let removed = {
@@ -376,8 +379,8 @@ impl Auth {
     }
 }
 
-/// Where `owner`'s grant for calendar account `email` is kept, in the [`SecretStore`] and the
-/// tokens: apart from `email`'s own mail grant, if it has one.
+/// The key that `owner`'s grant for calendar account `email` is kept under, in the
+/// [`SecretStore`] and the tokens. It's separate from `email`'s own mail grant, if it has one.
 fn calendar_key(owner: &str, email: &str) -> String {
     format!("calendar {email} for {owner}")
 }

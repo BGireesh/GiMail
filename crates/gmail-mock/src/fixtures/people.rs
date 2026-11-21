@@ -19,7 +19,7 @@ pub fn directory(google_id: &str, photo: Option<&str>) -> Directory {
         google_id,
     );
     if let Some(photo) = photo {
-        // People's URLs ask for 100px (`=s100`); `default` is left out for a photo of one's own.
+        // People's URLs ask for 100px (`=s100`). `default` is left out for a photo of one's own.
         let primary = &mut profile.photos[0];
         primary.url = Some(format!("{photo}=s100"));
         primary.default = None;

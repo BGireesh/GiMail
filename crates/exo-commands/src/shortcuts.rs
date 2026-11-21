@@ -12,7 +12,8 @@ use exo_ui::{
 
 use crate::score::command_score;
 
-/// A section of the table: its title and `(name, keys)` rows, keys space-separated keycap tokens.
+/// A section of the table: its title and `(name, keys)` rows, where keys are space-separated
+/// keycap tokens.
 struct Section {
     title: &'static str,
     rows: &'static [(&'static str, &'static str)],
@@ -20,7 +21,7 @@ struct Section {
 
 /// The table as a Gmail account without AI or a team sees it, so without the rows for AI features:
 /// `Ask AI`, `Summarize`, the AI assistant and its `Create Empty Event`. `Send later` and compose's
-/// `Remind me` are listed: Exo schedules sends and keeps reminders itself.
+/// `Remind me` are listed, because Exo schedules sends and keeps reminders itself.
 const SECTIONS: &[Section] = &[
     Section {
         title: "Actions",
@@ -213,7 +214,8 @@ pub(crate) struct Shortcuts {
     scroll: f32,
     /// Focus the search field and select its text next frame.
     focus: bool,
-    /// The account's `Send + Mark Done`: `Send` goes, and `Send + Mark Done` is `⌘ enter`.
+    /// Whether the account's `Send + Mark Done` is on. Then `Send` goes, and `Send + Mark Done`
+    /// is `⌘ enter`.
     send_and_done: bool,
 }
 
@@ -222,7 +224,7 @@ impl Shortcuts {
         self.open
     }
 
-    /// Opens the sheet as new: it always opens unsearched and unscrolled.
+    /// Opens the sheet as new, so it always opens unsearched and unscrolled.
     pub(crate) fn open(&mut self) {
         *self = Self {
             open: true,
@@ -236,7 +238,7 @@ impl Shortcuts {
         self.send_and_done = on;
     }
 
-    /// `section`'s rows as shown: with Send + Mark Done on, `Send` is hidden and `Send + Mark
+    /// `section`'s rows as shown. With Send + Mark Done on, `Send` is hidden and `Send + Mark
     /// Done` is on `⌘ enter`.
     fn rows(&self, section: &Section) -> Vec<(&'static str, &'static str)> {
         section
@@ -257,7 +259,7 @@ impl Shortcuts {
         self.open = false;
     }
 
-    /// Draws the sheet (while open or fading out) over `area`; a click on the backdrop or ×
+    /// Draws the sheet (while open or fading out) over `area`. A click on the backdrop or ×
     /// closes it.
     pub(crate) fn show(&mut self, ctx: &Context, area: Rect) {
         let id = exo_ui::id(ctx, "exo_commands::shortcuts");
@@ -284,14 +286,14 @@ impl Shortcuts {
         }
     }
 
-    /// Paints the sheet; returns whether a click dismissed it.
+    /// Paints the sheet, and returns whether a click dismissed it.
     fn draw(&mut self, ui: &mut Ui, area: Rect) -> bool {
         let ctx = ui.ctx().clone();
         let tokens = palette(&ctx);
         let rem = rem(area.width(), false);
         let width = exo_ui::right_pane_width(area.width());
         let panel = Rect::from_min_max(Pos2::new(area.right() - width, area.top()), area.max);
-        // Boxes paint on whole pixels; text stays where layout put it.
+        // Boxes paint on whole pixels, but text stays where layout put it.
         let snapped = pixel_snap(panel);
 
         let backdrop = ui.allocate_rect(area, Sense::click());
@@ -430,7 +432,7 @@ impl Shortcuts {
         close.clicked() || backdrop.clicked()
     }
 
-    /// The search field: what's typed is lower-cased as it's typed.
+    /// The search field, which lower-cases what's typed as it's typed.
     fn input(&mut self, ui: &mut Ui, line_top_left: Pos2, width: f32) {
         let ctx = ui.ctx().clone();
         let tokens = palette(&ctx);

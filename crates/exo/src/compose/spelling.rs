@@ -1,7 +1,8 @@
-//! The body's spelling and right-click menu: each draft's body checked by macOS's spellchecker,
-//! corrected and completed as the account's autocorrect and autocomplete say, its subject (and a
-//! snippet's name) checked as Chromium checks an `<input>`, and a right-click in one showing the
-//! shell's editable menu, its spelling suggestions first.
+//! Spelling and the right-click menu in a draft. macOS's spellchecker checks each draft's body,
+//! which is corrected and completed as the account's autocorrect and autocomplete settings say.
+//! The subject, and a snippet's name, are checked the way Chromium checks an `<input>`. A
+//! right-click in any of them shows the shell's editable menu, with its spelling suggestions
+//! first.
 
 use exo_editor::{Named, People};
 use exo_store::Address;
@@ -12,8 +13,8 @@ use crate::{
     spelling::{self, Done},
 };
 
-/// `address` by name as autocomplete takes it (the first and last names of the contact's display
-/// name), or `None` without one.
+/// `address` named the way autocomplete takes it, with the first and last names from the
+/// contact's display name. `None` without a display name.
 fn named(address: &Address) -> Option<Named> {
     let full = address
         .name
@@ -46,7 +47,7 @@ fn people(record: &exo_store::DraftRecord) -> People {
     }
 }
 
-/// The words of `names` a spellchecker may not know: autocorrect leaves them alone.
+/// The words of `names` that a spellchecker may not know, which autocorrect leaves alone.
 fn name_words<'a>(names: impl Iterator<Item = &'a str>) -> impl Iterator<Item = String> {
     names
         .flat_map(|name| name.split(|ch: char| !ch.is_alphabetic() && ch != '\''))
@@ -55,8 +56,8 @@ fn name_words<'a>(names: impl Iterator<Item = &'a str>) -> impl Iterator<Item = 
 }
 
 impl Mail {
-    /// The address book's people's name words (Typewise's contacts), which autocorrect leaves
-    /// alone in every editor.
+    /// The words in the names of the people in the address book, which autocorrect leaves alone
+    /// in every editor.
     pub(crate) fn contact_names(&self) -> Vec<String> {
         let book = self.compose.book.as_ref().map(|(contacts, _)| contacts);
         name_words(
@@ -66,9 +67,9 @@ impl Mail {
         .collect()
     }
 
-    /// Each frame, before anything draws: drafts' bodies and subjects get their spellcheckers,
-    /// and a right-click in one last frame (the word it selected now on screen) shows its menu
-    /// and does what's chosen in it.
+    /// Call each frame, before anything draws. Gives the drafts' bodies and subjects their
+    /// spellcheckers. After a right-click in one of them last frame, with the word the click
+    /// selected now on screen, shows the menu and does what's chosen in it.
     pub(crate) fn compose_spelling(&mut self, ctx: &egui::Context) {
         let (autocorrect, autocomplete) =
             (self.autocorrect(), self.account.settings().autocomplete());
@@ -91,9 +92,9 @@ impl Mail {
             spelling::check_field(&mut open.name_spelling, &*self.spelling);
             open.editor.set_autocorrect(autocorrect);
             open.editor.set_autocomplete(autocomplete);
-            // The people the draft may be to, whose names a spellchecker doesn't know: the
-            // address book's (Typewise's contacts) and the draft's own, again once the book is
-            // read.
+            // The names of the people the draft may be to, which a spellchecker doesn't know.
+            // They come from the address book and the draft's own recipients, and are set again
+            // once the book is read.
             let from = book
                 .as_ref()
                 .map(|book| std::sync::Arc::as_ptr(book) as usize);

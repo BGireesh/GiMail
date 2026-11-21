@@ -3,17 +3,17 @@
 //! - An account's background (its sync, sends, reminders, connection, bulk and calendar loops,
 //!   and the worker that answers the UI) restarts 0, 5, 10, 30 and 60 s after its successive
 //!   failures and gives up at the sixth with `The background process has crashed repeatedly.`
-//!   A loop that panics runs again after that wait, its wakes and channels kept; a request that
+//!   A loop that panics runs again after that wait, its wakes and channels kept. A request that
 //!   panics the worker is dropped, and the worker answers the next one after it. What's queued
 //!   and stored (held sends, drafts, queued changes) waits meanwhile.
 //! - The body renderer's thread is restarted the same way.
-//! - The UI thread recovers at once: a frame that panics is dropped and the next one drawn. As
+//! - The UI thread recovers at once. A frame that panics is dropped and the next one drawn. As
 //!   that can loop, Exo gives up at the sixth frame in a row, as for a background.
 //!
 //! Giving up shows the crash dialog and quits, through the quit flush, without asking first.
 //! Every panic is logged where it happened (`logging`).
 //!
-//! An account that closes stops its loops first ([`Restarts::stop`]), then its runtime: the
+//! An account that closes stops its loops first ([`Restarts::stop`]), then its runtime. The
 //! store's own tasks (toasty's connections) end with the runtime, in no set order, and a loop
 //! still at work then would find its connection gone and panic.
 
@@ -22,7 +22,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
-/// How long to wait before each restart, in seconds; one more failure gives up.
+/// How long to wait before each restart, in seconds. One more failure gives up.
 const DELAYS: [u64; 5] = [0, 5, 10, 30, 60];
 
 /// What `The background process has crashed repeatedly.` reports: the `{type}` of a background
@@ -34,14 +34,14 @@ pub struct GaveUp {
 }
 
 impl GaveUp {
-    /// The error line's type: a background that died.
+    /// The error line's type, for a background that died.
     pub const KIND: &'static str = "process-gone";
 }
 
-/// Exo gave up on something that kept failing: the app shows the dialog and quits.
+/// Set when Exo gave up on something that kept failing, so the app shows the dialog and quits.
 static GAVE_UP: Mutex<Option<GaveUp>> = Mutex::new(None);
 
-/// Whether something failed too often since the last call; the app then shows the crash dialog
+/// Whether something failed too often since the last call. The app then shows the crash dialog
 /// and quits.
 pub fn gave_up() -> Option<GaveUp> {
     GAVE_UP
@@ -65,7 +65,7 @@ pub(crate) struct Restarts {
 }
 
 impl Restarts {
-    /// No failures yet; `ctx` is the window's.
+    /// No failures yet. `ctx` is the window's.
     pub(crate) fn new(ctx: egui::Context) -> Self {
         Self {
             failures: AtomicUsize::new(0),
@@ -90,8 +90,8 @@ impl Restarts {
     }
 
     /// Stops every loop it supervises and every task it started, and waits, `grace` at most,
-    /// until they're gone: each is dropped at its next `.await`, what it was doing with the store
-    /// with it.
+    /// until they're gone. Each is dropped at its next `.await`, along with what it was doing
+    /// with the store.
     pub(crate) async fn stop(&self, grace: Duration) {
         self.stopping.send_replace(true);
         let loops = std::mem::take(&mut *self.loops.lock().unwrap_or_else(PoisonError::into_inner));
@@ -104,8 +104,8 @@ impl Restarts {
         .await;
     }
 
-    /// Another failure: how long to wait before starting again, or `None` once it has failed more
-    /// than five times, when Exo gives up.
+    /// Counts another failure. Returns how long to wait before starting again, or `None` once it
+    /// has failed more than five times, when Exo gives up.
     pub(crate) fn failed(&self) -> Option<Duration> {
         let attempts = self.failures.fetch_add(1, Ordering::SeqCst) + 1;
         let wait = DELAYS
@@ -167,8 +167,9 @@ fn supervise(restarts: &Restarts, supervisor: impl Future<Output = ()> + Send + 
         .push(handle);
 }
 
-/// Runs `task` as a task of its own until it ends (how, unless the runtime is shutting down) or
-/// `restarts` is stopping, when it's aborted and waited for: `None`.
+/// Runs `task` as a task of its own until it ends or `restarts` is stopping. Returns how it ended
+/// (unless the runtime is shutting down), or `None` when `restarts` is stopping, in which case
+/// the task is aborted and waited for.
 async fn until_stopped<F>(
     restarts: &Restarts,
     task: F,
@@ -179,7 +180,7 @@ where
     let mut stopping = restarts.stopping.subscribe();
     let mut running = tokio::spawn(task);
     let stopped = async move {
-        // Never `Err`: `restarts` holds the sender.
+        // Never `Err`, because `restarts` holds the sender.
         let _ = stopping.wait_for(|stop| *stop).await;
     };
     tokio::select! {
@@ -191,8 +192,8 @@ where
     None
 }
 
-/// The UI thread's frames: a frame that panics is dropped and the next one drawn; the sixth in a
-/// row gives up.
+/// The UI thread's frames. A frame that panics is dropped and the next one drawn, and the sixth
+/// in a row gives up.
 #[derive(Default)]
 pub(crate) struct Frames {
     /// Frames in a row that panicked.
@@ -223,7 +224,7 @@ impl Frames {
 mod tests {
     use super::*;
 
-    /// The tests that give up, one at a time: giving up is the process's.
+    /// Runs the tests that give up one at a time, because giving up is the whole process's.
     static GIVING_UP: Mutex<()> = Mutex::new(());
 
     #[test]

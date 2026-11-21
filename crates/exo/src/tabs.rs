@@ -1,14 +1,14 @@
-//! The window's tabs. A tab is an account and a route, what its link says ([`crate::links`]): the
-//! list and its filter, the open conversation, and search, the week view or the Snippets folder
-//! if one is up. The screen on screen is the active tab's; each other tab keeps its own page as
-//! it was left ([`Parked`]), or until it first shows, its route, which a page goes to then
-//! ([`Mail::go_to_route`](crate::Mail::go_to_route)).
+//! The window's tabs. A tab is an account and a route, which is what its link says
+//! ([`crate::links`]): the list and its filter, the open conversation, and search, the week view
+//! or the Snippets folder if one is up. The screen on screen is the active tab's. Each other tab
+//! keeps its own page as it was left ([`Parked`]), or, until it first shows, its route, which a
+//! page goes to then ([`Mail::go_to_route`](crate::Mail::go_to_route)).
 //!
-//! ⌘T or `+` opens a tab on the active tab's account, last in the strip; ⌘W or × closes one,
-//! showing its right neighbour or else its left one, and ⌘⇧T opens the one closed last again;
+//! ⌘T or `+` opens a tab on the active tab's account, last in the strip. ⌘W or × closes one,
+//! showing its right neighbour or else its left one, and ⌘⇧T opens the one closed last again.
 //! ⌘1…⌘9 show the first to ninth, ⌘⌥→ or ⌃Tab the next and ⌘⌥← or ⌃⇧Tab the previous, wrapping
-//! round. A window holds at most 20: one more closes the active tab's neighbour. The tabs are kept
-//! in `tabs.json` and come back at the next launch.
+//! round. A window holds at most 20, and one more closes the active tab's neighbour. The tabs are
+//! kept in `tabs.json` and come back at the next launch.
 
 use std::path::{Path, PathBuf};
 
@@ -28,7 +28,7 @@ const FILE_NAME: &str = "tabs.json";
 pub(crate) struct Route {
     /// The account.
     pub email: String,
-    /// The list; none for the account's home (`/{email}`).
+    /// The list, or none for the account's home (`/{email}`).
     pub list: Option<ListId>,
     /// The conversation open, if one is.
     #[serde(default)]
@@ -128,7 +128,7 @@ impl From<Closed> for Parked {
 struct Tab {
     /// What its pill showed last.
     pill: Pill,
-    /// Where it is; none for the tab on screen, which is wherever the screen is.
+    /// Where it is, or none for the tab on screen, which is wherever the screen is.
     parked: Option<Parked>,
 }
 
@@ -163,7 +163,7 @@ impl Tabs {
         self.tabs.len()
     }
 
-    /// The tab on screen's place.
+    /// The place of the tab on screen.
     pub(crate) fn active(&self) -> usize {
         self.active
     }
@@ -239,7 +239,7 @@ impl Tabs {
         self.tabs.iter().map(|tab| tab.pill.clone()).collect()
     }
 
-    /// What the tab on screen's pill showed last.
+    /// What the pill of the tab on screen showed last.
     pub(crate) fn active_pill(&self) -> &Pill {
         &self.tabs[self.active].pill
     }
@@ -249,7 +249,7 @@ impl Tabs {
         self.tabs[self.active].pill = pill;
     }
 
-    /// Makes tab `to` the one on screen, if it's another tab: returns where it is, for the caller
+    /// Makes tab `to` the one on screen, if it's another tab. Returns where it is, for the caller
     /// to show, and the place of the tab that was on screen, for [`park`](Self::park).
     pub(crate) fn select(&mut self, to: usize) -> Option<(usize, Parked)> {
         let parked = self.tabs.get_mut(to)?.parked.take()?;
@@ -273,7 +273,8 @@ impl Tabs {
         (self.active + self.tabs.len() - 1) % self.tabs.len()
     }
 
-    /// The tab that shows when the one on screen closes: its right neighbour, else its left one.
+    /// The tab that shows when the one on screen closes, which is its right neighbour or else its
+    /// left one.
     pub(crate) fn neighbour(&self) -> Option<usize> {
         if self.active + 1 < self.tabs.len() {
             Some(self.active + 1)
@@ -282,7 +283,7 @@ impl Tabs {
         }
     }
 
-    /// Adds a tab at `parked`, last, with `pill` until it shows; at the limit, the active tab's
+    /// Adds a tab at `parked`, last, with `pill` until it shows. At the limit, the active tab's
     /// neighbour closes first. Returns its place.
     pub(crate) fn push(&mut self, pill: Pill, parked: Parked) -> usize {
         if self.tabs.len() >= MAX_TABS {
@@ -328,14 +329,14 @@ impl Tabs {
         }
     }
 
-    /// The tab closed last, to open again; forgotten once taken.
+    /// The tab closed last, to open again. It's forgotten once taken.
     pub(crate) fn take_closed(&mut self) -> Option<Closed> {
         self.closed.take()
     }
 
-    /// `saved`, restored: at most [`MAX_TABS`], centred on the active one where they can be, the
-    /// first marked active winning, else the first. The active one comes back with its place
-    /// taken out, for the caller to show. None for no tabs.
+    /// Restores `saved`, keeping at most [`MAX_TABS`], centred on the active one where they can
+    /// be. The first tab marked active wins, or else the first tab. The active one comes back
+    /// with its place taken out, for the caller to show. None for no tabs.
     fn restored(saved: Saved) -> Option<(Self, Parked)> {
         let active = saved.tabs.iter().position(|tab| tab.active).unwrap_or(0);
         let start = active.saturating_sub(MAX_TABS / 2);
@@ -367,8 +368,8 @@ impl Tabs {
         ))
     }
 
-    /// What `tabs.json` keeps, `on_screen` the route of the tab on screen (none on the sign-in
-    /// screen or an alert).
+    /// What `tabs.json` keeps, with `on_screen` the route of the tab on screen (none on the
+    /// sign-in screen or an alert).
     fn saved(&self, on_screen: Option<&Route>) -> Saved {
         let tabs = self.tabs.iter().enumerate().map(|(index, tab)| {
             let route = match &tab.parked {
@@ -403,7 +404,7 @@ pub(crate) enum Command {
     Previous,
 }
 
-/// What `event` asks of the tabs, if it's a tab key (a shortcut or a menu item's accelerator);
+/// What `event` asks of the tabs, if it's a tab key (a shortcut or a menu item's accelerator).
 /// `several` says whether there's more than one tab, for ⌘W.
 fn command(event: &Event, several: bool) -> Option<Command> {
     let Event::Key {
@@ -450,7 +451,7 @@ fn command(event: &Event, several: bool) -> Option<Command> {
     }
 }
 
-/// Takes this frame's tab keys out of `ctx`'s input, whatever has the keyboard; `several` says
+/// Takes this frame's tab keys out of `ctx`'s input, whatever has the keyboard. `several` says
 /// whether there's more than one tab.
 pub(crate) fn keys(ctx: &egui::Context, several: bool) -> Vec<Command> {
     ctx.input_mut(|input| {
@@ -475,7 +476,7 @@ struct Saved {
 
 #[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 struct SavedTab {
-    /// Its route; none on the sign-in screen.
+    /// Its route, or none on the sign-in screen.
     #[serde(default)]
     route: Option<Route>,
     #[serde(default)]
@@ -522,8 +523,8 @@ impl File {
         )
     }
 
-    /// Writes `tabs` when they've changed since the last write, `on_screen` the route of the tab
-    /// on screen.
+    /// Writes `tabs` when they've changed since the last write, with `on_screen` the route of the
+    /// tab on screen.
     pub(crate) fn save(&mut self, tabs: &Tabs, on_screen: Option<&Route>) {
         let Ok(contents) = serde_json::to_vec(&tabs.saved(on_screen)) else {
             return;
@@ -555,7 +556,7 @@ pub(crate) fn title(name: &str, count: Option<&str>, who: &str) -> String {
 }
 
 /// The title of a tab not on screen at `route` in `account`, from the account's latest labels
-/// and counts, as its page would keep it; `who` is what it ends with. None for the week view,
+/// and counts, as its page would keep it. `who` is what it ends with. None for the week view,
 /// which keeps the title it had.
 pub(crate) fn parked_title(account: &Account, route: &Route, who: &str) -> Option<String> {
     let name = match &route.view {
@@ -601,10 +602,11 @@ impl crate::Mail {
         }
     }
 
-    /// Goes to `route`, a tab's shown again or a link's: out of what it doesn't have up (search,
-    /// the week, the Snippets folder, a new message's pane, whose draft is saved as going to a
-    /// list saves it), to its list with its filter and its conversation open or none, then into
-    /// what it has up again. A snippet with unsaved changes stays open.
+    /// Goes to `route`, of a tab shown again or of a link. It leaves what the route doesn't have
+    /// up (search, the week, the Snippets folder, a new message's pane, whose draft is saved as
+    /// going to a list saves it), goes to the route's list with its filter and its conversation
+    /// open or none, then back into what the route has up. A snippet with unsaved changes stays
+    /// open.
     pub(crate) fn go_to_route(&mut self, route: &Route) {
         let now = self.ctx.input(|input| input.time);
         let home = crate::splits::home(self.account.settings());
@@ -663,9 +665,9 @@ impl crate::Mail {
         }
     }
 
-    /// What the tab says: with several accounts it names the account; with one, Exo. Searching,
-    /// the search names it, without a count; See Your Week names the week (`📆 {week} - {who}`),
-    /// with no count.
+    /// What the tab says. With several accounts it names the account, and with one, Exo. While
+    /// searching, the search names it, without a count. See Your Week names the week
+    /// (`📆 {week} - {who}`), with no count.
     pub(crate) fn tab_title(&self) -> String {
         let name = match (&self.search, self.search_query()) {
             (Some(_), Some(query)) => format!("Search: {query}"),
@@ -759,7 +761,7 @@ mod tests {
             tabs.take_closed(),
             Some(Closed::Route(Route::home("6".to_owned())))
         );
-        // The active tab last: the one left of it.
+        // With the active tab last, the one left of it.
         select(&mut tabs, 19, "5");
         tabs.push(pill("newer"), route("newer"));
         assert_eq!(

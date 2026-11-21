@@ -30,7 +30,7 @@ const SHADOWS: [BoxShadow; 2] = [
         Color32::from_rgba_premultiplied(0, 0, 0, 31),
     ),
 ];
-/// The month's caption, padded `0 0 8px 16px`: 600 12px/16px, `letter-spacing: .18px`.
+/// The month's caption, padded `0 0 8px 16px`, in 600 12px/16px with `letter-spacing: .18px`.
 const CAPTION: TextStyle =
     TextStyle::new(Font::new(Family::Sans, 600), 12.0, 16.0).letter_spacing(0.18);
 const CAPTION_LEFT: f32 = 16.0;
@@ -56,7 +56,7 @@ const DAY_TEXT_TOP: f32 = 6.0;
 const DISABLED_OPACITY: f32 = 0.5;
 const OUTSIDE_OPACITY: f32 = 0.4;
 
-/// The popup's colours: it hangs outside whatever opened it, so it takes the app's theme.
+/// The popup's colours. It hangs outside whatever opened it, so it takes the app's theme.
 struct PopupColors {
     background: Color32,
     text: Color32,
@@ -109,7 +109,7 @@ pub struct DateInput {
 }
 
 impl DateInput {
-    /// The field showing `date` in [`format_date`]'s way, its popup closed.
+    /// The field showing `date` in [`format_date`]'s way, with its popup closed.
     pub fn showing(date: Option<Date>, today: Date) -> Self {
         Self {
             text: date
@@ -121,7 +121,7 @@ impl DateInput {
         }
     }
 
-    /// The input as typed changed to `text`: it parses against `reference` (the field's date, or
+    /// The input as typed changed to `text`. It parses against `reference` (the field's date, or
     /// today), and is wrong when it's not a date or is before `min`. Returns whether the field was
     /// emptied while `nullable`.
     pub fn typed(
@@ -164,7 +164,7 @@ pub fn format_date(date: Date, today: Date) -> String {
 
 /// A typed date, with commas dropped: a weekday name (`EEEE`), the next one if that's past; then a
 /// month and maybe a day (`M`, `M/d`, `MMMM`, `MMMM d`, `EEEE MMMM d`) in `reference`'s year, next
-/// year if that's past; then those with a year, and `yyyy-MM-dd`. Names may be abbreviated; a
+/// year if that's past; then those with a year, and `yyyy-MM-dd`. Names may be abbreviated, and a
 /// weekday with a date moves it into that day's week.
 pub fn parse_date(text: &str, reference: Date, today: Date) -> Option<Date> {
     let words: Vec<String> = text
@@ -300,7 +300,7 @@ fn weekday(name: &str) -> Option<Weekday> {
         .iter()
         .filter(|(day, _)| name.len() >= 2 && day.starts_with(name));
     let (_, found) = matches.next()?;
-    // `T` and `S` alone are ambiguous; `th`/`tu`, `sa`/`su` aren't.
+    // `T` and `S` alone are ambiguous, but `th`/`tu` and `sa`/`su` aren't.
     matches.next().is_none().then_some(*found)
 }
 
@@ -309,14 +309,14 @@ fn weekday(name: &str) -> Option<Weekday> {
 pub enum DatePick {
     /// A day was picked.
     Picked(Date),
-    /// A chevron was clicked: the field keeps the keyboard.
+    /// A chevron was clicked, and the field keeps the keyboard.
     MonthChanged,
 }
 
-/// The popup showing a month, its day picked by the pointer.
+/// The popup showing a month, with its day picked by the pointer.
 pub struct DatePicker<'a> {
     pub id: Id,
-    /// The month shown; the chevrons move it.
+    /// The month shown, which the chevrons move.
     pub month: &'a mut Date,
     pub selected: Option<Date>,
     /// Marked as today.
@@ -537,7 +537,7 @@ mod tests {
 
     #[test]
     fn a_day_before_the_first_allowed_is_wrong() {
-        // A past day without a year is next year's; with one, it's wrong.
+        // A past day without a year is next year's, and a past day with one is wrong.
         let mut input = DateInput {
             text: "11/10/2026".into(),
             ..DateInput::default()

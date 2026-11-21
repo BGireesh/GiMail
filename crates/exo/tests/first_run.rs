@@ -6,8 +6,8 @@ mod support;
 use egui::{Key, pos2};
 use support::{Fixture, start_new_account};
 
-/// The Calendar split's row on the split step, the first after Important; its switch; and
-/// `Continue with this setup`.
+/// Where to click: the Calendar split's row on the split step (the first after Important), its
+/// switch, and `Continue with this setup`.
 const CALENDAR_ROW: egui::Pos2 = pos2(300.0, 345.0);
 const CALENDAR_SWITCH: egui::Pos2 = pos2(523.0, 355.0);
 const CONTINUE: egui::Pos2 = pos2(341.0, 755.0);
@@ -57,11 +57,11 @@ fn account_setup_offers_the_splits_the_inbox_has_mail_for_then_gets_you_to_zero(
     app.click(CALENDAR_ROW);
     assert!(calendar_on(&app));
 
-    // The mail's keys don't get through: 2 doesn't open the week.
+    // The mail's keys don't get through, so 2 doesn't open the week.
     app.key(Key::Num2);
     assert_eq!(app.mail().calendar_week(), None);
 
-    // `Continue with this setup`: an inbox of more than ten ends in Get Me To Zero.
+    // After `Continue with this setup`, an inbox of more than ten ends in Get Me To Zero.
     app.click(CONTINUE);
     app.settle();
     let mail = app.mail();
@@ -98,7 +98,7 @@ fn quitting_in_account_setup_opens_it_again() {
 
 #[test]
 fn account_setup_without_a_split_to_offer_ends_after_loading() {
-    // No library: nothing to offer, so the split step is skipped (`r42`).
+    // With no library there's nothing to offer, so the split step is skipped.
     let mut app = start_new_account("account-setup-nothing");
     app.mail_mut().open_account_setup();
     app.wait(9.0);
@@ -134,7 +134,7 @@ fn account_setup_keys_follow_what_was_clicked() {
     assert!(!calendar_on(&app));
     app.key(Key::Enter);
     assert!(app.mail().account_setup_open());
-    // The switch takes the keyboard itself: Space toggles it again.
+    // The switch takes the keyboard itself, so Space toggles it again.
     app.click(CALENDAR_SWITCH);
     assert!(calendar_on(&app));
     app.key(Key::Space);

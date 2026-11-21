@@ -9,15 +9,15 @@ pub enum Opening {
     /// On screen, where it was left.
     #[default]
     Shown,
-    /// Minimized into the Dock without showing first, at its normal place; a full screen it was
-    /// left in waits for it to come back.
+    /// Minimized into the Dock without showing first, at its normal place. If it was left in full
+    /// screen, full screen waits for it to come back.
     Minimized,
 }
 
 impl Opening {
-    /// This launch's: minimized when macOS launched Exo as a login item. Ask first as the window is
-    /// made (eframe's `window_builder`), while macOS is handing Exo the event it launched it with;
-    /// that answer holds for the run.
+    /// How the window opens for this launch, which is minimized when macOS launched Exo as a login
+    /// item. Ask first as the window is made (eframe's `window_builder`), while macOS is handing
+    /// Exo the event it launched Exo with. That answer holds for the run.
     pub fn launch() -> Self {
         static LAUNCH: OnceLock<Opening> = OnceLock::new();
         *LAUNCH.get_or_init(|| {
@@ -29,10 +29,10 @@ impl Opening {
         })
     }
 
-    /// `builder`, already at the window's place, for this opening: a window opening minimized
-    /// doesn't open in full screen, which has a Space of its own and no way into the Dock, and
-    /// which AppKit would otherwise keep trying to enter (winit retries a full screen it was built
-    /// with until it takes).
+    /// `builder`, already at the window's place, adjusted for this opening. A window opening
+    /// minimized doesn't open in full screen, which has a Space of its own and no way into the
+    /// Dock. AppKit would otherwise keep trying to enter full screen, because winit retries a full
+    /// screen it was built with until it takes.
     pub fn apply(self, builder: egui::ViewportBuilder) -> egui::ViewportBuilder {
         match self {
             Self::Shown => builder,

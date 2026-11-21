@@ -1,7 +1,7 @@
-//! Instant Intro: replying to an introduction, ⌘⇧I moves the introducer to Bcc and starts the reply
-//! with the `customInstantIntro` line (`Thanks {first_name}! (to BCC)`) naming them. Each press
-//! moves the next of the original To and Cc instead, the line following; after the last, the
-//! recipients are as they were and the line goes, to come back on the next press.
+//! Instant Intro. In a reply to an introduction, ⌘⇧I moves the introducer to Bcc and starts the
+//! reply with the `customInstantIntro` line (`Thanks {first_name}! (to BCC)`) naming them. Each
+//! press moves the next of the original To and Cc instead, and the line follows. After the last,
+//! the recipients are as they were and the line goes, to come back on the next press.
 
 use exo_commands::{Command, Commands, Hint, Region};
 use exo_store::{Address, DraftAction, MessageDetail};
@@ -35,7 +35,7 @@ pub(crate) struct Cycle {
     start: Option<[Vec<Address>; 3]>,
     /// The snippet taken out when the cycle came back round, to put back on the next press.
     last_snippet: Option<String>,
-    /// The recipients as the cycle last left them: any other change starts it over.
+    /// The recipients as the cycle last left them. Any other change starts the cycle over.
     left: Option<[Vec<Address>; 3]>,
 }
 
@@ -58,8 +58,8 @@ fn recipients(open: &Open) -> [Vec<Address>; 3] {
     ]
 }
 
-/// One press. Returns whether it did anything (a draft needs two recipients), when Exo hints
-/// `Not quite right? Hit ⌘ shift I again!`.
+/// One press. Returns whether it did anything (a draft needs two recipients), in which case Exo
+/// hints `Not quite right? Hit ⌘ shift I again!`.
 pub(crate) fn cycle(
     open: &mut Open,
     intro: &str,
@@ -72,7 +72,7 @@ pub(crate) fn cycle(
     if everyone(open) < 2 {
         return false;
     }
-    // The next of the original To and Cc; after the last, no one.
+    // The next of the original To and Cc, or no one after the last.
     let cycle = &mut open.intro;
     match cycle.index {
         None => {
@@ -114,7 +114,8 @@ pub(crate) fn cycle(
         .and_then(|person| contacts::best_known_first_name(person, book));
     let index = open.intro.index;
     insert_snippet(open, first_name.as_deref(), index, intro);
-    // The recipients and body change together (the recipient undo step is `chips::History`'s).
+    // The recipients and body change together (the recipient undo step belongs to
+    // `chips::History`).
     open.record.to = to;
     open.record.cc = cc;
     open.record.bcc = bcc;
@@ -124,9 +125,9 @@ pub(crate) fn cycle(
     true
 }
 
-/// Into an empty body goes the snippet naming `first_name`; one already there names them instead,
-/// or goes when no one's moved (kept aside for the next press, which puts it back when it starts
-/// the cycle again). A body with anything else in it is left alone.
+/// Puts the snippet naming `first_name` into an empty body. A snippet already there names them
+/// instead, or goes when no one's moved. It's then kept aside for the next press, which puts it
+/// back when it starts the cycle again. A body with anything else in it is left alone.
 fn insert_snippet(open: &mut Open, first_name: Option<&str>, index: Option<usize>, intro: &str) {
     let dom = parse_document(RcDom::default(), Default::default()).one(open.editor.html());
     let Some(body) = find(&dom.document, |name, _| name == "body") else {
@@ -291,8 +292,8 @@ pub(super) fn register(commands: &mut Commands<commands::Action>) {
         .add(command(Action::InstantIntro).regions(&[Region::ComposeForm, Region::RecipientList]));
 }
 
-/// Registers `Instant Intro` on a conversation: in a thread, the focused message's; in the list,
-/// the highlighted conversation's.
+/// Registers `Instant Intro` on a conversation. In a thread it's for the focused message, and in
+/// the list for the highlighted conversation.
 pub(super) fn register_on_conversation(commands: &mut Commands<commands::Action>, in_thread: bool) {
     let regions: &[Region] = if in_thread {
         &[Region::ThreadMessages]
@@ -328,7 +329,7 @@ fn try_again() -> Hint {
 }
 
 impl crate::Mail {
-    /// ⌘⇧I in a draft: the next step of its cycle.
+    /// ⌘⇧I in a draft takes the next step of its cycle.
     pub(super) fn instant_intro(&mut self, now: f64) {
         let intro = self.account.settings().instant_intro().to_owned();
         if let Some((open, book)) = self.compose.focused_with_book()
@@ -338,7 +339,7 @@ impl crate::Mail {
         }
     }
 
-    /// ⌘⇧I on a conversation: the focused message's draft cycles, or a Reply All starts with the
+    /// ⌘⇧I on a conversation. The focused message's draft cycles, or a Reply All starts with the
     /// first step. A message with fewer than two recipients hints that Instant Intro is for
     /// introductions.
     pub(super) fn instant_intro_reply(&mut self, now: f64) {
@@ -463,7 +464,7 @@ mod tests {
         );
         let mut open = reply(std::slice::from_ref(&sam), &[bea.clone(), cy.clone()]);
         assert!(cycle(&mut open, INTRO, None, 0.0));
-        // Sam was alone in To: Cc moves up.
+        // Sam was alone in To, so Cc moves up.
         assert_eq!(
             (
                 emails(&open.record.to),

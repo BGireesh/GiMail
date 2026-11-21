@@ -1,4 +1,4 @@
-//! Split inboxes: saving a split routes inbox threads into it and out of Important and Other,
+//! Split inboxes. Saving a split routes inbox threads into it and out of Important and Other,
 //! and its list backfills from Gmail.
 
 mod support;
@@ -16,7 +16,8 @@ fn query(q: &str) -> ListQuery {
     }
 }
 
-/// The domain most inbox threads' contacts write from, so the split takes a few of them.
+/// The domain that the contacts of most inbox threads write from, so the split takes a few of
+/// them.
 async fn busiest_domain(harness: &Harness) -> String {
     let mut domains: Vec<String> = harness
         .all(&ListId::Inbox)
@@ -43,7 +44,7 @@ async fn busiest_domain(harness: &Harness) -> String {
 
 /// Inbox threads with a message (not a draft) from `domain`. A split matches `in:inbox` on the
 /// thread and `from:` on each message, so a reply you sent from that domain counts, where
-/// Gmail's search (one message matching everything) wouldn't.
+/// Gmail's search, which needs one message to match everything, wouldn't count it.
 async fn from_domain(harness: &Harness, domain: &str) -> BTreeSet<String> {
     let mut found = BTreeSet::new();
     for id in harness.gmail_ids(query("in:inbox")).await {

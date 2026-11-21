@@ -1,6 +1,6 @@
-//! Calendar Settings: the dialog the week view's gear, its time zone labels and the palette open,
-//! with the calendar's options (the secondary time zone's input among them), its meeting links,
-//! the way to its notifications, and its calendar accounts, with a way to sign another in.
+//! Calendar Settings, the dialog that the week view's gear, its time zone labels and the palette
+//! open. It holds the calendar's options (the secondary time zone's input among them), its meeting
+//! links, the way to its notifications, and its calendar accounts, with a way to sign another in.
 
 use egui::{Color32, CornerRadius, Rect, Sense, Ui, Vec2, pos2, vec2};
 use exo_ui::{Dialog, Family, Font, TextStyle};
@@ -8,9 +8,10 @@ use jiff::Timestamp;
 
 use super::timezones::{self, ZoneInput};
 
-/// The headings: 12px/20px bold, nudged `top: 3px`; the checkbox's label 14px/21px weight 500 (a
-/// 16px checkbox, the label 24px in); the radios' 12px/20px, the 12px radio 1px in and 3px down,
-/// the label 20px in; rows 24px apart; each account's address 12px/24px beside its 16px avatar.
+/// The headings are 12px/20px bold, nudged `top: 3px`. The checkbox's label is 14px/21px weight
+/// 500 (a 16px checkbox, the label 24px in). The radios' labels are 12px/20px, with the 12px radio
+/// 1px in and 3px down and the label 20px in. Rows are 24px apart. Each account's address is
+/// 12px/24px beside its 16px avatar.
 const HEADING: TextStyle = TextStyle::new(Font::new(Family::Sans, 700), 12.0, 20.0);
 const CHECK_LABEL: TextStyle = TextStyle::new(Font::new(Family::Sans, 500), 14.0, 21.0);
 const TEXT: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 12.0, 20.0);
@@ -18,13 +19,13 @@ const ACCOUNT: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 12.0, 24
 const ROW: f32 = 24.0;
 const LABEL_LEFT: f32 = 24.0;
 const RADIO_LABEL_LEFT: f32 = 20.0;
-/// Where each part starts from the body's top: `Options`' box and its first row, then a row
-/// every 24px (20px rows, `gap: 4px`), the time zone's input a row more; `Meeting Links`' box
-/// 20px after (its radios 27px under), and after the last radio's 20px row, 19.5px to
-/// `Notifications`' box (its button 27px under, the box 44px tall), then 20px to `Accounts`' box,
-/// whose first avatar is 32px under it and address 29px, an account every 28px (24px tall, 4px
-/// apart), then `Sign in with Google` 8px under the last, its 16px icon then its 12px/16px label
-/// 24px in, 1px down.
+/// Where each part starts from the body's top. `Options`' box and its first row come first, then a
+/// row every 24px (20px rows, `gap: 4px`), and the time zone's input takes a row more.
+/// `Meeting Links`' box is 20px after, with its radios 27px under it. After the last radio's 20px
+/// row, it's 19.5px to `Notifications`' box (its button 27px under, the box 44px tall), then 20px
+/// to `Accounts`' box. The first avatar is 32px under that box and its address 29px, with an
+/// account every 28px (24px tall, 4px apart). `Sign in with Google` is 8px under the last account,
+/// with its 16px icon and then its 12px/16px label 24px in, 1px down.
 const OPTIONS_TOP: f32 = 20.0;
 const CHECK_TOP: f32 = 47.5;
 const LINKS_BELOW: f32 = 40.5;
@@ -46,9 +47,10 @@ const ROW_HOVER_CARBON: Color32 = Color32::from_rgb(0xea, 0xea, 0xea);
 const ROW_OUTSET: f32 = 8.0;
 const REMOVE_INK: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 102);
 
-/// The secondary time zone's input: `margin-left: 20px; width: 254px`, 25.5px under its row's
-/// top: 12px/16px text over `padding-bottom: 2px` and a 2px `#aeb1dd` border (a literal both
-/// themes keep); its list 286px from 16px left of it and 4px under, five zones.
+/// The secondary time zone's input has `margin-left: 20px; width: 254px` and sits 25.5px under its
+/// row's top. It's 12px/16px text over `padding-bottom: 2px` and a 2px `#aeb1dd` border (a literal
+/// both themes keep). Its list is 286px wide, from 16px left of the input and 4px under it, and
+/// shows five zones.
 const ZONE_LEFT: f32 = 20.0;
 const ZONE_BELOW: f32 = 25.5;
 const ZONE_WIDTH: f32 = 254.0;
@@ -95,9 +97,9 @@ pub enum OptionsAction {
     /// A zone picked in the secondary time zone's input, by IANA id.
     SecondaryZone(String),
     MeetingLink(Option<String>),
-    /// `Manage notification settings`: the Notifications dialog in this one's place.
+    /// `Manage notification settings`, which puts the Notifications dialog in this one's place.
     Notifications,
-    /// `Sign in with Google`: another calendar account.
+    /// `Sign in with Google`, for another calendar account.
     SignIn,
     /// `Remove Account`.
     Remove(String),
@@ -131,7 +133,7 @@ impl Shown<'_> {
     }
 }
 
-/// The body's height: down to `Sign in with Google`.
+/// The body's height, down to `Sign in with Google`.
 fn body_height(shown: &Shown<'_>) -> f32 {
     let accounts = ACCOUNTS_LIST + shown.accounts.len() as f32 * ACCOUNT_PITCH
         - (ACCOUNT_PITCH - ACCOUNT_ROW)
@@ -146,7 +148,8 @@ fn body_height(shown: &Shown<'_>) -> f32 {
         + accounts
 }
 
-/// `Meeting Links`' box: after the options and, while it's on, the secondary time zone's input.
+/// Where `Meeting Links`' box starts: after the options and, while that option is on, the
+/// secondary time zone's input.
 fn links_top(shown: &Shown<'_>) -> f32 {
     let zone = if shown.on(Setting::SecondaryZone) {
         ROW
@@ -156,7 +159,7 @@ fn links_top(shown: &Shown<'_>) -> f32 {
     CHECK_TOP + (OPTIONS.len() as f32 - 1.0) * ROW + zone + LINKS_BELOW
 }
 
-/// Paints the dialog over `area` while `open` (and as it fades); returns what was changed.
+/// Paints the dialog over `area` while `open` (and as it fades), and returns what was changed.
 pub fn show(
     ctx: &egui::Context,
     area: Rect,
@@ -299,7 +302,7 @@ fn body_ui(ui: &mut Ui, body: Rect, shown: &Shown<'_>, zone: &mut ZoneInput) -> 
     }
     let accounts = notifications + NOTIFICATIONS_HEIGHT;
 
-    // `Accounts`: each account, its initial on its colour; then signing another in.
+    // `Accounts`: each account with its initial on its colour, then the way to sign another in.
     HEADING.paint_line(
         ui.painter(),
         pos2(left, accounts + NUDGE),
@@ -370,7 +373,7 @@ fn body_ui(ui: &mut Ui, body: Rect, shown: &Shown<'_>, zone: &mut ZoneInput) -> 
         }
         row_top += ACCOUNT_PITCH;
     }
-    // Signing another account in, with Google only: Exo is Gmail-only.
+    // Signing another account in, with Google only because Exo is Gmail-only.
     let sign_in = pos2(left, row_top - (ACCOUNT_PITCH - ACCOUNT_ROW) + SIGN_IN_GAP);
     // The logo keeps its own blue.
     exo_ui::paint_icon(
@@ -400,7 +403,8 @@ fn body_ui(ui: &mut Ui, body: Rect, shown: &Shown<'_>, zone: &mut ZoneInput) -> 
     actions
 }
 
-/// The secondary time zone's input at `origin`, its rule always showing; returns the zone picked.
+/// The secondary time zone's input at `origin`, with its rule always showing. Returns the zone
+/// picked.
 fn zone_input(
     ui: &mut Ui,
     origin: egui::Pos2,

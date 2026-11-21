@@ -383,7 +383,7 @@ fn share_availabilitys_menu_filters_as_you_type() {
         Some("Hi frezzzzz"),
         "keeping the text"
     );
-    // Escape closes it too, keeping what's typed; Backspace at its start does.
+    // Escape closes it too, keeping what's typed. So does Backspace at its start.
     app.press(Key::A, COMMAND.plus(Modifiers::SHIFT));
     app.key(Key::Backspace);
     assert_eq!(app.mail().compose_availability_query(), None);

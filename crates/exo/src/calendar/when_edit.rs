@@ -1,6 +1,7 @@
 //! An event's When while it's edited. Its first row has the start's date picker, the start and
 //! end times (and the end's date when the event ends on another day; an all-day event's first and
-//! last days instead) and `All day` with its switch; its second the time zone the times are in.
+//! last days instead) and `All day` with its switch. Its second has the time zone the times are
+//! in.
 //!
 //! A time is typed or picked from a list of quarter hours; a date is typed or picked from the
 //! month under it.
@@ -26,7 +27,7 @@ const UNDERLINE: f32 = 2.0;
 /// sits them 2px under an input's text.
 const SMALL_LINE: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 12.0, 12.0);
 const SMALL_NUDGE: f32 = 2.0;
-/// The start's date picker is 80px wide; the inputs size to their text (`field-sizing: content`)
+/// The start's date picker is 80px wide. The inputs size to their text (`field-sizing: content`)
 /// within `min-width: 20px` and their `max-width`s (72px for a date, 52px for a time).
 const START_DATE_BOX: f32 = 80.0;
 const MIN_INPUT: f32 = 20.0;
@@ -36,14 +37,14 @@ const MAX_TIME: f32 = 52.0;
 const RANGE_GAP: f32 = 6.0;
 /// Between `All day` and its switch: `column-gap: 18px`, the switch last in the row.
 const ALL_DAY_GAP: f32 = 18.0;
-/// The time zone input is 266px wide; its list 296px.
+/// The time zone input is 266px wide, and its list 296px.
 const ZONE_WIDTH: f32 = 266.0;
 const ZONE_LIST_WIDTH: f32 = 296.0;
 const ZONES: usize = 5;
-/// The time lists (the start's 80px wide, the end's 160px; `max-height: 168px`): 16px left of the
-/// input and 12px under its box; 32px items (`padding: 10px`) from 6px down (the first's
-/// `margin-top: 3px` and every one's `top: 3px`), 6px under the last; the end's labelled 16px in
-/// from each side.
+/// The time lists (the start's 80px wide, the end's 160px; `max-height: 168px`) sit 16px left of
+/// the input and 12px under its box. Their 32px items (`padding: 10px`) start 6px down (the
+/// first's `margin-top: 3px` and every one's `top: 3px`), and a list ends 6px under the last. The
+/// end's items are labelled 16px in from each side.
 const START_LIST: f32 = 80.0;
 const END_LIST: f32 = 160.0;
 const LIST_MAX: f32 = 168.0;
@@ -54,7 +55,7 @@ const ITEM_TOP: f32 = 6.0;
 const LIST_BOTTOM: f32 = 3.0;
 const ITEM_TEXT: f32 = 10.0;
 const END_PADDING: f32 = 16.0;
-/// `#aeb1dd` focused, `#f67b7b` wrong: Classic literals both themes keep.
+/// `#aeb1dd` focused and `#f67b7b` wrong, Classic literals both themes keep.
 const FOCUSED: Color32 = Color32::from_rgb(0xae, 0xb1, 0xdd);
 const WRONG: Color32 = Color32::from_rgb(0xf6, 0x7b, 0x7b);
 /// The typed time's formats, tried in this order.
@@ -95,7 +96,7 @@ pub enum Change {
     Times(Zoned, Zoned),
     /// The all-day switch.
     AllDay,
-    /// The times' zone: the same clock times there.
+    /// The times' zone, keeping the same clock times there.
     Zone(TimeZone),
 }
 
@@ -138,7 +139,7 @@ impl WhenEdit {
             || self.end_date.month.is_some()
     }
 
-    /// Escape: closes the open list or month.
+    /// Escape, which closes the open list or month.
     pub fn close_dropdown(&mut self) {
         self.start_time.open = false;
         self.end_time.open = false;
@@ -221,7 +222,7 @@ impl WhenEdit {
             focused = Some(Part::StartDate);
         }
         if let Some(date) = start_date.picked {
-            // The start moves to that day, the end with it.
+            // The start moves to that day, and the end with it.
             if let Some(change) = moved_start(shown, date) {
                 changes.push(change);
             }
@@ -345,7 +346,7 @@ impl WhenEdit {
         }
         SMALL_LINE.paint_line(ui.painter(), label.min, "All day", ink, None);
         if toggle.has_focus() {
-            // Focused: its border, 2px under its text.
+            // Focused, it shows its border 2px under its text.
             ui.painter().rect_filled(
                 Rect::from_min_size(
                     pos2(label.left(), label.bottom() + 2.0),
@@ -411,7 +412,7 @@ impl WhenEdit {
         (changes, focused.is_some())
     }
 
-    /// The part after `part` in the tab order; past the last, the zone keeps it.
+    /// The part after `part` in the tab order. Past the last, it stays on the zone.
     fn after(&self, part: Part, shown: &Shown<'_>) -> Part {
         let order = order(shown);
         order
@@ -422,7 +423,7 @@ impl WhenEdit {
             .unwrap_or(Part::Zone)
     }
 
-    /// The part before `part`; none before the first (egui hands the keyboard to the title).
+    /// The part before `part`, or none before the first (egui hands the keyboard to the title).
     fn before(&self, part: Part, shown: &Shown<'_>) -> Option<Part> {
         let order = order(shown);
         order
@@ -432,8 +433,8 @@ impl WhenEdit {
             .map(|at| order[at])
     }
 
-    /// A date input at `x`, its text's line `top`: the start's (`Part::StartDate`) or the
-    /// end's, its month while it has the keyboard.
+    /// A date input at `x`, with its text's line at `top`: the start's (`Part::StartDate`) or the
+    /// end's, with its month while it has the keyboard.
     fn date_input(
         &mut self,
         ui: &mut Ui,
@@ -482,7 +483,7 @@ impl WhenEdit {
             advance: false,
         };
         if response.gained_focus() || focus {
-            // Its text selected, and the month opens.
+            // Its text is selected, and the month opens.
             exo_ui::focus_field(
                 &ctx,
                 id,
@@ -563,7 +564,7 @@ impl WhenEdit {
             &mut self.end_date
         };
         if response.lost_focus() && !ui.memory(|memory| memory.has_focus(id)) {
-            // Leaving it closes the month; what's typed and not taken goes back.
+            // Leaving it closes the month, and what's typed and not taken goes back.
             input.month = None;
             if taken.picked.is_none() && !input.error {
                 *input = DateInput::showing(Some(current), shown.today);
@@ -631,7 +632,7 @@ impl WhenEdit {
             .filter(|(label, _, _)| !typed || label.starts_with(&time.text.to_uppercase()))
             .collect();
         if response.gained_focus() || focus {
-            // Its text selected, the list open on the current time at its top.
+            // Its text is selected, and the list opens with the current time at its top.
             exo_ui::focus_field(
                 &ctx,
                 id,
@@ -667,7 +668,7 @@ impl WhenEdit {
         }
         let valid = valid_time(&time.text);
         if had_focus && (keys.2 || keys.3) {
-            // Enter or Tab: the highlighted time, else what's typed when it reads as one.
+            // Enter or Tab takes the highlighted time, or else what's typed when it reads as one.
             let picked = if time.open && !listed.is_empty() {
                 listed.get(time.highlighted).map(|(_, _, at)| at.clone())
             } else {
@@ -716,7 +717,7 @@ impl WhenEdit {
         };
         if response.lost_focus() {
             time.open = false;
-            // Leaving it: what's typed and differs is taken when it reads as a time.
+            // On leaving, what's typed and differs is taken when it reads as a time.
             if taken.picked.is_none() && time.text != time_text(current) {
                 taken.picked = parse_time(&time.text, shown.start, part == Part::EndTime);
             }
@@ -772,8 +773,8 @@ fn shown_end_date(shown: &Shown<'_>) -> Date {
     }
 }
 
-/// The start moved to `date` at its time, the end keeping the event's length; an all-day
-/// event's end keeping its number of days.
+/// The start moved to `date` at its time, with the end keeping the event's length, or for an
+/// all-day event its number of days.
 fn moved_start(shown: &Shown<'_>, date: Date) -> Option<Change> {
     let tz = shown.start.time_zone().clone();
     let start = date.to_datetime(shown.start.time()).to_zoned(tz).ok()?;
@@ -793,7 +794,7 @@ fn moved_start(shown: &Shown<'_>, date: Date) -> Option<Change> {
     Some(Change::Times(start, end))
 }
 
-/// The `–` between two inputs, `RANGE_GAP` before the next; returns where that starts.
+/// The `–` between two inputs, `RANGE_GAP` before the next. Returns where the next starts.
 fn separator(ui: &Ui, x: f32, top: f32, ink: Color32) -> f32 {
     x + SMALL_LINE.paint_line(ui.painter(), pos2(x, top + SMALL_NUDGE), "–", ink, None) + RANGE_GAP
 }
@@ -803,9 +804,9 @@ fn time_text(at: &Zoned) -> String {
     at.strftime("%-I:%M %p").to_string()
 }
 
-/// A list's options: label, duration label and time. The start's are its day's quarter hours;
-/// the end's, on the start's day, the 24 hours after the start labelled with the length
-/// (`30 mins`, `1 hour`, `1.5 hours`), else its own day's quarter hours.
+/// A list's options: label, duration label and time. The start's are its day's quarter hours.
+/// The end's, on the start's day, are the 24 hours after the start labelled with the length
+/// (`30 mins`, `1 hour`, `1.5 hours`), and otherwise its own day's quarter hours.
 fn time_options(part: Part, shown: &Shown<'_>) -> Vec<(String, String, Zoned)> {
     let quarters = |day: Date, tz: &TimeZone| -> Vec<(String, String, Zoned)> {
         (0..96)
@@ -853,8 +854,8 @@ fn scroll_to(index: usize, count: usize) -> f32 {
     (ITEM_TOP + index as f32 * ITEM).min((content - LIST_MAX).max(0.0))
 }
 
-/// Paints a time list in `rect`, scrolled and highlighted as `time` has it; the pointer
-/// highlights and picks, on the press (the input keeps the keyboard until the release). Returns
+/// Paints a time list in `rect`, scrolled and highlighted as `time` has it. The pointer
+/// highlights and picks on the press (the input keeps the keyboard until the release). Returns
 /// the item picked.
 fn paint_list(
     ui: &Ui,
@@ -973,8 +974,8 @@ struct Read {
     pm: Option<bool>,
 }
 
-/// A typed time, its spaces and colons dropped, read in `format`: each token takes what it can
-/// greedily, and nothing may be left over.
+/// A typed time, with its spaces and colons dropped, read in `format`. Each token takes what it
+/// can greedily, and nothing may be left over.
 fn read(text: &str, format: &str) -> Option<Read> {
     let mut rest = text;
     let mut read = Read {
@@ -997,7 +998,7 @@ fn read(text: &str, format: &str) -> Option<Read> {
             read.minute = value;
             (rest, tokens) = (left, after);
         } else if let Some(after) = tokens.strip_prefix('h') {
-            // `/^(1[0-2]|0?\d)/`, then 1–12.
+            // `10` to `12`, a `0` and a digit, or one digit, then 1–12.
             let length = match rest.as_bytes() {
                 [b'1', b'0'..=b'2', ..] | [b'0', b'0'..=b'9', ..] => 2,
                 [b'0'..=b'9', ..] => 1,
@@ -1008,7 +1009,7 @@ fn read(text: &str, format: &str) -> Option<Read> {
             (read.hour, read.twelve) = (value, true);
             (rest, tokens) = (&rest[length..], after);
         } else {
-            // `a`: `/^(a|p)\.?\s?m\.?/i`, else `/^(a|p)/i`.
+            // `a`: `a` or `p` in either case, with a following `m`, `.m`, `m.` or `.m.`.
             let after = tokens.strip_prefix('a')?;
             let lower = rest.to_ascii_lowercase();
             read.pm = Some(match lower.as_bytes().first() {
@@ -1051,7 +1052,7 @@ fn valid_time(text: &str) -> bool {
     FORMATS.iter().any(|format| read(&text, format).is_some())
 }
 
-/// `text` as a time on `reference`'s day: the first format it reads in; a 12-hour time without
+/// `text` as a time on `reference`'s day, in the first format it reads in. A 12-hour time without
 /// am or pm takes the reference's half of the day. An end before the reference is the next
 /// day's.
 fn parse_time(text: &str, reference: &Zoned, end: bool) -> Option<Zoned> {

@@ -1,7 +1,8 @@
-//! Send later: ⌘⇧L, the palette's `Send Later` and the action pane's button open the picker; the
-//! time picked is the draft's, which Send then schedules: the store holds the draft, a Gmail draft
-//! meanwhile, until then. A reply scheduled `if no reply` is called off by a reply (`Unscheduled:
-//! {name} replied`); a time that passes while the draft is still being written is cleared.
+//! Send later. ⌘⇧L, the palette's `Send Later` and the action pane's button open the picker. The
+//! time picked becomes the draft's, and Send then schedules it, with the store holding the draft
+//! until then. Meanwhile it stays a Gmail draft. A reply scheduled `if no reply` is called off by
+//! a reply (`Unscheduled: {name} replied`). A time that passes while the draft is still being
+//! written is cleared.
 
 use exo_commands::{Command, Dropdown, SubPalette, Toast, command_score};
 use exo_store::{MessageDetail, PreviousSchedule, SendLater, ThreadDetail};
@@ -35,13 +36,13 @@ pub(super) struct Picker {
     pub reply: bool,
     /// The draft's time, if it has one.
     pub current: Option<Timestamp>,
-    /// A reply called its schedule off: no `Unschedule`.
+    /// A reply called its schedule off, so there's no `Unschedule`.
     pub unscheduled: bool,
     /// The `last used` row, as last picked.
     pub previous: Option<PreviousSchedule>,
 }
 
-/// A row: its title and the time it picks (`None`: at once, no time).
+/// A row, with its title and the time it picks (`None` for at once, with no time).
 #[derive(Clone, Debug)]
 struct Choice {
     title: String,
@@ -88,7 +89,7 @@ impl Picker {
             ]
         };
         if now.weekday() != Weekday::Sunday {
-            // `Date.future("monday")`: the next Monday after today.
+            // The next Monday after today.
             let days = i64::from(7 - now.weekday().to_monday_zero_offset());
             rows.push(Choice::at("Monday morning", at_hour(now, days, 8)));
         }
@@ -102,7 +103,7 @@ impl Picker {
     }
 
     /// The rows only a query shows: four hours on from this hour (`a few hours`, `later today` or
-    /// `later` past midnight), and with a time set, `now` and `immediately`, which clear it.
+    /// `later` past midnight), and with a time set, `now` and `immediately`, which clear the time.
     fn hidden(&self) -> Vec<Choice> {
         let now = &self.now;
         let hour = now
@@ -124,8 +125,9 @@ impl Picker {
         rows
     }
 
-    /// The rows for `query`: with none, the defaults; else what the parser makes of it, then the
-    /// defaults and hidden rows whose titles match it, minus those at a time the parser gave.
+    /// The rows for `query`. With no query, they're the defaults. Otherwise they're what the
+    /// parser makes of the query, then the defaults and hidden rows whose titles match it, minus
+    /// those at a time the parser gave.
     fn choices(&self, query: &str) -> Vec<Choice> {
         let rows = self.defaults();
         if query.is_empty() {
@@ -242,8 +244,8 @@ fn unique_times(rows: Vec<Choice>) -> Vec<Choice> {
         .collect()
 }
 
-/// The reply that called off `open`'s scheduled send, if one did: the first message of `thread` the
-/// send wasn't scheduled with that isn't a draft or the user's.
+/// The reply that called off `open`'s scheduled send, if one did. It's the first message of
+/// `thread` that the send wasn't scheduled with and that isn't a draft or the user's.
 pub(super) fn aborting<'a>(open: &Open, thread: &'a ThreadDetail) -> Option<&'a MessageDetail> {
     let later = open
         .record
@@ -258,7 +260,7 @@ pub(super) fn aborting<'a>(open: &Open, thread: &'a ThreadDetail) -> Option<&'a 
     })
 }
 
-/// `Unscheduled: {name} replied`'s name: the sender's display name.
+/// The name in `Unscheduled: {name} replied`, which is the sender's display name.
 pub(super) fn replier(message: &MessageDetail) -> String {
     let from = message.from.as_ref();
     let person = Person::new(
@@ -321,7 +323,7 @@ impl Mail {
         self.unschedule_passed();
     }
 
-    /// The open drafts whose time has passed while they're still being written lose it, and with a
+    /// Clears the time of open drafts whose time passed while they're still being written. With a
     /// thread or the new-message pane on screen, the toast says so.
     pub(super) fn unschedule_passed(&mut self) {
         let now = self.now.timestamp();

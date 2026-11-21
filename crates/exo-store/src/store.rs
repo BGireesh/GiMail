@@ -36,8 +36,8 @@ use crate::view::{Identity, Router, ThreadView};
 /// - [`flush`](Self::flush) after [`apply`](Self::apply)/[`undo`](Self::undo) and whenever a
 ///   flush reports a retry time;
 /// - [`load_bodies`](Self::load_bodies) when a thread opens whose bodies aren't stored
-///   ([`bodies_stored`](Self::bodies_stored)): sync stores most mail for its rows alone;
-///   [`reading`](Self::reading) first;
+///   ([`bodies_stored`](Self::bodies_stored)), calling [`reading`](Self::reading) first (sync
+///   stores most mail for its rows alone);
 /// - [`evict`](Self::evict) every day, which lets old mail go;
 /// - [`changes`](Self::changes) to know when to re-read lists and threads;
 /// - [`check_connection`](Self::check_connection) every so often while
@@ -65,8 +65,8 @@ pub(crate) struct Inner {
     /// The calendar account each person's calendar was last read through
     /// ([`Store::attendee_events`]).
     pub attendee_accounts: RwLock<HashMap<String, String>>,
-    /// Serializes write transactions (SQLite has one writer; this keeps it from ever being
-    /// contended or upgraded mid-transaction).
+    /// Serializes write transactions. SQLite has one writer, and this lock keeps that writer from
+    /// ever being contended or upgraded mid-transaction.
     write: Mutex<()>,
     /// One sync or backfill page at a time.
     pub sync: Mutex<()>,
@@ -82,22 +82,24 @@ pub(crate) struct Inner {
     splits: RwLock<Arc<Splits>>,
     /// The list on screen, whose background pass goes first in every round.
     pub on_screen: RwLock<Option<ListId>>,
-    /// How many of its rows the app has loaded, all of which sync fetches the bodies of.
+    /// How many rows of the list on screen the app has loaded. Sync fetches the bodies of all of
+    /// them.
     pub loaded_rows: std::sync::atomic::AtomicU32,
     /// Where Gmail's parts are kept, once the app says ([`Store::cache_parts`]).
     pub parts: std::sync::OnceLock<crate::parts::PartsCache>,
     /// What works out the search index's visible text, once the app says
     /// ([`Store::index_text_with`]).
     pub index_text: std::sync::OnceLock<crate::IndexText>,
-    /// The spans of the calendar read this session (epoch milliseconds), whose events eviction
-    /// keeps: the calendar shows them without fetching them again.
+    /// The spans of the calendar read this session (epoch milliseconds). Eviction keeps their
+    /// events, so the calendar shows them without fetching them again.
     pub calendar_read: std::sync::Mutex<Vec<(i64, i64)>>,
-    /// The conversation open on screen, whose bodies eviction leaves alone; a batch of eviction
-    /// holds it ([`Store::reading`]).
+    /// The conversation open on screen, whose bodies eviction leaves alone. A batch of eviction
+    /// holds this lock ([`Store::reading`]).
     pub reading: Mutex<Option<String>>,
-    /// Inbox threads whose bodies Gmail wouldn't give this session: they wait to be opened.
+    /// Inbox threads whose bodies Gmail wouldn't give this session. They wait until they're
+    /// opened.
     pub skipped_bodies: std::sync::Mutex<HashSet<String>>,
-    /// The outbox rows given up on this session, whose mutation never reached Gmail: undoing
+    /// The outbox rows given up on this session, whose mutation never reached Gmail, so undoing
     /// one has nothing to take back. Row ids are never reused (`AUTOINCREMENT`), and an
     /// [`Undo`](crate::Undo) lives no longer than the session.
     pub given_up: std::sync::Mutex<HashSet<u64>>,
@@ -109,11 +111,11 @@ pub(crate) struct Inner {
     /// When each draft was last written to Gmail this session, which paces its next write.
     pub written: std::sync::Mutex<HashMap<String, jiff::Timestamp>>,
     /// What Gmail holds of each draft Exo wrote this session: the message the write made and its
-    /// [`content`](crate::drafts::content), which a save Gmail already has matches.
+    /// [`content`](crate::drafts::content). A save that Gmail already has matches that content.
     pub acked: std::sync::Mutex<HashMap<String, (String, u64)>>,
     /// How each draft's files stand with Gmail ([`Store::uploads`]).
     pub uploads: watch::Sender<crate::drafts::Uploads>,
-    /// How to take back the reminder each held send put on its thread this session, which undo
+    /// How to take back the reminder that each held send put on its thread this session, as undo
     /// send does.
     pub given: std::sync::Mutex<HashMap<String, crate::outbox::Undo>>,
     /// One held send's reminder given or taken back at a time, so none is given twice.
@@ -124,20 +126,20 @@ pub(crate) struct Inner {
 }
 
 /// Tuning knobs. The defaults are what the app runs with: the backoff, Gmail's quota, the offline
-/// debounce and the drafts' pace; tests shorten the backoff and the debounce, and turn the drafts'
+/// debounce and the drafts' pace. Tests shorten the backoff and the debounce, and turn the drafts'
 /// pace off or shorten it.
 #[derive(Debug, Clone)]
 pub struct Options {
     /// First retry delay; later retries double it (capped at 32 s per call, 120 s in the
     /// outbox).
     pub backoff: Duration,
-    /// The quota Gmail calls are paced under; `None` sends them as they come (for a server
-    /// that enforces none, like gmail-mock unless asked to).
+    /// The quota that Gmail calls are paced under. `None` sends them as they come, for a server
+    /// that enforces none (like gmail-mock unless asked to).
     pub quota: Option<Quota>,
-    /// How long an outage lasts at least before [`Store::connection`] says it's over.
+    /// The shortest time an outage lasts before [`Store::connection`] says it's over.
     pub debounce: Debounce,
-    /// How soon after a draft is written to Gmail its next edits are, at the earliest: each save
-    /// is kept on the device at once, and the latest goes once the pace allows.
+    /// How soon after a draft is written to Gmail its next edits can be written, at the earliest.
+    /// Each save is kept on the device at once, and the latest one goes once the pace allows.
     pub draft_pace: Duration,
     /// [`draft_pace`](Self::draft_pace) for a draft with files, which every write uploads again.
     pub draft_files_pace: Duration,
@@ -157,7 +159,7 @@ impl Default for Options {
 
 impl Store {
     /// Opens `account`'s store, one SQLite file in `dir`, talking to Gmail at `endpoints`.
-    /// Calls to Google are paced under Gmail's quota; anywhere else (gmail-mock) they aren't,
+    /// Calls to Google are paced under Gmail's quota. Calls anywhere else (gmail-mock) aren't,
     /// since the mock enforces no quota unless asked to and tests shouldn't wait one out.
     ///
     /// # Errors
@@ -239,14 +241,15 @@ impl Store {
         })
     }
 
-    /// `account` has a store in `dir`: it has opened on this Mac since it last signed out.
+    /// Whether `account` has a store in `dir`, which it does when it has opened on this Mac since
+    /// it last signed out.
     #[must_use]
     pub fn exists(dir: impl AsRef<Path>, account: &str) -> bool {
         check_account(account).is_ok() && dir.as_ref().join(format!("{account}.sqlite3")).exists()
     }
 
-    /// Deletes `account`'s store in `dir`, its database, its drafts' attachments and any parts
-    /// kept beside them, as signing out does. Close every [`Store`] on it first. A store that
+    /// Deletes `account`'s store in `dir` (its database, its drafts' attachments and any parts
+    /// kept beside them), as signing out does. Close every [`Store`] on it first. A store that
     /// isn't there deletes fine.
     ///
     /// # Errors
@@ -273,11 +276,11 @@ impl Store {
         Ok(())
     }
 
-    /// Clears `account`'s cache in `dir` (Clear Cache and Restart): its database is made again,
-    /// empty, and the next sync downloads its mail again. What Gmail doesn't have is kept when
-    /// the old database still reads: the settings, the drafts (held and scheduled sends and their
-    /// files among them), the queued changes, the reminders and the unsubscribes to retry. Close
-    /// every [`Store`] on it first.
+    /// Clears `account`'s cache in `dir` (Clear Cache and Restart). Its database is made again,
+    /// empty, and the next sync downloads its mail again. When the old database still reads,
+    /// what Gmail doesn't have is kept: the settings, the drafts (held and scheduled sends and
+    /// their files among them), the queued changes, the reminders and the unsubscribes to retry.
+    /// Close every [`Store`] on it first.
     ///
     /// # Errors
     /// [`Error::InvalidAccount`], or when the old files can't be moved aside or the new database
@@ -287,23 +290,24 @@ impl Store {
         db::clear(&dir.as_ref().join(format!("{account}.sqlite3"))).await
     }
 
-    /// The connection to Gmail as the offline bar shows it: what's down, as the last calls found
-    /// it. It changes as calls fail and get through, not with [`changes`](Self::changes).
+    /// The connection to Gmail as the offline bar shows it, which is what the last calls found
+    /// down. It changes as calls fail and get through, not with [`changes`](Self::changes).
     #[must_use]
     pub fn connection(&self) -> watch::Receiver<Connection> {
         self.inner.api.connection()
     }
 
-    /// Checks whether Gmail answers, with its profile (the app checks every 10 s, 60 s while
-    /// hidden, while something is down); an answer brings back what has been down long enough.
+    /// Checks whether Gmail answers a request for its profile. The app checks every 10 s while
+    /// something is down (60 s while hidden). An answer brings back what has been down long
+    /// enough.
     pub async fn check_connection(&self) {
         if let Err(failure) = self.inner.api.ping().await {
             log::debug!("checking Gmail: {}", failure.message());
         }
     }
 
-    /// The OS says the network changed: checks whether Gmail answers, and when nothing does the
-    /// connection is [`Outage::Offline`] until something does.
+    /// Checks whether Gmail answers after the OS says the network changed. When nothing does,
+    /// the connection is [`Outage::Offline`] until something does.
     pub async fn network_changed(&self) {
         if let Err(Failure::Offline(error)) = self.inner.api.ping().await {
             log::info!("the network changed and Gmail can't be reached: {error}");
@@ -312,8 +316,8 @@ impl Store {
     }
 
     /// Calls a Google API other than Gmail and Calendar (People's contacts) through the store's
-    /// retry policy, `attempts` times at most, and tells the connection how it ended, as
-    /// Calendar's calls do: no answer means the network is down.
+    /// retry policy, `attempts` times at most. Like Calendar's calls, it tells the connection
+    /// how the call ended, and no answer means the network is down.
     ///
     /// # Errors
     /// [`Error::Offline`] and the like, as for Gmail's calls.
@@ -332,8 +336,8 @@ impl Store {
         self.inner.changes.subscribe()
     }
 
-    /// Up to `limit` threads of `list` after `after`, newest first (threads of the same date by
-    /// id, the higher first), with pending mutations applied. Only the range backfilled without
+    /// Up to `limit` threads of `list` after `after`, newest first (threads of the same date sort
+    /// by id, the higher first), with pending mutations applied. Only the range backfilled without
     /// gaps is returned; see [`ThreadPage::more_remote`].
     ///
     /// # Errors
@@ -347,11 +351,11 @@ impl Store {
         self.list_filtered(list, None, &[], &[], after, limit).await
     }
 
-    /// [`list`](Self::list) narrowed by `filter`, with sticky rows: only threads also in the
-    /// filter's list, and those in `keep` (a thread marked read in an Unread view stays until the
-    /// view changes) as long as they're still in `list`; and the threads in `held` even once
-    /// they've left `list`, where they'd sort in it (a conversation unstarred in Starred stays
-    /// until the view changes).
+    /// [`list`](Self::list) narrowed by `filter`, with sticky rows. It returns only threads also
+    /// in the filter's list, plus those in `keep` as long as they're still in `list` (a thread
+    /// marked read in an Unread view stays until the view changes). It also returns the threads
+    /// in `held` even once they've left `list`, where they'd sort in it (a conversation unstarred
+    /// in Starred stays until the view changes).
     ///
     /// # Errors
     /// On database failures.
@@ -406,7 +410,7 @@ impl Store {
         };
         let router = self.inner.router();
         // While Gmail can't be reached, the sends waiting for it are listed in Scheduled too,
-        // held there like `held`'s.
+        // held there like the threads in `held`.
         let waiting: Vec<ThreadId> =
             if *list == ListId::Scheduled && !self.inner.api.connection().borrow().is_online() {
                 crate::drafts::marks(&mut db)
@@ -526,7 +530,7 @@ impl Store {
         let Some(view) = load_view(&mut db, id.as_str()).await? else {
             return Ok(None);
         };
-        // Drafts written elsewhere too: the thread shows them in compose.
+        // Drafts written elsewhere are included too, because the thread shows them in compose.
         let ids: Vec<String> = view.all_messages().map(|m| m.row.id.clone()).collect();
         let attachments =
             AttachmentRow::filter(AttachmentRow::fields().message_id().in_list(ids.as_slice()))
@@ -539,7 +543,7 @@ impl Store {
     }
 
     /// [`Store::thread`] without bodies or attachments: who each message is from and to, its
-    /// labels and headers, for what needs no more (making a split from conversations).
+    /// labels and headers, for callers that need no more (making a split from conversations).
     ///
     /// # Errors
     /// On database failures.
@@ -551,8 +555,8 @@ impl Store {
         Ok(Some(view.detail(Vec::new(), Vec::new(), &self.inner.me())))
     }
 
-    /// Records that Exo wrote the draft message `message`, so it routes and shows as Exo's own:
-    /// a new message sits in the Inbox, and a reply's row reads `Draft to …` with the draft's
+    /// Records that Exo wrote the draft message `message`, so it routes and shows as Exo's own.
+    /// A new message sits in the Inbox, and a reply's row reads `Draft to …` with the draft's
     /// text. Drafts written anywhere else only appear in Drafts. Gmail gives a draft a new
     /// message id every time it's saved, so compose records each one.
     ///
@@ -562,8 +566,8 @@ impl Store {
         self.inner.record_draft(message).await
     }
 
-    /// `email`'s latest conversations in local mail, newest first, at most `limit`: threads
-    /// where they sent or received a message, outside drafts, Spam and Trash.
+    /// `email`'s latest conversations in local mail, newest first, at most `limit`. These are the
+    /// threads where they sent or received a message, outside drafts, Spam and Trash.
     /// [`fetch_recent_threads`](Self::fetch_recent_threads) brings in older ones from Gmail.
     ///
     /// # Errors
@@ -670,15 +674,15 @@ impl Store {
     }
 
     /// The bytes of message `message`'s MIME part `part` (an attachment, or an inline image),
-    /// fetched from Gmail with sync's retries. `attachment` is the attachment id the part had
-    /// when it was stored: Gmail hands out a new one every time it returns the message, so
-    /// when Gmail refuses a stored id (or there is none, because the part's data came inline)
+    /// fetched from Gmail with sync's retries. `attachment` is the attachment id that the part
+    /// had when it was stored. Gmail hands out a new one every time it returns the message, so
+    /// when Gmail refuses a stored id (or there is none, because the part's data came inline),
     /// the part is read from the message as Gmail returns it now.
     ///
     /// Someone is waiting on these bytes (an image in a body, a file they clicked), so they're
-    /// asked for ahead of sync, and a rate-limit pause that ends within the longest wait a
-    /// call sleeps through, often one sync ran into while backfilling, is waited out, as for
-    /// every Gmail call.
+    /// asked for ahead of sync. As for every Gmail call, a rate-limit pause is waited out when it
+    /// ends within the longest wait a call sleeps through. Such a pause is often one that sync
+    /// ran into while backfilling.
     ///
     /// # Errors
     /// [`Error::Offline`] without a network, [`Error::Throttled`] while Gmail rate limits the
@@ -693,9 +697,9 @@ impl Store {
         self.download_part(message, attachment, part, None).await
     }
 
-    /// [`part_data`](Self::part_data), reporting how far Gmail's answer has come to `progress`
-    /// as it arrives (a file being downloaded: its card's bar and its notification). A part kept
-    /// already reports nothing.
+    /// [`part_data`](Self::part_data), reporting to `progress` how much of Gmail's answer has
+    /// arrived (for a file being downloaded, its card's bar and its notification). A part that
+    /// is already kept reports nothing.
     ///
     /// # Errors
     /// As [`part_data`](Self::part_data).
@@ -716,7 +720,7 @@ impl Store {
         Ok(data)
     }
 
-    /// [`part_data`](Self::part_data) from Gmail, in `lane`; a part read by its attachment id
+    /// [`part_data`](Self::part_data) from Gmail, in `lane`. A part read by its attachment id
     /// reports its transfer to `progress`.
     pub(crate) async fn fetch_part(
         &self,
@@ -826,7 +830,7 @@ impl Inner {
         }
     }
 
-    /// Reads the splits again (after settings or labels change). When `reroute` and the
+    /// Reads the splits again (after settings or labels change). When `reroute` is set and the
     /// enabled splits changed, every inbox thread is routed again.
     pub async fn reload_splits(&self, reroute: bool) -> Result<()> {
         let mut db = self.db.clone();
@@ -851,7 +855,7 @@ impl Inner {
             reindex(write.exec(), thread, &router).await?;
         }
         // The Inbox, Important and Other searches subtract the splits, so a page token from the
-        // old search can't continue the new one: their passes start again from the top, keeping
+        // old search can't continue the new one. Their passes start again from the top and keep
         // how far back they've covered.
         let inbox_lists = [ListId::Inbox, ListId::Important, ListId::Other];
         let keys: Vec<&str> = inbox_lists.iter().map(ListId::key).collect();
@@ -886,8 +890,9 @@ impl Inner {
     }
 }
 
-/// A write transaction. It holds the store's write lock until it ends (SQLite has one writer;
-/// taking turns in-process means it's never contended), and rolls back if dropped.
+/// A write transaction. It holds the store's write lock until it ends, and rolls back if
+/// dropped. SQLite has one writer, and taking turns in-process means that writer is never
+/// contended.
 pub(crate) struct Write<'a> {
     tx: Transaction<'a>,
     _lock: MutexGuard<'a, ()>,
@@ -975,7 +980,7 @@ pub(crate) async fn load_views(
         .collect())
 }
 
-/// The draft messages Exo wrote, which route and show as its own.
+/// The draft messages Exo wrote, which route and show as Exo's own.
 async fn exo_drafts(exec: &mut dyn Executor) -> Result<BTreeSet<String>> {
     Ok(db::kv_get(exec, EXO_DRAFTS).await?.unwrap_or_default())
 }

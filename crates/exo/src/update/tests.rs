@@ -21,7 +21,8 @@ struct Fake {
     check_takes: Duration,
     /// What a check fails with, if it does.
     check_fails: Option<&'static str>,
-    /// Progress a download tells, waiting for a go from the test before each when given.
+    /// Progress a download tells, waiting for a go from the test before each report when there's
+    /// a gate.
     progress: Vec<(u64, u64)>,
     gate: Mutex<Option<Receiver<()>>>,
     /// The pause between a download's progress reports.
@@ -61,7 +62,7 @@ impl Releases for Arc<Fake> {
             std::thread::sleep(self.pace);
             progress(received, total);
         }
-        // Nothing installs a sample: a handoff refuses it, and this one never gets there.
+        // Nothing installs a sample, since a handoff refuses it, and this one never gets there.
         let installation = Installation {
             executable: "/nonexistent/Exo.app/Contents/MacOS/Exo".into(),
             kind: Kind::MacBundle,
@@ -192,7 +193,8 @@ fn a_release_found_downloads_says_its_ready_and_installs_when_asked() {
         "Install Update and Restart"
     );
 
-    // Checking again finds what's downloaded already: no second download or notification.
+    // Checking again finds what's downloaded already, so there's no second download or
+    // notification.
     updates.check(Mode::Background);
     wait("the second check", || fake.asked().len() == 3);
     wait("its end", || !updates.lock().busy);

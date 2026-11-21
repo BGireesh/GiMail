@@ -21,7 +21,7 @@ const SUBMIT: TextStyle = TextStyle::new(Font::new(Family::Sans, 700), 12.0, 16.
 const NAME_ROOM: f32 = 36.0;
 /// The name's line, above the card's top (`margin: -40px 0 20px`, `top: -1px`, the name's 3px).
 const NAME_ABOVE: f32 = 26.0;
-/// The view's `padding-top: 16px`; the recipients' header starts 4px higher.
+/// The view's `padding-top: 16px`. The recipients' header starts 4px higher.
 const SPACING_TOP: f32 = 16.0;
 const HEADER_TOP: f32 = 12.0;
 /// The subject's `padding-top: 12px` under recipients, and its `margin-bottom: 8px`, which the
@@ -49,7 +49,7 @@ pub(crate) struct Preview {
 }
 
 impl Preview {
-    /// Nothing is being laid out or painted.
+    /// Whether nothing is being laid out or painted.
     pub(crate) fn is_idle(&self) -> bool {
         self.bodies.as_ref().is_none_or(Bodies::is_idle)
     }
@@ -92,7 +92,8 @@ fn message(snippet: &Snippet) -> MessageDetail {
             )),
             text: None,
         },
-        // Its files that aren't inline, as parts of it, by `uuid`.
+        // The snippet's files that aren't inline, as the message's parts, each with its `uuid`
+        // as the part's id.
         attachments: snippet
             .attachments
             .iter()
@@ -131,7 +132,8 @@ struct Parts {
 
 /// The card's layout for `message` with a body `body` tall, `width` wide.
 fn parts(ui: &Ui, message: &MessageDetail, body: f32, width: f32) -> Parts {
-    // The content starts the card's own padding down; the view's spacing replaces it.
+    // The content starts the card's own padding down, and the view's spacing replaces that
+    // padding.
     let padding = crate::thread::CARD_PADDING_TOP;
     let painter = ui.painter();
     let ink = Color32::BLACK;
@@ -188,14 +190,14 @@ fn parts(ui: &Ui, message: &MessageDetail, body: f32, width: f32) -> Parts {
 }
 
 impl crate::Mail {
-    /// Enter or a click on a row: the snippet, read-only.
+    /// Enter or a click on a row opens the snippet read-only.
     pub(crate) fn open_snippet_view(&mut self, id: &str) {
         self.leave_pane();
         self.snippets.folder.view(id);
     }
 
-    /// Back from the view to the folder. Its renderer goes with it: nothing would take what it's
-    /// still working on.
+    /// Back from the view to the folder. The view's renderer goes too, because nothing would take
+    /// what it's still working on.
     pub(crate) fn close_snippet_view(&mut self) {
         self.snippets.folder.close_view();
         self.snippets.preview = Preview::default();
@@ -212,7 +214,7 @@ impl crate::Mail {
             .cloned()
     }
 
-    /// A card in the view: snippet file `uuid` opens (in the preview, or as a download).
+    /// A card in the view opens snippet file `uuid` (in the preview, or as a download).
     pub(crate) fn open_snippet_file(&mut self, uuid: &str, preview: bool) {
         if let Some(file) = self.viewed_snippet().and_then(|snippet| {
             snippet
@@ -224,7 +226,8 @@ impl crate::Mail {
         }
     }
 
-    /// The view's `Download all`: the snippet's files in one zip named for its subject.
+    /// The view's `Download all`, which downloads the snippet's files in one zip named for its
+    /// subject.
     pub(crate) fn download_snippet_files(&mut self) {
         let Some(snippet) = self.viewed_snippet() else {
             return;
@@ -378,7 +381,8 @@ impl crate::Mail {
                     // Dragging a file out takes a Gmail part (`attachment_files::drag`).
                     Some(crate::thread::attachments::Click::Drag { .. }) | None => {}
                 }
-                // The footer: the rule, `Edit` (underlined while the view has the keyboard), Discard.
+                // The footer: the rule, `Edit` (underlined while the view has the keyboard) and
+                // Discard.
                 let footer = top + parts.footer_top;
                 let rule = Rect::from_min_size(pos2(left, footer), vec2(content.width(), 1.0));
                 let dark = exo_ui::theme(ui.ctx()) == exo_ui::Theme::Carbon;
@@ -412,7 +416,7 @@ impl crate::Mail {
                     asked.push(Action::Edit(Some(snippet.id.clone())));
                 }
                 if focused {
-                    // Focused, `Edit` is underlined: a 2px border under its text.
+                    // While focused, `Edit` is underlined with a 2px border under its text.
                     painter.rect_filled(
                         exo_ui::pixel_snap(Rect::from_min_max(
                             pos2(left, pane_top + 17.0),

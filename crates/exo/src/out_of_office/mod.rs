@@ -46,7 +46,7 @@ pub enum Action {
     Dialog(DialogEvent),
     /// A formatting key in the message.
     Format(FormatCommand),
-    /// ⌘⇧– or ⌘⇧= on a date in the message: a day back or on.
+    /// ⌘⇧– or ⌘⇧= on a date in the message, which moves it a day back or on.
     ShiftDate(i64),
     /// Something in an alert.
     Alert(AlertEvent),
@@ -55,17 +55,17 @@ pub enum Action {
 /// What an alert's keys and buttons do.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AlertEvent {
-    /// Enter: the selected one.
+    /// Enter, which runs the selected one.
     Confirm,
     /// Escape.
     Dismiss,
-    /// The arrows: the selection moves by one.
+    /// The arrows, which move the selection by one.
     Cycle(isize),
 }
 
 /// What Gmail or Calendar answered, handed back to the UI thread.
 enum Outcome {
-    /// Gmail's responder, read for the dialog or on the hour; `Err` when it couldn't be.
+    /// Gmail's responder, read for the dialog or on the hour, or `Err` when it couldn't be.
     Read {
         settings: Result<VacationSettings, ()>,
         dialog: bool,
@@ -396,7 +396,7 @@ impl Mail {
         }
     }
 
-    /// The user just made `event` on `calendar`: an out-of-office one of theirs on the primary
+    /// The user just made `event` on `calendar`. An out-of-office event of theirs on the primary
     /// calendar, starting within a week, is offered a reply at once.
     pub(crate) fn out_of_office_created(&mut self, calendar: &str, event: &CalendarEvent) {
         let data = self.account.calendar().data();
@@ -472,8 +472,7 @@ impl Mail {
         }
     }
 
-    /// Opens the dialog: offline, an alert; else the dialog, which reads Gmail. `days` are the
-    /// nudge's.
+    /// Opens the dialog, which reads Gmail, or an alert while offline. `days` are the nudge's.
     fn open_out_of_office(&mut self, days: Option<OutOfOfficeDays>) {
         self.commands.close_palette();
         if !self.snapshot.connection.is_online() {
@@ -614,7 +613,8 @@ impl Mail {
         }
     }
 
-    /// The Out of Office Reply status bar's showing: Gmail's replies are going out now.
+    /// Whether the Out of Office Reply status bar shows, because Gmail's replies are going out
+    /// now.
     pub(crate) fn out_of_office(&self) -> bool {
         self.account
             .settings()
@@ -640,7 +640,7 @@ impl Mail {
             .and_then(dialog::Dialog::focus)
     }
 
-    /// The Out of Office Reply alert showing, its title and text, for tests.
+    /// The Out of Office Reply alert showing, with its title and text, for tests.
     pub fn out_of_office_alert_text(&self) -> Option<(&'static str, String)> {
         self.out_of_office
             .alert

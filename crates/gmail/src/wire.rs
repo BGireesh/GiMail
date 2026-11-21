@@ -1,6 +1,6 @@
 //! Serde adapters for Google's JSON encodings that serde can't express directly.
 //!
-//! `int64`/`uint64` fields travel as JSON strings; use `serde_with::DisplayFromStr` for those.
+//! `int64`/`uint64` fields travel as JSON strings. Use `serde_with::DisplayFromStr` for those.
 //! `bytes` fields travel as base64url, which is what [`Base64Url`] handles.
 
 use base64::Engine;

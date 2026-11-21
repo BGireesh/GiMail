@@ -1,9 +1,9 @@
 //! Remind me end to end on gmail-mock: `H` snoozes the cursor's conversation into Reminders, `Z`
 //! takes it back, the footer removes it, and the conversation comes back to the inbox once its
-//! reminder is due, by the app's clock. Compose's ⌘⇧H gives a reply a reminder its thread gets
-//! from Send on, the follow-up hint does for a message just sent, Move takes a thread out of
-//! Reminders, the Reminders dialog keeps the defaults, and Automatic Reminders put them on
-//! drafts to someone outside.
+//! reminder is due, by the app's clock. In compose, ⌘⇧H gives a reply a reminder, which its
+//! thread has from Send on, and the follow-up hint does the same for a message just sent. Move
+//! takes a thread out of Reminders, the Reminders dialog keeps the defaults, and Automatic
+//! Reminders put reminders on drafts to someone outside.
 
 mod support;
 
@@ -13,7 +13,7 @@ use support::{Fixture, start, start_with_settings};
 
 const COMMAND: Modifiers = Modifiers::MAC_CMD.plus(Modifiers::COMMAND);
 
-/// Thursday at 8:00 in New York: a reminder's `in 2 days` at the mock's now.
+/// Thursday at 8:00 in New York, which is when a reminder's `in 2 days` falls at the mock's now.
 fn thursday_morning() -> jiff::Timestamp {
     "2026-11-19T08:00[America/New_York]"
         .parse::<jiff::Zoned>()
@@ -31,7 +31,7 @@ fn reply(app: &mut Fixture) {
 /// The first conversation in the mock's inbox.
 const FIRST: &str = "Design crit moved to 3pm";
 
-/// `g` then `h`: the Reminders folder.
+/// Goes to the Reminders folder with `g` then `h`.
 fn go_to_reminders(app: &mut Fixture) {
     app.key(Key::G);
     app.key(Key::H);
@@ -47,7 +47,7 @@ fn reminder(app: &Fixture, subject: &str) -> Option<ReminderStatus> {
         .and_then(|thread| thread.reminder.clone())
 }
 
-/// Every label on thread `id`'s messages in Gmail, Exo's own by name.
+/// Every label on the messages of thread `id` in Gmail, with Exo's own labels by name.
 fn gmail_labels(app: &Fixture, id: &str) -> Vec<String> {
     let gmail = app.gmail();
     app.block_on(async {
@@ -167,7 +167,7 @@ fn typed_times_and_regardless_and_the_footer_removes_it() {
         Some("in 3 days")
     );
 
-    // In Reminders the thread isn't in the inbox: the footer moves it back too.
+    // In Reminders the thread isn't in the inbox, so the footer moves it back too.
     app.key(Key::H);
     app.press(Key::ArrowUp, Modifiers::MAC_CMD.plus(Modifiers::COMMAND));
     app.key(Key::ArrowUp);
@@ -230,7 +230,7 @@ fn a_reply_with_a_reminder_gives_its_thread_one_from_send() {
     let mut app = start("remind-compose");
     let id = cursor_id(&app);
     reply(&mut app);
-    // ⌘⇧H: Draft mode's rows, `in 2 days` first.
+    // ⌘⇧H shows the picker's rows for a draft, `in 2 days` first.
     app.press(Key::H, COMMAND.plus(Modifiers::SHIFT));
     app.key(Key::Enter);
     let picked = DraftReminder {
@@ -245,7 +245,7 @@ fn a_reply_with_a_reminder_gives_its_thread_one_from_send() {
         "a draft's reminder says nothing until it's sent"
     );
 
-    // Sent, held for undo: the thread has it at once.
+    // Once the reply is sent and held for undo, the thread has the reminder at once.
     let thursday = Some(ReminderStatus::Set {
         at: thursday_morning(),
         keep_on_reply: false,
@@ -253,7 +253,7 @@ fn a_reply_with_a_reminder_gives_its_thread_one_from_send() {
     app.press(Key::Enter, COMMAND);
     app.settle();
     assert_eq!(reminder(&app, FIRST), thursday, "from Send on");
-    // Undo send takes it back with the send; the draft keeps it.
+    // Undo send takes the reminder back with the send, and the draft keeps it.
     app.key(Key::Z);
     app.settle();
     assert_eq!(reminder(&app, FIRST), None);
@@ -299,7 +299,7 @@ fn the_follow_up_hint_reminds_about_the_message_just_sent() {
             "Hit H on any email you've sent, and choose a time. If you don't hear back by then, we'll remind you to follow up."
         )
     );
-    // `h` is Set reminder; the picker has a reminder's rows.
+    // `h` is Set reminder, and the picker has a reminder's rows.
     app.key(Key::H);
     assert_eq!(app.mail().compose_alert(), None);
     app.key(Key::Enter);
@@ -369,7 +369,7 @@ fn moving_a_thread_out_of_reminders_removes_its_reminder() {
 fn regardless_picked_from_the_menu_hints_at_the_key() {
     let mut app = start("remind-regardless-hint");
     app.key(Key::H);
-    // Tab opens the dropdown's menu; ↓ and Enter pick `regardless`.
+    // Tab opens the dropdown's menu. ↓ and Enter pick `regardless`.
     app.key(Key::Tab);
     app.key(Key::ArrowDown);
     app.key(Key::Enter);
@@ -398,7 +398,7 @@ fn the_reminders_dialog_keeps_the_defaults() {
     app.key(Key::Enter);
     app.settle();
     assert!(app.mail().settings_dialog_open());
-    // The days are selected: typing replaces them.
+    // The days are selected, so typing replaces them.
     app.type_text("3");
     app.key(Key::Tab);
     app.type_text("9:30 pm");
@@ -444,7 +444,7 @@ fn automatic_reminders_go_on_a_draft_to_someone_outside() {
     let mut app = start_with_settings("remind-automatic", &|settings| {
         settings.reminders.default_reminders_trigger = "EXTERNAL".into()
     });
-    // Tom is a colleague: a reply to him gets none.
+    // Tom is a colleague, so a reply to him gets no reminder.
     reply(&mut app);
     app.settle();
     assert_eq!(

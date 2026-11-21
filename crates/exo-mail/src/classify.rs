@@ -102,7 +102,7 @@ fn is_delivery_status_sender(email: &str) -> bool {
     user == "mailer-daemon" || user == "postmaster"
 }
 
-/// Whether an element counts as a signal: rules and hidden or banner content don't.
+/// Whether an element counts as a signal. Rules and hidden or banner content don't.
 fn counts(node: &NodeRef) -> bool {
     !is_horizontal_rule(node) && !is_excluded(node)
 }

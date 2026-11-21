@@ -1,23 +1,25 @@
-//! Calendar accounts other than the mail account: the week sidebar's list of them, signing one in,
-//! and removing one. The grants and the reading are the account's
-//! ([`crate::account::Account::sign_in_calendar`]); this is what the calendar's UI asks of it.
+//! Calendar accounts other than the mail account: the week sidebar's list of them, and signing
+//! one in. The account holds the grants and does the reading
+//! ([`crate::account::Account::sign_in_calendar`]). This module is what the calendar's UI asks
+//! of the account.
 
 use super::week::{AccountState, ListedAccount, ListedCalendar};
 use crate::thread::invite::{Invite, Response};
 
-/// What a calendar sign-in is for, which says what its outcome does.
+/// What a calendar sign-in is for, which decides what its outcome does.
 #[derive(Clone, Debug)]
 pub(crate) enum SignInFor {
-    /// The list's `Sign in with Google` and `Sign in again`, Calendar Settings' `Sign in with
-    /// Google`, the day view's `Add Calendar`: nothing more.
+    /// From the list's `Sign in with Google` or `Sign in again`, Calendar Settings' `Sign in with
+    /// Google`, or the day view's `Add Calendar`, with nothing more to do once signed in.
     List,
-    /// The invite card's `RSVP` alert: once signed in, the answer goes.
+    /// From the invite card's `RSVP` alert. Once the account signs in, the answer is sent.
     Invite(Box<Invite>, Response),
 }
 
 impl crate::Mail {
     /// The week sidebar's calendar accounts: those with calendars to list, those loading, and the
-    /// signed-out ones, which go last; the mail account first, the others by address.
+    /// signed-out ones. The signed-out ones go last, and within each group the mail account comes
+    /// first and the others sort by address.
     pub(crate) fn calendar_accounts_listed(&self) -> Vec<ListedAccount> {
         let email = self.account.email();
         let settings = self.account.settings();
@@ -98,16 +100,17 @@ impl crate::Mail {
             .collect()
     }
 
-    /// The calendar account `invite` is to, whose primary calendar answers it: the mail account,
-    /// unless only another calendar account of mine is invited, signed in or not.
+    /// The calendar account `invite` was sent to, whose primary calendar answers it. That's the
+    /// mail account, unless the only one invited is another calendar account of mine, signed in or
+    /// not.
     pub(crate) fn calendar_invite_account(&self, invite: &Invite) -> String {
         invite
             .calendar_account(self.account.email(), &self.calendar_others())
             .to_owned()
     }
 
-    /// The signed-out calendar account `invite` is to, which has to sign in before it can be
-    /// answered.
+    /// The calendar account `invite` was sent to, if it's signed out and has to sign in before the
+    /// invite can be answered.
     pub(crate) fn calendar_invite_needs_sign_in(&self, invite: &Invite) -> Option<String> {
         let account = self.calendar_invite_account(invite);
         self.calendar_signed_out()
@@ -115,7 +118,7 @@ impl crate::Mail {
             .then_some(account)
     }
 
-    /// Starts signing a calendar account in for `purpose`, `hint` the account asked for.
+    /// Starts signing a calendar account in for `purpose`, with `hint` as the account to ask for.
     pub(crate) fn calendar_sign_in(&mut self, hint: Option<&str>, purpose: SignInFor) {
         if self.account.sign_in_calendar(hint) {
             self.calendar.signing_in = Some(purpose);
@@ -126,8 +129,8 @@ impl crate::Mail {
         }
     }
 
-    /// Picks up a calendar sign-in's outcome, and Google's refusals of the calendar accounts'
-    /// grants, once a frame.
+    /// Once a frame, picks up the outcome of a calendar sign-in and any grants that Google has
+    /// refused for the calendar accounts.
     pub(crate) fn calendar_accounts_frame(&mut self) {
         self.account.check_calendar_grants();
         let (others, signed_out) = (self.calendar_others(), self.calendar_signed_out());
@@ -146,7 +149,8 @@ impl crate::Mail {
                 self.calendar_respond_to_invite(answered, response, false);
             }
             (Ok(_), _) => {}
-            // Signing in from the list says nothing of a failure: declined, or another account.
+            // A failed sign-in from the list shows nothing, whether the user declined or signed
+            // in with another account.
             (Err(error), Some(SignInFor::List) | None) => {
                 log::info!("a calendar account didn't sign in: {error}")
             }

@@ -1,7 +1,7 @@
 //! The pixels of the images in the drafts' bodies: a draft's own inline attachments, from the
 //! draft files or the Gmail message they're part of, `data:` URLs, and remote images as the
-//! Images setting allows. Each editor asks for what it shows; the loads run off the UI thread and
-//! come back here.
+//! Images setting allows. Each editor asks for the images it shows. The loads run off the UI
+//! thread and come back here.
 
 use std::{
     collections::HashSet,
@@ -15,10 +15,10 @@ use exo_store::{AttachmentSource, DraftAttachment, RemoteContentBlocking};
 use super::draft::Open;
 use crate::account::Loader;
 
-/// The longest side an image is drawn from: a bigger file is scaled down for its texture, which
+/// The longest side an image is drawn from. A bigger file is scaled down for its texture, which
 /// the editor never draws wider than the window anyway.
 const MAX_SIDE: u32 = 2048;
-/// Pixels per inch in a metre (`INCHES_PER_METER`), for a PNG's resolution.
+/// Inches in a metre, to turn a PNG's pixels per metre into dpi.
 const INCHES_PER_METER: f32 = 39.370_08;
 
 /// An image loaded for a draft.
@@ -28,8 +28,8 @@ struct Loaded {
     load: ImageLoad,
 }
 
-/// The loads in flight, the Images setting they were made under, and the drafts whose remote
-/// images Show Images shows whatever it says, for the session.
+/// The loads in flight, the Images setting they were made under, and the drafts where Show Images
+/// shows remote images whatever the setting says, for the session.
 pub(crate) struct Loads {
     sender: Sender<Loaded>,
     receiver: Receiver<Loaded>,
@@ -117,7 +117,7 @@ impl Loads {
             },
             ImageSource::Data(url) => decode_off_thread(exo_mail::decode_data_url(&url), finish),
             // A read receipt in a quote (Exo quotes a message as it came, receipts and all) is
-            // never loaded, nor drawn blocked: the quote shows as if it had none.
+            // never loaded or drawn blocked, so the quote shows as if it had none.
             ImageSource::Remote(_) if is_read_receipt(element) => finish(ImageLoad::Broken),
             ImageSource::Remote(_)
                 if sources.setting == RemoteContentBlocking::All
@@ -132,8 +132,8 @@ impl Loads {
     }
 }
 
-/// An image pasted in from another open draft, whose HTML names that draft's inline attachment:
-/// draft `index` takes a copy of it as its own inline attachment.
+/// An image pasted in from another open draft, whose HTML names that draft's inline attachment.
+/// Draft `index` takes a copy of the attachment as its own inline attachment.
 fn adopt(drafts: &mut [Open], index: usize, cid: &str, folder: &std::path::Path) {
     let Some(found) = drafts
         .iter()
@@ -148,7 +148,7 @@ fn adopt(drafts: &mut [Open], index: usize, cid: &str, folder: &std::path::Path)
         uuid: super::factory::uuid_v4(),
         ..found.clone()
     };
-    // A quoted message's part stays in its message; a file the user added is copied.
+    // A quoted message's part stays in its message, but a file the user added is copied.
     if copy.source == AttachmentSource::Local
         && let Err(error) = std::fs::copy(folder.join(&found.uuid), folder.join(&copy.uuid))
     {
@@ -168,8 +168,8 @@ fn attachment<'a>(attachments: &'a [DraftAttachment], cid: &str) -> Option<&'a D
     })
 }
 
-/// An attachment's bytes: from the draft files, or from its Gmail message into them, as sending
-/// takes them.
+/// An attachment's bytes, read from the draft files or fetched from its Gmail message into them,
+/// as sending takes them.
 fn load_attachment(
     attachment: &DraftAttachment,
     sources: &Sources<'_>,
@@ -222,7 +222,7 @@ fn decode_off_thread(bytes: Option<Vec<u8>>, finish: impl FnOnce(ImageLoad) + Se
 }
 
 /// An image file's pixels (the first frame of an animation), scaled down past [`MAX_SIDE`], and
-/// its resolution; an animation's file, for the editor to play.
+/// its resolution. The file comes too, so the editor can play an animation.
 pub(crate) fn decode(bytes: &[u8]) -> ImageLoad {
     let Ok(image) = image::load_from_memory(bytes) else {
         return ImageLoad::Broken;
@@ -246,9 +246,9 @@ pub(crate) fn decode(bytes: &[u8]) -> ImageLoad {
     })
 }
 
-/// The image's retina factor: its resolution in multiples of 72 dpi, rounded: a PNG's `pHYs`
-/// (pixels a metre), a JPEG's EXIF `XResolution` when its `ResolutionUnit` is inches; 1 for
-/// anything else.
+/// The image's retina factor, which is its resolution in multiples of 72 dpi, rounded. The
+/// resolution is a PNG's `pHYs` (pixels a metre), or a JPEG's EXIF `XResolution` when its
+/// `ResolutionUnit` is inches. The factor is 1 for anything else.
 fn retina(bytes: &[u8]) -> u32 {
     let dpi = png_dpi(bytes).or_else(|| jpeg_dpi(bytes)).unwrap_or(72.0);
     (dpi / 72.0).round() as u32
@@ -272,8 +272,9 @@ fn png_dpi(bytes: &[u8]) -> Option<f32> {
     None
 }
 
-/// A JPEG's dpi: from the `Exif` APP1 segment's first IFD, `XResolution` (0x011a) when
-/// `ResolutionUnit` (0x0128) is 2, inches; 72 for another unit; none without the tag.
+/// A JPEG's dpi, read from the first IFD of the `Exif` APP1 segment. It's `XResolution` (0x011a)
+/// when `ResolutionUnit` (0x0128) is 2 (inches), 72 for another unit, and none without the
+/// `ResolutionUnit` tag.
 fn jpeg_dpi(bytes: &[u8]) -> Option<f32> {
     let mut rest = bytes.strip_prefix(&[0xff, 0xd8])?;
     let tiff = loop {
@@ -281,7 +282,7 @@ fn jpeg_dpi(bytes: &[u8]) -> Option<f32> {
             return None;
         };
         let length = usize::from(u16::from_be_bytes([high, low]));
-        // The image data starts: no more metadata.
+        // The image data starts, so there's no more metadata.
         if marker == 0xda || length < 2 || rest.len() < 2 + length {
             return None;
         }

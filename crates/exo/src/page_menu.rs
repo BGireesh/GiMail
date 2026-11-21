@@ -1,6 +1,6 @@
 //! The shell's right-click menu as a native one ([`crate::desktop::context_menu`]): a link's, an
 //! image's, an editable field's (its spelling first) or a selection's. Compose's body has its own
-//! ([`crate::compose`]); a message body's is here.
+//! ([`crate::compose`]), and a message body's is here.
 
 use crate::{
     Mail,
@@ -14,7 +14,7 @@ pub(crate) struct Target {
     pub link: Option<String>,
     /// The `src` of an image with its pixels.
     pub image: Option<String>,
-    /// An editable field: its spelling.
+    /// An editable field, with its spelling.
     pub editable: Option<Editable>,
     /// The selected text.
     pub selection: String,
@@ -38,7 +38,7 @@ pub(crate) enum Choice {
     CopyImage,
     /// `Open Link`: a web link in the browser, a `mailto:` in compose.
     OpenLink(String),
-    /// A suggestion: it replaces the misspelled word.
+    /// A suggestion, which replaces the misspelled word.
     Correct(String),
     /// `Add to Dictionary`.
     AddToDictionary(String),
@@ -56,7 +56,7 @@ pub(crate) enum Choice {
     Paste,
 }
 
-/// One item of the menu, and what it does; a separator does nothing.
+/// One item of the menu, and what it does. A separator does nothing.
 pub(crate) type Entry = (MenuItem, Option<Choice>);
 
 /// The menu for `target`, in this order: a link's items (and its image's); or an image's; or an
@@ -139,7 +139,7 @@ pub(crate) fn entries(target: &Target) -> Vec<Entry> {
     out
 }
 
-/// `Copy Image`, and `Copy Image URL` but for an image that's the message's own (a `cid:`).
+/// `Copy Image`, and `Copy Image URL` except for an image that's the message's own (a `cid:`).
 fn image_items(src: &str) -> Vec<Entry> {
     let item = |title: &str, choice: Choice| {
         (
@@ -217,7 +217,7 @@ fn truncated(text: &str) -> String {
     out
 }
 
-/// What `Open Link` opens: only web links leave Exo, and `mailto:` opens compose.
+/// Whether `Open Link` opens `url`. Only web links leave Exo, and `mailto:` opens compose.
 fn is_trusted(url: &str) -> bool {
     url::Url::parse(url).is_ok_and(|url| matches!(url.scheme(), "http" | "https" | "mailto"))
 }
@@ -255,12 +255,12 @@ pub(crate) struct Pending {
     pub selection: Option<(String, egui::Pos2)>,
 }
 
-/// The size Look Up shows a message's text at: a body's usual 14px.
+/// The size Look Up shows a message's text at, which is a body's usual 14px.
 const BODY_TEXT: f32 = 14.0;
 
 impl Mail {
-    /// A right-click in a message body last frame (the word it selected now on screen): the
-    /// shell's menu for what it landed on, and what's chosen in it.
+    /// Shows the shell's menu for a right-click in a message body last frame (the word it
+    /// selected is now on screen), and carries out what's chosen in it.
     pub(crate) fn show_message_menu(&mut self, ctx: &egui::Context) {
         let Some(Pending { at, hit, selection }) = self.message_menu.take() else {
             return;
@@ -297,7 +297,7 @@ impl Mail {
                 }
             }
             Choice::Copy => self.bodies.copy(),
-            // An editable field's: not a message's.
+            // An editable field's, not a message's.
             Choice::Correct(_)
             | Choice::AddToDictionary(_)
             | Choice::IgnoreSpelling(_)

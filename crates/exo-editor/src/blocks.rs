@@ -1,9 +1,9 @@
-//! Block structure edits with Squire's semantics: splitting and merging blocks, and the block
-//! operations (lists, quotes, indents).
+//! Block structure edits: splitting and merging blocks, and the block operations (lists, quotes,
+//! indents).
 //!
-//! Squire runs a block operation by extracting the selected blocks *up to the root*, splitting
-//! every container around them, transforming that fragment, putting it back and merging it with
-//! alike neighbouring containers. [`Document::modify_blocks`] does the same on paths:
+//! A block operation works as if the selected blocks were extracted *up to the root*, splitting
+//! every container around them, and the fragment transformed, put back and merged with alike
+//! neighbouring containers. [`Document::modify_blocks`] does this on paths:
 //! [`isolate`](Document::isolate) gives the selected blocks' containers fresh ids, the operation
 //! edits their paths, and [`merge_edge`](Document::merge_edge) re-joins alike containers at both
 //! ends. That is why two quoted lines become one quote, and why ⌘] in a quote wraps the *outside*
@@ -52,8 +52,8 @@ impl Document {
     }
 
     /// Appends block `index` to the block before it and returns where they meet. The earlier block
-    /// keeps its element; its `<br>` fixer goes. An atom (a rule, a table) can't hold text, so it
-    /// goes and the text takes its place.
+    /// keeps its element but loses its `<br>` fixer. An atom (a rule, a table) can't hold text, so
+    /// it goes and the text takes its place.
     pub(crate) fn merge_with_previous(&mut self, index: usize) -> Pos {
         let next = self.blocks.remove(index);
         let previous = &mut self.blocks[index - 1];
@@ -71,7 +71,7 @@ impl Document {
         Pos::new(index - 1, offset)
     }
 
-    /// Deletes everything between `start` and `end`: the rest of the end block joins the start
+    /// Deletes everything between `start` and `end`, joining the rest of the end block to the start
     /// block. Returns where the range starts.
     pub(crate) fn delete(&mut self, start: Pos, end: Pos) -> Pos {
         let (start, end) = self.trim_atoms(start, end);
@@ -97,8 +97,8 @@ impl Document {
         start
     }
 
-    /// `start..end` without the atoms (rules, tables) it only touches: a range that starts
-    /// after one or ends before one doesn't take it.
+    /// `start..end` without the atoms (rules, tables) it only touches. A range that starts after
+    /// an atom or ends before one doesn't take the atom.
     fn trim_atoms(&self, start: Pos, end: Pos) -> (Pos, Pos) {
         let atom = |pos: Pos| !self.blocks[pos.block].is_inline();
         let start = if atom(start) && start.offset > 0 && start.block < end.block {
@@ -114,7 +114,7 @@ impl Document {
         (start, end)
     }
 
-    /// The blocks between `start` and `end`, cut to them: what ⌘C copies.
+    /// The blocks between `start` and `end`, cut to them, which is what ⌘C copies.
     pub(crate) fn fragment(&self, start: Pos, end: Pos) -> Vec<Block> {
         let (start, end) = self.trim_atoms(start, end);
         let mut blocks = self.blocks[start.block..=end.block].to_vec();
@@ -136,8 +136,7 @@ impl Document {
         Pos::new(at.block, at.offset + text.chars().count())
     }
 
-    /// Runs `operation` on blocks `range` the way Squire runs a block operation (see the module
-    /// docs).
+    /// Runs `operation` on blocks `range` as a block operation (see the module docs).
     pub(crate) fn modify_blocks(
         &mut self,
         range: Range<usize>,
@@ -151,7 +150,7 @@ impl Document {
     }
 
     /// Splits every container that `range` shares with blocks outside it, as extracting the
-    /// range up to the root does: the blocks before keep their containers, the range and the
+    /// range up to the root does. The blocks before keep their containers, and the range and the
     /// blocks after get copies.
     fn isolate(&mut self, range: Range<usize>) {
         self.split_containers_at(range.end);
@@ -187,8 +186,8 @@ impl Document {
     }
 
     /// Gives each element a container id of its own again after an operation moved blocks out
-    /// of the middle of one: blocks share a container only while it runs unbroken from one
-    /// block to the next, as an element does.
+    /// of the middle of one. Blocks share a container only while it runs unbroken from one block
+    /// to the next, as an element does.
     fn split_broken_containers(&mut self) {
         let mut seen = HashSet::new();
         // The block before's containers, `(id before, id now)`.
@@ -243,10 +242,10 @@ impl Document {
         }
     }
 
-    /// Gives lines the `<br>`s a browser needs to show them as the editor does: a block whose
-    /// last line is empty gets its placeholder (as the browser adds one), or the line has no
-    /// height; and loose text (right inside a container) followed by more loose text gets one,
-    /// or the two run together into one line.
+    /// Gives lines the `<br>`s a browser needs to show them as the editor does. A block whose last
+    /// line is empty gets its placeholder (as the browser adds one), or the line would have no
+    /// height. Loose text (right inside a container) followed by more loose text gets one, or the
+    /// two would run together into one line.
     pub(crate) fn fix_lines(&mut self) {
         let loose = |block: &Block| block.element.tag.is_empty() && block.is_inline();
         // Neighbours in the same innermost container at the same depth share their whole path.
@@ -268,7 +267,7 @@ impl Document {
         }
     }
 
-    /// Keeps an editable line at the end: if the last block is inside a container, or isn't a plain
+    /// Keeps an editable line at the end. If the last block is inside a container or isn't a plain
     /// line, an empty `div` follows it.
     pub(crate) fn ensure_bottom_line(&mut self) {
         let last = self.blocks.last().expect("a document has a block");
@@ -277,7 +276,8 @@ impl Document {
         }
     }
 
-    /// The deepest container blocks `range` all share: the selection's common ancestor.
+    /// The deepest container that blocks `range` all share, which is the selection's common
+    /// ancestor.
     pub(crate) fn common_path(&self, range: Range<usize>) -> Vec<Container> {
         let first = &self.blocks[range.start].path;
         let mut shared = first.len();
@@ -356,8 +356,8 @@ impl Document {
         }
     }
 
-    /// Nests each item in a list of its list's kind: the one the item before it was just nested in,
-    /// or a new one.
+    /// Nests each item in a list of its list's kind, either the one the item before it was just
+    /// nested in or a new one.
     pub(crate) fn increase_list_level(&mut self, range: Range<usize>) {
         for index in range {
             let Some((depth, list)) = self.blocks[index]
@@ -431,8 +431,8 @@ impl Document {
         }
     }
 
-    /// Enter inside any `blockquote`: the quote is split at `at` and a `div` holding three empty
-    /// lines goes between the halves, at the top level; the caret lands on the middle line. Returns
+    /// Enter inside any `blockquote`. The quote is split at `at`, and a `div` holding three empty
+    /// lines goes between the halves at the top level, with the caret on the middle line. Returns
     /// the caret.
     pub(crate) fn break_out_of_quote(&mut self, at: Pos) -> Pos {
         let index = at.block;
@@ -459,7 +459,7 @@ impl Document {
         Pos::new(caret, 0)
     }
 
-    /// A code block, with a 20px `margin-left`: each block becomes a plain `div` (keeping its
+    /// Makes a code block with a 20px `margin-left`. Each block becomes a plain `div` (keeping its
     /// `dir`) in a new innermost `pre`, which joins a `pre` just before it
     /// ([`Document::modify_blocks`] merges the two).
     pub(crate) fn make_code(&mut self, range: Range<usize>) {
@@ -474,8 +474,8 @@ impl Document {
         }
     }
 
-    /// Squire's Enter on an empty line of a code block: the line goes, and a plain line at the
-    /// top level takes its place, splitting the code (and whatever holds it) around it when
+    /// Enter on an empty line of a code block. The line goes, and a plain line at the top level
+    /// takes its place, splitting the code (and whatever holds it) around the new line when
     /// there's more below. Returns the new line's start.
     pub(crate) fn leave_code(&mut self, index: usize, line: Range<usize>) -> Pos {
         let block = &mut self.blocks[index];

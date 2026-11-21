@@ -1,13 +1,13 @@
-//! Signing in a calendar account an invite is to: the provider dropdown the invite card's `RSVP`
-//! alert and the day view's `Add Calendar` takeover both ask with.
+//! Signing in the calendar account an invite was sent to, with the provider dropdown that the
+//! invite card's `RSVP` alert and the day view's `Add Calendar` takeover both ask with.
 
 use egui::{Color32, Id, Pos2, Rect, Sense, Ui, Vec2, pos2, vec2};
 use exo_ui::{BoxShadow, Family, Font, Menu, TextStyle, motion};
 
-/// `Choose a provider`, `Google Calendar`; there's no `Microsoft`, as Exo is Gmail-only.
+/// `Choose a provider` and `Google Calendar`. There's no `Microsoft`, as Exo is Gmail-only.
 const ITEMS: [&str; 2] = ["Choose a provider", "Google Calendar"];
-/// The dropdown's value: 14px/20px bold; the down caret 10px after it, 10px wide, 7.4px down the
-/// line.
+/// The dropdown's value is 14px/20px bold. The down caret sits 10px after it, 10px wide and 7.4px
+/// down the line.
 const VALUE: TextStyle = TextStyle::new(Font::new(Family::Sans, 700), 14.0, 20.0);
 const CARET_GAP: f32 = 10.0;
 const CARET: Vec2 = vec2(10.0, 10.0 * 6.7 / 12.0);
@@ -26,8 +26,9 @@ pub(super) struct ProviderPicker {
 }
 
 impl ProviderPicker {
-    /// Paints the dropdown with its line's top left at `at`, `value` its text's ink and `caret`
-    /// the caret's, and its list under it while open (above everything). Returns its height.
+    /// Paints the dropdown with its line's top left at `at`, its text in `value` and its caret in
+    /// `caret`, and its list under it while open (above everything). Returns the dropdown's
+    /// height.
     pub fn show(&mut self, ui: &Ui, id: Id, at: Pos2, value: Color32, caret: Color32) -> f32 {
         let width = VALUE.paint_line(
             ui.painter(),
@@ -79,7 +80,7 @@ impl ProviderPicker {
         VALUE.line_height
     }
 
-    /// Closes its list, if open: whether it was (Escape closes it first).
+    /// Closes its list if open, and returns whether it was (Escape closes the list first).
     pub fn close(&mut self) -> bool {
         self.open.take().is_some()
     }
@@ -102,8 +103,8 @@ pub(super) enum TakeoverAction {
 /// The takeover (`padding: 32px 2rem`): `Add Calendar` (16px/24px, black or white at `.8`, 28px
 /// above the rest), the ask (14px/24px at `.55`), the dropdown 16px under it, and 16px under that
 /// `Sign in` (disabled until a provider is chosen; 4px margin and `top: 2px`) and `No thanks`
-/// (12px/20px at `.3`, `.5` hovered, 1rem after it and 8px down; the button's 28px box puts its
-/// text 4px down).
+/// (12px/20px at `.3`, `.5` hovered, 1rem after `Sign in` and 8px down; its button's 28px box puts
+/// the text 4px down).
 const TITLE: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 16.0, 24.0);
 const TITLE_GAP: f32 = 28.0;
 const ASK: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 14.0, 24.0);
@@ -114,14 +115,15 @@ const DECLINE_TOP: f32 = 8.0;
 const DECLINE_PADDING: Vec2 = vec2(0.0, 4.0);
 
 /// The purple `Sign in` in Classic: 14px/20px bold uppercase, padded `8px 12px 4px`, 2px
-/// corners on `#aeb1dd`, its label white at `.98` (Carbon `#27292d`), the glow `0 0 6px 0
-/// #aeb1dd, 0 2px 12px 0` at `.5` hovered; Carbon's glows at `.2` always (`.7` hovered). Disabled,
-/// its label is black at `.15`, and Snow's loses its fill (`background: unset`), Carbon's not.
+/// corners on `#aeb1dd`, its label white at `.98` (Carbon `#27292d`), and the glow
+/// `0 0 6px 0 #aeb1dd, 0 2px 12px 0` at `.5` hovered. Carbon's glows at `.2` always (`.7`
+/// hovered). Disabled, its label is black at `.15`, and Snow's button loses its fill
+/// (`background: unset`) while Carbon's keeps it.
 const BUTTON: TextStyle = TextStyle::new(Font::new(Family::Sans, 700), 14.0, 20.0);
 const BUTTON_PADDING: Vec2 = vec2(12.0, 8.0);
 const ACCENT: Color32 = Color32::from_rgb(0xae, 0xb1, 0xdd);
 
-/// Paints `Sign in` over `rect`; returns whether it was clicked.
+/// Paints `Sign in` over `rect` and returns whether it was clicked.
 fn sign_in_button(ui: &Ui, rect: Rect, enabled: bool) -> bool {
     let carbon = exo_ui::theme(ui.ctx()) == exo_ui::Theme::Carbon;
     let sense = if enabled {
@@ -210,8 +212,8 @@ pub(super) fn show_takeover(
         top += ASK.line_height;
     }
     top += GAP;
-    // The chosen provider: black (Carbon white) at `.75`; the caret black (Carbon white), which
-    // draws as at `.5`.
+    // The chosen provider is black (Carbon white) at `.75`. The caret is black (Carbon white) too,
+    // which draws as if at `.5`.
     top += picker.show(
         ui,
         exo_ui::id(ui.ctx(), "calendar-takeover-provider"),

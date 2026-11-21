@@ -1,15 +1,16 @@
-//! The Signatures dialog: a send-as alias's Gmail signature, shown but not edited (Gmail's
-//! settings edit it), and whether replies and forwards carry it.
+//! The Signatures dialog shows a send-as alias's Gmail signature without editing it (Gmail's
+//! settings do that), and sets whether replies and forwards carry it.
 //!
-//! - `Signature for:` and the aliases, the default first; a dropdown when
-//!   there are several, its caret showing while it has the keyboard or the pointer.
-//! - The signature in Snow's email styles, laid out by the body renderer, after a 4px bar;
-//!   under the pointer, a dashed card says where to edit it, `Gmail settings` opening Gmail's.
-//!   An alias without one says where to add one.
+//! - `Signature for:` and the aliases, the default first. They're a dropdown when there are
+//!   several, with its caret showing while it has the keyboard or the pointer.
+//! - The signature in Snow's email styles, laid out by the body renderer, after a 4px bar. Under
+//!   the pointer, a dashed card says where to edit it, and `Gmail settings` opens Gmail's. For an
+//!   alias without a signature, the card says where to add one.
 //! - `Include signature on replies and forwards` (`includeSignatureOnReplies`), only for an alias
-//!   with a signature: a row that takes the keyboard as the pointer comes onto it, and toggles.
+//!   with a signature. It's a row that takes the keyboard as the pointer comes onto it, and
+//!   toggles.
 //!
-//! The keyboard starts on the dropdown with several aliases, else on the row; Tab goes on to
+//! The keyboard starts on the dropdown with several aliases, else on the row. Tab goes on to
 //! `Gmail settings` and the row.
 
 use egui::{Color32, Context, CornerRadius, Rect, Sense, Shape, Stroke, Ui, pos2, vec2};
@@ -21,18 +22,18 @@ use crate::{
     body::{Bodies, Look},
 };
 
-/// `Signature for:`: 12px/20px at `.7`, 3px down its line, the dropdown's value (12px/16px) 1px
-/// past its `margin-right: 4px` and 2px lower.
+/// `Signature for:` is 12px/20px at `.7`, 3px down its line. The dropdown's value (12px/16px)
+/// sits 1px past its `margin-right: 4px` and 2px lower.
 const LABEL: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 12.0, 20.0);
 const LABEL_TOP: f32 = 27.0;
 const VALUE: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 12.0, 16.0);
 const VALUE_LEFT: f32 = 5.0;
 const VALUE_TOP: f32 = 29.0;
 const LABEL_INK: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 179);
-/// The open list: 18px left of the value and 24px under it.
+/// The open list: 18px left of the value and 23px under it.
 const MENU_OFFSET: egui::Vec2 = vec2(-18.0, 23.0);
-/// The signature's block 60px down (`padding-top: 16px` under the 44px row), at least 48px
-/// tall (`min-height: 48px`); its bar 4px wide, the signature 12px past it.
+/// The signature's block sits 60px down (`padding-top: 16px` under the 44px row) and is at least
+/// 48px tall (`min-height: 48px`). Its bar is 4px wide, with the signature 12px past it.
 const BLOCK_TOP: f32 = 60.0;
 const BLOCK_MIN: f32 = 48.0;
 const BAR: f32 = 4.0;
@@ -50,10 +51,11 @@ const FADE: f32 = 0.1;
 const RULE_GAP: f32 = 16.0;
 const RULE_INSET: f32 = 3.0;
 const RULE: Color32 = Color32::from_rgb(0xed, 0xed, 0xed);
-/// The row: 20px under the rule's 4px, 44px tall; its label 12px/20px semibold at `.7` spaced
-/// 0.2px, and its 14px checkbox at the right, 14px and 15.5px down (measured: Chromium lands the
-/// label's 14.5px and the box's 16.5px on the device pixels above). Focused, a `#aeb1dd` bar 3px wide at
-/// the dialog's edge and the same colour at 15% across the dialog, 4px down and 40px tall.
+/// The row sits 20px under the rule's 4px and is 44px tall. Its label is 12px/20px semibold at `.7`
+/// spaced 0.2px, and its 14px checkbox sits at the right. They're 14px and 15.5px down (measured:
+/// Chromium lands the label's 14.5px and the box's 16.5px on the device pixels above). Focused, the
+/// row has a `#aeb1dd` bar 3px wide at the dialog's edge and the same colour at 15% across the
+/// dialog, 4px down and 40px tall.
 const ROW_GAP: f32 = 24.0;
 const ROW_HEIGHT: f32 = 44.0;
 const ROW_LABEL: TextStyle =
@@ -98,7 +100,7 @@ pub enum Event {
     MenuClose,
     /// The pointer on a row of the list.
     Highlight(usize),
-    /// Enter or Tab on the open list: its highlighted alias.
+    /// Enter or Tab on the open list, which picks its highlighted alias.
     MenuPick,
     /// An alias, by address.
     Choose(String),
@@ -113,7 +115,7 @@ pub enum Event {
 /// The dialog's alias, keyboard and list.
 #[derive(Clone, Debug, Default)]
 pub struct State {
-    /// The alias shown; the default one until another is chosen.
+    /// The alias shown, which is the default one until another is chosen.
     selected: Option<String>,
     focus: Option<Focus>,
     /// The list is open, with this row highlighted.
@@ -161,7 +163,7 @@ impl State {
         }
     }
 
-    /// Whether the list is open: Escape closes it, not the dialog.
+    /// Whether the list is open, so that Escape closes it rather than the dialog.
     pub fn menu_open(&self) -> bool {
         self.menu.is_some()
     }
@@ -171,7 +173,8 @@ impl State {
         self.focus
     }
 
-    /// Applies `event`; returns what's left for the app: toggling the setting, opening Gmail.
+    /// Applies `event` and returns what's left for the app, which is toggling the setting or
+    /// opening Gmail.
     pub fn handle(&mut self, event: Event, aliases: &[Alias]) -> Option<Event> {
         let shown_email = shown(self.selected.as_deref(), aliases)
             .map(|alias| alias.email.clone())
@@ -261,8 +264,8 @@ pub struct Shown<'a> {
     pub loader: &'a Loader,
 }
 
-/// Draws the dialog over `area` while `open` (and as it fades), its signature by `preview`;
-/// returns what was done.
+/// Draws the dialog over `area` while `open` (and as it fades), with its signature drawn by
+/// `preview`, and returns what was done.
 pub fn dialog(
     ctx: &Context,
     area: Rect,
@@ -281,20 +284,21 @@ pub fn dialog(
     let look = Look {
         width: CONTENT_WIDTH,
         scale: ppp,
-        // `Shadowbox theme="snow"`, in Carbon too, on the dialog's card.
+        // The signature renders in Snow, in Carbon too, on the dialog's card.
         theme: exo_ui::Theme::Snow,
         rem: exo_ui::rem(area.width(), false),
         show_quoted: true,
         hide_original: false,
         phase: left - left.floor(),
-        // On the dialog's card (`#fff`, `#f5f5f5` in Carbon): the Shadowbox has no background.
+        // On the dialog's card (`#fff`, `#f5f5f5` in Carbon), since the signature has no
+        // background of its own.
         background: match exo_ui::theme(ctx) {
             exo_ui::Theme::Snow => Color32::WHITE,
             exo_ui::Theme::Carbon => Color32::from_rgb(0xf5, 0xf5, 0xf5),
         }
         .to_array(),
     };
-    // The signature's height once laid out; a line's until then.
+    // The signature's height once laid out, or a line's until then.
     let content = signature.map_or(0.0, |alias| {
         preview.height(ctx, alias, shown, look).unwrap_or(24.0)
     });
@@ -470,8 +474,8 @@ fn draw(
     event
 }
 
-/// The dashed card over `card` at `opacity`, saying `before` `Gmail settings` `after`, centred;
-/// returns whether the link was clicked.
+/// The dashed card over `card` at `opacity`, saying `before` `Gmail settings` `after`, centred.
+/// Returns whether the link was clicked.
 fn help_card(ui: &Ui, card: Rect, (before, after): (&str, &str), opacity: f32) -> bool {
     let ctx = ui.ctx();
     let mut painter = ui.painter().clone();
@@ -546,8 +550,9 @@ impl Preview {
         format!("signature:{}", alias.email)
     }
 
-    /// `alias`'s signature's height laid out with `look`, once it has been. Call every frame:
-    /// it hands the renderer the signature, unless it has it, and takes what it's done.
+    /// The height of `alias`'s signature laid out with `look`, once it has been. Call it every
+    /// frame, since it hands the renderer the signature (unless the renderer has it) and takes what
+    /// the renderer has done.
     fn height(
         &mut self,
         ctx: &Context,

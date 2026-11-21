@@ -20,7 +20,7 @@ pub struct ListQuery {
     pub q: Option<String>,
     /// Only results carrying every one of these labels.
     pub label_ids: Vec<String>,
-    /// Page size; Gmail defaults to 100 and caps at 500.
+    /// Page size. Gmail defaults to 100 and caps at 500.
     pub max_results: Option<u32>,
     /// `nextPageToken` from the previous page.
     pub page_token: Option<String>,
@@ -33,7 +33,7 @@ pub struct ListQuery {
 pub struct DraftQuery {
     /// Gmail search query over draft messages.
     pub q: Option<String>,
-    /// Page size; Gmail defaults to 100 and caps at 500.
+    /// Page size. Gmail defaults to 100 and caps at 500.
     pub max_results: Option<u32>,
     /// `nextPageToken` from the previous page.
     pub page_token: Option<String>,
@@ -44,13 +44,13 @@ pub struct DraftQuery {
 /// `history.list` parameters.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct HistoryQuery {
-    /// Return records after this ID. A 404 means it expired: do a full sync.
+    /// Return records after this ID. A 404 means it expired, so do a full sync.
     pub start_history_id: u64,
     /// Only these record types.
     pub history_types: Vec<HistoryType>,
     /// Only messages with this label.
     pub label_id: Option<String>,
-    /// Page size; Gmail defaults to 100 and caps at 500.
+    /// Page size. Gmail defaults to 100 and caps at 500.
     pub max_results: Option<u32>,
     /// `nextPageToken` from the previous page.
     pub page_token: Option<String>,
@@ -61,7 +61,7 @@ pub struct HistoryQuery {
 pub struct InsertOptions {
     /// Labels to apply (e.g. `INBOX`, `UNREAD`).
     pub label_ids: Vec<String>,
-    /// Thread to add the message to; Gmail also requires matching `Subject` and threading
+    /// Thread to add the message to. Gmail also requires matching `Subject` and threading
     /// headers.
     pub thread_id: Option<String>,
     /// Defaults to `receivedTime` for insert and `dateHeader` for import.
@@ -108,7 +108,7 @@ impl<'a> Gmail<'a> {
 
     // Labels
 
-    /// `labels.list` (no counts; use [`Gmail::label`] for those).
+    /// `labels.list`, without counts. Use [`Gmail::label`] for those.
     pub fn labels(&self) -> Call<'a, ListLabelsResponse> {
         self.call(Method::GET, &["labels"])
     }
@@ -145,8 +145,8 @@ impl<'a> Gmail<'a> {
         list(self.call(Method::GET, &["threads"]), query)
     }
 
-    /// `threads.get`. `format` must not be [`Format::Raw`]; `metadata_headers` only applies to
-    /// [`Format::Metadata`].
+    /// `threads.get`. `format` must not be [`Format::Raw`], and `metadata_headers` only applies
+    /// to [`Format::Metadata`].
     pub fn thread(&self, id: &str, format: Format, metadata_headers: &[&str]) -> Call<'a, Thread> {
         get(
             self.call(Method::GET, &["threads", id]),
@@ -203,7 +203,7 @@ impl<'a> Gmail<'a> {
             .json(request)
     }
 
-    /// `messages.batchModify`: same label change on up to 1000 messages.
+    /// `messages.batchModify`: applies the same label change to up to 1000 messages.
     pub fn batch_modify_messages(&self, request: &BatchModifyMessagesRequest) -> Call<'a, ()> {
         self.call(Method::POST, &["messages", "batchModify"])
             .json(request)
@@ -378,11 +378,12 @@ impl<'a> Gmail<'a> {
 
     /// Runs up to [`MAX_BATCH`] calls in one HTTP request (`POST /batch/gmail/v1`).
     ///
-    /// The outer `Result` fails when the batch itself can't be sent or read; each inner one is
+    /// The outer `Result` fails when the batch itself can't be sent or read. Each inner one is
     /// that call's own outcome, in the order given. Media uploads can't be batched.
     ///
     /// # Errors
-    /// [`Error::Batch`] for too many calls, uploads or a malformed response; transport errors.
+    /// [`Error::Batch`] for too many calls, uploads or a malformed response, and any transport
+    /// error.
     pub async fn batch<T: DeserializeOwned>(
         &self,
         calls: Vec<Call<'_, T>>,
@@ -450,7 +451,7 @@ impl<'a> Gmail<'a> {
             .to_owned();
         let body = response.bytes().await?;
         let Some(boundary) = multipart::boundary(&content_type) else {
-            // The whole batch was rejected: Google sends a plain JSON error.
+            // When Google rejects the whole batch, it sends a plain JSON error.
             return Err(decode::<serde_json::Value>(status, &body)
                 .err()
                 .unwrap_or_else(|| Error::Batch(format!("not multipart: {content_type}"))));

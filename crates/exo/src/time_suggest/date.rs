@@ -141,8 +141,8 @@ impl JsDate {
         );
     }
 
-    /// `MakeDate(MakeDay(year, month, date), time)` read as wall time in the zone (`UTC(t)`): a
-    /// time a clock change skips moves on by the change, one it repeats is the earlier.
+    /// `MakeDate(MakeDay(year, month, date), time)` read as wall time in the zone (`UTC(t)`). A
+    /// time that a clock change skips moves on by the change, and one it repeats is the earlier.
     fn set_local(&mut self, year: i64, month: i64, date: i64, time: i64) {
         let days =
             days_from_civil(year + month.div_euclid(12), month.rem_euclid(12) + 1, 1) + date - 1;

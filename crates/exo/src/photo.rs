@@ -13,16 +13,17 @@ use egui::{Color32, Mesh, Painter, Rect, Shape, TextureHandle, Vec2, pos2, vec2}
 /// The photos are bigger, so they're cut into tiles.
 const MAX_SIDE: u32 = 2048;
 
-/// A photo that is being decoded, or has been: a 4096px JPEG takes a moment (65ms in a release
+/// A photo that is being decoded, or has been. A 4096px JPEG takes a moment (65ms in a release
 /// build, two seconds in a debug one).
 pub struct Photo {
     tiles: Arc<OnceLock<Option<Tiles>>>,
     decoding: Option<std::thread::JoinHandle<()>>,
 }
 
-/// The photos decoded or being decoded, by file, whether with a blurred copy and the context
-/// whose textures hold them (its texture manager's address, kept alive by the textures): every
-/// screen showing one shares it (each tab's page has the day's photo behind Inbox Zero).
+/// The photos decoded or being decoded, keyed by file, whether with a blurred copy, and the
+/// context whose textures hold them (its texture manager's address, kept alive by the textures).
+/// Every screen showing a photo shares it (each tab's page has the day's photo behind Inbox
+/// Zero).
 type Decoded = Vec<((PathBuf, bool, usize), Weak<OnceLock<Option<Tiles>>>)>;
 static DECODED: Mutex<Decoded> = Mutex::new(Vec::new());
 
@@ -115,14 +116,14 @@ impl Photo {
         let _ = self.tiles.set(None);
     }
 
-    /// Decoding is over, whether or not it worked. For screenshots and tests.
+    /// Whether decoding is over, whether or not it worked. For screenshots and tests.
     pub fn is_loaded(&self) -> bool {
         self.tiles.get().is_some()
     }
 
-    /// Paints the photo scaled to cover `rect`, placed by `position`: given how much wider and
-    /// taller the scaled photo is than `rect`, how far left and up to shift it (CSS's
-    /// `background-position`). Paints nothing until it's decoded.
+    /// Paints the photo scaled to cover `rect`, placed by `position`. Given how much wider and
+    /// taller the scaled photo is than `rect`, `position` says how far left and up to shift it
+    /// (CSS's `background-position`). Paints nothing until it's decoded.
     pub fn paint(&self, painter: &Painter, rect: Rect, position: impl FnOnce(Vec2) -> Vec2) {
         let Some(Some(photo)) = self.tiles.get() else {
             return;
@@ -140,7 +141,7 @@ impl Photo {
                 ((tile.owned.min - tile.held.min) / tile.held.size()).to_pos2(),
                 ((tile.owned.max - tile.held.min) / tile.held.size()).to_pos2(),
             );
-            // A bare mesh: a rect shape would feather its edges, which shows at the seams.
+            // A bare mesh, because a rect shape would feather its edges, which shows at the seams.
             let mut mesh = Mesh::with_texture(tile.texture.id());
             mesh.add_rect_with_uv(on_screen(tile.owned), uv, Color32::WHITE);
             painter.add(Shape::mesh(mesh));
@@ -148,7 +149,7 @@ impl Photo {
     }
 }
 
-/// The blurred copy's width: an eighth of a 2880px photo, which a window of half its width shows
+/// The blurred copy's width, an eighth of a 2880px photo, which a window of half its width shows
 /// at twice that size, so a blur of `BLUR` texels is CSS's `blur(8px)` there.
 const BLURRED_WIDTH: u32 = 360;
 const BLUR: f32 = 2.0;
@@ -220,7 +221,7 @@ fn decode(ctx: &egui::Context, path: &Path, blurred: bool) -> Option<Tiles> {
                 (columns.end + 1).min(width),
                 (rows.end + 1).min(height),
             );
-            // Row by row: a copy per row is far quicker than a generic crop in a debug build.
+            // Row by row, since a copy per row is far quicker than a generic crop in a debug build.
             let mut pixels =
                 Vec::with_capacity(((held.2 - held.0) * (held.3 - held.1) * 3) as usize);
             for row in held.1..held.3 {

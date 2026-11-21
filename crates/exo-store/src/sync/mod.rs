@@ -35,10 +35,10 @@ use crate::view::{Identity, Router};
 pub(crate) const ATTEMPTS: u32 = 5;
 /// The largest `text/html` body Gmail moved to an attachment that's put back in its part.
 const MAX_INLINED_BODY: u32 = 5 * 1024 * 1024;
-/// The headers a message's row reads (lists, splits, the search index, the contact pane and
-/// replies), all `format=metadata` is asked for. `Content-Type` stands in for the top-level
-/// MIME type should Gmail leave `mimeType` out, and `Content-Class` marks Exchange's invites
-/// ([`needs_structure`]).
+/// The headers a message's row reads (for lists, splits, the search index, the contact pane and
+/// replies), which are all that `format=metadata` asks for. `Content-Type` stands in for the
+/// top-level MIME type if Gmail leaves `mimeType` out, and `Content-Class` marks Exchange's
+/// invites ([`needs_structure`]).
 pub(crate) const ROW_HEADERS: [&str; 15] = [
     "From",
     "To",
@@ -63,24 +63,26 @@ const BODY_ONLY: [&str; 3] = ["text/plain", "text/html", "multipart/alternative"
 /// How far Gmail's history is applied this session, as the footer shows it.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct SyncProgress {
-    /// A round of history ended this session, however it ended.
+    /// Whether a round of history ended this session, however it ended.
     pub caught_up: bool,
-    /// While a round applies history: the changes it has to its messages, and how many it has
-    /// applied.
+    /// While a round applies history, how many changes to messages it has, and how many of them
+    /// it has applied.
     pub changes: Option<(usize, usize)>,
 }
 
 /// What one [`Store::sync`] did.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SyncReport {
-    /// Threads Gmail history changed.
+    /// How many threads Gmail history changed.
     pub changed: usize,
-    /// The background backfill isn't finished: call `sync` again soon (on an idle tick).
+    /// Whether the background backfill isn't finished, so `sync` should be called again soon (on
+    /// an idle tick).
     pub backfilling: bool,
-    /// History had expired, so the cache was rebuilt from scratch. Queued mutations were kept.
+    /// Whether history had expired, so the cache was rebuilt from scratch. Queued mutations were
+    /// kept.
     pub rebuilt: bool,
-    /// The messages Gmail history brought that the store didn't have, oldest first: new mail.
-    /// None from a rebuild or a backfill.
+    /// The messages Gmail history brought that the store didn't have, oldest first, which is the
+    /// new mail. A rebuild or a backfill brings none.
     pub arrived: Vec<Arrival>,
 }
 
@@ -92,7 +94,7 @@ impl Store {
     ///
     /// # Errors
     /// [`Error::Offline`](crate::Error::Offline), [`Error::Throttled`](crate::Error::Throttled)
-    /// and the like when Gmail can't be reached or refuses; local data stays as it was.
+    /// and the like when Gmail can't be reached or refuses. Local data stays as it was.
     pub async fn sync(&self) -> Result<SyncReport> {
         let inner = &self.inner;
         let mut report = SyncReport::default();
@@ -122,10 +124,9 @@ impl Store {
         self.inner.progress.subscribe()
     }
 
-    /// Says which list is on screen: when it's one of the background passes (Inbox, Important,
-    /// Other or a split), each round backfills it first, starting with a screenful and on to
-    /// the app's first 100 threads, so after a rebuild the list in front of the user fills
-    /// before the others.
+    /// Says which list is on screen. When it's one of the background passes (Inbox, Important,
+    /// Other or a split), each round backfills it first, from a screenful up to the app's first
+    /// 100 threads, so after a rebuild the list in front of the user fills before the others.
     pub fn show(&self, list: &ListId) {
         *self
             .inner
@@ -134,8 +135,8 @@ impl Store {
             .expect("on-screen lock is never poisoned") = Some(list.clone());
     }
 
-    /// Says how many rows of the list on screen the app has loaded: sync fetches the bodies of
-    /// them all, and eviction keeps them.
+    /// Says how many rows of the list on screen the app has loaded. Sync fetches the bodies of
+    /// all those rows, and eviction keeps them.
     pub fn loaded(&self, rows: usize) {
         self.inner.loaded_rows.store(
             u32::try_from(rows).unwrap_or(u32::MAX),
@@ -205,7 +206,7 @@ impl Inner {
             let history_id = profile.history_id.unwrap_or_default();
             let mut write = self.begin(&mut db).await?;
             db::kv_set(write.exec(), HISTORY_ID, &history_id).await?;
-            // A new store: threads another store snoozed may be waiting with no reminder here.
+            // In a new store, threads another store snoozed may be waiting with no reminder here.
             db::kv_set(write.exec(), db::ORPHANED_SNOOZES, &true).await?;
             write.commit().await?;
         }
@@ -338,7 +339,7 @@ impl Inner {
         for thread in &threads {
             reindex(write.exec(), thread, &router).await?;
         }
-        // Only once it's stored: a failure above leaves the old identity, so the next
+        // Only once it's stored, so a failure above leaves the old identity and the next
         // bootstrap tries again.
         write.commit().await?;
         *self
@@ -381,8 +382,8 @@ impl Inner {
         write.publish().await
     }
 
-    /// Soft bankruptcy: forget everything fetched from Gmail, keep the outbox. The next
-    /// bootstrap snapshots a fresh cursor and backfill starts over.
+    /// Soft bankruptcy, which forgets everything fetched from Gmail and keeps the outbox. The
+    /// next bootstrap snapshots a fresh cursor and backfill starts over.
     async fn bankrupt(&self) -> Result<()> {
         log::warn!("Gmail history expired; rebuilding the local cache (queued mutations are kept)");
         let mut db = self.db.clone();
@@ -423,18 +424,18 @@ pub(crate) async fn fetch_thread(
     Ok(Some(thread))
 }
 
-/// A thread fetched for its rows: `threads.get` with `format=metadata` (a third of `full`'s
-/// quota units), and in full each new message whose row needs its structure.
+/// A thread fetched for its rows. That's `threads.get` with `format=metadata` (a third of
+/// `full`'s quota units), plus each new message whose row needs its structure, fetched in full.
 pub(crate) struct Rows {
     pub thread: gmail::Thread,
     /// The ids of the messages in `thread` fetched in full.
     pub full: HashSet<String>,
 }
 
-/// Fetches thread `id` for its rows, in `lane`: its messages' labels, snippets and
-/// [`ROW_HEADERS`], plus, in full, those that may hold files or an invite (the row's icon and
-/// `has:attachment`/`filename:` need their parts) unless they're among `stored`. `None` when
-/// the thread is gone.
+/// Fetches thread `id` for its rows, in `lane`. That's its messages' labels, snippets and
+/// [`ROW_HEADERS`], plus the messages that may hold files or an invite, fetched in full unless
+/// they're among `stored`. The row's icon and `has:attachment`/`filename:` need those messages'
+/// parts. `None` when the thread is gone.
 pub(crate) async fn fetch_rows(
     api: &Api,
     lane: Lane,
@@ -464,7 +465,7 @@ pub(crate) async fn fetch_rows(
     )
     .await?;
     let mut full = HashSet::new();
-    // One gone since the thread was read keeps its row until history says so.
+    // A message gone since the thread was read keeps its row until history says so.
     for message in fetched.into_iter().flatten() {
         let Some(id) = message.id.clone() else {
             continue;
@@ -481,10 +482,10 @@ pub(crate) async fn fetch_rows(
     Ok(Some(Rows { thread, full }))
 }
 
-/// A message fetched for its row may hold a file or an invite: its top-level type isn't one
-/// of [`BODY_ONLY`], or it's an Exchange meeting message, whose invite or RSVP is a
-/// `text/calendar` alternative inside `multipart/alternative` (Outlook's `Content-Class:
-/// urn:content-classes:calendarmessage`). Chats are never stored.
+/// Whether a message fetched for its row may hold a file or an invite. It may when its top-level
+/// type isn't one of [`BODY_ONLY`], or when it's an Exchange meeting message, whose invite or
+/// RSVP is a `text/calendar` alternative inside `multipart/alternative` (Outlook's
+/// `Content-Class: urn:content-classes:calendarmessage`). Chats are never stored.
 fn needs_structure(message: &Message) -> bool {
     let Some(payload) = &message.payload else {
         return true;
@@ -554,7 +555,8 @@ fn found<T>(fetched: Result<T, Failure>) -> Result<Option<T>, Failure> {
     }
 }
 
-/// Gmail moves big `text/html` bodies into attachments; fetch them back into the part.
+/// Gmail moves big `text/html` bodies into attachments, so this fetches them back into the
+/// part.
 async fn inline_bodies(
     api: &Api,
     lane: Lane,

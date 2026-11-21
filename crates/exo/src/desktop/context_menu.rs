@@ -1,7 +1,7 @@
-//! Native context menus: Exo's right-click menus are AppKit's (`NSMenu`), so they look and behave
-//! as a Mac app's do. [`show`] pops one up at the pointer and waits for the item chosen, as
-//! AppKit's menu tracking does. The thread list's rows use it, and compose's body; [`look_up`] is
-//! the shell's `Look Up`.
+//! Native context menus. Exo's right-click menus are AppKit's (`NSMenu`), so they look and behave
+//! as a Mac app's do. [`show`] pops one up at the pointer and waits for an item to be chosen, as
+//! AppKit's menu tracking does. The rows of the thread list and compose's body use it. [`look_up`]
+//! is the shell's `Look Up`.
 
 /// An entry of a context menu.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -14,28 +14,28 @@ pub enum MenuItem {
         key: Option<MenuKey>,
         /// Its SF Symbol, shown at its left.
         symbol: Option<&'static str>,
-        /// It can run now; otherwise it's dimmed.
+        /// Whether it can run now. When it can't, it's dimmed.
         enabled: bool,
     },
     /// A line between groups of items.
     Separator,
 }
 
-/// A key a menu item shows: a character, with ⇧ when `shift` (`⇧E`) and ⌘ when `command`
-/// (`⌘X`), the key that runs the item's command outside the menu.
+/// A key that a menu item shows, which runs the item's command outside the menu: a character, with
+/// ⇧ when `shift` (`⇧E`) and ⌘ when `command` (`⌘X`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MenuKey {
     /// The character, lower-case for a letter.
     pub key: char,
-    /// Shift is held with it.
+    /// Whether Shift is held with it.
     pub shift: bool,
-    /// ⌘ is held with it.
+    /// Whether ⌘ is held with it.
     pub command: bool,
 }
 
-/// Shows macOS's definition of `text` (Dictionary's popover), its first line's baseline starting at
-/// `at` (points from the window content's top left), in the system font at `size`. Does nothing off
-/// the main thread and off macOS.
+/// Shows macOS's definition of `text` (Dictionary's popover) in the system font at `size`, with the
+/// baseline of its first line starting at `at` (points from the window content's top left). Does
+/// nothing off the main thread and off macOS.
 pub fn look_up(text: &str, at: egui::Pos2, size: f32) {
     #[cfg(target_os = "macos")]
     macos::look_up(text, at, size);
@@ -88,7 +88,7 @@ mod macos {
         unsafe impl NSObjectProtocol for Chooser {}
 
         impl Chooser {
-            /// An item was chosen: remember which.
+            /// An item was chosen, so remember which.
             #[unsafe(method(choose:))]
             fn choose(&self, sender: &NSMenuItem) {
                 self.ivars().set(Some(sender.tag()));
@@ -117,7 +117,7 @@ mod macos {
                 continue;
             };
             let equivalent = key.map_or_else(String::new, |key| key.key.to_string());
-            // SAFETY: the action is the chooser's, taking the sender; the chooser outlives the
+            // SAFETY: the action is the chooser's and takes the sender. The chooser outlives the
             // menu, which lives until this returns.
             let item = unsafe {
                 let item = NSMenuItem::initWithTitle_action_keyEquivalent(
@@ -131,7 +131,7 @@ mod macos {
             };
             item.setTag(isize::try_from(index).ok()?);
             item.setEnabled(*enabled);
-            // The key with what it takes held: ⇧, ⌘, or neither.
+            // The modifiers the key needs held: ⇧, ⌘, or neither.
             let mut mask = NSEventModifierFlags::empty();
             if key.is_some_and(|key| key.shift) {
                 mask |= NSEventModifierFlags::Shift;
@@ -179,7 +179,7 @@ mod macos {
         app.keyWindow().or_else(|| app.mainWindow())?.contentView()
     }
 
-    /// `at`, points from the content's top left, in `view`'s coordinates.
+    /// `at`, in points from the content's top left, converted to `view`'s coordinates.
     fn point(view: &NSView, at: egui::Pos2) -> NSPoint {
         let height = view.frame().size.height;
         if view.isFlipped() {

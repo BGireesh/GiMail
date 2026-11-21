@@ -5,7 +5,7 @@ use gmail::{
     HistoryType, Message,
 };
 
-/// Records after the floor; anything older has "expired" and `history.list` answers 404.
+/// Records after the floor. Anything older has "expired", and `history.list` answers 404 for it.
 #[derive(Debug, Clone)]
 pub struct HistoryLog {
     records: Vec<Record>,
@@ -56,8 +56,8 @@ impl HistoryLog {
         labels: Vec<String>,
         change: Change,
     ) -> u64 {
-        // Real IDs grow with gaps ("not contiguous with random gaps", per the discovery doc);
-        // skipping one now and then keeps clients from assuming otherwise.
+        // Real IDs grow with gaps ("not contiguous with random gaps", per the discovery doc).
+        // Skipping one now and then keeps clients from assuming otherwise.
         self.current += if self.current % 7 == 0 { 2 } else { 1 };
         self.records.push(Record {
             id: self.current,

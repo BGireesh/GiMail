@@ -14,7 +14,7 @@ use url::Url;
 use crate::account::{Account, Credentials, OpenError};
 use crate::power::PowerSource;
 
-/// Shows Google's consent page: the system browser in the app, a scripted one in tests.
+/// Shows Google's consent page, in the system browser in the app and a scripted one in tests.
 pub type Browser = Arc<dyn Fn(&Url) -> io::Result<()> + Send + Sync>;
 
 /// Opens `url` in the system browser.
@@ -37,8 +37,8 @@ pub type Outcome = Result<exo_auth::Account, exo_auth::Error>;
 
 /// The device's accounts: signing them in, and opening their mail.
 pub struct SignIn {
-    /// Opens the account list with its OAuth client; tried again on each sign-in until it works,
-    /// so a client file saved while Exo runs is picked up.
+    /// Opens the account list with its OAuth client. It's tried again on each sign-in until it
+    /// works, so a client file saved while Exo runs is picked up.
     open: Box<dyn Fn() -> Result<Auth, exo_auth::Error>>,
     auth: Option<Auth>,
     /// Where accounts' mail stores live.
@@ -88,7 +88,7 @@ impl SignIn {
     }
 
     /// Has the accounts it opens from now on sync off screen by `power`, the Mac's
-    /// ([`PowerSource::watch`]) in the app. Without, they're plugged in.
+    /// ([`PowerSource::watch`]) in the app. Without this, they count as plugged in.
     pub fn set_power(&mut self, power: PowerSource) {
         self.power = power;
     }
@@ -106,7 +106,7 @@ impl SignIn {
         Ok(self.auth.insert(auth))
     }
 
-    /// Starts signing an account in, abandoning the attempt in flight if there is one; `ctx`
+    /// Starts signing an account in, abandoning the attempt in flight if there is one. `ctx`
     /// repaints when it's over. Google offers `hint` first (`login_hint`), when given.
     ///
     /// # Errors
@@ -151,7 +151,7 @@ impl SignIn {
     pub(crate) fn unsent(&mut self, email: &str) -> Result<exo_store::Unsent, MailError> {
         let endpoints = self.auth()?.endpoints().clone();
         let stores = self.stores.clone();
-        // Counting makes no Gmail call: the store's client is never used.
+        // Counting makes no Gmail call, so the store's client is never used.
         let counted = self.runtime.block_on(async move {
             exo_store::Store::open(&stores, email, endpoints, gmail::StaticToken(String::new()))
                 .await?
@@ -161,7 +161,8 @@ impl SignIn {
         Ok(counted.map_err(OpenError::from)?)
     }
 
-    /// `email` has a store: it has opened on this Mac since it last signed out.
+    /// Whether `email` has a store, which it does when it has opened on this Mac since it last
+    /// signed out.
     pub(crate) fn has_store(&self, email: &str) -> bool {
         exo_store::Store::exists(&self.stores, email)
     }
@@ -173,7 +174,7 @@ impl SignIn {
         }
     }
 
-    /// Clears `email`'s cache, once its mail is closed: its store is made again, keeping what
+    /// Clears `email`'s cache, once its mail is closed. Its store is made again, keeping what
     /// Gmail doesn't have yet ([`exo_store::Store::clear_cache`]), and fills from Gmail when it
     /// next opens.
     ///

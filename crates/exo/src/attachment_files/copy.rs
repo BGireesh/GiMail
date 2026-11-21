@@ -1,6 +1,6 @@
-//! Copy Attachments: a message's files on the clipboard as references to its Gmail parts, with the
-//! account they're in, which ⌘V in a draft adds to it. Another account's are refused, as Gmail
-//! parts can only be sent from their own mailbox.
+//! Copy Attachments, which puts a message's files on the clipboard as references to their Gmail
+//! parts, with the account they're in. ⌘V in a draft adds the files to it. Files from another
+//! account are refused, because Gmail parts can only be sent from their own mailbox.
 
 use exo_store::{Attachment, AttachmentSource, DraftAttachment};
 use serde::{Deserialize, Serialize};
@@ -13,7 +13,7 @@ pub(crate) struct Copied {
     pub(crate) attachments: Vec<File>,
 }
 
-/// One file, as its metadata: enough to send it from its Gmail message.
+/// One file's metadata, which is enough to send it from its Gmail message.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct File {
     pub(crate) message_id: String,
@@ -27,7 +27,7 @@ pub(crate) struct File {
 /// The alert a paste of another account's files shows.
 pub(crate) const OTHER_ACCOUNT: &str = "Sorry! Attachments cannot be copy & pasted between email accounts. If you'd like to include attachments, first download them and then attach them to this draft.";
 
-/// The files Copy Attachments copies of a message: all but its inline images.
+/// The files Copy Attachments copies from a message, which are all but its inline images.
 pub(crate) fn copied(attachments: &[Attachment]) -> impl Iterator<Item = &Attachment> {
     attachments
         .iter()

@@ -86,8 +86,9 @@ impl Account<'_> {
             || recipients::same_address(self.email, email)
     }
 
-    /// The alias a reply to `message` is from: the first active alias among its To, Cc, From and
-    /// Bcc, else its `Delivered-To` (not the primary, unless it's the default), else the default.
+    /// The alias a reply to `message` is from. That's the first active alias among its To, Cc,
+    /// From and Bcc, or else its `Delivered-To` (not the primary, unless the primary is the
+    /// default), or else the default.
     pub fn addressee(&self, message: &MessageDetail) -> Address {
         let default = self.default_from();
         let on_message = message
@@ -191,8 +192,8 @@ impl Fields {
         }
     }
 
-    /// A copied message's fields (with its new part as the body), which pasting it makes a draft
-    /// of.
+    /// A copied message's fields (with its new part as the body), which pasting the message turns
+    /// into a draft.
     pub fn of_message(message: &MessageDetail, unquoted_html: &str) -> Self {
         let list = |contacts: &[Contact]| contacts.iter().map(address).collect();
         Self {
@@ -216,8 +217,8 @@ pub(crate) struct QuotedBody {
     pub id: String,
 }
 
-/// A reply, reply all or forward of `message`. `in_sent`: the message is in Sent (then every
-/// send-as address counts as you).
+/// A reply, reply all or forward of `message`. `in_sent` says the message is in Sent, where every
+/// send-as address counts as you.
 pub(crate) fn reply(
     account: &Account<'_>,
     action: DraftAction,
@@ -276,8 +277,8 @@ pub(crate) fn missing_originals(record: &DraftRecord, message: &MessageDetail) -
 }
 
 /// Whether a reply's recipients going from `before` to `now` (lowercased addresses) adds someone
-/// who isn't on `message`, the one it answers (its To, Cc and From): what makes Exo offer the
-/// message's files.
+/// who isn't on `message`, the message the reply answers (its To, Cc and From). Adding someone new
+/// is what makes Exo offer the message's files.
 pub(crate) fn adds_newcomer(now: &[String], before: &[String], message: &MessageDetail) -> bool {
     let on_message = |email: &String| {
         message
@@ -291,8 +292,9 @@ pub(crate) fn adds_newcomer(now: &[String], before: &[String], message: &Message
         .any(|email| !before.contains(email) && !on_message(email))
 }
 
-/// Every attachment of `message` (`all`: a forward, or `Include Original Attachments`), else only
-/// its inline images (so a reply's quote shows them); each once, by reference to its Gmail part.
+/// Copies every attachment of `message` when `all` (a forward, or
+/// `Include Original Attachments`), or else only its inline images, so a reply's quote shows
+/// them. Each is copied once, by reference to its Gmail part.
 pub(crate) fn copy_attachments(record: &mut DraftRecord, message: &MessageDetail, all: bool) {
     for attachment in &message.attachments {
         if has_attachment(record, attachment) || !(all || attachment.inline) {
@@ -314,7 +316,7 @@ pub(crate) fn copy_attachments(record: &mut DraftRecord, message: &MessageDetail
 }
 
 /// Re-aims an existing reply draft at another action (pressing R where a Reply All draft
-/// exists): recipients and subject recomputed, id, body and `Message-ID` kept.
+/// exists). It recomputes the recipients and subject, and keeps the id, body and `Message-ID`.
 pub(crate) fn retarget(
     record: &mut DraftRecord,
     account: &Account<'_>,
@@ -338,9 +340,9 @@ pub(crate) fn retarget(
     record.fingerprint = fingerprint(record);
 }
 
-/// A reply made a new message (its subject edited): it answers nothing, so it goes out without
-/// `In-Reply-To` and `References` and starts its own thread. Recipients, body, quote and files
-/// stay.
+/// Makes a reply a new message once its subject is edited. It answers nothing, so it goes out
+/// without `In-Reply-To` and `References` and starts its own thread. Recipients, body, quote and
+/// files stay.
 pub(crate) fn unthread(record: &mut DraftRecord) {
     record.action = DraftAction::EditSubjectLineReply;
     record.in_reply_to = None;
@@ -362,7 +364,7 @@ fn recipients_for(
     let all = action == DraftAction::ReplyAll;
     let is_self =
         |contact: &Contact| contact.is_me || (in_sent && account.in_send_as(&contact.email));
-    // Cc without you, the alias replied from, or anyone in To; once each.
+    // Cc leaves out you, the alias replied from and anyone in To, and lists each address once.
     let cc = |list: Vec<&Contact>, to: &[Address]| -> Vec<Address> {
         let mut out: Vec<Address> = Vec::new();
         for contact in list {
@@ -434,7 +436,8 @@ fn address(contact: &Contact) -> Address {
     }
 }
 
-/// A reply's or forward's subject: `Fwd: ` always; `Re: ` unless it already starts with `re:`.
+/// A reply's or forward's subject. A forward always gets `Fwd: `, and a reply gets `Re: ` unless
+/// the subject already starts with `re:`.
 pub(crate) fn subject(action: DraftAction, subject: &str) -> String {
     if action == DraftAction::Forward {
         return format!("Fwd: {subject}");
@@ -462,8 +465,8 @@ fn references(message: &MessageDetail) -> Vec<String> {
     references
 }
 
-/// The draft's fingerprint: To and Cc addresses and the files' ids (sorted) as created, which tell
-/// whether a reply's recipients or files were touched.
+/// The draft's fingerprint, made of its To and Cc addresses and its files' ids (sorted) as
+/// created. It tells whether a reply's recipients or files were touched.
 pub(crate) fn fingerprint(record: &DraftRecord) -> String {
     let join = |list: &[Address]| {
         list.iter()

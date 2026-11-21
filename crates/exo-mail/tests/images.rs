@@ -43,8 +43,8 @@ fn rendered(html: &str) -> Render {
     render(&message, None, &[])
 }
 
-/// Lays `html` out 400px wide at 2×, blocking remote content or not, and paints it on white;
-/// returns the URLs asked for and the pixels.
+/// Lays `html` out 400px wide at 2×, blocking remote content or not, and paints it on white.
+/// Returns the URLs asked for and the pixels.
 fn show(html: &str, theme: Theme, block: bool) -> (Vec<String>, exo_mail::Image) {
     let record = Arc::new(Record::default());
     let options = ViewOptions {
@@ -143,7 +143,7 @@ fn blocked_images_are_empty_boxes_sized_like_broken_ones() {
         "<img src=\"https://x.example/a.png\" width=\"160\" height=\"48\" alt=\"Badge\" style=\"display:block\">",
     );
     assert_eq!([bounds[2], bounds[3]], [160.0, 48.0]);
-    // Wider than the column: `max-width: 100%`, keeping the ratio.
+    // An image wider than the column gets `max-width: 100%`, keeping the ratio.
     let (bounds, ..) =
         boxed("<div><img src=\"https://x.example/a.png\" width=\"800\" height=\"200\"></div>");
     assert_eq!([bounds[2], bounds[3]], [400.0, 100.0]);
@@ -152,7 +152,7 @@ fn blocked_images_are_empty_boxes_sized_like_broken_ones() {
 #[test]
 fn carbon_marketing_mail_keeps_a_white_box_with_a_white_border() {
     // Classic Carbon's marketing mail (`.Theme-carbon:not(.Theme-dark).isMarketing`) whitens the
-    // base rule's border; its personal mail keeps it.
+    // base rule's border, but its personal mail keeps it.
     let marketing = "<table width=\"100%\"><tr><td><img src=\"https://x.example/a.png\" width=\"120\" height=\"60\"></td></tr></table>\
                      <p align=\"center\">Our winter sale ends on Sunday.</p>";
     assert!(rendered(marketing).unquoted_is_marketing);
@@ -167,8 +167,8 @@ fn carbon_marketing_mail_keeps_a_white_box_with_a_white_border() {
     assert!(!border(Theme::Dark), "Carbon's white one");
 }
 
-/// Carbon's personal mail keeps the box white on its dark page: the restyle that drops
-/// near-black elements' backgrounds doesn't reach it (`remote-images-personal.eml`).
+/// Carbon's personal mail keeps the box white on its dark page, because the restyle that drops
+/// near-black elements' backgrounds doesn't reach it.
 #[test]
 fn carbon_personal_mail_keeps_the_white_box() {
     let html = "<div>The trail map <img src=\"https://x.example/a.png\" width=\"120\" height=\"60\"> is attached.</div>";

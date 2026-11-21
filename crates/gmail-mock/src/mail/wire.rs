@@ -6,7 +6,7 @@ use super::StoredMessage;
 
 impl StoredMessage {
     /// The message as `messages.get` returns it in `format`. `metadata_headers` filters the
-    /// headers of the `metadata` format (case-insensitively); empty means all.
+    /// headers of the `metadata` format (case-insensitively). Empty means all.
     pub fn to_wire(&self, format: Format, metadata_headers: &[String]) -> Message {
         let mut message = Message {
             id: Some(self.id.clone()),

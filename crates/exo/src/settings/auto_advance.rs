@@ -1,7 +1,8 @@
-//! The Auto Advance dialog: where triaging a conversation goes next. A choice applies at once.
+//! The Auto Advance dialog, which picks where triaging a conversation goes next. A choice applies
+//! at once.
 //!
 //! The dropdown has the keyboard from the start and lists its choice first, then the others by
-//! name. Metrics at a 1280×800 window; in Carbon the card keeps Snow's colours.
+//! name. Metrics are at a 1280×800 window. In Carbon the card keeps Snow's colours.
 
 use egui::{Color32, Context, Rect, Sense, Ui, pos2, vec2};
 use exo_store::AutoAdvance;
@@ -9,16 +10,16 @@ use exo_ui::{Dialog, DialogResponse, Family, Font, Menu, TextStyle};
 
 /// The subheader and the dropdown's label: 12px/20px, 3px down their lines.
 const TEXT: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 12.0, 20.0);
-/// Below the body's top: the subheader's line (`padding-top: 24px`), the label's
-/// (`margin-bottom: 16px`, the row's `padding: 4px 0`) and the dropdown's value; the body ends
-/// with the row.
+/// How far below the body's top the subheader's line (`padding-top: 24px`), the label's line
+/// (`margin-bottom: 16px`, the row's `padding: 4px 0`) and the dropdown's value sit. The body
+/// ends with the row.
 const SUBHEADER_TOP: f32 = 3.0 + 24.0;
 const LABEL_TOP: f32 = 44.0 + 16.0 + 4.0 + 3.0;
 const VALUE_TOP: f32 = 69.0;
 const BODY_HEIGHT: f32 = 88.0;
 /// The label's `margin-right: 4px`, and the value 1px into its button.
 const VALUE_LEFT: f32 = 5.0;
-/// The subheader `rgba(0,0,0,.85)`; the dropdown's label `.7`.
+/// The subheader is `rgba(0,0,0,.85)`, and the dropdown's label `.7`.
 const SUBHEADER_INK: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 217);
 const LABEL_INK: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 179);
 /// The open list: 18px left of the value and 26px under the button.
@@ -37,13 +38,13 @@ const CHOICES: [(AutoAdvance, &str); 3] = [
 /// Something done in the dialog.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Event {
-    /// A click on the dropdown, or Enter on it: the list opens or closes.
+    /// A click on the dropdown, or Enter on it, which opens or closes the list.
     ToggleMenu,
-    /// ↓ (1) or ↑ (-1): the list opens, or its highlight moves round.
+    /// ↓ (1) or ↑ (-1), which opens the list or moves its highlight round.
     Move(isize),
-    /// Enter or Tab in the open list: its highlighted row.
+    /// Enter or Tab in the open list, which picks its highlighted row.
     Enter,
-    /// Escape, or a click elsewhere, with the list open: it closes.
+    /// Escape, or a click elsewhere, with the list open, which closes it.
     MenuClose,
     /// The pointer on a row of the list.
     Highlight(usize),
@@ -58,12 +59,12 @@ pub struct State {
 }
 
 impl State {
-    /// Whether the list is open: its keys are the dialog's.
+    /// Whether the list is open, in which case its keys are the dialog's.
     pub fn menu_open(&self) -> bool {
         self.menu.is_some()
     }
 
-    /// Applies `event` with `current` chosen; returns a new choice to save.
+    /// Applies `event` with `current` chosen, and returns a new choice to save.
     pub fn handle(&mut self, event: Event, current: AutoAdvance) -> Option<AutoAdvance> {
         let count = CHOICES.len() as isize;
         match event {
@@ -105,7 +106,7 @@ fn name(current: AutoAdvance) -> &'static str {
         .map_or(CHOICES[0].1, |(_, name)| name)
 }
 
-/// Draws the dialog over `area` while `open` (and as it fades); returns what was done.
+/// Draws the dialog over `area` while `open` (and as it fades), and returns what was done.
 pub fn dialog(
     ctx: &Context,
     area: Rect,

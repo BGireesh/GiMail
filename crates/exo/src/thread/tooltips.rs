@@ -1,6 +1,7 @@
-//! The header's tooltips that stay while the pointer is on them: a participant's, `{name}
-//! <{address}>` with a copy button, its address composing to them; and the subject's copy
-//! tooltip. Both are dark boxes 8px under their target, kept inside the message column.
+//! The header's tooltips that stay while the pointer is on them. A participant's tooltip shows
+//! `{name} <{address}>` with a copy button, and a click on its address composes to them. The
+//! subject has a copy tooltip. Both are tooltip boxes (dark in Snow, light in Carbon), centred 8px
+//! under their target and kept inside the message column.
 
 use egui::{Color32, Order, Pos2, Rect, Sense, Ui, pos2, vec2};
 use exo_store::Contact;
@@ -15,7 +16,7 @@ const PADDING_TOP: f32 = 6.0;
 const PADDING_BOTTOM: f32 = 3.0;
 /// The gap between a tooltip and its target.
 const GAP: f32 = 8.0;
-/// A participant's tooltip polls its hover intent every 200ms; the subject's every 100ms.
+/// A participant's tooltip polls its hover intent every 200ms, and the subject's every 100ms.
 const CONTACT_INTERVAL: f64 = 0.2;
 /// How long a tooltip stays once the pointer has left its target, or longer while the pointer is
 /// on the tooltip.
@@ -169,7 +170,7 @@ impl Tooltips {
         clicked
     }
 
-    /// Where the open tooltip's box goes: centred under its target, inside `within`.
+    /// Where the open tooltip's box goes, centred under its target and inside `within`.
     fn rect(&self, ui: &Ui, open: &Open, within: egui::Rangef) -> Rect {
         let width = match &open.what {
             Showing::Contact(contact) => contact_width(ui, contact),
@@ -197,8 +198,8 @@ fn ink(ui: &Ui) -> Color32 {
     }
 }
 
-/// The copy button: `padding: 8px 4px 8px 7px`, the 12px icon box less its
-/// `margin-right: -3px`; the glyph 1px under the line's top (`top: 2px; margin-top: -2px`, on
+/// The copy button's width, from `padding: 8px 4px 8px 7px` and the 12px icon box less its
+/// `margin-right: -3px`. The glyph sits 1px under the line's top (`top: 2px; margin-top: -2px`, on
 /// the baseline).
 const CONTACT_COPY: f32 = 7.0 + 12.0 - 3.0 + 4.0;
 
@@ -288,7 +289,7 @@ fn contact_content(
     None
 }
 
-/// The subject's copy tooltip: its text at most 460px wide, then the icon 8px after it.
+/// The subject's copy tooltip has its text at most 460px wide, then the icon 8px after it.
 const SUBJECT_MAX: f32 = 460.0;
 const SUBJECT_ICON_GAP: f32 = 8.0;
 const SUBJECT_ICON: f32 = 11.0;
@@ -302,9 +303,9 @@ fn subject_width(ui: &Ui, subject: &str) -> f32 {
         + SUBJECT_ICON
 }
 
-/// The subject's copy tooltip from `line`: the subject in 70% white (black in Carbon), `top:
-/// -1px`, cut at 460px, underlined while hovered; the copy icon at 66% after it, `top: 1px`.
-/// A click on either copies it.
+/// The subject's copy tooltip from `line`. The subject is in 70% white (black in Carbon) at
+/// `top: -1px`, cut at 460px and underlined while hovered. The copy icon follows it at 66%, at
+/// `top: 1px`. A click on either copies the subject.
 fn subject_content(ui: &Ui, painter: &egui::Painter, line: Pos2, subject: &str) -> Option<Clicked> {
     let carbon = exo_ui::theme(ui.ctx()) == exo_ui::Theme::Carbon;
     let (text_ink, icon_ink) = if carbon {

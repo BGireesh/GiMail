@@ -1,6 +1,6 @@
 //! Exo's icons, compiled in from `assets/icons` (Material Symbols and open brand marks, each fitted
-//! into its icon's box): monochrome icons white (so a tint colors them), and themed icons as one
-//! file per theme (`<name>.light.svg`, `<name>.dark.svg`).
+//! into its icon's box). Monochrome icons are white (so a tint colors them), and themed icons come
+//! as one file per theme (`<name>.light.svg`, `<name>.dark.svg`).
 //!
 //! The Classic style draws the legacy set (`legacy/…`), which CSS colors through placeholder
 //! fills: `red` (written white, so a tint colors it) and sometimes `blue`
@@ -132,14 +132,14 @@ pub(crate) fn icon_uri(ctx: &egui::Context, name: &str) -> String {
 }
 
 /// [`paint_icon`] for a legacy icon whose placeholder strokes CSS widens (`stroke-width`, in the
-/// icon's own units), as a done row's check widens to `stroke-width: 2`: the icon's heavier cut,
-/// `<name>-stroke<stroke>`, which the build fits to that width.
+/// icon's own units), as a done row's check widens to `stroke-width: 2`. It draws the icon's
+/// heavier cut, `<name>-stroke<stroke>`, which the build fits to that width.
 pub fn paint_icon_stroked(ui: &Ui, name: &str, rect: Rect, color: Color32, stroke: f32) {
     paint_icon(ui, &format!("{name}-stroke{stroke}"), rect, color);
 }
 
 /// The URI of icon `name` with `edit` applied to its SVG, registered the first time it's asked
-/// for under `key`; `None` until the icon's bytes are loaded.
+/// for under `key`, or `None` until the icon's bytes are loaded.
 pub(crate) fn edited_icon(
     ctx: &Context,
     name: &str,
@@ -173,7 +173,7 @@ pub(crate) fn edited_icon(
     Some(uri)
 }
 
-/// Icon `name`'s intrinsic size: its SVG's `width` and `height` in px. `None` for icons sized by
+/// Icon `name`'s intrinsic size, its SVG's `width` and `height` in px. `None` for icons sized by
 /// their container (`width="100%"`) and unknown names.
 pub fn icon_size(ctx: &Context, name: &str) -> Option<Vec2> {
     registry(ctx).and_then(|registry| registry.sizes.get(name).copied())
@@ -209,14 +209,15 @@ pub fn paint_icon_two_tone(ui: &Ui, name: &str, rect: Rect, red: Color32, blue: 
         }
         svg
     };
-    // No `#` in the key: a URI's fragment isn't part of what loaders look up.
+    // No `#` in the key, because a URI's fragment isn't part of what loaders look up.
     let key = format!("{red_hex}{red_alpha}{blue_hex}{blue_alpha}").replace('#', "");
     if let Some(uri) = edited_icon(ui.ctx(), name, &key, edit) {
         Image::new(uri).paint_at(ui, fit(ui.ctx(), name, rect));
     }
 }
 
-/// The root `<svg>`'s `width` and `height` in px (`"16"` or `"16px"`), when both are given that way.
+/// The root `<svg>`'s `width` and `height` in px (`"16"` or `"16px"`), when both are given that
+/// way.
 fn root_size(svg: &[u8]) -> (Option<Vec2>, Option<Vec2>) {
     let root = std::str::from_utf8(svg).ok().and_then(|svg| {
         let root = &svg[svg.find("<svg")?..];
@@ -252,8 +253,8 @@ fn root_size(svg: &[u8]) -> (Option<Vec2>, Option<Vec2>) {
     (size, view_box)
 }
 
-/// Classic's spinner in `rect`, in `color`, at `now`: a 7.5-unit circle of a 17-unit box stroked
-/// 1.25 wide with a 40-unit dash, so a sixth of it is open, turning clockwise once a second
+/// Classic's spinner in `rect`, in `color`, at `now`. It's a 7.5-unit circle of a 17-unit box,
+/// stroked 1.25 wide with a 40-unit dash so a sixth of it is open, turning clockwise once a second
 /// (`1000ms infinite linear`). It asks for the next frame.
 pub fn paint_spinner(painter: &egui::Painter, rect: Rect, now: f64, color: Color32) {
     const STEPS: usize = 48;

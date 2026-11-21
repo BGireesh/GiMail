@@ -16,7 +16,8 @@ const EDGE_POINTS: usize = 64;
 const SMALLEST_LEVEL: usize = 8;
 
 /// Paints the circle filling `rect` in `fill`, with `initial` centered on it in `style` and
-/// `ink`. `dy` is the SVG text's `dy`: how far its baseline sits below the circle's center.
+/// `ink`. `dy` is the SVG text's `dy`, which is how far its baseline sits below the circle's
+/// center.
 pub fn paint_initial_avatar(
     painter: &Painter,
     rect: Rect,
@@ -41,16 +42,16 @@ pub fn paint_initial_avatar(
 }
 
 /// A profile photo, ready to draw at an avatar's size the way Chromium draws an image scaled
-/// down: from the smallest of its halvings (mip levels, averaged 2×2 as Skia makes them) that's
-/// still at least the size drawn (`GpuImageDecodeCache`'s upload level), sampled bilinearly.
-/// Cheap to clone.
+/// down. It's drawn from the smallest of its halvings (mip levels, averaged 2×2 as Skia makes
+/// them) that's still at least the size drawn (`GpuImageDecodeCache`'s upload level), sampled
+/// bilinearly. Cheap to clone.
 #[derive(Clone)]
 pub struct AvatarPhoto {
     /// The photo, then each half the size of the one before.
     levels: Vec<TextureHandle>,
 }
 
-/// Its textures' ids stand in for them.
+/// Shows its textures' ids in place of the textures.
 impl std::fmt::Debug for AvatarPhoto {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_list()
@@ -113,11 +114,11 @@ fn halve(image: &ColorImage) -> ColorImage {
     ColorImage::new([width, height], pixels)
 }
 
-/// Paints `photo` as account avatars show one: an element filling `rect` with `border-radius: 50%`
-/// and a `ring`-wide solid border in `color` (`box-sizing: border-box`), the photo its
-/// `background-size: cover` image, centered in the padding box, all at `opacity`.
+/// Paints `photo` as account avatars show one. That's an element filling `rect` with
+/// `border-radius: 50%` and a `ring`-wide solid border in `color` (`box-sizing: border-box`), with
+/// the photo as its `background-size: cover` image centered in the padding box, all at `opacity`.
 ///
-/// Chromium paints the background under the border; here the photo stops half a device pixel
+/// Chromium paints the background under the border. Here the photo stops half a device pixel
 /// past the ring's inner edge, so the ring's antialiasing blends into the photo while the two
 /// barely overlap, which only shows when `opacity` is under 1 (the group is one layer there).
 pub fn paint_photo_avatar(
@@ -133,7 +134,7 @@ pub fn paint_photo_avatar(
     let texture = photo.level(padding.size() * painter.pixels_per_point());
     let size = texture.size_vec2();
     let scale = (padding.width() / size.x).max(padding.height() / size.y);
-    // `no-repeat`: the image paints only where it lands.
+    // With `no-repeat`, the image paints only where it lands.
     let image = Rect::from_center_size(padding.center(), size * scale);
     let reach = rect.width() / 2.0 - ring + 0.5 / painter.pixels_per_point();
     let tint = Color32::WHITE.gamma_multiply(opacity);

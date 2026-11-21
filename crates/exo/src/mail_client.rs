@@ -2,9 +2,10 @@
 //! first run, and the app menu's `Set as Default Email Client`.
 //!
 //! macOS hands a link over as a "get URL" Apple Event, to the running app or to the one it
-//! launches for it. The handler goes in as the app is about to finish launching, Apple's advice:
-//! the event that launched the app comes right after, and installed any later it would go
-//! unhandled. Links go to the [`Launcher`], as those another launch passes on do.
+//! launches for it. The handler goes in as the app is about to finish launching, as Apple
+//! advises. The event that launched the app comes right after, and would go unhandled if the
+//! handler went in any later. Links go to the [`Launcher`], as the links another launch passes on
+//! do.
 
 use std::path::Path;
 
@@ -17,7 +18,7 @@ const INSTALL_FILE: &str = "install.json";
 #[derive(Default, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 struct Install {
-    /// Exo made itself the default email app.
+    /// Whether Exo made itself the default email app.
     set_as_default_client: bool,
 }
 
@@ -30,17 +31,17 @@ pub fn listen(launcher: Launcher) {
     drop(launcher);
 }
 
-/// The app is up: the app menu offers `Set as Default Email Client`. Call on the main thread
+/// The app is up, so the app menu offers `Set as Default Email Client`. Call on the main thread
 /// once the window is open.
 pub fn ready() {
     #[cfg(target_os = "macos")]
     macos::add_menu_item();
 }
 
-/// Makes Exo the default email app on Exo.app's first run: whatever app had `mailto:` links
-/// then, and never again, even once another app takes them back. macOS may ask to confirm.
+/// Makes Exo the default email app on Exo.app's first run, whatever app had `mailto:` links then.
+/// It never does again, even once another app takes them back. macOS may ask to confirm.
 /// `state` is the state folder, which keeps the record (`install.json`). A bare binary (`cargo
-/// run`) never claims, since macOS hands links to bundles only; don't call it for a run on
+/// run`) never claims, since macOS hands links to bundles only. Don't call it for a run on
 /// gmail-mock.
 pub fn claim_on_first_run(state: &Path) {
     #[cfg(target_os = "macos")]
@@ -53,10 +54,10 @@ pub fn claim_on_first_run(state: &Path) {
     }
 }
 
-/// Whether this run is a `bundled` Exo's first, recording in `state` that it was before saying
+/// Whether this run is the first for a `bundled` Exo. It records that in `state` before saying
 /// so, so no later run is, whatever macOS then answers. A record that can't be read or written
-/// counts as one: Exo changes the system's default only when it knows it hasn't before. A bare
-/// binary records nothing, so Exo.app still claims on its first run.
+/// counts as one, since Exo changes the system's default only when it knows it hasn't before. A
+/// bare binary records nothing, so Exo.app still claims on its first run.
 fn first_run(state: &Path, bundled: bool) -> bool {
     if !bundled {
         return false;
@@ -110,7 +111,7 @@ mod macos {
 
     use super::Launcher;
 
-    /// `kInternetEventClass` and `kAEGetURL`: both `'GURL'`.
+    /// `kInternetEventClass` and `kAEGetURL`, which are both `'GURL'`.
     const GET_URL: u32 = u32::from_be_bytes(*b"GURL");
     /// `keyDirectObject`: the event's URL.
     const DIRECT_OBJECT: u32 = u32::from_be_bytes(*b"----");
@@ -121,8 +122,8 @@ mod macos {
     const MENU_INDEX: NSInteger = 2;
 
     thread_local! {
-        /// The handler, alive for good: the notification center, the Apple Event manager, the
-        /// menu item and the menu all hold it without retaining it.
+        /// The handler, alive for good, because the notification center, the Apple Event
+        /// manager, the menu item and the menu all hold it without retaining it.
         static HANDLER: OnceCell<Retained<Handler>> = const { OnceCell::new() };
     }
 
@@ -146,8 +147,9 @@ mod macos {
             fn will_finish_launching(&self, _notification: &NSNotification) {
                 let manager = NSAppleEventManager::sharedAppleEventManager();
                 // SAFETY: the selector is this class's, taking the event and the reply.
-                // `setEventHandler:andSelector:forEventClass:andEventID:` through `msg_send!`:
-                // objc2 types its four-character codes only with objc2-core-services.
+                // `setEventHandler:andSelector:forEventClass:andEventID:` goes through
+                // `msg_send!` because objc2 types its four-character codes only with
+                // objc2-core-services.
                 let () = unsafe { msg_send![&manager, setEventHandler: self, andSelector: sel!(handleGetURLEvent:withReplyEvent:), forEventClass: GET_URL, andEventID: GET_URL] };
             }
 
@@ -203,7 +205,7 @@ mod macos {
         };
         HANDLER.with(|cell| {
             let handler = cell.get_or_init(|| Handler::new(mtm, launcher));
-            // SAFETY: the selector is this class's, taking the notification; the handler lives
+            // SAFETY: the selector is this class's, taking the notification. The handler lives
             // for good, so the center never calls a freed observer.
             unsafe {
                 NSNotificationCenter::defaultCenter().addObserver_selector_name_object(
@@ -236,8 +238,8 @@ mod macos {
             );
     }
 
-    /// Exo runs as Exo.app. macOS sends links to bundles only: a bare binary can't be the
-    /// default.
+    /// Whether Exo runs as Exo.app. macOS sends links to bundles only, so a bare binary can't be
+    /// the default.
     pub(super) fn is_bundled() -> bool {
         NSBundle::mainBundle().bundleIdentifier().is_some()
     }
@@ -261,7 +263,7 @@ mod macos {
             if handler.ivars().items.get().is_some() {
                 return;
             }
-            // SAFETY: the action is this class's, taking the sender; the target outlives the
+            // SAFETY: the action is this class's, taking the sender. The target outlives the
             // item.
             let item = unsafe {
                 let item = NSMenuItem::initWithTitle_action_keyEquivalent(
@@ -289,7 +291,8 @@ mod macos {
         });
     }
 
-    /// Exo opens `mailto:` links: the app macOS picks for them has Exo's bundle identifier.
+    /// Whether Exo opens `mailto:` links, which it does when the app macOS picks for them has
+    /// Exo's bundle identifier.
     fn is_default() -> bool {
         let ours = NSBundle::mainBundle().bundleIdentifier();
         let handler = NSURL::URLWithString(ns_string!("mailto:"))

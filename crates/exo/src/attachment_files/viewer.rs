@@ -1,8 +1,8 @@
-//! Exo's attachment viewer: the window darkened to .9 black, the file in the middle (an image as it
-//! is, at most 80% of the page either way; a message as a white card), a header with `Download`,
-//! the file's type and name and a close cross, chevrons to the previous and next file, and `N of M`
-//! for a second after each move. Images and messages show here; PDFs and the rest open in Quick
-//! Look.
+//! Exo's attachment viewer. It darkens the window to .9 black and shows the file in the middle: an
+//! image as it is, at most 80% of the page either way, or a message as a white card. A header holds
+//! `Download`, the file's type and name, and a close cross. Chevrons lead to the previous and next
+//! file, and `N of M` shows for a second after each move. Images and messages show here, and PDFs
+//! and the rest open in Quick Look.
 //!
 //! Esc closes it, ← and → move, Enter downloads the file. A click on the image downloads it, on
 //! a chevron moves, on the message card does nothing, anywhere else closes. The image drags out
@@ -33,15 +33,16 @@ pub(crate) enum Action {
     Download,
     /// Download the message card's `n`th file.
     SaveFile(usize),
-    /// ⌘C: the message's selected text to the clipboard.
+    /// ⌘C, which copies the message's selected text to the clipboard.
     Copy,
 }
 
-/// What the pointer asked of the viewer: one of its actions, or what the app does for it.
+/// What the pointer asked of the viewer, which is one of its actions or something the app does
+/// for it.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Output {
     Action(Action),
-    /// A link in a message, clicked (with ⌘ held: opened in the background).
+    /// A link in a message was clicked (with ⌘ held, it opens in the background).
     Link {
         url: String,
         background: bool,
@@ -50,7 +51,7 @@ pub(crate) enum Output {
     Drag(Pos2),
 }
 
-/// Its keys, while it's open.
+/// The viewer's keys, while it's open.
 pub(crate) fn register(commands: &mut Commands<crate::Action>) {
     const VIEWER: &[Region] = &[Region::AttachmentPreview];
     let key = |id: &'static str, key: &'static str, action: Action| {
@@ -72,10 +73,10 @@ pub(crate) fn register(commands: &mut Commands<crate::Action>) {
 
 /// The backdrop: black at .9.
 const BACKDROP: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 230);
-/// The overlay fades in and out over 200ms `ease`; the viewer is gone 150ms into the fade out.
+/// The overlay fades in and out over 200ms `ease`. The viewer is gone 150ms into the fade out.
 const FADE: f64 = 0.2;
 const GONE_AFTER: f64 = 0.15;
-/// An item slides over 300ms on `cubic-bezier(0.19, 1, 0.22, 1)`; an image's container scales back
+/// An item slides over 300ms on `cubic-bezier(0.19, 1, 0.22, 1)`. An image's container scales back
 /// up over 250ms on the same curve.
 const SLIDE: f64 = 0.3;
 const SCALE: f64 = 0.25;
@@ -83,20 +84,20 @@ const EXPO: motion::CubicBezier = motion::CubicBezier::new(0.19, 1.0, 0.22, 1.0)
 /// The counter shows for a second after a move, then fades over .2s `ease-out`.
 const COUNTER_FOR: f64 = 1.0;
 const COUNTER_FADE: f64 = 0.2;
-/// The header's width, 8px down the page.
+/// The header's width, and its top 8px down the page.
 const HEADER_WIDTH: f32 = 729.0;
 const HEADER_TOP: f32 = 8.0;
 /// The close button's 67.5px left margin.
 const CLOSE_MARGIN: f32 = 67.5;
-/// 12px/12px bold, `top: 3px`: the header's words, the counter and the alt text.
+/// 12px/12px bold, `top: 3px`, for the header's words, the counter and the alt text.
 const LABEL: TextStyle = TextStyle::new(Font::new(Family::Sans, 700), 12.0, 12.0);
 const NUDGE: f32 = 3.0;
 /// The message card's subject: 21px/32px, `top: 3px`, `margin-bottom: 16px`.
 const SUBJECT: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 21.0, 32.0);
 /// A header row: 14px/24px bold, `top: 1px`.
 const HEADER_ROW: TextStyle = TextStyle::new(Font::new(Family::Sans, 700), 14.0, 24.0);
-/// A header row's label is at least 60px wide: the value follows it on the row's first line, and
-/// wraps to the row's left edge.
+/// A header row's label is at least 60px wide. The value follows the label on the row's first
+/// line, and wraps to the row's left edge.
 const LABEL_WIDTH: f32 = 60.0;
 /// The message card: `padding: 24px 32px 0; width: min(72vw, 720px)`.
 const CARD_PADDING_TOP: f32 = 24.0;
@@ -133,9 +134,9 @@ const MAX_TEXTURE: u32 = 4096;
 enum Item {
     /// Its bytes are on their way, or didn't come (`Loading…` stays).
     Loading,
-    /// They couldn't be had offline (`This image is not available offline.`).
+    /// Its bytes couldn't be had offline (`This image is not available offline.`).
     Offline,
-    /// Its natural size in CSS px, and whether it has no transparency.
+    /// An image, with its natural size in CSS px and whether it has no transparency.
     Image {
         texture: TextureHandle,
         size: Vec2,
@@ -181,10 +182,10 @@ pub(crate) struct Viewer {
     /// The last press in the body: when, where, and how many in a row (a double or triple
     /// click).
     clicks: Option<(f64, Pos2, u32)>,
-    /// A drag in the body is selecting its text.
+    /// Whether a drag in the body is selecting its text.
     selecting: bool,
-    /// ⌘ was held on the last click in the body, which a link it lands on opens in the
-    /// background.
+    /// Whether ⌘ was held on the last click in the body. A link the click lands on then opens in
+    /// the background.
     command_click: bool,
     /// The body's scrollbar.
     scrollbar: exo_ui::Scrollbar,
@@ -194,7 +195,8 @@ pub(crate) struct Viewer {
 type Channel<T> = (mpsc::Sender<T>, mpsc::Receiver<T>);
 
 impl Viewer {
-    /// The viewer over `attachments` from the `start`th, every file's bytes fetched at once.
+    /// Opens the viewer over `attachments` at the `start`th, and fetches every file's bytes at
+    /// once.
     pub(crate) fn open(
         ctx: &Context,
         loader: &Loader,
@@ -206,7 +208,8 @@ impl Viewer {
         for (at, attachment) in attachments.iter().enumerate() {
             let (sender, ctx, is_eml) = (loaded.0.clone(), ctx.clone(), super::is_eml(attachment));
             loader.attachment(attachment, move |bytes| {
-                // Decoding a photo takes a while; the account's tasks have better to do.
+                // Decoding a photo takes a while, so it gets its own thread and leaves the
+                // account's tasks free.
                 std::thread::spawn(move || {
                     let loaded = match bytes {
                         Err(error) => Loaded::Failed {
@@ -262,17 +265,17 @@ impl Viewer {
             .map(|(name, _, bytes)| (name.clone(), bytes.clone()))
     }
 
-    /// The viewer is closing (it gave the keyboard back) or has gone.
+    /// Whether the viewer is closing (it gave the keyboard back) or has gone.
     pub(crate) fn is_closing(&self) -> bool {
         self.closing_at.is_some()
     }
 
-    /// Its fade out is over.
+    /// Whether the viewer's fade out is over.
     pub(crate) fn is_gone(&self, now: f64) -> bool {
         self.closing_at.is_some_and(|at| now >= at + GONE_AFTER)
     }
 
-    /// Does `action` at `now`; downloads are the caller's.
+    /// Does `action` at `now`. Downloads are the caller's to do.
     pub(crate) fn run(&mut self, action: Action, now: f64) {
         let page = self.page;
         match action {
@@ -291,8 +294,8 @@ impl Viewer {
         }
     }
 
-    /// ⌘C: the card's selected header text, else the body's (which [`Self::show`] puts on the
-    /// clipboard once the body's worker has it).
+    /// ⌘C, which copies the card's selected header text, or else the body's selected text.
+    /// [`Self::show`] puts the body's text on the clipboard once the body's worker has it.
     pub(crate) fn copy(&self, ctx: &Context) {
         match self.selection.text() {
             Some(text) => ctx.copy_text(text),
@@ -300,9 +303,9 @@ impl Viewer {
         }
     }
 
-    /// Shows the `to`th file, sliding in from where it waited: an image beside the last one, as
-    /// wide as it would show at .85; anything else from the page's left edge, where it had no
-    /// place. The counter shows again.
+    /// Shows the `to`th file, sliding in from where it waited. An image waited beside the last
+    /// one, reckoned as wide as it would show at .85. Anything else had no place, so it comes from
+    /// the page's left edge. The counter shows again.
     fn move_to(&mut self, to: usize, page: Rect, now: f64) {
         let vw = page.width();
         let from = match &self.items[to] {
@@ -324,8 +327,8 @@ impl Viewer {
         self.bodies.clear_selection();
     }
 
-    /// Takes in the files that arrived and hands the messages' bodies to the renderer; returns a
-    /// link a click in a body landed on.
+    /// Takes in the files that arrived and hands the messages' bodies to the renderer. Returns the
+    /// link a click in a body landed on, if any.
     fn poll(&mut self, ctx: &Context, loader: &Loader, account: &str) -> Option<Output> {
         while let Ok((at, loaded)) = self.loaded.1.try_recv() {
             self.items[at] = match loaded {
@@ -362,7 +365,7 @@ impl Viewer {
         let mut link = None;
         for event in self.bodies.poll(ctx) {
             match event {
-                // `#id` scrolls the card to it; anything else is the app's to open.
+                // `#id` scrolls the card to that anchor. The app opens any other link.
                 Event::Clicked {
                     id,
                     hit: Hit::Link { href },
@@ -385,9 +388,9 @@ impl Viewer {
         link
     }
 
-    /// Draws the viewer over `page` (the window under the tab bar; `window_height` is the whole
-    /// window's) at `now` (`zoned` in the account's time zone), and returns what a click asked
-    /// for.
+    /// Draws the viewer over `page` at `now`, and returns what a click asked for. `page` is the
+    /// window under the tab bar, `window_height` is the whole window's height, and `zoned` is
+    /// `now` in the account's time zone.
     #[expect(
         clippy::too_many_arguments,
         reason = "the viewer drawn over the app, from its state"
@@ -431,7 +434,7 @@ impl Viewer {
                     .card
                     .zip(ui.ctx().pointer_interact_pos())
                     .is_some_and(|(card, pos)| card.contains(pos));
-                // A click on the message card stays there: it doesn't close the viewer.
+                // A click on the message card stays there and doesn't close the viewer.
                 let clicked = header
                     .or(chevrons)
                     .map(Output::Action)
@@ -528,7 +531,7 @@ impl Viewer {
             }
             Item::Eml(_) => self.paint_card(ui, painter, page, window_height, left),
             other => {
-                // The alt text, centred; its text has no line breaks.
+                // The alt text, centred. It has no line breaks.
                 let text = match other {
                     Item::Offline => {
                         "This image is not available offline. Please check your connection and try again."
@@ -552,9 +555,10 @@ impl Viewer {
         }
     }
 
-    /// The message card at the item's top, its left edge `left`: the subject and header, then under
-    /// a rule the body and its files, which scroll under the rule once the card reaches 80% of the
-    /// window. Its text selects; returns a click on one of its files.
+    /// Paints the message card at the item's top, with its left edge at `left`. The card holds the
+    /// subject and header, then, under a rule, the body and its files, which scroll under the rule
+    /// once the card reaches 80% of the window. Its text selects. Returns a click on one of its
+    /// files.
     fn paint_card(
         &mut self,
         ui: &mut Ui,
@@ -598,8 +602,7 @@ impl Viewer {
                 subject.len() as f32 * SUBJECT.line_height + 16.0
             }
             + rows_height;
-        // The body as the thread renders one, on a white card whatever the theme (`Shadowbox`
-        // with `theme: Snow`).
+        // The body as the thread renders one, in Snow on a white card whatever the theme.
         let id = body_id(self.position);
         let look = Look {
             width: content,
@@ -618,14 +621,14 @@ impl Viewer {
         let height = (fixed + SCROLL_MARGIN + scrolled).min(0.8 * window_height);
         let card = Rect::from_min_size(pos2(x, top), vec2(width, height));
         self.card = Some(card);
-        // The body scrolls: what's under its border scrolls, the border doesn't.
+        // The body scrolls. What's under its border scrolls, but the border doesn't.
         let viewport = Rect::from_min_max(pos2(x, top + fixed + SCROLL_MARGIN), card.max);
         let most = (scrolled - viewport.height()).max(0.0);
         if ui.rect_contains_pointer(viewport) {
             self.scroll -= ui.input(|input| input.smooth_scroll_delta.y);
         }
         self.scroll = self.scroll.clamp(0.0, most);
-        // Over the card the pointer is a text cursor; links and files say otherwise.
+        // Over the card the pointer is a text cursor, unless a link or a file sets its own.
         if ui.rect_contains_pointer(card) {
             ctx.set_cursor_icon(egui::CursorIcon::Text);
         }
@@ -759,9 +762,10 @@ impl Viewer {
         clicked
     }
 
-    /// The pointer over the message's body, `body` on screen with its top left at `origin`:
-    /// the I-beam over text and the hand over links, a click's hit (a link opens), and selecting
-    /// with a press and drag or a double or triple click, as in the thread.
+    /// Handles the pointer over the message's body, which is `body` on screen with its top left at
+    /// `origin`. It shows the I-beam over text and the hand over links, passes on a click's hit (a
+    /// link opens), and selects with a press and drag or a double or triple click, as in the
+    /// thread.
     fn body_pointer(&mut self, ui: &Ui, id: &str, body: Rect, origin: Pos2) {
         let response = ui.interact(body, ui.id().with("preview-body"), Sense::click_and_drag());
         let local = |at: Pos2| (at - origin).to_pos2();
@@ -798,8 +802,8 @@ impl Viewer {
             }
         }
         let multi_click = self.clicks.is_some_and(|(.., count)| count > 1);
-        // From where the button went down; after a double or triple click, the drag extends that
-        // word or paragraph.
+        // A drag selects from where the button went down. After a double or triple click, the
+        // drag extends that word or paragraph instead.
         if response.drag_started() && !multi_click {
             self.selecting = false;
             if let Some(at) = ui
@@ -835,8 +839,8 @@ impl Viewer {
         let ctx = ui.ctx();
         let top = page.top() + HEADER_TOP;
         let left = page.left() + (page.width() - HEADER_WIDTH) / 2.0;
-        // `Download`: `margin-top: 4px; padding: 12px`, the 13px glyph 6px before the word; .7
-        // hovered (150ms).
+        // `Download`: `margin-top: 4px; padding: 12px`, with the 13px glyph 6px before the word,
+        // at .7 when hovered (150ms).
         let label_width = LABEL.width(ctx, "Download");
         let download = Rect::from_min_size(
             pos2(left, top + 4.0),
@@ -904,7 +908,7 @@ impl Viewer {
         let mut x = download.right() + (room - (24.0 + kind_width + name_width)) / 2.0 + 12.0;
         let text_top = top + 12.0 + 4.0 + NUDGE;
         if !kind.is_empty() {
-            // The type: black at .9 on a 19px white pill from 5px above it.
+            // The type, black at .9, on a 19px white pill that starts 5px above it.
             let pill = Rect::from_min_size(pos2(x, text_top - 5.0), vec2(kind_width - 6.0, 19.0));
             painter.rect_filled(
                 exo_ui::pixel_snap(pill),
@@ -928,9 +932,9 @@ impl Viewer {
         }
     }
 
-    /// The chevrons: 27×50 strokes centred in 7vw boxes 3vw in from each side,
-    /// `top: calc(40% + {top padding})`; shown only where there's somewhere to go (150ms), .7
-    /// hovered.
+    /// The chevrons, 27×50 strokes centred in 7vw boxes 3vw in from each side, at
+    /// `top: calc(40% + {top padding})`. Each shows only when there's somewhere to go (150ms), and
+    /// is .7 when hovered.
     fn paint_chevrons(&self, ui: &Ui, painter: &Painter, page: Rect) -> Option<Action> {
         let ctx = ui.ctx();
         let vw = page.width();
@@ -1052,7 +1056,8 @@ fn body_id(at: usize) -> String {
     format!("exo-preview-eml-{at}")
 }
 
-/// `eml` as a message the body pipeline renders: its HTML and nothing else it reads.
+/// `eml` as a message the body pipeline renders. It carries the HTML, and none of the other fields
+/// the pipeline reads.
 fn message(id: &str, eml: &Eml) -> MessageDetail {
     MessageDetail {
         id: id.to_owned(),
@@ -1083,7 +1088,7 @@ fn message(id: &str, eml: &Eml) -> MessageDetail {
     }
 }
 
-/// The header's rows (those with something in them), then the date's (an empty label).
+/// The header's rows that have something in them, then the date's row (with an empty label).
 fn header_rows(eml: &Eml) -> Vec<(&'static str, Vec<&Contact>)> {
     let mut rows: Vec<(&'static str, Vec<&Contact>)> = Vec::new();
     if let Some(from) = &eml.from {
@@ -1100,9 +1105,9 @@ fn header_rows(eml: &Eml) -> Vec<(&'static str, Vec<&Contact>)> {
     rows
 }
 
-/// A header row's value broken into lines `width` wide: each contact's name at .8 and address
-/// at .5, after the label's 60px on the first line and from the row's left edge on the next; or the
-/// date at .5 (in `now`'s zone) for the date's row (no label).
+/// A header row's value broken into lines `width` wide. The value is each contact's name at .8 and
+/// address at .5, after the label's 60px on the first line and from the row's left edge on the
+/// next. The date's row (no label) has the date at .5, in `now`'s zone.
 fn header_value(
     ctx: &Context,
     width: f32,
@@ -1144,8 +1149,8 @@ fn header_value(
     lines(ctx, &job, width, indent)
 }
 
-/// `job` broken into lines `width` wide, the first `indent` in, each a job of its own: egui's
-/// own wrapping puts continuation rows off the sub-pixel position Chromium gives them.
+/// `job` broken into lines `width` wide, the first `indent` in, each a job of its own. egui's own
+/// wrapping puts continuation rows off the sub-pixel position Chromium gives them.
 fn lines(ctx: &Context, job: &LayoutJob, width: f32, indent: f32) -> Vec<LayoutJob> {
     let mut wrapped = job.clone();
     if let Some(first) = wrapped.sections.first_mut() {
@@ -1183,7 +1188,7 @@ fn lines(ctx: &Context, job: &LayoutJob, width: f32, indent: f32) -> Vec<LayoutJ
     lines
 }
 
-/// How the message card's files sit `width` wide: columns, and the grid's height.
+/// How the message card's files sit `width` wide: the number of columns, and the grid's height.
 fn files_grid(count: usize, width: f32) -> Option<(usize, f32)> {
     if count == 0 {
         return None;
@@ -1228,7 +1233,7 @@ fn fit(size: Vec2, page: Rect) -> Vec2 {
         .min(1.0)
 }
 
-/// How wide an image waiting beside the one shown is reckoned.
+/// The width reckoned for an image waiting beside the one shown.
 fn scaled_width(size: Vec2, page: Rect) -> f32 {
     let (most_wide, most_tall) = (0.8 * page.width(), 0.8 * page.height());
     if size.x < most_wide && size.y < most_tall {

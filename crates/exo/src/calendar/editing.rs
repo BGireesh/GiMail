@@ -1,7 +1,7 @@
 //! Making and changing events: the form opening and closing, Save with its checks and dialogs,
 //! Delete, the saves a drag in the grid makes, and the toasts with their Undo.
 //!
-//! A change goes to the calendar task, which queues it in the store, held for Undo, until
+//! A change goes to the calendar task, which holds it for Undo and queues it in the store until
 //! Calendar has it ([`exo_store::CalendarChange`]).
 
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -34,11 +34,11 @@ const ONE_ON_ONE: [&str; 6] = [
 /// What Undo takes back.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Undone {
-    /// A new event (`Scheduling undone.`): its form opens again.
+    /// A new event (`Scheduling undone.`), whose form opens again.
     Create,
     /// An edit (`Event edit undone.`).
     Edit,
-    /// A deletion (`Event deletion undone.`): the calendar goes to the event's day.
+    /// A deletion (`Event deletion undone.`), after which the calendar goes to the event's day.
     Delete(jiff::civil::Date),
 }
 
@@ -62,7 +62,7 @@ impl Scope {
 
 /// An alert or dialog over the page, and what its actions lead to.
 pub(super) enum Prompt {
-    /// A confirmation or a message: the first action does `then`, any other closes it.
+    /// A confirmation or a message. The first action does `then`, and any other closes it.
     Confirm {
         title: &'static str,
         text: &'static str,
@@ -70,7 +70,7 @@ pub(super) enum Prompt {
         selected: usize,
         then: Then,
     },
-    /// Saving an edit: which events, then whether to tell the guests.
+    /// Saving an edit, which asks which events and then whether to tell the guests.
     Edit {
         notify_step: bool,
         scopes: Vec<Scope>,
@@ -78,7 +78,7 @@ pub(super) enum Prompt {
         ask_notify: bool,
         form: Box<EventForm>,
     },
-    /// Deleting: which events, then whether to tell the guests.
+    /// Deleting, which asks which events and then whether to tell the guests.
     Delete {
         notify_step: bool,
         scopes: Vec<Scope>,
@@ -86,8 +86,8 @@ pub(super) enum Prompt {
         ask_notify: bool,
         target: Box<Target>,
     },
-    /// The invite card's `RSVP` alert: signed-out calendar account `email` signs in, with the
-    /// provider chosen, to give `response` to `invite`.
+    /// The invite card's `RSVP` alert, where signed-out calendar account `email` signs in with the
+    /// provider chosen to give `response` to `invite`.
     SignIn {
         email: String,
         invite: Box<crate::thread::invite::Invite>,
@@ -118,9 +118,9 @@ impl Prompt {
     }
 }
 
-/// The invite card's `RSVP` alert over `page`: the ask, and under it (8px apart,
-/// `display: flex; gap: 8px`) the provider dropdown, nudged down 3px as a dialog's dropdown button
-/// is (`top: 3px`), its text black at `.75` and its caret black at `.5` in both themes. The ask
+/// The invite card's `RSVP` alert over `page`: the ask, and the provider dropdown 8px under it
+/// (`display: flex; gap: 8px`). The dropdown is nudged down 3px as a dialog's dropdown button is
+/// (`top: 3px`), with its text black at `.75` and its caret black at `.5` in both themes. The ask
 /// wraps plainly, not as the alert's own text does (the flex item's anonymous block). Returns the
 /// action clicked.
 fn show_sign_in(
@@ -194,8 +194,8 @@ pub(super) struct Target {
 /// Counts ids, in case the system's randomness is out.
 static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
-/// An id for a new event, chosen here (Calendar takes a client's own): 32 hex digits, which
-/// are base32hex.
+/// An id for a new event, chosen here because Calendar takes a client's own. It's 32 hex digits,
+/// which are base32hex.
 fn new_id() -> String {
     let mut bytes = [0u8; 16];
     if getrandom::fill(&mut bytes).is_err() {
@@ -249,7 +249,8 @@ impl crate::Mail {
                 },
             )
             .collect();
-        // The mail account's first, then by account; the primary first.
+        // The mail account's calendars first, then the others by account, each account's
+        // primary first.
         let key = |account: &str| (account != email, account.to_lowercase());
         options.sort_by(|(a_primary, a), (b_primary, b)| {
             key(&a.account)
@@ -299,9 +300,9 @@ impl crate::Mail {
         }
     }
 
-    /// A click on a date in a message: the right pane's new event titled `title` (the
-    /// conversation's subject) with `guests` (its people: name, address), over the day `date`
-    /// (the one its hover showed). When stays empty.
+    /// A click on a date in a message opens the right pane's new event titled `title` (the
+    /// conversation's subject) with `guests` (its people, as name and address), over the day
+    /// `date` (the one the date's hover showed). When stays empty.
     pub(crate) fn calendar_create_for_thread(
         &mut self,
         title: String,
@@ -367,7 +368,7 @@ impl crate::Mail {
         self.calendar.form = Some(form);
     }
 
-    /// `b` (and `shift+b`): in the week view, a half hour from the next half hour on its day;
+    /// `b` (and `shift+b`): in the week view, a half hour from the next half hour on its day, and
     /// elsewhere the right pane's empty form.
     pub(super) fn calendar_new_event(&mut self, now: &Zoned) {
         let Some(active) = self.calendar_week() else {
@@ -402,7 +403,7 @@ impl crate::Mail {
         self.calendar_create(when, false, true);
     }
 
-    /// Event `key`'s form, `field` focused.
+    /// Event `key`'s form, with `field` focused.
     pub(super) fn calendar_edit(&mut self, key: &str, field: Field, now: &Zoned) {
         let Some((event, source, _)) = self.calendar_detailed(key, now) else {
             return;
@@ -420,8 +421,8 @@ impl crate::Mail {
         self.calendar_open_form(form);
     }
 
-    /// A click or drag on empty grid: a new event there, or with the form open, the draft moved
-    /// there, keeping its length for a click.
+    /// A click or drag on empty grid makes a new event there. With the form open, it moves the
+    /// draft there instead, keeping the draft's length for a click.
     pub(super) fn calendar_slot(
         &mut self,
         start: Zoned,
@@ -449,8 +450,8 @@ impl crate::Mail {
         self.calendar_create(Some((start, end)), all_day, week);
     }
 
-    /// An event moved or resized in the grid: the draft's new time, or an edit saved at once
-    /// (through the edit's dialogs, without the check for a time in the past).
+    /// An event moved or resized in the grid becomes the draft's new time, or an edit saved at
+    /// once (through the edit's dialogs, without the check for a time in the past).
     pub(super) fn calendar_moved(&mut self, key: &str, start: Zoned, end: Zoned, now: &Zoned) {
         if key == DRAFT {
             if let Some(form) = &mut self.calendar.form {
@@ -509,7 +510,8 @@ impl crate::Mail {
                 "Please pick a date and time for your calendar event.",
             );
         };
-        // In the past: a timed event starting, or an all-day one ending, before now.
+        // In the past means a timed event starting before now, or an all-day one ending before
+        // now.
         let past = if form.values.all_day {
             end < *now
         } else {
@@ -583,17 +585,17 @@ impl crate::Mail {
             );
     }
 
-    /// Whether Calendar hasn't got `event` of `calendar` yet: it's a new event still queued,
-    /// which a deletion takes back from the queue, with no Undo.
+    /// Whether Calendar hasn't got `event` of `calendar` yet, because it's a new event still
+    /// queued. A deletion takes such an event back from the queue, with no Undo.
     fn calendar_unsynced(&self, calendar: &str, event: &ApiEvent) -> bool {
         self.account.calendar().data().events.iter().any(|stored| {
             stored.unsynced && stored.calendar_id == calendar && stored.event.id == event.id
         })
     }
 
-    /// Asks, for a recurring event, which events (only this one, unless its start stays on its
-    /// day: all of them too); for a Google event with guests, whether to tell them. Then the
-    /// edit.
+    /// For a recurring event, asks which events: only this one, or all of them too while its
+    /// start stays on its day. For a Google event with guests, asks whether to tell them. Then
+    /// makes the edit.
     fn calendar_edit_dialogs(&mut self, form: EventForm) {
         let Some(edited) = &form.edited else { return };
         let dirty = form.dirty();
@@ -625,8 +627,8 @@ impl crate::Mail {
                         attendee.email.as_deref().unwrap_or_default(),
                     )
                 }));
-        // A new series Calendar hasn't got yet has no instance of its own to change: it changes
-        // as a whole.
+        // A new series that Calendar hasn't got yet has no instance of its own to change, so it
+        // changes as a whole.
         let unsynced = recurring && self.calendar_unsynced(&form.values.calendar, &edited.event);
         let scope_step = recurring && allow_all;
         if !scope_step && !ask_notify {
@@ -717,8 +719,8 @@ impl crate::Mail {
     }
 
     /// `This and all following events`: series `series` ends before its edited `instance`, and
-    /// a new series with `patch` takes over from it. Meanwhile the instances from it on show the
-    /// change, moved as the instance moved. Returns the change's token.
+    /// a new series with `patch` takes over from `instance`. Meanwhile the instances from
+    /// `instance` on show the change, moved as `instance` moved. Returns the change's token.
     fn calendar_split(
         &mut self,
         form: &EventForm,
@@ -808,8 +810,8 @@ impl crate::Mail {
             );
     }
 
-    /// The details menu's `Delete`: for a recurring event, which events; for my event with
-    /// guests, whether to tell them; then the deletion, with Undo.
+    /// The details menu's `Delete`. It asks which events for a recurring event, and whether to
+    /// tell the guests for my event with guests, then makes the deletion, with Undo.
     pub(super) fn calendar_delete(&mut self, key: &str, now: &Zoned) {
         let Some((event, source, _)) = self.calendar_detailed(key, now) else {
             return;
@@ -864,8 +866,8 @@ impl crate::Mail {
         }
     }
 
-    /// Holds the deletion and says so, with Undo; a new event Calendar hasn't got yet is simply
-    /// taken back, with none.
+    /// Holds the deletion and says so, with Undo. A new event that Calendar hasn't got yet is
+    /// simply taken back, with no Undo.
     fn calendar_apply_delete(&mut self, target: &Target, scope: Scope, notify: bool) {
         let instance = target.event.id.clone().unwrap_or_default();
         let series = target.event.recurring_event_id.clone();
@@ -919,8 +921,8 @@ impl crate::Mail {
             );
     }
 
-    /// Undo on a toast: takes the held change back while it's held. Past the hold (a hovered
-    /// toast outlives it) the change went, so nothing is undone and the toast goes.
+    /// Undo on a toast takes the held change back while it's held. Past the hold (a hovered
+    /// toast outlives it), the change has gone, so nothing is undone and the toast goes.
     pub(super) fn calendar_undo(&mut self, token: u64, undone: Undone) {
         if !self.account.calendar().undo(token) {
             self.commands.hide_toast();
@@ -947,7 +949,7 @@ impl crate::Mail {
         }
     }
 
-    /// A queued change Calendar refused: the toast or alert that says so.
+    /// A queued change that Calendar refused, and the toast or alert that says so.
     pub(super) fn calendar_failed(&mut self, failure: super::sync::Failure) {
         use super::sync::Failure;
         match failure {
@@ -988,8 +990,8 @@ impl crate::Mail {
                 calendar,
                 event,
             } => {
-                // The form opens again with what was saved, and Try Again goes back to it. One
-                // queued before Exo last quit has its values read back from the event.
+                // The form opens again with what was saved, and Try Again goes back to it. A
+                // change queued before Exo last quit has its values read back from the event.
                 let values = self
                     .calendar
                     .created
@@ -1194,7 +1196,7 @@ impl crate::Mail {
                 }
                 _ => {}
             },
-            // `Sign in` does nothing until a provider is chosen; the alert stays up while the
+            // `Sign in` does nothing until a provider is chosen. The alert stays up while the
             // browser signs in. `Cancel` (and Escape, once the list is closed) closes it.
             Prompt::SignIn {
                 email,
@@ -1220,7 +1222,7 @@ impl crate::Mail {
         }
     }
 
-    /// Closes the invite card's `RSVP` alert, if it's up: its sign-in came back.
+    /// Closes the invite card's `RSVP` alert, if it's up, once its sign-in has come back.
     pub(super) fn calendar_close_sign_in_prompt(&mut self) {
         if matches!(self.calendar.prompt, Some(Prompt::SignIn { .. })) {
             self.calendar.prompt = None;
@@ -1381,7 +1383,8 @@ impl crate::Mail {
                     settings.meeting_links.default_meeting_link = link.clone()
                 }),
                 OptionsAction::Close => self.calendar.options_open = false,
-                // Adding an account: the dialog goes, the week view opens, and Google's consent.
+                // Adding an account closes the dialog, opens the week view, and starts Google's
+                // consent.
                 OptionsAction::SignIn => {
                     self.calendar.options_open = false;
                     if self.calendar.week.is_none() {
@@ -1457,8 +1460,8 @@ impl crate::Mail {
             .fixed_pos(popup.min)
             .constrain(false)
             .show(ui.ctx(), |area| {
-                // The area covers the card, so the pointer over it is over the area (`layer_id_at`),
-                // which its dropdowns ask to stay open on a click inside.
+                // The area covers the card, so the pointer over the card is over the area
+                // (`layer_id_at`). The card's dropdowns ask that to stay open on a click inside.
                 area.expand_to_include_rect(popup);
                 let mut card = area.new_child(egui::UiBuilder::new().max_rect(popup));
                 let snapped = exo_ui::pixel_snap(popup);
@@ -1487,7 +1490,7 @@ impl crate::Mail {
     }
 
     /// The right pane's new-event form: the form over a day of the calendar showing the draft,
-    /// Save and Cancel at the bottom. Returns whether it drew.
+    /// with Save and Cancel at the bottom. Returns whether it drew.
     pub(super) fn calendar_show_pane_form(&mut self, ui: &mut Ui, pane: Rect, rem: f32) -> bool {
         if !self.calendar_pane_form() {
             return false;
@@ -1542,8 +1545,8 @@ impl crate::Mail {
             pos2(pane.left(), pane.bottom() - form::PANE_FOOTER_HEIGHT),
             pane.max,
         );
-        // A press in the mail gives it the keyboard; one in the pane takes it back. What's over
-        // the page (the palette, a toast) doesn't count.
+        // A press in the mail gives the mail the keyboard, and one in the pane takes it back.
+        // What's over the page (the palette, a toast) doesn't count.
         let pressed = ui.input(|input| {
             input
                 .pointer
@@ -1561,8 +1564,9 @@ impl crate::Mail {
         form.show(ui, form_rect, &shown, true);
         let clicked = form.footer(ui, footer, true);
         let hint = form::paint_away_hint(ui, pos2(form_rect.left(), form_rect.bottom()), form.away);
-        // The day under it, from the form's bottom (the hint's) to the footer's top, 40px lower
-        // while When's list covers it (`margin-top: 64px`, over `transition: margin-top .1s`).
+        // The day under the form, from the form's bottom (the hint's) to the footer's top. It's
+        // 40px lower while When's list covers it (`margin-top: 64px`, over
+        // `transition: margin-top .1s`).
         let covered = form.when_covers(form_rect.bottom() + hint + super::day::COMPACT_TOP);
         let spacing = 40.0
             * exo_ui::motion::transition(
@@ -1633,7 +1637,7 @@ impl crate::Mail {
         true
     }
 
-    /// A click on a guest's tooltip: a new message to them, or their address copied.
+    /// A click on a guest's tooltip, which starts a new message to them or copies their address.
     fn calendar_chip_clicked(&mut self, ctx: &egui::Context) {
         match self
             .calendar
@@ -1704,7 +1708,7 @@ impl crate::Mail {
         })
     }
 
-    /// The people of the conversation open behind the form, once each and me left out, for
+    /// The people of the conversation open behind the form, each once and without me, for
     /// Who's `Everybody in this conversation` (senders, then Cc, then To; none while the week
     /// view is up).
     fn calendar_conversation(&self) -> Vec<exo_store::Address> {
@@ -1726,7 +1730,7 @@ impl crate::Mail {
             if contact.is_me || contact.email.eq_ignore_ascii_case(me) {
                 continue;
             }
-            // A later mention replaces the earlier's name, in its place.
+            // A later mention replaces the earlier one's name but keeps its place.
             match people
                 .iter_mut()
                 .find(|person| person.email == contact.email)
@@ -1741,8 +1745,8 @@ impl crate::Mail {
         people
     }
 
-    /// Where's places: asked for what's typed while it has the keyboard, forgotten once it
-    /// hasn't.
+    /// The places for Where, asked for what's typed while Where has the keyboard and forgotten
+    /// once it hasn't.
     fn calendar_places(&mut self, ctx: &egui::Context) -> Vec<super::places::Place> {
         match self
             .calendar
@@ -1761,7 +1765,7 @@ impl crate::Mail {
         self.calendar.places.found()
     }
 
-    /// The address book, indexed for Who; read the first time it's wanted.
+    /// The address book, indexed for Who and read the first time it's wanted.
     pub(super) fn calendar_book(
         &mut self,
     ) -> Option<std::sync::Arc<crate::compose::contacts::Index>> {
@@ -1826,7 +1830,7 @@ impl crate::Mail {
     }
 }
 
-/// The form's values for `event`: its notes as HTML for About's editor, a plain-text
+/// The form's values for `event`, with its notes as HTML for About's editor and a plain-text
 /// description's lines kept as lines.
 fn values_of(event: &Event, source: &ApiEvent, me: &str) -> Values {
     let description = source.description.clone().unwrap_or_default();
@@ -1907,8 +1911,8 @@ fn date_time(at: &Zoned, all_day: bool) -> EventDateTime {
     }
 }
 
-/// The guests as Calendar's attendees: me among them (the organizer's calendar), accepted, when
-/// there's anyone else.
+/// The guests as Calendar's attendees. When there's anyone else, I'm among them (the organizer's
+/// calendar), accepted.
 fn attendees(values: &Values, me: &str) -> Vec<EventAttendee> {
     let others: Vec<&Guest> = values
         .guests
@@ -1957,7 +1961,7 @@ fn new_event(values: &Values, start: &Zoned, end: &Zoned, me: &str) -> ApiEvent 
         is_self: Some(true),
         ..EventPerson::default()
     };
-    // A series starts on its rule's first day, its end moved as many days.
+    // A series starts on its rule's first day, with its end moved by as many days.
     let (start, end) = match values.repeat.as_ref().and_then(|rule| rule.first(start)) {
         Some(first) => {
             let days = start

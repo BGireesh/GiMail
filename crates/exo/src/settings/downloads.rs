@@ -1,7 +1,8 @@
-//! The Downloads dialog: where attachments download to, app-wide ([`crate::downloads`]). A line of
-//! explanation, then `Download attachments to:` and a dropdown of `Downloads`, `Desktop`, the
-//! folder chosen before (by its path) and `Other…`, which asks for a folder. A choice applies at
-//! once; there's no Save. The dropdown has the keyboard from the start.
+//! The Downloads dialog, which picks where attachments download to, app-wide
+//! ([`crate::downloads`]). It has a line of explanation, then `Download attachments to:` and a
+//! dropdown of `Downloads`, `Desktop`, the folder chosen before (by its path) and `Other…`, which
+//! asks for a folder. A choice applies at once, and there's no Save. The dropdown has the keyboard
+//! from the start.
 
 use std::path::{Path, PathBuf};
 
@@ -11,8 +12,8 @@ use exo_ui::{Dialog, DialogDropdown, DialogResponse, Family, Font, Menu, TextSty
 /// The subheader: 12px/20px, `padding-top: 24px`, 3px down, `margin-bottom: 16px`.
 const LINE: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 12.0, 20.0);
 const SUBHEADER_TOP: f32 = 27.0;
-/// The dropdown's row (`padding: 4px 0`) 60px down, its label 3px down its line, the
-/// dropdown's value 1px past the label's `margin-right: 4px` and 2px lower.
+/// The dropdown's row (`padding: 4px 0`) sits 60px down, with its label 3px down its line. The
+/// dropdown's value is 1px past the label's `margin-right: 4px` and 2px lower.
 const LABEL_TOP: f32 = 67.0;
 const VALUE_LEFT: f32 = 5.0;
 const VALUE_TOP: f32 = 69.0;
@@ -34,7 +35,7 @@ pub enum Choice {
     Desktop,
     /// The folder chosen before, by its path (`current`).
     Current(PathBuf),
-    /// `Other…`: a folder chooser (`pick`).
+    /// `Other…`, which opens a folder chooser (`pick`).
     Other,
 }
 
@@ -49,8 +50,8 @@ impl Choice {
     }
 }
 
-/// The rows for the folder downloads go to (`chosen`, `None` for the Downloads folder), the one
-/// it is first and the rest by name, as dialog dropdowns sort them.
+/// The rows for the folder that downloads go to (`chosen`, `None` for the Downloads folder). That
+/// folder's row comes first and the rest by name, as dialog dropdowns sort them.
 pub fn choices(
     chosen: Option<&Path>,
     downloads: Option<&Path>,
@@ -89,7 +90,7 @@ pub enum Event {
     MenuClose,
     /// The pointer on a row of the list.
     Highlight(usize),
-    /// Enter or Tab on the open list: its highlighted row.
+    /// Enter or Tab on the open list, which picks its highlighted row.
     MenuPick,
     /// A row, clicked or picked.
     Choose(Choice),
@@ -102,12 +103,12 @@ pub struct State {
 }
 
 impl State {
-    /// Whether the list is open: Escape closes it, not the dialog.
+    /// Whether the list is open, so that Escape closes it rather than the dialog.
     pub fn menu_open(&self) -> bool {
         self.menu.is_some()
     }
 
-    /// Applies `event` to the list, the dropdown's rows being `choices`; returns the row chosen.
+    /// Applies `event` to the list, whose rows are `choices`, and returns the row chosen.
     pub fn handle(&mut self, event: Event, choices: &[Choice]) -> Option<Choice> {
         match event {
             Event::ToggleMenu => self.menu = if self.menu.is_some() { None } else { Some(0) },
@@ -128,8 +129,8 @@ impl State {
     }
 }
 
-/// Draws the dialog over `area` with `choices` (the first the folder downloads go to); returns
-/// what was done.
+/// Draws the dialog over `area` with `choices` (the first being the folder downloads go to), and
+/// returns what was done.
 pub fn dialog(
     ctx: &Context,
     area: Rect,
@@ -206,7 +207,7 @@ fn draw(ui: &mut Ui, body: Rect, state: &State, choices: &[Choice]) -> Option<Ev
     event
 }
 
-/// `Could not change download folder` over the dialog in `area`; returns whether it was
+/// `Could not change download folder` over the dialog in `area`. Returns whether it was
 /// dismissed (`OK`, or a click beside it).
 pub fn alert(ctx: &Context, area: Rect) -> bool {
     let alert = exo_ui::Alert {

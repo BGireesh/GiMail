@@ -294,9 +294,9 @@ fn holiday_events(now: &Zoned) -> Vec<Event> {
     .collect()
 }
 
-/// The calendars of `email`, another Google account signed in on the mock (a `login_hint` that
-/// isn't the mailbox's owner): its primary calendar with a few events of its own this week, and
-/// the holidays calendar the mailbox's owner has too.
+/// The calendars of `email`, another Google account signed in on the mock through a `login_hint`
+/// that isn't the mailbox's owner. They're its primary calendar, with a few events of its own
+/// this week, and the holidays calendar the mailbox's owner has too.
 pub fn personal(email: &str, now: &Zoned) -> Calendars {
     let tz_name = zone_name(now);
     let entries = vec![

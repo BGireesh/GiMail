@@ -1,15 +1,17 @@
-//! The footer's sync line, first match wins: what's on its way to Gmail since it was last offline
-//! or since launch (`Sending: 2 of 3`, `Uploading: 1 of 4`), what's waiting for the network
-//! (`1 email to send`, `3 changes to upload`), a bulk action's progress, Gmail's history being
-//! applied (`Updating: 12 of 40`), `Connecting…` before the session's first round of it, or
-//! nothing. The store's count of what's unsent keeps the counts it counts from.
+//! The footer's sync line, where the first match wins: what's on its way to Gmail since it was
+//! last offline or since launch (`Sending: 2 of 3`, `Uploading: 1 of 4`), what's waiting for the
+//! network (`1 email to send`, `3 changes to upload`), a bulk action's progress, Gmail's history
+//! being applied (`Updating: 12 of 40`), `Connecting…` before the session's first round of it, or
+//! nothing. The line keeps the store's count of what's unsent as the counts its progress starts
+//! from.
 
 use egui::{Rect, Ui};
 use exo_store::{SyncProgress, Unsent};
 
-/// How long a round of history runs before it shows, but for the session's first.
+/// How long a round of history runs before it shows, except for the session's first.
 const SHOW_SYNC_DELAY: f64 = 1.0;
-/// The line fades in and out (opacity, 200ms ease-in-out); a change of what it says doesn't.
+/// The line fades in and out (opacity, 200ms ease-in-out). A change of what it says doesn't
+/// fade.
 const FADE: f32 = 0.2;
 /// The line before the session's first round of history.
 const CONNECTING: &str = "Connecting…";
@@ -17,9 +19,9 @@ const CONNECTING: &str = "Connecting…";
 /// What the line remembers between frames.
 #[derive(Default)]
 pub(crate) struct FooterSync {
-    /// What it counts progress against: what was waiting while offline, or at launch.
+    /// What it counts progress against, which is what was waiting while offline or at launch.
     from: Option<Unsent>,
-    /// The counts were read once: what's waiting at launch is counted from.
+    /// Whether the counts have been read once, since what's waiting at launch is counted from.
     counted: bool,
     /// When the round of history running started.
     started: Option<f64>,
@@ -28,8 +30,9 @@ pub(crate) struct FooterSync {
 }
 
 impl FooterSync {
-    /// The line for this frame, at `now` seconds: `uploading` is the snapshot's count of what's
-    /// on its way to Gmail (`None` before it's read), `bulk` a running bulk action's status.
+    /// The line for this frame, at `now` seconds. `uploading` is the snapshot's count of what's
+    /// on its way to Gmail (`None` before it's read), and `bulk` is a running bulk action's
+    /// status.
     pub(crate) fn line(
         &mut self,
         uploading: Option<Unsent>,
@@ -67,7 +70,7 @@ impl FooterSync {
         (!progress.caught_up && online).then(|| CONNECTING.to_owned())
     }
 
-    /// What's unsent: progress against what was waiting while online, the counts while
+    /// What's unsent, as progress against what was waiting while online, or as the counts while
     /// offline.
     fn pending(&mut self, pending: Unsent, online: bool) -> Option<String> {
         let launch = !std::mem::replace(&mut self.counted, true);

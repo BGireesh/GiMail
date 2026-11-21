@@ -172,7 +172,7 @@ async fn offline_changes_wait_for_the_network() {
     .await
     .unwrap();
 
-    // Reads and mutations work; sending waits.
+    // Reads and mutations work, but sending waits.
     assert!(matches!(offline.sync().await, Err(Error::Offline(_))));
     offline
         .apply(std::slice::from_ref(&thread.id), Mutation::Star)
@@ -287,7 +287,8 @@ async fn undoing_a_mutation_given_up_on_sends_nothing() {
         .await
         .unwrap();
     assert_eq!(harness.store.flush().await.unwrap().failed.len(), 1);
-    // Its toast's Undo, after the failure: Gmail never had the change to take back.
+    // The Undo in its toast, after the failure, has nothing to take back, because Gmail never had
+    // the change.
     harness.store.undo(undo).await.unwrap();
     assert_eq!(
         harness.store.pending().await.unwrap(),
@@ -318,7 +319,7 @@ async fn reading_again_rewrites_the_queued_read() {
         .await
         .unwrap();
 
-    // New mail makes the thread unread again; reading it again replaces the queued read.
+    // New mail makes the thread unread again, and reading it again replaces the queued read.
     harness
         .deliver(json!({ "from": "Ana <ana@example.com>", "threadId": thread.id.as_str(), "text": "More" }))
         .await;
@@ -379,7 +380,7 @@ async fn a_rejected_token_is_refreshed_once() {
     store.sync().await.unwrap();
     assert_eq!(tokens.0.load(Ordering::Relaxed), 1);
 
-    // Rejected again after the refresh: the store gives up (the account must sign in again).
+    // Rejected again after the refresh, the store gives up (the account must sign in again).
     harness
         .fault(json!({ "method": "GET", "path": "/gmail/v1/users/me/history", "status": 401, "times": 2 }))
         .await;
@@ -477,7 +478,7 @@ async fn backoff_starts_over_once_a_step_goes_through() {
     .await
     .unwrap();
     let thread = inbox_thread(&harness).await;
-    // Trash is a batchModify, then a threads.modify: the first fails twice, the second once.
+    // Trash is a batchModify, then a threads.modify. The first fails twice, and the second once.
     harness
         .fault(json!({ "method": "POST", "path": "/gmail/v1/users/me/messages/batchModify", "status": 503, "times": 2 }))
         .await;
@@ -494,7 +495,7 @@ async fn backoff_starts_over_once_a_step_goes_through() {
         tokio::time::sleep(Duration::try_from(wait).unwrap_or_default()).await;
     }
 
-    // The batchModify goes through; the threads.modify failing after it is a first failure.
+    // The batchModify goes through, so the threads.modify failing after it is a first failure.
     let started = jiff::Timestamp::now();
     let retry_at = store.flush().await.unwrap().retry_at.unwrap();
     let backoff = Duration::try_from(retry_at.duration_since(started)).unwrap();

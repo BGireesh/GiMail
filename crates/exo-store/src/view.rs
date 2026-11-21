@@ -1,4 +1,4 @@
-//! A thread's effective state, Gmail's copy with the outbox's pending steps applied, and
+//! A thread's effective state (Gmail's copy with the outbox's pending steps applied) and
 //! everything derived from it: list membership and per-list sort, importance, mute,
 //! participants.
 
@@ -89,34 +89,35 @@ impl Router {
 
 pub(crate) struct ThreadView {
     pub id: String,
-    /// The thread's messages, oldest first: every one but drafts Exo didn't write. Routing,
-    /// rows and actions all work on these.
+    /// The thread's messages, oldest first, leaving out drafts Exo didn't write. Routing, rows
+    /// and actions all work on these.
     pub messages: Vec<ViewMessage>,
     /// Drafts written outside Exo (Gmail web, …), oldest first. They only put the thread in
     /// Drafts and only show there.
     pub foreign_drafts: Vec<ViewMessage>,
-    /// A send of the thread's is held or waiting to go (its message is left out of `messages`,
-    /// unless it's scheduled).
+    /// Whether a send from this thread is held or waiting to go. Its message is left out of
+    /// `messages` unless it's scheduled.
     pub sending: bool,
     /// That send's text, for its row in Scheduled while it waits for the network.
     pub sending_snippet: Option<String>,
-    /// The thread has a scheduled send: the earliest one's time, and whether Gmail has the
-    /// latest version of every one.
+    /// When the thread has scheduled sends, the earliest one's time and whether Gmail has the
+    /// latest version of each of them.
     pub scheduled: Option<(Timestamp, bool)>,
     /// Its reminder, if one was ever set and not removed.
     pub reminder: Option<ReminderRow>,
 }
 
-/// How long a failed draft keeps its thread in the inbox, by the draft's date: three weeks.
+/// How long a failed draft keeps its thread in the inbox, counted from the draft's date (three
+/// weeks).
 const RECENT_FAILURE_MS: i64 = 21 * 24 * 60 * 60 * 1000;
 
 pub(crate) struct ViewMessage {
     pub row: MessageRow,
     /// Labels after pending steps.
     pub labels: BTreeSet<String>,
-    /// A failed draft's: why and when its send failed.
+    /// For a failed draft, why and when its send failed.
     pub failed: Option<(SendFailure, Timestamp)>,
-    /// A scheduled send's: when it goes.
+    /// For a scheduled send, when it goes.
     pub scheduled: Option<Timestamp>,
 }
 
@@ -129,7 +130,7 @@ impl ViewMessage {
         self.has(DRAFT)
     }
 
-    /// A draft being written: not one whose send failed or is scheduled.
+    /// A draft being written, not one whose send failed or is scheduled.
     fn is_editable_draft(&self) -> bool {
         self.is_draft() && self.failed.is_none() && self.scheduled.is_none()
     }
@@ -163,8 +164,9 @@ impl ViewMessage {
         self.is_from_me(me) && self.recipients().any(|to| me.is_me(&to.email))
     }
 
-    /// Whether the message is important: Gmail's Primary category, or a note to self or Google
-    /// Docs invitation that isn't Social. Gmail's `IMPORTANT` label has no say.
+    /// Whether the message is important. It is when it's in Gmail's Primary category, or when
+    /// it's a note to self or a Google Docs invitation that isn't in Social. Gmail's `IMPORTANT`
+    /// label has no say.
     fn is_important(&self, me: &Identity) -> bool {
         self.has(CATEGORY_PERSONAL)
             || ((self.is_note_to_self(me) || self.row.sender_raw.contains("via Google"))
@@ -173,8 +175,8 @@ impl ViewMessage {
 }
 
 impl ThreadView {
-    /// Gmail's copy of a thread with `ops` (queue order) applied on top. `exo_drafts` are the
-    /// draft messages Exo wrote; any other draft is foreign.
+    /// Gmail's copy of a thread with `ops` applied on top, in queue order. `exo_drafts` are the
+    /// draft messages Exo wrote, and any other draft is foreign.
     pub fn new(
         id: String,
         mut rows: Vec<MessageRow>,
@@ -251,8 +253,8 @@ impl ThreadView {
         self.messages.iter().any(|message| message.has(label))
     }
 
-    /// Whether the thread is muted: some message carries the mute label, and no newer message
-    /// added one of your addresses as a new recipient.
+    /// Whether the thread is muted. It is when some message carries the mute label and no newer
+    /// message added one of your addresses as a new recipient.
     pub fn is_muted(&self, me: &Identity) -> bool {
         let Some(muted) = me.muted_label.as_deref() else {
             return false;
@@ -313,8 +315,9 @@ impl ThreadView {
         })
     }
 
-    /// The reply that cancelled an "if no reply" reminder: the latest message someone else sent
-    /// isn't one the reminder was set on, and the first of theirs that isn't is who replied.
+    /// The reply that cancelled an "if no reply" reminder. A reply cancels it when the latest
+    /// message from someone else isn't one the reminder was set on. The reply is then the first
+    /// message from someone else that the reminder wasn't set on.
     fn aborting_reply(&self, reminder: &ReminderRow, me: &Identity) -> Option<&ViewMessage> {
         if reminder.keep_on_reply {
             return None;
@@ -328,14 +331,14 @@ impl ThreadView {
         received.find(new)
     }
 
-    /// The reminder is set and due to bring the thread back.
+    /// Whether the reminder is set and due to bring the thread back.
     pub fn has_reminder(&self, me: &Identity) -> bool {
         matches!(self.reminder_status(me), Some(ReminderStatus::Set { .. }))
     }
 
-    /// The thread's lists without splits ([`Router::list_ids`] adds them), over `messages`.
-    /// Drafts written elsewhere only add Drafts: a thread that is nothing else is in no other
-    /// list.
+    /// The thread's lists from `messages`, without splits, which [`Router::list_ids`] adds.
+    /// Drafts written elsewhere only add Drafts, so a thread that has nothing else is in no
+    /// other list.
     pub fn list_ids(&self, me: &Identity) -> Vec<&str> {
         if self.messages.is_empty() {
             return if self.foreign_drafts.is_empty() {
@@ -363,11 +366,11 @@ impl ThreadView {
             }
         } else {
             // A thread that is only a draft (a new message being written) sits in Important, but
-            // not one only scheduled.
+            // a thread that is only a scheduled send doesn't.
             let draft_only = ids.contains(&DRAFT)
                 && (self.messages.iter().all(ViewMessage::is_draft) || ids == [DRAFT]);
             let sending = self.messages.first().is_some_and(|m| m.scheduled.is_some());
-            // So is one with a recent failed draft.
+            // So does a thread with a recent failed draft.
             if (draft_only && !sending) || self.messages.iter().any(ViewMessage::is_recent_failure)
             {
                 push(&mut ids, SH_IMPORTANT);
@@ -389,7 +392,7 @@ impl ThreadView {
                 Some(ReminderStatus::Returned { unread: true, .. }) => push(&mut ids, UNREAD),
                 _ => {}
             }
-            // Awaiting a reply: the last message, drafts aside, is the user's.
+            // Awaiting a reply means the last message, drafts aside, is the user's.
             if self
                 .messages
                 .iter()
@@ -409,16 +412,17 @@ impl ThreadView {
         ids
     }
 
-    /// Whether the thread is done: not routed to the inbox. A thread that is only a draft written
-    /// elsewhere isn't anywhere but Drafts, so it isn't done either.
+    /// Whether the thread is done, meaning it isn't routed to the inbox. A thread that is only a
+    /// draft written elsewhere isn't anywhere but Drafts, so it isn't done either.
     pub fn is_done(&self, me: &Identity) -> bool {
         !self.messages.is_empty() && !self.list_ids(me).contains(&INBOX)
     }
 
-    /// The thread's sort key in `list`: the latest message relevant to it, where your own sent
-    /// mail doesn't count unless it's to yourself. A reminder that brought the thread back counts
-    /// as a message then. A failed draft doubles it (and counts when it failed), which keeps the
-    /// thread on top. Reminders sort by when they're due, the soonest first.
+    /// The thread's sort key in `list`, which is the date of the latest message relevant to
+    /// `list`. Your own sent mail doesn't count unless it's to yourself. A reminder that brought
+    /// the thread back counts as a message dated when it fired. A failed draft counts as a
+    /// message dated when it failed, and doubles the key, which keeps the thread on top.
+    /// Reminders sort by when they're due, the soonest first.
     pub fn sort_for(&self, list: &str, me: &Identity) -> i64 {
         // Soonest first.
         if let (SH_SCHEDULED, Some((at, _))) = (list, self.scheduled) {
@@ -448,7 +452,7 @@ impl ThreadView {
 
     fn latest_for(&self, list: &str, me: &Identity) -> i64 {
         let latest = |messages: &[&ViewMessage]| messages.iter().map(|m| m.date()).max();
-        // A scheduled send is a read-only draft, which counts, dated when it was last written.
+        // A scheduled send is a read-only draft. It counts, dated when it was last written.
         let non_draft = || {
             self.messages
                 .iter()
@@ -487,9 +491,9 @@ impl ThreadView {
         .unwrap_or_default()
     }
 
-    /// Everyone but you who sent or received the messages a contact's Gmail search finds
-    /// (`-in:DRAFT`, outside Spam and Trash), lower-cased, and the latest such message's date:
-    /// what a contact's latest conversations are read from.
+    /// The lower-cased addresses of everyone but you who sent or received the messages that a
+    /// contact's Gmail search finds (`-in:DRAFT`, outside Spam and Trash), and the latest such
+    /// message's date. A contact's latest conversations are read from these.
     pub fn participants(&self, me: &Identity) -> (BTreeSet<String>, i64) {
         let found: Vec<&ViewMessage> = self
             .messages
@@ -506,7 +510,7 @@ impl ThreadView {
         (emails, date)
     }
 
-    /// The thread's subject: its first received message's, or its first draft's.
+    /// The thread's subject, from its first received message or else its first draft.
     pub fn subject(&self) -> String {
         subject(&self.messages.iter().collect::<Vec<_>>())
     }
@@ -522,10 +526,10 @@ impl ThreadView {
             .unwrap_or_default()
     }
 
-    /// Where Gmail lists the thread: its latest message, drafts written elsewhere included.
-    /// Backfill measures how far back a pass has listed with it: a thread that's only such a
-    /// draft has no [`gmail_sort`](Self::gmail_sort) (0), which ended a 31-day pass at the first
-    /// page that listed one.
+    /// Where Gmail lists the thread, which is by its latest message, drafts written elsewhere
+    /// included. Backfill uses it to measure how far back a pass has listed. A thread that's
+    /// only such a draft has a [`gmail_sort`](Self::gmail_sort) of 0, so measuring with that
+    /// ended a 31-day pass at the first page that listed one.
     pub fn listed_at(&self) -> i64 {
         self.all_messages()
             .map(ViewMessage::date)
@@ -552,7 +556,8 @@ impl ThreadView {
             .map(|m| m.row.id.clone())
     }
 
-    /// The message Mark Unread marks: the latest message; a draft-only thread's first.
+    /// The message Mark Unread marks, which is the latest message, or the first one in a
+    /// draft-only thread.
     pub fn message_to_mark_unread(&self) -> Option<String> {
         let message = if self.messages.iter().all(ViewMessage::is_draft) {
             self.messages.first()
@@ -562,8 +567,8 @@ impl ThreadView {
         message.map(|m| m.row.id.clone())
     }
 
-    /// The messages a row in `list` is built from: [`ThreadView::messages`], and in Drafts, the
-    /// drafts written elsewhere too, oldest first.
+    /// The messages a row in `list` is built from. That's [`ThreadView::messages`], plus, in
+    /// Drafts, the drafts written elsewhere, oldest first.
     fn shown(&self, list: &ListId) -> Vec<&ViewMessage> {
         let mut shown: Vec<&ViewMessage> = self.messages.iter().collect();
         if *list == ListId::Drafts && !self.foreign_drafts.is_empty() {
@@ -574,8 +579,8 @@ impl ThreadView {
     }
 
     /// The thread as a row of `list`, whose sort key in that list is `sort`.
-    /// `attachments` holds at least this thread's attachment rows. (Mutable only to try
-    /// mutations on: the view is left as it was.)
+    /// `attachments` holds at least this thread's attachment rows. (It takes `&mut self` only to
+    /// try mutations on, and leaves the view as it was.)
     pub fn summary(
         &mut self,
         list: &ListId,
@@ -586,9 +591,9 @@ impl ThreadView {
         let removed_by = self.removed_by(list, router, attachments);
         let me = &router.me;
         let shown = self.shown(list);
-        // Spam and trashed messages give no snippet but in Trash, so Spam's rows have none.
-        // A send waiting for the network is its row's in Scheduled, which lists it for that,
-        // with its own text.
+        // Spam and trashed messages give a snippet only in Trash, so rows in Spam have none.
+        // Scheduled lists a thread for its send waiting for the network, so there the row shows
+        // that send's own text.
         let waiting = self
             .sending_snippet
             .as_deref()
@@ -646,8 +651,8 @@ impl ThreadView {
         }
     }
 
-    /// Why the thread's failed drafts failed: their reason when they share one, else
-    /// [`SendFailure::Other`]; `None` without a failed draft.
+    /// Why the thread's failed drafts failed. That's their reason when they share one, else
+    /// [`SendFailure::Other`], and `None` when no draft failed.
     fn failure(&self) -> Option<SendFailure> {
         let mut reasons = self
             .messages
@@ -678,8 +683,8 @@ impl ThreadView {
         })
     }
 
-    /// The triage mutations (and `extra`) after which `leaves` holds of the thread's list ids
-    /// and labels.
+    /// The triage mutations (and `extra`) after which `leaves` returns true for the thread's
+    /// list ids and labels.
     pub fn removed_by_with(
         &mut self,
         router: &Router,
@@ -707,8 +712,8 @@ impl ThreadView {
         mutations
     }
 
-    /// Whether applying `mutation` the way the outbox does makes `leaves` hold. The steps are
-    /// applied to the view and then undone.
+    /// Whether applying `mutation` the way the outbox does makes `leaves` return true. The steps
+    /// are applied to the view and then undone.
     fn would_leave(
         &mut self,
         mutation: &Mutation,
@@ -732,8 +737,8 @@ impl ThreadView {
         left
     }
 
-    /// Whom the contact pane shows: unread messages first, then the rest newest first; the first
-    /// sender who isn't you.
+    /// Whom the contact pane shows, which is the first sender who isn't you. Unread messages come
+    /// first, then the rest newest first.
     fn pane_contact(&self, me: &Identity) -> Option<Contact> {
         let received: Vec<&ViewMessage> = self.messages.iter().filter(|m| !m.is_draft()).collect();
         let (unread, read): (Vec<&ViewMessage>, Vec<&ViewMessage>) =
@@ -836,7 +841,7 @@ impl ThreadView {
 
 /// The From column for `messages` (oldest first).
 fn participants(messages: &[&ViewMessage], list: &ListId, me: &Identity) -> Vec<Contact> {
-    // A failed draft is no draft here: it's yours among the senders.
+    // A failed draft doesn't count as a draft here. It's one of yours among the senders.
     let entries: Vec<&Mailbox> =
         if let Some(draft) = messages.iter().rev().find(|m| m.is_editable_draft()) {
             draft.recipients().collect()
@@ -853,7 +858,7 @@ fn participants(messages: &[&ViewMessage], list: &ListId, me: &Identity) -> Vec<
                 .filter_map(|m| m.row.sender.0.as_ref())
                 .collect()
         };
-    // More than two: keep the first, then each person's last appearance.
+    // With more than two, keep the first, then each person's last appearance.
     let entries: Vec<&Mailbox> = if entries.len() > 2 {
         let rest = &entries[1..];
         std::iter::once(entries[0])
@@ -902,8 +907,8 @@ fn is_invite(row: &AttachmentRow) -> bool {
         || row.filename.to_ascii_lowercase().ends_with(".ics")
 }
 
-/// `messages`' attached files, oldest message first, a later file replacing an earlier one of
-/// the same name where it was. `rows` holds at least their attachment rows.
+/// The files attached to `messages`, oldest message first. A later file replaces an earlier one
+/// with the same name, in the earlier one's place. `rows` holds at least their attachment rows.
 fn attached_files(messages: &[&ViewMessage], rows: &[AttachmentRow]) -> Vec<Attachment> {
     let mut files: Vec<Attachment> = Vec::new();
     for message in messages {
@@ -933,8 +938,8 @@ fn attached_files(messages: &[&ViewMessage], rows: &[AttachmentRow]) -> Vec<Atta
     files
 }
 
-/// What a row's attachment icon shows for `messages`; files win over an invite.
-/// `rows` holds at least their attachment rows.
+/// What a row's attachment icon shows for `messages`. Files win over an invite. `rows` holds at
+/// least their attachment rows.
 fn attachments_of(messages: &[&ViewMessage], rows: &[AttachmentRow]) -> Attachments {
     let mine = |row: &&AttachmentRow| messages.iter().any(|m| m.row.id == row.message_id);
     if rows
@@ -955,7 +960,8 @@ fn timestamp(millis: i64) -> Timestamp {
     Timestamp::from_millisecond(millis).unwrap_or(Timestamp::UNIX_EPOCH)
 }
 
-/// A draft's snippet with its placeholders' braces dropped: `{FIRST_NAME}` reads `FIRST_NAME`.
+/// A draft's snippet with the braces around its placeholders dropped: `{FIRST_NAME}` reads
+/// `FIRST_NAME`.
 fn strip_placeholder_braces(snippet: &str) -> String {
     let mut out = String::with_capacity(snippet.len());
     let mut rest = snippet;
@@ -1060,7 +1066,7 @@ pub(crate) mod tests {
         let theirs = ThreadView::new("t".into(), rows(), &[], &BTreeSet::new());
         assert_eq!(theirs.list_ids(&me()), [DRAFT]);
         assert!(!theirs.is_done(&me()), "nor in Done");
-        // One Exo wrote is a new message being written, in Important.
+        // A draft Exo wrote is a new message being written, so it's in Important.
         let ours = ThreadView::new("t".into(), rows(), &[], &BTreeSet::from(["d".to_owned()]));
         assert_eq!(lists(&ours), ["DRAFT", "INBOX", "SH_ALL", "SH_IMPORTANT"]);
     }
@@ -1169,7 +1175,7 @@ pub(crate) mod tests {
         );
         social_docs.sender_raw = "Ann (via Google Docs) <x@docs.google.com>".into();
         assert!(lists(&thread(vec![social_docs])).contains(&SH_OTHER.into()));
-        // Only inbox messages decide: an archived personal message doesn't.
+        // Only inbox messages decide. An archived personal message doesn't.
         let mixed = thread(vec![
             message("a", 1, "ann@x.com", &[ME], &["CATEGORY_PERSONAL"]),
             message(
@@ -1201,7 +1207,7 @@ pub(crate) mod tests {
             &["SPAM", "UNREAD", "CATEGORY_UPDATES"],
         )]);
         assert_eq!(lists(&spam), ["SPAM", "UNREAD"]);
-        // A new message Exo is writing (drafts written elsewhere: see below).
+        // A new message Exo is writing. Drafts written elsewhere are below.
         let draft_only = ThreadView::new(
             "t".into(),
             vec![message("a", 1, ME, &["ann@x.com"], &["DRAFT"])],
@@ -1233,7 +1239,7 @@ pub(crate) mod tests {
             lists(&view),
             [MUTED, "SH_ALL", "SH_ARCHIVED", "SH_MUTED", "UNREAD"]
         );
-        // You weren't on the muted message; a newer one adds you.
+        // You weren't on the muted message, and a newer one adds you.
         let added = thread(vec![
             message("a", 1, "ann@x.com", &["bob@x.com"], &["INBOX", MUTED]),
             message("b", 2, "bob@x.com", &[ME], &["INBOX"]),

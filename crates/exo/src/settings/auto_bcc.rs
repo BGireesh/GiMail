@@ -1,10 +1,10 @@
-//! The Auto Bcc dialog: the addresses every draft gets in Bcc (`autoBcc`), and the addresses and
-//! domains whose mail goes without them (`autoBccExclusions`), each list over its input. Enter
-//! adds what's typed; each entry's trash can removes it. What compose does with them is
+//! The Auto Bcc dialog lists the addresses every draft gets in Bcc (`autoBcc`), and the addresses
+//! and domains whose mail goes without them (`autoBccExclusions`), each list over its input. Enter
+//! adds what's typed, and each entry's trash can removes it. What compose does with them is in
 //! `crate::compose::auto_bcc`.
 //!
-//! Metrics at a 1280×800 window. In Carbon the card keeps Snow's colours but for the row's hover
-//! fill.
+//! Metrics are at a 1280×800 window. In Carbon the card keeps Snow's colours, except for the row's
+//! hover fill.
 
 use egui::{Color32, Context, CursorIcon, Rect, Sense, Ui, pos2, vec2};
 use exo_store::Settings as AccountSettings;
@@ -12,12 +12,12 @@ use exo_ui::{Dialog, DialogInput, DialogResponse, Family, Font, TextStyle};
 
 use crate::compose::recipients;
 
-/// The subheaders: 12px/20px, `padding-top: 24px`, 3px down; the entries and inputs bold.
+/// The subheaders are 12px/20px, `padding-top: 24px`, 3px down, and the entries and inputs bold.
 const TEXT: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 12.0, 20.0);
 const BOLD: TextStyle = TextStyle::new(Font::new(Family::Sans, 700), 12.0, 20.0);
 const NUDGE: f32 = 3.0;
 const SUBHEADER_PADDING: f32 = 24.0;
-/// The subheader's `margin-bottom: 20px`; the exclusions' subheader keeps a dialog subheader's
+/// The subheader's `margin-bottom: 20px`. The exclusions' subheader keeps a dialog subheader's
 /// 16px, which the list's 20px outgrows when it's empty.
 const LIST_GAP: f32 = 20.0;
 const EXCLUSIONS_LIST_GAP: f32 = 16.0;
@@ -26,13 +26,14 @@ const ITEM: f32 = 20.0;
 const ITEM_GAP: f32 = 8.0;
 /// The input's line and its 1px rule (`margin-bottom: -1px`).
 const INPUT: f32 = 20.0;
-/// The dialog's `padding-bottom: 24px`: 4px more than the shell's.
+/// The dialog's `padding-bottom: 24px`, which is 4px more than the shell's.
 const EXTRA_PADDING: f32 = 4.0;
 /// The subheaders' `rgba(0, 0, 0, .85)`, and the entries'.
 const INK: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 217);
 /// A link: `#54acdc` in both themes.
 const LINK: Color32 = Color32::from_rgb(0x54, 0xac, 0xdc);
-/// The hovered or focused row (`::before`, from 2px above it): `#f2f4fa`, `#eaeaea` in Carbon.
+/// The fill of the hovered or focused row (`::before`, from 2px above it), `#f2f4fa` or `#eaeaea`
+/// in Carbon.
 const ROW_FILL: Color32 = Color32::from_rgb(0xf2, 0xf4, 0xfa);
 const ROW_FILL_CARBON: Color32 = Color32::from_rgb(0xea, 0xea, 0xea);
 /// The trash can: `rgba(0, 0, 0, .3)`, `.4` hovered or focused, over 64ms.
@@ -89,9 +90,9 @@ pub enum Focus {
 /// Something done in the dialog.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
-    /// Enter in a list's input: what's typed is added.
+    /// Enter in a list's input, which adds what's typed.
     Submit(List),
-    /// A trash can, clicked or Enter/Space: that entry goes.
+    /// A trash can, clicked or Enter/Space, which removes that entry.
     Remove(List, usize),
     /// Tab (1) or ⇧Tab (-1).
     Tab(isize),
@@ -101,13 +102,13 @@ pub enum Event {
     Focus(Focus),
 }
 
-/// The dialog's inputs as typed, which is marked wrong, and what has the keyboard.
+/// The dialog's inputs as typed, which of them is marked wrong, and what has the keyboard.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct State {
     inputs: [String; 2],
     invalid: [bool; 2],
     focus: Focus,
-    /// The focused input still has to get egui's keyboard.
+    /// Whether the focused input still has to get egui's keyboard.
     focus_pending: bool,
     /// A link to open, chosen from the keyboard.
     open: Option<&'static str>,
@@ -190,10 +191,9 @@ impl State {
         self.focus_pending = matches!(focus, Focus::Input(_));
     }
 
-    /// Adds the entries typed, split at `,` and `;`, that aren't on the list
-    /// yet; those with a valid address are added, the rest stay typed, marked wrong, and named in
-    /// a toast. The first address added also excludes the account's own domain, unless it's a
-    /// webmail one.
+    /// Submits the typed entries, split at `,` and `;`, that aren't on the list yet. Those with a
+    /// valid address are added, and the rest stay typed, marked wrong, and named in a toast. The
+    /// first address added also excludes the account's own domain, unless it's a webmail one.
     fn submit_addresses(&mut self, settings: &AccountSettings, domain: &str) -> Saved {
         let mut saved = Saved::default();
         let (valid, invalid): (Vec<String>, Vec<String>) = entries(&self.inputs[0])
@@ -226,8 +226,8 @@ impl State {
         saved
     }
 
-    /// Adds exclusions as for addresses, an entry being an address or a domain (a
-    /// leading `*@` or `@` dropped), compared by address.
+    /// Adds exclusions as for addresses. An entry is an address or a domain (a leading `*@` or `@`
+    /// dropped), compared by address.
     fn submit_exclusions(&mut self, settings: &AccountSettings) -> Saved {
         let mut saved = Saved::default();
         let existing: Vec<String> = settings
@@ -267,8 +267,8 @@ impl State {
         saved
     }
 
-    /// A trash can: the entry goes; its row had the keyboard, which stays on the list's next
-    /// control.
+    /// A trash can removes its entry. If its row had the keyboard, the keyboard stays on the list's
+    /// next control.
     fn remove(&mut self, list: List, at: usize, settings: &AccountSettings) -> Saved {
         let mut entries = match list {
             List::Addresses => settings.auto_bcc.clone(),
@@ -349,8 +349,8 @@ fn exclusions_top(settings: &AccountSettings) -> f32 {
         + SUBHEADER_PADDING
 }
 
-/// From the subheader's bottom to its input's top: the list of `count` rows, its margins
-/// collapsing with the subheader's `gap` (an empty list's 20px outgrows it).
+/// The height from the subheader's bottom to its input's top. That's the list of `count` rows,
+/// whose margins collapse with the subheader's `gap` (an empty list's 20px outgrows it).
 fn list_and_input(count: usize, gap: f32) -> f32 {
     if count == 0 {
         LIST_GAP.max(gap)
@@ -474,8 +474,8 @@ fn show(ui: &mut Ui, body: Rect, state: &mut State, settings: &AccountSettings) 
     ))
 }
 
-/// A list's rows from `top`: each entry with its trash can at the right edge; the hovered or
-/// focused row filled from 2px above it.
+/// A list's rows from `top`, each entry with its trash can at the right edge. The hovered or
+/// focused row is filled from 2px above it.
 fn rows(
     ui: &Ui,
     state: &State,
@@ -550,7 +550,7 @@ fn rows(
     event
 }
 
-/// A list's input, its line at `at`.
+/// A list's input, with its line at `at`.
 fn input(ui: &mut Ui, state: &mut State, list: List, at: egui::Pos2, width: f32) -> Option<Event> {
     let index = list as usize;
     let id = exo_ui::id(ui.ctx(), ("auto-bcc-input", index));

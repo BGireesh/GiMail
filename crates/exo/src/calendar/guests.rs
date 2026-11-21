@@ -16,12 +16,12 @@ use super::{
 
 /// The most guests' calendars overlaid.
 pub const MAX: usize = 7;
-/// The colours guests take in turn, those of my shown calendars last.
+/// The colours guests take in turn, with those of my shown calendars last.
 const COLORS: [&str; 10] = [
     "blue", "pink", "green", "orange", "cobalt", "ochre", "red", "lime", "yellow", "magenta",
 ];
 
-/// One of my calendars, as guests' colours avoid them: its id, colour and whether it shows.
+/// One of my calendars, which guests' colours avoid: its id, colour and whether it shows.
 pub type Mine = (String, CalendarColor, bool);
 
 /// A surface's guests' colours, in the order they were given, and the calendar a hover
@@ -41,9 +41,9 @@ impl Colors {
             .map(|(_, color)| *color)
     }
 
-    /// Gives each of `guests` whose calendar has loaded a colour: one of my calendars keeps its
-    /// own; anyone else takes the colour after the last one given, my shown calendars' colours
-    /// coming last.
+    /// Gives a colour to each of `guests` whose calendar has loaded. One of my calendars keeps its
+    /// own, and anyone else takes the colour after the last one given, with my shown calendars'
+    /// colours coming last.
     pub fn assign(&mut self, guests: &[String], data: &Data, mine: &[Mine]) {
         for email in guests {
             let loaded = data
@@ -90,7 +90,8 @@ impl Colors {
         }
     }
 
-    /// The first [`MAX`] of `guests` whose calendars show, with their colours (offline, none).
+    /// The first [`MAX`] of `guests` whose calendars show, with their colours (none while
+    /// offline).
     pub fn shown(
         &self,
         guests: &[String],
@@ -120,7 +121,7 @@ pub enum Marker {
     Swatch(CalendarColor),
     /// Their calendar is loading (`Loading availability`).
     Spinner,
-    /// Their calendar isn't shown: an empty swatch.
+    /// An empty swatch, while their calendar isn't shown.
     Empty,
 }
 
@@ -174,7 +175,7 @@ pub fn paint_marker(ui: &egui::Ui, rect: egui::Rect, marker: Marker) {
 }
 
 /// `(busy)` when one of `email`'s events overlaps `start`–`end` on the start's day, else `(OOO)`
-/// when an out-of-office one does; nothing for free time, an unanswered invite, or offline.
+/// when an out-of-office one does. Nothing for free time, an unanswered invite, or while offline.
 pub fn busy_status(
     email: &str,
     data: &Data,
@@ -291,9 +292,9 @@ pub struct Column {
     pub events: Vec<Event>,
 }
 
-/// The guests' columns over `days`, each of `shown`'s events as a block in their colour, all-day
-/// ones that keep them busy as the whole of each day; those that leave them free stay all-day,
-/// for the all-day row.
+/// The guests' columns over `days`, with each of `shown`'s events as a block in their colour.
+/// All-day events that keep them busy take the whole of each day, while those that leave them
+/// free stay all-day, for the all-day row.
 pub fn guest_events(
     data: &Data,
     shown: &[(String, CalendarColor)],
@@ -480,9 +481,9 @@ pub fn columns(
     columns
 }
 
-/// The columns' widths as shares of the day, timed and all-day alike, from which are
-/// `collapsed`: one alone takes it all; otherwise each open one 50% and the collapsed ones the
-/// rest between them.
+/// The columns' widths as shares of the day, timed and all-day alike, from which of them are
+/// `collapsed`. One column alone takes the whole day. Otherwise each open one takes 50% and the
+/// collapsed ones share the rest.
 pub fn widths(collapsed: &[bool]) -> Vec<f32> {
     if collapsed.len() == 1 {
         return vec![1.0];
@@ -512,7 +513,7 @@ pub type AllDayColumn<'a> = (Option<String>, bool, Vec<&'a Event>);
 
 /// The all-day row's columns while guests are overlaid: for each day, mine (every all-day event
 /// of mine on it) then each guest's (their all-day events that leave them free, on it). With two
-/// guests or more all but the expanded one (mine unless a hover chose another) collapse.
+/// guests or more, all but the expanded one (mine unless a hover chose another) collapse.
 pub fn all_day_columns<'a>(
     mine: &[&'a Event],
     guests: &'a [(String, Vec<Event>)],
@@ -554,8 +555,8 @@ enum Surface {
     Meet,
 }
 
-/// Guests' busy times as Find Time counts them: their events that don't leave them
-/// free, all-day ones as their days.
+/// Guests' busy times as Find Time counts them: their events that don't leave them free, with
+/// all-day ones as their days.
 pub fn busy(data: &Data, email: &str, tz: &TimeZone) -> Vec<(Timestamp, Timestamp)> {
     events_of(data, email)
         .unwrap_or_default()
@@ -567,10 +568,10 @@ pub fn busy(data: &Data, email: &str, tz: &TimeZone) -> Vec<(Timestamp, Timestam
 }
 
 impl crate::Mail {
-    /// The guests overlaid on the calendar now, with the column a hover expanded: the open
-    /// form's, else Share Availability's, else the week's Meet's (the right pane only the
-    /// form's). Asks for their calendars over the time that surface covers, and gives the
-    /// loaded ones their colours.
+    /// The guests overlaid on the calendar now, with the column a hover expanded. They're the open
+    /// form's, else Share Availability's, else the week's Meet's (in the right pane, only the
+    /// form's). Asks for their calendars over the time that surface covers, and gives the loaded
+    /// ones their colours.
     pub(super) fn calendar_overlay(
         &mut self,
         now: &Zoned,
@@ -612,9 +613,9 @@ impl crate::Mail {
         (guest_events(&data, &shown, days, &tz), expanded)
     }
 
-    /// A guest's event in the week the details show: `key`'s, among the overlaid guests', in its
-    /// guest's colour, with no answer of mine and nothing to change. An all-day one that keeps
-    /// them busy goes by each of its days' blocks.
+    /// A guest's event in the week, as the details show it: `key`'s, among the overlaid guests'
+    /// events, in its guest's colour, with no answer of mine and nothing to change. An all-day one
+    /// that keeps them busy matches the key of each of its days' blocks.
     pub(super) fn calendar_guest_detailed(
         &self,
         key: &str,

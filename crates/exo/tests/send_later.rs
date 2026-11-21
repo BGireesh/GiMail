@@ -1,6 +1,6 @@
-//! Send later end to end on gmail-mock: ⌘⇧L's picker gives a draft its time, Send schedules
-//! it, a Gmail draft meanwhile that its thread shows as scheduled and Scheduled lists, and Undo
-//! or the time passing take it back.
+//! Send later end to end on gmail-mock. ⌘⇧L's picker gives a draft its time and Send schedules
+//! it. Until it goes, it's a Gmail draft, which its thread shows as scheduled and Scheduled
+//! lists. Undo or the time passing take it back.
 
 mod support;
 
@@ -14,8 +14,8 @@ const REPLY_SUBJECT: &str = "Re: Design crit moved to 3pm";
 
 /// Now in the mock's New York. The store sends by the system's clock, so the app's has to agree
 /// for "tomorrow morning" to be ahead for both. Before 4 am the picker offers this morning
-/// instead, so the app's clock starts at 4 am then: still ahead of the store's, and tomorrow
-/// morning is the first row.
+/// instead, so the app's clock starts at 4 am then. That's still ahead of the store's clock, and
+/// tomorrow morning is the first row.
 fn now() -> Zoned {
     let now = Zoned::now().with_time_zone(TimeZone::get("America/New_York").expect("a zone"));
     if now.hour() < 4 {
@@ -193,7 +193,8 @@ fn undo_takes_a_scheduled_send_back_with_its_time() {
         "back in compose, its time still set"
     );
 
-    // The picker's footer clears it (`Unschedule`, under the rows: ↑ from the first).
+    // The picker's footer clears it (`Unschedule`, under the rows, which ↑ reaches from the
+    // first).
     app.press(Key::L, COMMAND.plus(Modifiers::SHIFT));
     app.key(Key::ArrowUp);
     app.key(Key::Enter);

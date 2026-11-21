@@ -2,9 +2,10 @@
 //! backdrop, with its header at the top left and a close × at the top right. The overlay fades in
 //! and out over 200ms (`opacity 200ms ease`).
 //!
-//! `padding: 20px 32px`, a 20px header row (16px/20px text nudged down 2px), 4px corners and
-//! `box-shadow: 0 2px 0 rgba(0,0,0,.1)`; the × is 12×13 at 40% opacity, 24px from the top and 32px
-//! from the right. A dialog whose close goes back a step shows the 13px back arrow there instead.
+//! The card has `padding: 20px 32px`, a 20px header row (16px/20px text nudged down 2px), 4px
+//! corners and `box-shadow: 0 2px 0 rgba(0,0,0,.1)`. The × is 12×13 at 40% opacity, 24px from the
+//! top and 32px from the right. A dialog whose close goes back a step shows the 13px back arrow
+//! there instead.
 //!
 //! Carbon's dialogs are light cards (`#f5f5f5`) that keep Snow's colors, so a dialog draws its
 //! contents with Snow's palette in either theme ([`crate::with_theme`]).
@@ -64,7 +65,8 @@ pub struct Dialog<'a> {
 
 /// What a frame of a dialog came to.
 pub struct DialogResponse<R> {
-    /// What the body returned; `None` once the dialog has faded out, when its owner can drop it.
+    /// What the body returned, or `None` once the dialog has faded out, when its owner can drop
+    /// it.
     pub inner: Option<R>,
     /// The backdrop or the × was clicked.
     pub close: bool,
@@ -90,7 +92,7 @@ impl<'a> Dialog<'a> {
     }
 
     /// Fills the area less `margin` on each side, at most `max_width` (and at least 510px) wide,
-    /// with no header or padding: the body is the whole card. Its back arrow sits 36px down and
+    /// with no header or padding, so the body is the whole card. Its back arrow sits 36px down and
     /// 44px in, in an 8px-padded box (the split library's dialog).
     pub fn fill(self, max_width: f32, margin: egui::Vec2) -> Self {
         Self {
@@ -126,7 +128,7 @@ impl<'a> Dialog<'a> {
         }
     }
 
-    /// Its close control goes back a step: a back arrow instead of the ×.
+    /// Its close control goes back a step, with a back arrow instead of the ×.
     pub fn back(self) -> Self {
         Self { back: true, ..self }
     }
@@ -216,7 +218,7 @@ impl<'a> Dialog<'a> {
                 vec2(DIALOG_WIDTH, natural.min(area.height() - 72.0)),
             )
         };
-        // Centering can land on a half pixel; Chromium paints the dialog's layer at the whole
+        // Centering can land on a half pixel, and Chromium paints the dialog's layer at the whole
         // pixel below it, text and all.
         let card = pixel_snap(card);
         // The card swallows clicks so they don't reach the backdrop.
@@ -250,7 +252,7 @@ impl<'a> Dialog<'a> {
                 ),
                 size,
             );
-            // The clickable box pads the icon 30px, 12px below; the × has no hover style.
+            // The clickable box pads the icon 30px, 12px below. The × has no hover style.
             (
                 icon,
                 Rect::from_min_max(icon.min - vec2(30.0, 30.0), icon.max + vec2(30.0, 12.0)),

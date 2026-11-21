@@ -1,7 +1,7 @@
-//! Expansion of the RRULE subset fixtures and clients use: `FREQ=DAILY|WEEKLY|MONTHLY|YEARLY`
+//! Expansion of the RRULE subset that fixtures and clients use: `FREQ=DAILY|WEEKLY|MONTHLY|YEARLY`
 //! with `INTERVAL`, `COUNT`, `UNTIL`, (weekly) `BYDAY` and (monthly) one `BYDAY` with its week
-//! (`3TU`, `-1FR`). Wall-clock times are kept across DST
-//! changes by stepping in the event's own time zone; an all-day series' instances are all-day.
+//! (`3TU`, `-1FR`). Wall-clock times are kept across DST changes by stepping in the event's own
+//! time zone, and an all-day series' instances are all-day.
 
 use gmail::calendar::{Event, EventDateTime};
 use jiff::civil::Weekday;
@@ -36,7 +36,7 @@ struct Rule {
     nth: Option<i8>,
 }
 
-/// Whether every rule's `UNTIL` takes its series' start's type, a date for an all-day series
+/// Whether every rule's `UNTIL` takes the type of its series' start, a date for an all-day series
 /// and a date-time otherwise, as RFC 5545 §3.3.10 requires.
 pub fn valid(event: &Event) -> bool {
     let all_day = event
@@ -283,7 +283,7 @@ mod tests {
             .iter()
             .map(|e| e.start.clone().unwrap().date_time.unwrap())
             .collect();
-        // DST ends on 2026-11-01: still 10:00 local, now at -05:00.
+        // DST ends on 2026-11-01, so it's still 10:00 local, now at -05:00.
         assert_eq!(
             starts,
             [

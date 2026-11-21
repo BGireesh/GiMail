@@ -13,7 +13,7 @@ pub(crate) fn from_html(html: &str) -> String {
     out.finish()
 }
 
-/// The text of `html` the user wrote: quotes, the signature and quoted messages left out.
+/// The text of `html` that the user wrote, leaving out quotes, the signature and quoted messages.
 pub(crate) fn authored(html: &str) -> String {
     let dom = parse_document(RcDom::default(), Default::default()).one(html);
     let mut out = Writer {
@@ -43,7 +43,7 @@ struct Writer {
     gap: usize,
     /// `> ` levels.
     quote: usize,
-    /// Inside `<pre>`: whitespace kept.
+    /// Inside `<pre>`, where whitespace is kept.
     pre: bool,
 }
 

@@ -12,7 +12,7 @@ use crate::compose::{contacts::Index, recipients};
 
 /// Working hours, 9 to 18, on weekdays.
 pub const WORKING: (i8, i8) = (9, 18);
-/// The meeting lengths offered, in minutes; 30 by default.
+/// The meeting lengths offered, in minutes, with 30 by default.
 pub const DURATIONS: [i64; 4] = [15, 30, 45, 60];
 /// How many weeks Find Time looks ahead: 20 days, in whole weeks.
 pub const WEEKS: i64 = 3;
@@ -28,8 +28,8 @@ const INPUT_TOP: f32 = 28.0;
 /// The input: 32px tall, 2px out on each side, a 2px border in its own fill,
 /// `padding: 6px 8px 4px`, the text nudged `top: 1px`.
 const INPUT_HEIGHT: f32 = 32.0;
-/// The guests' list 8px under the input, a row 24px: an 8px swatch 6px in and 8px down, the
-/// name 22px in, 5px down.
+/// The guests' list sits 8px under the input, with a row every 24px: an 8px swatch 6px in and 8px
+/// down, and the name 22px in and 5px down.
 const GUEST: f32 = 24.0;
 const GUESTS_GAP: f32 = 8.0;
 /// The buttons, 14px under the guests: Find Time 75px and the length 56px, 27px tall, `#aeb1dd`
@@ -50,7 +50,7 @@ pub struct Guest {
 /// The section's state.
 pub struct Meet {
     pub guests: Vec<Guest>,
-    /// The guests' calendars' colours, and the column a hover expanded.
+    /// The colours of the guests' calendars, and the column a hover expanded.
     pub colors: super::guests::Colors,
     /// Find Time is on.
     pub finding: bool,
@@ -58,7 +58,7 @@ pub struct Meet {
     pub duration: i64,
     input: String,
     suggestion: usize,
-    /// The durations' list, open, and its highlighted row.
+    /// The durations' list while it's open, with its highlighted row.
     durations: Option<usize>,
     /// The input takes the keyboard next frame (`m`), or gives it up (Escape).
     focus: bool,
@@ -87,23 +87,23 @@ impl Default for Meet {
 /// What the section asked for.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MeetAction {
-    /// The guests changed: their calendars are wanted.
+    /// The guests changed, so their calendars are wanted.
     Guests,
     /// `Find Time`, or Enter with guests and nothing typed.
     Find,
     /// `Cancel`.
     Cancel,
-    /// `Hit enter to instantly find times!`'s ✕: it doesn't show again.
+    /// The ✕ on `Hit enter to instantly find times!`, after which the hint doesn't show again.
     DismissHint,
 }
 
 impl Meet {
-    /// `m`: the keyboard to the input.
+    /// `m`, which moves the keyboard to the input.
     pub fn focus(&mut self) {
         self.focus = true;
     }
 
-    /// Escape in the input: it gives up the keyboard.
+    /// Escape in the input, which gives up the keyboard.
     pub fn blur(&mut self) {
         self.blur = true;
         self.input.clear();
@@ -155,8 +155,8 @@ impl Meet {
             None,
         );
 
-        // The input: `#f2f4fa` (Carbon `#373a3f`), its border `#aeb1dd` (Carbon `#a0a4d9`) with
-        // the keyboard.
+        // The input is `#f2f4fa` (Carbon `#373a3f`), with its border `#aeb1dd` (Carbon `#a0a4d9`)
+        // while it has the keyboard.
         let input = Rect::from_min_max(
             pos2(left - 2.0, top + INPUT_TOP),
             pos2(right + 2.0, top + INPUT_TOP + INPUT_HEIGHT),
@@ -336,7 +336,7 @@ impl Meet {
             actions.push(MeetAction::Guests);
         }
 
-        // The guests, each in their calendar's colour, × on hover.
+        // The guests, each in their calendar's colour, with × on hover.
         let mut y = input.bottom() + GUESTS_GAP;
         let mut removed = None;
         for (index, guest) in self.guests.iter().enumerate() {
@@ -388,7 +388,7 @@ impl Meet {
         }
 
         // `Find Time` (`Cancel` while finding) and the length (`30m`), one periwinkle pill split
-        // by a 1px rule, glowing on hover; white labels (Carbon `#27292d`).
+        // by a 1px rule, glowing on hover, with white labels (Carbon `#27292d`).
         let row_top = y + BUTTONS_GAP + 1.0;
         let (fill, ink, rule) = match exo_ui::theme(&ctx) {
             exo_ui::Theme::Snow => (
@@ -574,10 +574,10 @@ impl Meet {
 }
 
 /// Find Time's Enter hint: a tooltip tethered by its top right to Find Time's top left (10px up
-/// and 8px left, less the 8px padding of a tooltip placed below), its row 204px wide padded
-/// `0 1px 3px`: `Hit` `enter` ` to instantly find times!` (12px semibold, `top: 1px`, the key
-/// with no margin), and the ✕ (`DEPRECATED_closeV3`, 8px, white at 30%, Carbon's black) at the
-/// right. Returns a click on the ✕.
+/// and 8px left, less the 8px padding of a tooltip placed below). Its row is 204px wide, padded
+/// `0 1px 3px`, and holds `Hit` `enter` ` to instantly find times!` (12px semibold, `top: 1px`,
+/// the key with no margin) and the ✕ (`DEPRECATED_closeV3`, 8px, white at 30%, Carbon's black) at
+/// the right. Returns a click on the ✕.
 fn find_time_hint(ui: &Ui, button: Rect) -> bool {
     const ROW: f32 = 204.0;
     const ROW_PADDING: f32 = 1.0;
@@ -617,9 +617,9 @@ fn find_time_hint(ui: &Ui, button: Rect) -> bool {
         .show(ctx, |area| {
             let painter = area.painter();
             exo_ui::paint_tooltip_box(painter, rect);
-            // The text `top: 1px`, its line a pixel lower again for the key (an 18px inline block on
-            // a 16px line); the key at the line's top, its label (`top: 0`) a pixel higher in it than
-            // in other tooltips.
+            // The text is at `top: 1px`, and its line a pixel lower again for the key (an 18px
+            // inline block on a 16px line). The key sits at the line's top, with its label
+            // (`top: 0`) a pixel higher in it than in other tooltips.
             let row = pos2(
                 rect.left() + PADDING.x,
                 exo_ui::pixel_snap(rect).top() + PADDING.y,
@@ -778,8 +778,8 @@ impl crate::Mail {
             .collect()
     }
 
-    /// The first week, of three from this one, with a free slot; when it's
-    /// not the week on screen, offers it.
+    /// The first week, of three from this one, with a free slot. When it's not the week on
+    /// screen, offers it.
     fn calendar_find_first(
         &mut self,
         busy: &[(Timestamp, Timestamp)],
@@ -852,8 +852,8 @@ impl crate::Mail {
         }
     }
 
-    /// A free slot clicked: the new event's form for it, with Meet's guests and their names as
-    /// its title.
+    /// A free slot clicked, which opens the new event's form for it, with Meet's guests and their
+    /// names as its title.
     pub(super) fn calendar_pick_slot(&mut self, key: &str, _now: &Zoned) {
         let Some((start, end)) = key
             .strip_prefix(super::grid::FREE_SLOT)
@@ -905,8 +905,8 @@ impl crate::Mail {
 }
 
 /// The free `minutes`-long slots everyone has between `from` and `to` in working hours, around
-/// `busy`: busy spans widened to quarter hours and merged, taken out of each weekday's 9 to 18,
-/// and what's left cut into meetings back to back.
+/// `busy`: busy spans with both ends rounded up to the quarter hour and merged, taken out of
+/// each weekday's 9 to 18, and what's left cut into meetings back to back.
 pub fn slots(
     busy: &[(Timestamp, Timestamp)],
     from: &Zoned,
@@ -1034,8 +1034,8 @@ mod tests {
 
     #[test]
     fn slots_fill_working_hours_around_busy_times() {
-        // Tuesday from 9:10: the first slot waits for the quarter hour; a 10:05–11:00 meeting's
-        // start rounds up too, so it takes 10:15–11:00.
+        // From 9:10 on Tuesday, the first slot waits for the quarter hour. A 10:05–11:00
+        // meeting's start rounds up too, so the meeting takes 10:15–11:00.
         let busy = [(
             at("2026-11-17T10:05").timestamp(),
             at("2026-11-17T11:00").timestamp(),

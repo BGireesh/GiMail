@@ -1,7 +1,7 @@
 //! Signing in and out, switching and adding accounts, what Exo opens on launch, and the
-//! teardowns for a store that can't be opened, end to end:
-//! the app on an in-process gmail-mock (its OAuth endpoints too; a `login_hint` signs in another
-//! address on its mailbox), with refresh tokens in memory and a scripted browser.
+//! teardowns for a store that can't be opened, end to end. The tests run the app on an in-process
+//! gmail-mock (its OAuth endpoints too, where a `login_hint` signs in another address on its
+//! mailbox), with refresh tokens in memory and a scripted browser.
 
 use std::{
     path::PathBuf,
@@ -28,8 +28,8 @@ const BEA: &str = "bea@example.com";
 const CTRL: Modifiers = Modifiers::CTRL;
 const CLIENT_ID: &str = "exo-test.apps.googleusercontent.com";
 const CLIENT_SECRET: &str = "GOCSPX-test";
-/// "Sign in with Google" at 1280×800: the column (388px) centers in the 759px below the tab
-/// strip, and the button sits 140px into its card.
+/// Where "Sign in with Google" is at 1280×800. The column (388px) centers in the 759px below the
+/// tab strip, and the button sits 140px into its card.
 const BUTTON: Pos2 = pos2(640.0, 440.0);
 /// A 60 fps frame.
 const FRAME: f64 = 1.0 / 60.0;
@@ -49,7 +49,7 @@ impl Drop for Device {
 }
 
 impl Device {
-    /// A fresh device; `name` keeps concurrent tests' folders apart.
+    /// A fresh device. `name` keeps concurrent tests' folders apart.
     fn new(name: &str) -> Self {
         Self::on(name, gmail_mock::Config::default())
     }
@@ -94,7 +94,7 @@ impl Device {
         self.sign_in_as(None);
     }
 
-    /// Signs in the account Google offers for `hint` (the mock's own without one; any other
+    /// Signs in the account Google offers for `hint` (the mock's own without one, and any other
     /// address shares its mailbox), behind Exo's back.
     fn sign_in_as(&self, hint: Option<&str>) {
         let auth = self.auth();
@@ -327,7 +327,7 @@ fn off_screen(app: &App) -> Vec<&str> {
     open
 }
 
-/// Waits, without frames, for `done`: an account off screen needs none.
+/// Waits, without frames, for `done`, since an account off screen needs none.
 fn wait_for(what: &str, seconds: u64, done: impl Fn() -> bool) {
     let started = Instant::now();
     while !done() {
@@ -382,12 +382,12 @@ fn a_first_sign_in_on_this_mac_is_welcomed() {
         mail.welcome_covers() && mail.account().device_settings().splash_pending,
         "the welcome splash, till it's been seen"
     );
-    // The keys are the splash's: 2 doesn't open the week.
+    // The keys are the splash's, so 2 doesn't open the week.
     press(&mut app, Key::Num2);
     assert_eq!(app.state().mail().unwrap().calendar_week(), None);
 
-    // Five seconds on, with the inbox in, it gives way to the first-run flow: account setup, in
-    // Snow, its keys its own.
+    // Five seconds on, with the inbox in, it gives way to the first-run flow. That's account
+    // setup, in Snow, with keys of its own.
     app.run_steps((5.1 / FRAME) as usize);
     let mail = app.state().mail().unwrap();
     assert!(!mail.welcome_covers() && !mail.account().device_settings().splash_pending);
@@ -395,7 +395,7 @@ fn a_first_sign_in_on_this_mac_is_welcomed() {
     press(&mut app, Key::Num2);
     assert_eq!(app.state().mail().unwrap().calendar_week(), None);
 
-    // The splash only the first time; quit in account setup and it opens again.
+    // The splash shows only the first time. Quit in account setup and setup opens again.
     drop(app);
     let mut app = device.launch(abandoned());
     run_until(&mut app, "the inbox", inbox_shows);
@@ -489,7 +489,7 @@ fn a_denied_keychain_asks_to_sign_in_again() {
     let open = move || Auth::open(client.clone(), &dir, Denied(secrets.clone()));
     let mut app =
         device.launch_with(SignIn::new(open, &device.dir.join("stores"), approving()).unwrap());
-    // Straight to "Almost there…": without the grant there's no mail to show.
+    // Straight to "Almost there…", since without the grant there's no mail to show.
     assert!(matches!(app.state().screen(), Screen::SignedOut(alert) if alert.email() == EMAIL));
 
     press(&mut app, Key::Enter);
@@ -967,7 +967,7 @@ fn after_almost_there_the_back_button_leads_to_a_signed_in_account() {
     run_until(&mut app, "Bea's mail", |app| on_screen(app) == Some(BEA));
 }
 
-/// Writes a new message to Priya and sends it: held for Undo.
+/// Writes a new message to Priya and sends it, which holds it for Undo.
 fn send_new_message(app: &mut Harness<'_, App>, subject: &str) {
     press(app, Key::C);
     settle(app);
@@ -1006,7 +1006,7 @@ fn switching_keeps_both_accounts_open_and_a_held_send_goes_on_time() {
     run_until(&mut app, "Bea's mail", |app| on_screen(app) == Some(BEA));
     assert_eq!(off_screen(app.state()), [EMAIL], "Maya's mail stays open");
 
-    // Back within the hold, it's the same mail: Undo still takes the send back.
+    // Back within the hold, it's the same mail, so Undo still takes the send back.
     press_with(&mut app, Key::Num2, CTRL);
     run_until(&mut app, "Maya's mail", |app| on_screen(app) == Some(EMAIL));
     assert_eq!(off_screen(app.state()), [BEA], "and Bea's in turn");
@@ -1118,8 +1118,8 @@ fn the_accounts_dialog_reorders_colors_signs_out_and_adds() {
     settle(&mut app);
     assert!(app.state().mail().unwrap().settings_dialog_open());
 
-    // Two accounts at 1280×800: the card's top is at 323, rows 44px apart from 384; the drag
-    // handles at x 761, the swatches at 877, `Sign out` around 716.
+    // Two accounts at 1280×800. The card's top is at 323, with rows 44px apart from 384, the
+    // drag handles at x 761, the swatches at 877, and `Sign out` around 716.
     drag(&mut app, pos2(761.0, 443.0), pos2(761.0, 395.0));
     settle(&mut app);
     assert_eq!(
@@ -1170,7 +1170,7 @@ fn the_accounts_dialog_reorders_colors_signs_out_and_adds() {
         "and closes the picker"
     );
 
-    // Maya, now second, isn't on screen: she signs out at once.
+    // Maya, now second, isn't on screen, so she signs out at once.
     click(&mut app, pos2(716.0, 444.0));
     run_until(&mut app, "Maya to go", |app| {
         app.mail().is_some_and(|mail| mail.accounts().len() == 1)
@@ -1179,7 +1179,7 @@ fn the_accounts_dialog_reorders_colors_signs_out_and_adds() {
     assert_eq!(device.secrets.get(EMAIL).unwrap(), None);
     assert_eq!(device.store_files(EMAIL), Vec::<String>::new());
 
-    // The footer adds one: one row now, so it's 44px higher (and the card 22px lower).
+    // The footer adds one. There's one row now, so it's 44px higher (and the card 22px lower).
     click(&mut app, pos2(450.0, 460.0));
     let screen = log_in(app.state()).expect("the sign-in screen");
     assert_eq!(
@@ -1262,7 +1262,7 @@ fn switching_away_saves_a_drafts_last_keystrokes() {
     run_until(&mut app, "the draft in Gmail", |_| {
         !gmail_messages(&device, "subject:\"Switched mid-word\" in:drafts").is_empty()
     });
-    // Within the second compose waits between saves, then away.
+    // Type within the second that compose waits between saves, then switch away.
     type_text(&mut app, "The last keystroke");
     let switched = Instant::now();
     press_with(&mut app, Key::Num1, CTRL);
@@ -1349,7 +1349,7 @@ fn signing_out_an_account_off_screen_asks_about_its_send() {
     type_text(&mut app, "account settings");
     press(&mut app, Key::Enter);
     settle(&mut app);
-    // Maya's row is the second: `Sign out` around (716, 444) at 1280×800.
+    // Maya's row is the second, with `Sign out` around (716, 444) at 1280×800.
     click(&mut app, pos2(716.0, 444.0));
     let alert = |app: &App| {
         app.mail().and_then(|mail| {
@@ -1366,7 +1366,7 @@ fn signing_out_an_account_off_screen_asks_about_its_send() {
         )
     );
 
-    // Cancel (a frame on, once the alert has the keyboard): Maya stays, and her send goes out
+    // Cancel (a frame on, once the alert has the keyboard). Maya stays, and her send goes out
     // on time, once.
     app.run_steps(2);
     press(&mut app, Key::Escape);
@@ -1419,7 +1419,7 @@ fn signing_out_an_account_off_screen_anyway_closes_it_without_sending() {
     assert!(gmail_messages(&device, "subject:\"Dropped on sign-out\" in:sent").is_empty());
 }
 
-/// A Keychain that asks before each read, as macOS asks an ad hoc build: it keeps the order of
+/// A Keychain that asks before each read, as macOS asks an ad hoc build. It keeps the order of
 /// the reads, and refuses `denied`'s (the user clicked Deny for it).
 struct Asking {
     secrets: Arc<MemorySecrets>,
@@ -1513,7 +1513,8 @@ fn launch_reads_every_grant_first_and_a_denied_one_leaves_the_others_open() {
     );
     drop(app);
 
-    // Refused the account on screen's: "Almost there…" for Bea, and Maya open off screen.
+    // When the Keychain refuses the on-screen account's grant, Bea gets "Almost there…", and
+    // Maya is open off screen.
     let (mut app, _) = launch_denying(&device, BEA);
     assert!(matches!(app.state().screen(), Screen::SignedOut(alert) if alert.email() == BEA));
     run_until(&mut app, "Maya's first sync", App::is_idle);
@@ -1615,7 +1616,7 @@ fn an_account_off_screen_sends_on_time_and_notifies() {
         "not before its time"
     );
 
-    // New mail comes in (for both: the mock's accounts share a mailbox).
+    // New mail comes in (for both, since the mock's accounts share a mailbox).
     let deliver = serde_json::json!({ "from": "Priya Raman <priya@brightmoor.co>", "subject": "Launch checklist", "text": "Before 3?" });
     let url = device.server.url().join("/__mock/deliver").unwrap();
     let delivered: serde_json::Value = device.runtime.block_on(async {
@@ -1651,7 +1652,7 @@ fn an_account_off_screen_sends_on_time_and_notifies() {
         notifier.posted().iter().any(maya)
     });
 
-    // Its click switches to Maya and opens the conversation, Bea's mail open off screen.
+    // Its click switches to Maya and opens the conversation, with Bea's mail open off screen.
     let notice = notifier.posted().into_iter().find(maya).unwrap();
     launcher.clicked(notice.click);
     run_until(&mut app, "Maya's conversation", |app| {
@@ -1702,7 +1703,7 @@ fn a_reminder_off_screen_comes_back_and_notifies() {
     run_until(&mut app, "Bea's mail", |app| on_screen(app) == Some(BEA));
     settle(&mut app);
 
-    // Its time comes: with no frame, Maya's account brings it back and notifies.
+    // When its time comes, Maya's account brings it back and notifies, with no frame.
     *now.lock().unwrap() = "2026-11-17T10:01[America/New_York]".parse().unwrap();
     let back = |notice: &exo::notifications::Notice| {
         notice.click.account == EMAIL
@@ -1762,7 +1763,7 @@ fn signing_out_an_account_off_screen_since_launch_closes_it() {
     type_text(&mut app, "account settings");
     press(&mut app, Key::Enter);
     settle(&mut app);
-    // Maya's row is the second; with nothing unsent she goes without asking.
+    // Maya's row is the second. With nothing unsent she goes without asking.
     click(&mut app, pos2(716.0, 444.0));
     run_until(&mut app, "Maya to go", |app| {
         app.mail().is_some_and(|mail| mail.accounts().len() == 1)
@@ -1957,7 +1958,7 @@ fn a_locked_store_opens_once_reloaded() {
     let device = Device::new("locked-store");
     device.sign_in();
     std::fs::create_dir_all(device.stores()).expect("the stores' folder");
-    // Something else holds the file: opening waits out SQLite's busy timeout, then gives up.
+    // Something else holds the file, so opening waits out SQLite's busy timeout, then gives up.
     let holder = rusqlite::Connection::open(database(&device, EMAIL)).expect("opens");
     holder.execute_batch("BEGIN EXCLUSIVE").expect("locks");
     let mut app = device.launch(abandoned());
@@ -1974,7 +1975,7 @@ fn one_accounts_broken_store_leaves_the_others_a_control_number_away() {
     device.sign_in();
     device.sign_in_as(Some(BEA));
     break_store(&device, BEA);
-    // Bea signed in last, so launch opens her: her teardown, not a failed launch.
+    // Bea signed in last, so launch opens her and shows her teardown, not a failed launch.
     let mut app = device.launch(abandoned());
     assert_eq!(unopened(app.state()), Some((BEA, Reason::Corrupt)));
 
@@ -2063,7 +2064,7 @@ fn an_account_whose_store_is_broken_signs_out_from_another() {
     press(&mut app, Key::Enter);
     settle(&mut app);
 
-    // Bea's row is the second (`Sign out` around 716, 444): what her store holds can't be
+    // Bea's row is the second (`Sign out` around 716, 444). What her store holds can't be
     // counted, and she goes without asking.
     click(&mut app, pos2(716.0, 444.0));
     run_until(&mut app, "Bea to go", |app| {
@@ -2174,7 +2175,8 @@ fn the_initial_shows_until_the_photo_comes_and_when_google_has_none() {
     );
     drop(app);
 
-    // Google says the account has no photo any more: the saved one goes, and the initial shows.
+    // Google says the account has no photo any more, so the saved one goes and the initial
+    // shows.
     let removed = Device::new("photo-removed");
     removed.sign_in();
     removed
@@ -2223,7 +2225,7 @@ fn the_saved_photo_outlives_clear_cache_and_shows_at_the_next_launch_offline() {
     device.runtime.block_on(device.server.disconnect());
     let mut app = device.launch(abandoned());
     wait_for_photo(&mut app, EMAIL);
-    // Google out of reach: People is asked again in a second, two, four…
+    // With Google out of reach, People is asked again in a second, two, four…
     app.run_steps(120);
     assert!(photo(&app, EMAIL).is_some(), "the saved photo stays");
     assert!(device.photo_file(EMAIL).exists());
@@ -2262,7 +2264,7 @@ fn each_tab_keeps_its_account_and_comes_back_after_a_relaunch() {
     run_until(&mut app, "the inbox", inbox_shows);
     assert_eq!(on_screen(app.state()), Some(BEA));
 
-    // ⌘T: Bea's home again, which ⌃1 switches to the first account in that tab alone.
+    // ⌘T opens Bea's home again, which ⌃1 switches to the first account in that tab alone.
     press_with(&mut app, Key::T, COMMAND);
     assert_eq!(
         on_screen(app.state()),
@@ -2288,7 +2290,7 @@ fn each_tab_keeps_its_account_and_comes_back_after_a_relaunch() {
         "each names its account: {titles:?}"
     );
 
-    // Quit and launch again: both tabs, Bea's on screen.
+    // Quit and launch again, and both tabs come back with Bea's on screen.
     drop(app);
     let mut app = device.launch(abandoned());
     let ctx = app.ctx.clone();
@@ -2407,8 +2409,8 @@ fn a_calendar_account_signs_in_from_the_week_and_its_calendar_shows_until_it_is_
 
 /// An invitation to `BEA`, at the top of the inbox.
 const INVITE: &[u8] = include_bytes!("support/invite-calendar-account.eml");
-/// At 1280×800 with that invitation open: the `RSVP` alert's provider dropdown, and its list's
-/// `Google Calendar`; the day view's `No thanks`.
+/// At 1280×800 with that invitation open: the `RSVP` alert's provider dropdown, its list's
+/// `Google Calendar`, and the day view's `No thanks`.
 const PROVIDER: Pos2 = pos2(536.0, 442.0);
 const GOOGLE_CALENDAR: Pos2 = pos2(540.0, 520.0);
 const NO_THANKS: Pos2 = pos2(1095.0, 247.0);

@@ -23,7 +23,7 @@ impl Pasteboard {
         }
     }
 
-    /// What's there (empty for nothing).
+    /// What's there, or an empty string when nothing is.
     pub(super) fn read(&self) -> String {
         match self {
             Self::System => system::read(),

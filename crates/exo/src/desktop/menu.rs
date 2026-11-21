@@ -1,27 +1,27 @@
-//! The menu bar: the app menu, File, Edit, View, Window and Help. Exo builds it as it finishes
-//! launching, in place of winit's app menu, which is when AppKit adds its own items to an app's
-//! Edit menu (Writing Tools, AutoFill, `Start Dictation…`, `Emoji & Symbols`).
+//! The menu bar: the app menu, File, Edit, View, Window and Help. Exo builds it in place of winit's
+//! app menu as it finishes launching, which is when AppKit adds its own items to an app's Edit menu
+//! (Writing Tools, AutoFill, `Start Dictation…`, `Emoji & Symbols`).
 //!
-//! Most items stand for a keystroke ([`Keystroke`]): the tab ones, Print, the editing ones and the
-//! zoom ones. Their keys reach Exo as any other keys do, so whatever has the keyboard handles them
-//! (the editor, a field, the palette, the list) before the menu does. AppKit takes the keys of a
-//! shortcut an item shows, even a disabled one, so these items show theirs only while their menu is
-//! open. Clicked, an item hands its keystroke to Exo as egui-winit would have made it, for whatever
-//! has the keyboard; it's enabled only while Exo's window has it. The other items are AppKit's (the
-//! app menu's, Minimize, Bring All to Front) or the shell's (Reload, Toggle Full Screen, Clear
-//! Cache and Restart), shortcuts and all.
+//! Most items stand for a keystroke ([`Keystroke`]): the tab items, Print, the editing items and
+//! the zoom items. Their keys reach Exo as any other keys do, so whatever has the keyboard (the
+//! editor, a field, the palette, the list) handles them before the menu does. AppKit takes the keys
+//! of any shortcut an item shows, even on a disabled item, so these items show their shortcuts only
+//! while their menu is open. A clicked item hands its keystroke, as egui-winit would have made it,
+//! to whatever has the keyboard. The item is enabled only while Exo's window has the keyboard. The
+//! other items are AppKit's (the app menu's, Minimize, Bring All to Front) or the shell's (Reload,
+//! Toggle Full Screen, Clear Cache and Restart), shortcuts and all.
 //!
 //! Edit's `Enable Autocorrect` is a checkbox, checked while autocorrect is on for the account on
-//! screen; choosing it turns every account's the other way.
+//! screen. Choosing it turns autocorrect the other way for every account.
 //!
-//! Window's `Close Window` is AppKit's `performClose:`, showing its ⌘W only while its menu is
-//! open, as the keystroke items do: File's `Close Tab` has ⌘W.
+//! Window's `Close Window` is AppKit's `performClose:`. Like the keystroke items, it shows its ⌘W
+//! only while its menu is open, because File's `Close Tab` has ⌘W.
 //!
 //! The app menu's updater item, after `About Exo`, says where the updater is (`Check for
 //! Updates…`, `Downloading Update…`, `Install Update and Restart`…) and does what it says when
 //! it can be chosen. It's there only when Exo updates itself.
 //!
-//! There's no `New Window`: Exo is one window.
+//! There's no `New Window`, because Exo is one window.
 
 use egui::{Event, Key, Modifiers};
 
@@ -36,7 +36,7 @@ const SHIFT_COMMAND: Modifiers = Modifiers {
     ..COMMAND
 };
 
-/// A menu item that stands for a keystroke whatever has the keyboard handles.
+/// A menu item that stands for a keystroke, which whatever has the keyboard handles.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Keystroke {
     /// File ▸ `New Tab` (⌘T).
@@ -45,7 +45,7 @@ pub enum Keystroke {
     CloseWindow,
     /// File ▸ `Close Tab` (⌘W).
     CloseTab,
-    /// File ▸ `Print` (⌘P), whatever prints the conversation on screen.
+    /// File ▸ `Print` (⌘P), for whatever prints the conversation on screen.
     Print,
     /// Edit ▸ `Undo` (⌘Z).
     Undo,
@@ -118,10 +118,10 @@ impl Keystroke {
         }
     }
 
-    /// The modifiers held and the events egui-winit makes of the keys: ⌘X and ⌘C are a cut and a
-    /// copy; ⌘V, with ⇧ or not, a paste of `clipboard`'s text; any other the key pressed and let
-    /// go. So is ⌘V when the clipboard has no text (an image, files), where egui-winit would make
-    /// nothing at all: compose pastes those itself.
+    /// The modifiers held and the events egui-winit makes of the keys. ⌘X and ⌘C are a cut and a
+    /// copy, and ⌘V, with ⇧ or not, is a paste of the text from `clipboard`. Any other keystroke is
+    /// its key pressed and let go. So is ⌘V when the clipboard has no text (an image, files), where
+    /// egui-winit would make nothing at all. Compose pastes those itself.
     pub fn input(self, clipboard: impl FnOnce() -> Option<String>) -> (Modifiers, Vec<Event>) {
         let (modifiers, key) = self.keys();
         let pasted = || {
@@ -158,14 +158,14 @@ pub fn install(launcher: super::Launcher) {
     drop(launcher);
 }
 
-/// The window has the keyboard from now on: the keystroke items send theirs to it. Call once the
-/// window is made.
+/// The window has the keyboard from now on, so the keystroke items send their keystrokes to it.
+/// Call once the window is made.
 pub(super) fn window_ready() {
     #[cfg(target_os = "macos")]
     macos::window_ready();
 }
 
-/// The app menu's updater item's tag, which `Set as Default Email Client` goes after.
+/// The tag of the app menu's updater item, which `Set as Default Email Client` goes after.
 #[cfg(target_os = "macos")]
 pub(crate) use macos::UPDATER_TAG;
 
@@ -199,22 +199,22 @@ mod macos {
     use crate::desktop::macos::WINIT_VIEW as VIEW_CLASS;
 
     thread_local! {
-        /// The menu bar's handler, alive for good: the notification center, the menus and their
-        /// items hold it without retaining it.
+        /// The menu bar's handler, alive for good, because the notification center, the menus and
+        /// their items hold it without retaining it.
         static HANDLER: OnceCell<Retained<Handler>> = const { OnceCell::new() };
     }
 
     /// The keystroke items' tags start here, clear of the ones AppKit's own items may carry.
     const TAG_BASE: isize = 0x4578_6F00;
-    /// Edit ▸ `Enable Autocorrect`'s tag, past the keystrokes'.
+    /// The tag of Edit ▸ `Enable Autocorrect`, past the keystrokes' tags.
     const AUTOCORRECT_TAG: isize = TAG_BASE + 0x80;
-    /// Window ▸ `Close Window`'s tag, whose ⌘W shows only while the menu is open.
+    /// The tag of Window ▸ `Close Window`, whose ⌘W shows only while the menu is open.
     const CLOSE_WINDOW_TAG: isize = TAG_BASE + 0x81;
-    /// The app menu's updater item's tag.
+    /// The tag of the app menu's updater item.
     pub(crate) const UPDATER_TAG: isize = TAG_BASE + 0x82;
 
     impl Keystroke {
-        /// Its item's title: the standard one for the editing and zoom items.
+        /// Its item's title, the standard one for the editing and zoom items.
         fn title(self) -> &'static str {
             match self {
                 Self::NewTab => "New Tab",
@@ -260,8 +260,8 @@ mod macos {
             }
         }
 
-        /// What its item sends whatever has the keyboard: AppKit's own actions for the edit ones,
-        /// by which AppKit finds the Edit menu to add its items to.
+        /// What its item sends to whatever has the keyboard. The edit items send AppKit's own
+        /// actions, by which AppKit finds the Edit menu to add its items to.
         fn action(self) -> Sel {
             match self {
                 Self::Undo => sel!(undo:),
@@ -283,7 +283,8 @@ mod macos {
             }
         }
 
-        /// The tag its item carries: its place in [`Keystroke::ALL`], from [`TAG_BASE`].
+        /// The tag its item carries, which is its place in [`Keystroke::ALL`] counted from
+        /// [`TAG_BASE`].
         fn tag(self) -> isize {
             TAG_BASE
                 + Self::ALL
@@ -322,14 +323,15 @@ mod macos {
                 self.ivars().toggle_autocorrect();
             }
 
-            /// View ▸ `Reload` (⌘R): the account on screen starts over.
+            /// View ▸ `Reload` (⌘R), which starts the account on screen over.
             #[unsafe(method(reload:))]
             fn reload(&self, _sender: Option<&AnyObject>) {
                 self.ivars().reload();
             }
 
-            /// View ▸ `Toggle Full Screen` (⌃⌘F): the focused window goes into full screen, or out
-            /// of it. Not `toggleFullScreen:`, whose item AppKit retitles `Enter Full Screen`.
+            /// View ▸ `Toggle Full Screen` (⌃⌘F), which takes the focused window into full screen
+            /// or out of it. It isn't `toggleFullScreen:`, because AppKit retitles that action's
+            /// item `Enter Full Screen`.
             #[unsafe(method(toggleWindowFullScreen:))]
             fn toggle_full_screen(&self, _sender: Option<&AnyObject>) {
                 if let Some(window) = NSApplication::sharedApplication(self.mtm()).keyWindow() {
@@ -337,7 +339,7 @@ mod macos {
                 }
             }
 
-            /// The app menu's updater item: installs the update ready, or checks.
+            /// The app menu's updater item, which installs the ready update or checks for one.
             #[unsafe(method(updaterItem:))]
             fn updater_item(&self, _sender: Option<&AnyObject>) {
                 if let Some(updates) = self.ivars().updates() {
@@ -345,8 +347,8 @@ mod macos {
                 }
             }
 
-            /// The updater item says where the updater is as the menu opens, and can be chosen
-            /// only when idle or ready; the handler's other items always can.
+            /// The updater item says where the updater is as the menu opens, and can be chosen only
+            /// when the updater is idle or ready. The handler's other items can always be chosen.
             #[unsafe(method(validateMenuItem:))]
             fn validate_menu_item(&self, item: &NSMenuItem) -> Bool {
                 if item.tag() != UPDATER_TAG {
@@ -360,8 +362,8 @@ mod macos {
                 Bool::new(enabled)
             }
 
-            /// Help ▸ `Clear Cache and Restart`: a modal alert, `Cancel` the default, before
-            /// anything is cleared.
+            /// Help ▸ `Clear Cache and Restart`, which shows a modal alert, with `Cancel` the
+            /// default, before anything is cleared.
             #[unsafe(method(clearCacheAndRestart:))]
             fn clear_cache_and_restart(&self, _sender: Option<&AnyObject>) {
                 let alert = NSAlert::new(self.mtm());
@@ -376,8 +378,8 @@ mod macos {
         }
 
         unsafe impl NSMenuDelegate for Handler {
-            /// A keystroke item shows its shortcut while its menu is open, and only then; `Enable
-            /// Autocorrect` is checked as it opens.
+            /// A keystroke item shows its shortcut while its menu is open, and only then. `Enable
+            /// Autocorrect` is checked as its menu opens.
             #[unsafe(method(menuWillOpen:))]
             fn menu_will_open(&self, menu: &NSMenu) {
                 show_shortcuts(menu, true);
@@ -405,7 +407,7 @@ mod macos {
                 // SAFETY: `NSObject`'s designated initializer.
                 unsafe { msg_send![super(this), init] }
             });
-            // SAFETY: the selector is the handler's, taking the notification; the handler lives
+            // SAFETY: the selector is the handler's and takes the notification. The handler lives
             // for good, so the center never calls a freed observer.
             unsafe {
                 NSNotificationCenter::defaultCenter().addObserver_selector_name_object(
@@ -418,7 +420,7 @@ mod macos {
         });
     }
 
-    /// An item sending `action` to `target` (nil: whatever has the keyboard), with `key` and
+    /// An item sending `action` to `target` (nil for whatever has the keyboard), with `key` and
     /// `mask` as its shortcut.
     fn item(
         mtm: MainThreadMarker,
@@ -443,8 +445,8 @@ mod macos {
         }
     }
 
-    /// A keystroke's item: for whatever has the keyboard, its shortcut shown only while its menu
-    /// is open.
+    /// A keystroke's item, sent to whatever has the keyboard, with its shortcut shown only while
+    /// its menu is open.
     fn keystroke_item(mtm: MainThreadMarker, keystroke: Keystroke) -> Retained<NSMenuItem> {
         let item = item(
             mtm,
@@ -458,7 +460,7 @@ mod macos {
         item
     }
 
-    /// A menu titled `title` holding `items`, `None` a separator, added to `bar`.
+    /// A menu titled `title` holding `items` (`None` for a separator), added to `bar`.
     fn menu(
         mtm: MainThreadMarker,
         bar: &NSMenu,
@@ -489,9 +491,9 @@ mod macos {
         let name = NSProcessInfo::processInfo().processName().to_string();
         let bar = NSMenu::new(mtm);
 
-        // The updater's item and its separator after `About Exo`'s, when Exo updates itself.
-        // `Set as Default Email Client` goes in after it, or else with a separator of its own
-        // after `About Exo`'s (`mail_client`).
+        // The updater's item and its separator, after the separator of `About Exo`, when Exo
+        // updates itself. `Set as Default Email Client` goes in after the updater's item, or else
+        // with a separator of its own after `About Exo` (`mail_client`).
         let updater = handler.ivars().updates().map(|updates| {
             let item = item(
                 mtm,
@@ -636,7 +638,7 @@ mod macos {
             ],
             Some(handler),
         );
-        // macOS adds its window items and the windows (`role: 'window'`).
+        // macOS adds its window items and the windows, since this is the windows menu.
         let close_window = item(mtm, "Close Window", sel!(performClose:), None, "", command);
         close_window.setTag(CLOSE_WINDOW_TAG);
         let window = menu(
@@ -668,7 +670,7 @@ mod macos {
             Some(handler),
         );
         app.setWindowsMenu(Some(&window));
-        // macOS adds its search field (`role: 'help'`).
+        // macOS adds its search field, since this is the help menu.
         let help = menu(
             mtm,
             &bar,
@@ -687,7 +689,8 @@ mod macos {
         app.setMainMenu(Some(&bar));
     }
 
-    /// Shows or hides the shortcuts of `menu`'s keystroke items, and Window ▸ `Close Window`'s.
+    /// Shows or hides the shortcuts of the keystroke items in `menu`, and the shortcut of Window ▸
+    /// `Close Window`.
     fn show_shortcuts(menu: &NSMenu, shown: bool) {
         for item in menu.itemArray().iter() {
             let shortcut = match Keystroke::from_tag(item.tag()) {
@@ -701,9 +704,9 @@ mod macos {
         }
     }
 
-    /// Exo's view answers the keystroke items' actions, which AppKit sends whatever has the
-    /// keyboard: Exo's window, while it's the key window. winit's view has none of them, so
-    /// they're added to its class.
+    /// Exo's view answers the keystroke items' actions, which AppKit sends to whatever has the
+    /// keyboard, that is, Exo's window while it's the key window. winit's view has none of these
+    /// actions, so they're added to its class.
     pub(super) fn window_ready() {
         if MainThreadMarker::new().is_none() {
             return;
@@ -712,8 +715,8 @@ mod macos {
             log::warn!("the menu bar's keystrokes: no {VIEW_CLASS:?} class");
             return;
         };
-        // SAFETY: `send` has the signature of an action (`self`, `_cmd`, the sender), which
-        // `v@:@` describes; the class is winit's view, which doesn't define these actions.
+        // SAFETY: `send` has the signature of an action (`self`, `_cmd`, the sender), which `v@:@`
+        // describes. The class is winit's view, which doesn't define these actions.
         unsafe {
             let send: unsafe extern "C-unwind" fn(&AnyObject, Sel, Option<&AnyObject>) = send;
             let imp: Imp = std::mem::transmute(send);
@@ -739,8 +742,8 @@ mod macos {
         }
     }
 
-    /// A keystroke item, sent by AppKit to Exo's view: its keystroke goes to Exo. The same
-    /// actions from anything else (a service, accessibility) do nothing.
+    /// A keystroke item's action, sent by AppKit to Exo's view, which hands the item's keystroke to
+    /// Exo. The same actions from anything else (a service, accessibility) do nothing.
     unsafe extern "C-unwind" fn send(_view: &AnyObject, _action: Sel, sender: Option<&AnyObject>) {
         let item = sender.and_then(AnyObject::downcast_ref::<NSMenuItem>);
         let Some(keystroke) = item.and_then(|item| Keystroke::from_tag(item.tag())) else {
@@ -793,7 +796,7 @@ mod tests {
             Keystroke::PasteAndMatchStyle.input(clipboard),
             (SHIFT_COMMAND, vec![Event::Paste("one\ntwo".to_owned())])
         );
-        // No text (a screenshot): the key, which compose pastes an image for.
+        // With no text (a screenshot), the key, which compose pastes an image for.
         let key = [true, false]
             .map(|pressed| Event::Key {
                 key: Key::V,

@@ -1,5 +1,5 @@
 //! The render pipeline, from a message's HTML to what the thread view shows. Nothing is measured
-//! here: Blitz measures when the body is shown.
+//! here, because Blitz measures when the body is shown.
 
 use std::rc::Rc;
 
@@ -23,7 +23,7 @@ pub struct Message {
     pub from_name: String,
     /// The `Message-ID` header (help-desk mail gets special quote handling).
     pub rfc822_id: String,
-    /// Attachment file names: Exchange replaces quoted attachments with `<name>`.
+    /// Attachment file names. Exchange replaces quoted attachments with `<name>`.
     pub attachment_names: Vec<String>,
 }
 
@@ -33,12 +33,12 @@ pub struct RenderOptions {
     /// Mark the dates in the text. A message shown as a file in the attachment viewer has none
     /// (it's only sanitized).
     pub detect_dates: bool,
-    /// Put the quote and signature behind a `…` (`QuoteDetector`). The attachment viewer's
-    /// message shows whole, for the same reason.
+    /// Put the quote and signature behind a `…`. The attachment viewer's message shows whole, for
+    /// the same reason.
     pub split_quoted: bool,
-    /// Classify the body (marketing or not) and tag its colors for the restyle (`sh-color-*`). A
-    /// read-only snippet shows its body only sanitized: never marketing, its text in the pane's ink
-    /// where no color of its own says otherwise.
+    /// Classify the body (marketing or not) and tag its colors for the restyle (`exo-color-*`).
+    /// A read-only snippet shows its body only sanitized. It's never marketing, and its text takes
+    /// the pane's ink where no color of its own says otherwise.
     pub classify: bool,
 }
 
@@ -53,9 +53,9 @@ impl Default for RenderOptions {
 }
 
 /// Runs the pipeline on `message`. `replying_to` is the message it answers (the one its
-/// `In-Reply-To` names, else the one before it in the thread) and that message's render; its
-/// quote is what ends up behind the `…`. `own_domains` are the account's domains: a `mailto:`
-/// to them is never an unsubscribe link.
+/// `In-Reply-To` names, else the one before it in the thread) and that message's render. The
+/// quote of that message is what ends up behind the `…`. `own_domains` are the account's domains,
+/// and a `mailto:` to them is never an unsubscribe link.
 pub fn render(
     message: &Message,
     replying_to: Option<(&Message, &Render)>,
@@ -157,9 +157,9 @@ pub fn render_with(
 }
 
 /// A fragment of a draft's body (a table the compose editor keeps whole) as the editor shows it,
-/// for a [`crate::BodyView`]: its colours tagged for the restyle as the editor's content is, as
-/// personal mail. Nothing else of the pipeline runs: the editor sanitized it as it came in, and
-/// doesn't linkify or date what it shows.
+/// for a [`crate::BodyView`]. Its colours are tagged for the restyle as the editor's content is,
+/// as personal mail. Nothing else of the pipeline runs, because the editor sanitized it as it came
+/// in and doesn't linkify or date what it shows.
 pub fn render_fragment(html: &str) -> Render {
     let document = dom::parse(html);
     colors::carbonize(&document_element(&document), false);

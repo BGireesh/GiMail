@@ -13,8 +13,8 @@ use crate::{
 pub struct Parts<'a> {
     /// The From alias's signature (Gmail `sendAs` HTML, already cleaned), if it has one.
     pub signature: Option<&'a str>,
-    /// Whether the signature's content is included: always for new mail, and on replies unless
-    /// `includeSignatureOnReplies` is off.
+    /// Whether the signature's content is included. It always is for new mail, and it is on
+    /// replies unless `includeSignatureOnReplies` is off.
     pub include_signature_content: bool,
     /// No signature at all.
     pub skip_signature: bool,
@@ -27,8 +27,8 @@ pub struct Parts<'a> {
 /// Where a read-status pixel would go. Exo has no read statuses, so it's an empty `<div>`.
 const PIXEL: &str = "<div></div>";
 
-/// The message's HTML body: `body` cleaned for sending (bare URLs linked), then wrapped with the
-/// signature and quote. The signature and quote go in as given, so they must already be
+/// The message's HTML body, which is `body` cleaned for sending (bare URLs linked) and then wrapped
+/// with the signature and quote. The signature and quote go in as given, so they must already be
 /// sanitized.
 pub fn html(body: &Document, parts: &Parts<'_>) -> String {
     let mut body = body.clone();
@@ -56,7 +56,7 @@ pub fn html(body: &Document, parts: &Parts<'_>) -> String {
     }
 }
 
-/// The signature block: `<div class="gmail_signature">` holding the alias's signature (written
+/// The signature block, a `<div class="gmail_signature">` holding the alias's signature (written
 /// back as a document) and a `<br/>`, or nothing when there's no signature. Exo adds no "Sent
 /// via" line. `draft_id` is the `data-signature-draft-id` the editor's copy carries.
 pub fn signature(content: Option<&str>, include_content: bool, draft_id: Option<&str>) -> String {
@@ -91,8 +91,8 @@ pub fn inlined(body: &str, signature: Option<&str>, quote: Option<&str>) -> Stri
     }
 }
 
-/// A reply's quote: the reply header and the quoted body. `body_attrs` are the original body
-/// element's `class`, `style` and `id`; `body` its inner HTML.
+/// A reply's quote: the reply header and the quoted body. `body_class`, `body_style` and `body_id`
+/// are the original body element's `class`, `style` and `id`, and `body` is its inner HTML.
 pub fn reply_quote(
     sent: &Zoned,
     name: &str,
@@ -130,7 +130,7 @@ pub struct Forwarded<'a> {
     pub subject: &'a str,
 }
 
-/// A forward's quote: the forwarded-message header and body.
+/// A forward's quote, made of the forwarded message's header and body.
 pub fn forward_quote(
     sent: &Zoned,
     header: &Forwarded<'_>,
@@ -191,9 +191,9 @@ fn remove_pixels(html: &str) -> String {
     out
 }
 
-/// The clean-up for sending: links bare URLs, points inline images at their Content-ID, drops
-/// signature ids and the dark-mode colour tags, Exo's and the `sh-` ones a draft begun elsewhere
-/// carries (leaving an empty `class` attribute, as a browser does).
+/// The clean-up for sending. It links bare URLs, points inline images at their Content-ID, and
+/// drops signature ids and the dark-mode colour tags, both Exo's and the `sh-` ones a draft begun
+/// elsewhere carries (leaving an empty `class` attribute, as a browser does).
 fn clean(doc: &mut Document) {
     for block in &mut doc.blocks {
         for container in &mut block.path {
@@ -234,8 +234,8 @@ fn clean_element(element: &mut Element) {
     }
 }
 
-/// An image shown by Content-ID gets it as its URL, in the `src` it has (an image without one
-/// gets one), and loses Exo's class; its `src-cid` stays.
+/// An image shown by Content-ID gets the Content-ID as its URL, in the `src` it has (an image
+/// without a `src` gets one), and loses Exo's class. Its `src-cid` stays.
 fn clean_image(image: &mut Element) {
     for (attr, target) in [
         ("src-cid", "src"),
@@ -260,8 +260,8 @@ fn clean_image(image: &mut Element) {
     }
 }
 
-/// `Linkify.text` on every text run outside a link: `<a target="_blank" rel="noopener
-/// noreferrer" href="…">`.
+/// Links what `exo_mail::links` finds in every text run outside a link, as `<a target="_blank"
+/// rel="noopener noreferrer" href="…">`.
 fn linkify(runs: &mut Vec<Run>) {
     let link = |href: &str| {
         Element::with(
@@ -279,9 +279,9 @@ fn linkify(runs: &mut Vec<Run>) {
         .collect();
 }
 
-/// Gives every element in `blocks` without a `class` an empty one, as every element that shows
-/// text has in sent mail once its dark-mode classes are stripped: for a revealed quote and
-/// signature.
+/// Gives every element in `blocks` without a `class` an empty one, for a revealed quote and
+/// signature. In sent mail, every element that shows text has one once its dark-mode classes are
+/// stripped.
 pub(crate) fn add_empty_classes(blocks: &mut [Block]) {
     let mut seen = std::collections::HashSet::new();
     for block in blocks {

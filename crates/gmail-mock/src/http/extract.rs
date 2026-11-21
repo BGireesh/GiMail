@@ -201,7 +201,7 @@ impl<S: Send + Sync, T: CarriesRaw> FromRequest<S> for Upload<T> {
     type Rejection = Failure;
 
     async fn from_request(request: Request, state: &S) -> Result<Self> {
-        // Nested routers see a stripped path; the original says whether this is an upload.
+        // Nested routers see a stripped path. The original says whether this is an upload.
         let is_upload = request
             .extensions()
             .get::<OriginalUri>()

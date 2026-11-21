@@ -38,7 +38,7 @@ impl Star {
     /// The star `elapsed` seconds after the conversation was starred (the sprite runs forward to
     /// rest) or unstarred (it runs back to its first frame, then goes).
     pub fn changed(starred: bool, elapsed: f64) -> Self {
-        // `steps(101)` jumps at the end of each step: the last frame shows once the time is up.
+        // `steps(101)` jumps at the end of each step, so the last frame shows once the time is up.
         let step = ((elapsed / STEPS_FOR * RESTING as f64).floor().max(0.0) as usize).min(RESTING);
         match (starred, step) {
             (true, RESTING) => Self::Resting,
@@ -49,8 +49,8 @@ impl Star {
     }
 }
 
-/// The star of the conversation shown under `id`, which is now `starred`: when that changed while
-/// it showed, the sprite plays; when it wasn't shown the frame before, it rests: a star that
+/// The star of the conversation shown under `id`, which is now `starred`. When that changed while
+/// it showed, the sprite plays. When it wasn't shown the frame before, it rests, so a star that
 /// appears with its row doesn't animate.
 pub fn animated_star(ctx: &Context, id: Id, starred: bool) -> Star {
     #[derive(Clone, Copy)]
@@ -102,7 +102,7 @@ const STAR_SHIFT: f32 = -4.0;
 /// A conversation's status as painted, mid-animation or at rest.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Status {
-    /// The dot's kind: one that's shrinking away keeps its color.
+    /// The dot's kind. A dot that's shrinking away keeps its color.
     pub unread: Unread,
     /// The dot's scale (1 at rest).
     pub dot: f32,
@@ -128,7 +128,7 @@ impl Status {
     }
 
     /// The boxes it shows (the dot's and the star's 15px boxes, hanging off `origin`), which is
-    /// where its tooltip's hover is (the status is a 0×0 box over them): `None` with neither.
+    /// where its tooltip's hover is (the status is a 0×0 box over them), or `None` with neither.
     pub fn rect(&self, origin: Pos2) -> Option<Rect> {
         let dot = (self.unread != Unread::No)
             .then(|| Rect::from_min_size(origin + vec2(-20.0, 0.0), Vec2::splat(FRAME)));
@@ -145,8 +145,8 @@ impl Status {
     }
 }
 
-/// The status of the conversation shown under `id`, which is now `unread` and `starred`: what
-/// changed while it showed animates; shown afresh, it rests.
+/// The status of the conversation shown under `id`, which is now `unread` and `starred`. What
+/// changed while it showed animates, and a status shown afresh rests.
 pub fn animated_status(ctx: &Context, id: Id, unread: Unread, starred: bool) -> Status {
     #[derive(Clone, Copy)]
     struct Seen {
@@ -201,7 +201,7 @@ pub fn animated_status(ctx: &Context, id: Id, unread: Unread, starred: bool) -> 
     };
     status.star_shift = from + (to - from) * POP.at(progress);
     if unread == Unread::No {
-        // Shrinking away, then gone (at 725ms; it's at scale 0 by then).
+        // Shrinking away, then gone (at 725ms, by when it's at scale 0).
         if progress < 1.0 {
             status.unread = kind;
             status.dot = 1.0 - SHRINK.at(progress);
@@ -223,8 +223,8 @@ pub enum Unread {
     Reminder,
 }
 
-/// Paints the unread dot and the star whose boxes hang off `origin` (the status's position): 6.6px
-/// dots in 15px boxes. The star's sprite rests on a frame that is the same dot in gold, 3.5px
+/// Paints the unread dot and the star whose boxes hang off `origin` (the status's position), as
+/// 6.6px dots in 15px boxes. The star's sprite rests on a frame that is the same dot in gold, 3.5px
 /// further left in its box (measured), painted over the unread dot.
 pub fn paint_thread_status(painter: &Painter, origin: Pos2, unread: Unread, star: Star) {
     paint_status(
@@ -291,7 +291,7 @@ pub fn paint_failed_status(painter: &Painter, origin: Pos2) {
 }
 
 /// Paints frame `at` of the star's sprite in `rect`, its 15px box. Each frame is an image of its
-/// own: the whole strip is wider than a texture may be.
+/// own, because the whole strip is wider than a texture may be.
 fn paint_sprite_frame(painter: &Painter, rect: Rect, at: usize) {
     let ctx = painter.ctx();
     let left = at as f32 * FRAME;
@@ -414,7 +414,7 @@ mod tests {
         assert_eq!(frame(false, 1.352), Star::Frame(51));
         assert_eq!(frame(false, 1.8), Star::None);
         assert_eq!(frame(true, 2.0), Star::Frame(0), "starred again");
-        // Not shown for a frame (scrolled off, not the cursor): shown again, it rests.
+        // Not shown for a frame (scrolled off, not the cursor), so when it's shown again it rests.
         ctx.run_ui(
             egui::RawInput {
                 time: Some(2.1),

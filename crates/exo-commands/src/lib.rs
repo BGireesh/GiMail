@@ -9,11 +9,12 @@
 //!
 //! # The model
 //!
-//! There is no central keymap. Whatever is on screen registers [`Command`]s: a title makes one a
-//! palette row, keys make it a shortcut, and usually it's both, so a row and its shortcut can't
-//! drift apart. Each command is scoped to [focus regions](Region): it's live only while one of
-//! them has the keyboard (for rows: was active when the palette opened). Running a command hands
-//! back its action, a value of the app's own type `A`; the app applies it.
+//! There is no central keymap. Whatever is on screen registers [`Command`]s. A title makes a
+//! command a palette row, keys make it a shortcut, and usually it's both, so a row and its
+//! shortcut can't drift apart. Each command is scoped to [focus regions](Region), and it's live
+//! only while one of them has the keyboard. A palette row is live when one of them was active as
+//! the palette opened. Running a command hands back its action, a value of the app's own type
+//! `A`, and the app applies it.
 //!
 //! # Wiring it into the app
 //!
@@ -67,7 +68,7 @@
 //! sharing) are never registered. When several live commands bind the same key, the one registered
 //! last wins.
 //!
-//! Results go in the toast slot; its Undo also runs on `z` / ⌘Z while it shows:
+//! Results go in the toast slot. Its Undo also runs on `z` / ⌘Z while it shows:
 //!
 //! ```ignore
 //! commands.toast(Toast::new("Marked as Done.").undo(Action::Undo(token)));
@@ -123,7 +124,7 @@ enum Builtin {
     OpenShortcuts,
     ToggleShortcuts,
     CloseShortcuts,
-    /// Runs the current toast's action keyed so.
+    /// Runs the current toast's action for this key.
     ToastKey(ToastKey),
 }
 
@@ -134,11 +135,13 @@ pub struct Commands<A> {
     multiple_selected: bool,
     /// This frame's registrations, in order.
     registered: Vec<Command<Act<A>>>,
-    /// Last frame's, which this frame's keys go to: keys are dispatched before anything draws.
+    /// Last frame's registrations, which this frame's keys go to, because keys are dispatched
+    /// before anything draws.
     previous: Vec<Command<Act<A>>>,
     keyboard: Keyboard,
-    /// The repeat and release actions of the command whose key is held, from when it was pressed
-    /// (registrations change from frame to frame; a held key keeps doing what it started).
+    /// The repeat and release actions of the command whose key is held, as of when it was
+    /// pressed. Registrations change from frame to frame, but a held key keeps doing what it
+    /// started.
     held: Option<(Act<A>, Option<Act<A>>)>,
     palette: Palette<Act<A>>,
     shortcuts: Shortcuts,
@@ -172,13 +175,13 @@ impl<A: Clone + 'static> Commands<A> {
         }
     }
 
-    /// Sets the region the app's focus is in (the "primary" region: the palette and the shortcuts
-    /// sheet take the keyboard while open and give it back here).
+    /// Sets the region the app's focus is in, the "primary" region. The palette and the shortcuts
+    /// sheet take the keyboard while open and give it back here.
     pub fn set_region(&mut self, region: Region) {
         self.region = region;
     }
 
-    /// The region that has the keyboard: the palette's or the sheet's while one is open.
+    /// The region that has the keyboard, which is the palette's or the sheet's while one is open.
     pub fn region(&self) -> Region {
         if self.palette.is_open() {
             Region::Command
@@ -189,19 +192,19 @@ impl<A: Clone + 'static> Commands<A> {
         }
     }
 
-    /// Says whether several conversations are selected; the palette then lists only commands
-    /// marked [`Command::multiple`].
+    /// Says whether several conversations are selected. While they are, the palette lists only
+    /// commands marked [`Command::multiple`].
     pub fn set_multiple_selected(&mut self, multiple: bool) {
         self.multiple_selected = multiple;
     }
 
     /// Registers `command` for this frame. Call every frame the command's screen is on screen,
-    /// between [`Self::dispatch`] and [`Self::show`]; the next frame's keys go to it.
+    /// between [`Self::dispatch`] and [`Self::show`]. The next frame's keys go to it.
     pub fn add(&mut self, command: Command<A>) {
         self.registered.push(command.map(Act::App));
     }
 
-    /// Opens the main palette, or (with `initial`) opens it with that typed (`g l` opens it on
+    /// Opens the main palette. With `initial`, it opens with that text typed (`g l` opens it on
     /// `go to `).
     pub fn open_palette(&mut self, initial: Option<&str>) {
         self.palette.open_main(initial);
@@ -229,13 +232,14 @@ impl<A: Clone + 'static> Commands<A> {
         self.palette.is_sub_open(id)
     }
 
-    /// The open sub-palette's prompt and the titles it lists for what's typed, its footer's
-    /// last (for tests).
+    /// The open sub-palette's prompt and the titles it lists for what's typed, with the footer's
+    /// title last (for tests).
     pub fn sub_palette_rows(&self) -> Option<(String, Vec<String>)> {
         self.palette.sub_rows()
     }
 
-    /// The modifiers held as the palette row [`Self::show`] returned ran, by Enter or a click.
+    /// The modifiers that were held when the palette row returned by [`Self::show`] ran, by Enter
+    /// or a click.
     pub fn ran_with(&self) -> egui::Modifiers {
         self.ran_with
     }
@@ -288,8 +292,9 @@ impl<A: Clone + 'static> Commands<A> {
         self.feedback.toast_bottom = bottom;
     }
 
-    /// How far above the area's bottom edge the toast sits ([`set_toast_bottom`](Self::set_toast_bottom)):
-    /// where the notifications stacked over it start.
+    /// How far above the area's bottom edge the toast sits
+    /// ([`set_toast_bottom`](Self::set_toast_bottom)), which is where the notifications stacked
+    /// over it start.
     pub fn toast_bottom(&self) -> f32 {
         self.feedback.toast_bottom
     }
@@ -304,21 +309,23 @@ impl<A: Clone + 'static> Commands<A> {
         self.feedback.show_hint(hint, self.now);
     }
 
-    /// Whether the "Go to…" panel should be in the right pane: an unmodified `g` was pressed where
-    /// go-to sequences are bound, at least 200ms ago and less than 2.6s ago, and nothing since.
+    /// Whether the "Go to…" panel should be in the right pane. It should when an unmodified `g`
+    /// was pressed where go-to sequences are bound, at least 200ms ago and less than 2.6s ago, and
+    /// nothing since.
     pub fn go_menu_visible(&self) -> bool {
         self.keyboard.go_menu_visible(self.now)
     }
 
     /// Runs this frame's keys through the commands registered last frame and returns the app
-    /// actions they ran, in order. Call first every frame, before anything draws: a key a
-    /// command takes is removed from the frame's input with the text it types, so no widget
+    /// actions they ran, in order. Call it first every frame, before anything draws. A key that a
+    /// command takes is removed from the frame's input along with the text it types, so no widget
     /// also gets it (compose's `;` inserts a snippet, not a semicolon).
     ///
     /// # Panics
     ///
-    /// In debug builds, if a live command's key binding isn't valid Mousetrap notation (they're
-    /// literals, so a typo is a bug the first frame it's live shows); release builds skip it.
+    /// In debug builds, if a live command's key binding isn't valid notation. Bindings are
+    /// literals, so a typo is a bug that shows the first frame the command is live. Release
+    /// builds skip the binding.
     pub fn dispatch(&mut self, ctx: &Context) -> Vec<A> {
         let now = ctx.input(|input| input.time);
         self.now = now;
@@ -351,7 +358,7 @@ impl<A: Clone + 'static> Commands<A> {
             .collect();
         let keyboard = &mut self.keyboard;
         ctx.input_mut(|input| {
-            // egui-winit reports a key, then the text it types; a taken key's text goes with it.
+            // egui-winit reports a key, then the text it types. A taken key's text goes with it.
             let typed: Vec<Option<String>> = input
                 .events
                 .iter()
@@ -423,9 +430,9 @@ impl<A: Clone + 'static> Commands<A> {
     }
 
     /// Draws the overlays over `area` (the window below the tab bar) and returns the app
-    /// actions run from them (a palette row, a toast's action), in order. Call last every
-    /// frame, once every screen has registered its commands: the palette lists them, and the
-    /// next frame's keys go to them.
+    /// actions run from them (a palette row, a toast's action), in order. Call it last every
+    /// frame, once every screen has registered its commands, because the palette lists them and
+    /// the next frame's keys go to them.
     pub fn show(&mut self, ctx: &Context, area: Rect) -> Vec<A> {
         self.now = ctx.input(|input| input.time);
         self.register_builtins();
@@ -511,8 +518,8 @@ impl<A: Clone + 'static> Commands<A> {
     }
 }
 
-/// `command`'s key bindings for `os`. An invalid one is a typo in a literal: a panic in debug
-/// builds, skipped in release builds.
+/// `command`'s key bindings for `os`. An invalid one is a typo in a literal, so it panics in
+/// debug builds and is skipped in release builds.
 fn parse_keys<A>(command: &Command<A>, os: OperatingSystem) -> Vec<Binding> {
     command
         .keys

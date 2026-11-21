@@ -6,8 +6,8 @@
 //!     --mock http://127.0.0.1:8791 --thread 1a1e9b426200015e --out body.png
 //! ```
 //!
-//! Remote images load with reqwest and inline (`cid:`) images from the message's attachments;
-//! the PNG is painted once everything has arrived.
+//! Remote images load with reqwest and inline (`cid:`) images from the message's attachments.
+//! The PNG is painted once everything has arrived.
 
 use std::{
     collections::HashMap,
@@ -174,7 +174,7 @@ fn main() -> anyhow::Result<()> {
         width: view.content_width(),
         phase: [args.phase_x, 0.0],
     };
-    // The message card: `--origin-color-background-elevated-default`.
+    // The message card's background.
     let image = view.paint(
         region,
         if args.dark {

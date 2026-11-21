@@ -1,12 +1,12 @@
-//! HTML in and out: a draft body loaded and saved as Squire does it, and the paste cleanup.
+//! HTML in and out: a draft body loaded and saved, and the paste cleanup.
 //!
-//! [`write`] produces what Chromium's `innerHTML` gives for the DOM Squire would hold: block
+//! [`write`] produces what Chromium's `innerHTML` gives for the DOM the document stands for: block
 //! elements with their attributes, inline elements nested as recorded, `<br>` in empty lines,
 //! and spaces as Chromium's editing leaves them (`&nbsp;` where a plain space would collapse).
 //! [`parse`] reads that back exactly, and reads foreign HTML (Gmail drafts, quoted replies,
-//! signatures) the way Squire keeps it: unknown structure as containers, text directly inside a
-//! container as a line of its own. Reading doesn't sanitize: the editor runs what it loads or
-//! pastes through `exo_mail::sanitize_fragment` first.
+//! signatures) with unknown structure as containers and text directly inside a container as a
+//! line of its own. Reading doesn't sanitize, so the editor runs what it loads or pastes through
+//! `exo_mail::sanitize_fragment` first.
 
 use html5ever::{
     parse_document,
@@ -17,7 +17,7 @@ use markup5ever_rcdom::{Handle, NodeData, RcDom, SerializableHandle};
 
 use crate::model::{Block, Container, Content, Document, Element, Piece, Run};
 
-/// Elements laid out as blocks (Squire's blocks and containers, plus the HTML block-level
+/// Elements laid out as blocks (the editor's blocks and containers, plus the HTML block-level
 /// elements pasted mail uses).
 const BLOCK_TAGS: [&str; 33] = [
     "address",
@@ -56,7 +56,7 @@ const BLOCK_TAGS: [&str; 33] = [
 ];
 /// Kept whole, as markup the editor doesn't edit inside.
 const OPAQUE_TAGS: [&str; 1] = ["table"];
-/// Left out with their contents: what Squire's clean-up drops, foreign content (SVG, MathML)
+/// Left out with their contents: what the editor's clean-up drops, foreign content (SVG, MathML)
 /// the editor can't show, and what runs or embeds other content, in case unsanitized markup
 /// gets here.
 const DROPPED_TAGS: [&str; 21] = [
@@ -82,11 +82,11 @@ const DROPPED_TAGS: [&str; 21] = [
     "title",
     "xmp",
 ];
-/// How deep elements nest: Chromium's parser (`kMaximumHTMLParserDOMTreeDepth`) adds deeper ones
-/// as siblings, so Squire never holds more. It also bounds the reader's recursion.
+/// How deep elements nest. Chromium's parser (`kMaximumHTMLParserDOMTreeDepth`) adds deeper ones
+/// as siblings, so a loaded body never nests deeper. It also bounds the reader's recursion.
 const MAX_DEPTH: usize = 512;
 
-/// Reads a draft body as Squire holds it once loaded. It doesn't sanitize.
+/// Reads a draft body as the editor holds it once loaded. It doesn't sanitize.
 pub fn parse(html: &str) -> Document {
     let (_document, root) = fragment(html);
     let mut reader = Reader::default();
@@ -110,9 +110,9 @@ pub(crate) fn is_blockquoted(html: &str) -> bool {
     })
 }
 
-/// Reads pasted HTML with the paste cleanup: only colour, weight, style and decoration survive as
-/// inline styles, and the result is normalized the way Squire cleans what it inserts. It doesn't
-/// sanitize.
+/// Reads pasted HTML with the paste cleanup. Only colour, weight, style and decoration survive as
+/// inline styles, and the result is normalized the way the editor cleans what it inserts. It
+/// doesn't sanitize.
 pub(crate) fn parse_paste(html: &str) -> Document {
     let (_document, root) = fragment(html);
     let mut reader = Reader {
@@ -124,8 +124,8 @@ pub(crate) fn parse_paste(html: &str) -> Document {
 }
 
 /// Parses `html` as a page's body would be (a `div`'s `innerHTML` parses the same way for the
-/// content the editor holds): the document, which must outlive any use of the tree (dropping it
-/// empties every node), and its `<body>`.
+/// content the editor holds). Returns the document, which must outlive any use of the tree
+/// (dropping it empties every node), and its `<body>`.
 fn fragment(html: &str) -> (Handle, Handle) {
     let document = parse_document(RcDom::default(), Default::default())
         .one(html)
@@ -203,7 +203,8 @@ impl Reader {
         self.flush_loose(&mut inline, path);
     }
 
-    /// Text and inline elements directly inside a container: a line with no block element.
+    /// Text and inline elements directly inside a container, read as a line with no block
+    /// element.
     fn flush_loose(&mut self, inline: &mut Vec<Run>, path: &[Container]) {
         let runs = std::mem::take(inline);
         let mut block = Block::div(path.to_vec(), runs);
@@ -234,7 +235,7 @@ impl Reader {
         }
         let children = node.children.borrow();
         let has_blocks = children.iter().any(|child| matches!(&child.data, NodeData::Element { name, .. } if is_block(&name.local) || OPAQUE_TAGS.contains(&&*name.local)));
-        // `<div><hr></div>`: Squire's rule line.
+        // `<div><hr></div>`: the editor's rule line.
         let only_rule = children
             .iter()
             .filter(|child| !is_blank(child))
@@ -334,8 +335,8 @@ fn is_blank(node: &Handle) -> bool {
     matches!(&node.data, NodeData::Text { contents } if contents.borrow().chars().all(char::is_whitespace))
 }
 
-/// The element `node` is, with Squire's tag normalization (`strong` → `b`, `em` → `i`, `ins` →
-/// `u`, `strike` → `s`) and, for pastes, the attribute cleanup.
+/// The element `node` is, with the editor's tag normalization (`strong` → `b`, `em` → `i`, `ins`
+/// → `u`, `strike` → `s`) and, for pastes, the attribute cleanup.
 fn element_of(node: &Handle, paste: bool) -> Element {
     let NodeData::Element { name, attrs, .. } = &node.data else {
         return Element::new("");
@@ -359,7 +360,7 @@ fn element_of(node: &Handle, paste: bool) -> Element {
     element
 }
 
-/// The paste's attribute rules: theme classes and `tabindex` go; non-table elements
+/// The paste's attribute rules. Theme classes and `tabindex` go, and non-table elements
 /// keep only `color`, bold `font-weight`, `font-style` and `text-decoration` in their style.
 fn clean_pasted(element: &mut Element) {
     const TABLE: [&str; 8] = [
@@ -454,7 +455,8 @@ fn finish(block: &mut Block) -> bool {
     !runs.is_empty()
 }
 
-/// `white-space: pre-wrap` (a `pre`): white space stays, and each `\n` is a line break.
+/// Lays out `white-space: pre-wrap` (a `pre`), where white space stays and each `\n` is a line
+/// break.
 fn code_lines(runs: Vec<Run>) -> Vec<Run> {
     let mut out = Vec::with_capacity(runs.len());
     for run in runs {
@@ -477,8 +479,8 @@ fn code_lines(runs: Vec<Run>) -> Vec<Run> {
     out
 }
 
-/// `white-space: normal`: runs of spaces, tabs and newlines become one space, and none start or
-/// end a line. No-break spaces stay.
+/// Lays out `white-space: normal`, where runs of spaces, tabs and newlines become one space and
+/// none start or end a line. No-break spaces stay.
 fn collapse_whitespace(runs: &mut [Run]) {
     let mut at_line_start = true;
     for run in runs.iter_mut() {
@@ -581,7 +583,7 @@ pub fn as_document(html: &str) -> String {
 }
 
 /// [`as_document`] with its inline images pointed at their Content-IDs, as the quote appended to a
-/// sent message is: a `src-cid` image's `src` becomes `cid:{id}`, and it loses Exo's class.
+/// sent message is. A `src-cid` image's `src` becomes `cid:{id}`, and the image loses Exo's class.
 pub(crate) fn as_sent_document(html: &str) -> String {
     let dom = parse_document(RcDom::default(), Default::default()).one(html);
     let mut pending = vec![dom.document.clone()];
@@ -629,8 +631,8 @@ pub(crate) fn as_sent_document(html: &str) -> String {
     root.map_or_else(String::new, |root| outer_html(&root))
 }
 
-/// `html` (a kept table's markup) with each `<img>` handed to `image` to rewrite: what a kept
-/// table's drawing loads its images from (`view::table`).
+/// `html` (a kept table's markup) with each `<img>` handed to `image` to rewrite. A kept table's
+/// drawing loads its images from the result (`view::table`).
 pub(crate) fn map_images(html: &str, mut image: impl FnMut(&mut Element)) -> String {
     let (_document, body) = fragment(html);
     let mut pending = vec![body.clone()];
@@ -669,8 +671,8 @@ pub(crate) fn map_images(html: &str, mut image: impl FnMut(&mut Element)) -> Str
 }
 
 /// `html` (a kept table) inside the containers of `path`, outermost first, as the editor's DOM
-/// has it, for what it inherits from them (a quote's grey): their boxes (margins, padding, a
-/// quote's bar) are the editor's own layout's, so they're emptied here.
+/// has it, for what the table inherits from them (a quote's grey). The containers' boxes (margins,
+/// padding, a quote's bar) belong to the editor's own layout, so they're emptied here.
 pub(crate) fn in_containers(path: &[Container], html: &str) -> String {
     const EMPTY: &str =
         "margin:0 !important;padding:0 !important;border:0 !important;background:none !important";
@@ -692,14 +694,14 @@ pub(crate) fn in_containers(path: &[Container], html: &str) -> String {
 
 // Writing
 
-/// Writes `doc` as Squire would save it: the draft body.
+/// Writes `doc` as the draft body.
 pub fn write(doc: &Document) -> String {
     let mut out = String::new();
     write_blocks(&doc.blocks, &mut out);
     out
 }
 
-/// Writes `blocks` in their containers: a container opens before its first block and closes
+/// Writes `blocks` in their containers. A container opens before its first block and closes
 /// after its last. Iterative, so editing can nest containers as deep as it likes.
 pub(crate) fn write_blocks(blocks: &[Block], out: &mut String) {
     let mut open: Vec<&Container> = Vec::new();
@@ -800,10 +802,10 @@ pub(crate) fn write_runs(runs: &[Run], code: bool, out: &mut String) {
     }
 }
 
-/// For each position of `runs`, whether a space there is written as `&nbsp;`: what Chromium's
-/// editing leaves for typed spaces. A lone space between words stays a space; longer runs
-/// alternate starting with a no-break space; a run at the start or end of a line starts or ends
-/// with one.
+/// For each position of `runs`, whether a space there is written as `&nbsp;`, as Chromium's
+/// editing leaves typed spaces. A lone space between words stays a space. Longer runs alternate,
+/// starting with a no-break space, and a run at the start or end of a line starts or ends with
+/// one.
 pub(crate) fn space_kinds(runs: &[Run]) -> Vec<bool> {
     let chars: Vec<Option<char>> = runs
         .iter()

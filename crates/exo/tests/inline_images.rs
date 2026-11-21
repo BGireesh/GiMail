@@ -20,7 +20,7 @@ const COMMAND: Modifiers = Modifiers::MAC_CMD.plus(Modifiers::COMMAND);
 /// The first conversation, which Enter opens.
 const REPLY: &str = "Re: Design crit moved to 3pm";
 
-/// An 800×500 PNG at 144 dpi: a Retina screenshot, 400×250 at Best Fit.
+/// An 800×500 PNG at 144 dpi, like a Retina screenshot, which is 400×250 at Best Fit.
 fn screenshot() -> Vec<u8> {
     let image = image::RgbaImage::from_pixel(800, 500, image::Rgba([40, 90, 200, 255]));
     let mut png = Vec::new();
@@ -160,7 +160,7 @@ fn a_pasted_screenshot_goes_in_the_body_and_out_by_content_id() {
 
 #[test]
 fn command_v_alone_pastes_a_screenshot() {
-    // A clipboard holding only an image gives egui-winit no text, so it sends no paste: the ⌘V
+    // A clipboard holding only an image gives egui-winit no text, so it sends no paste. The ⌘V
     // key is all that comes, from the keyboard or Edit ▸ Paste.
     let mut app = start("images-paste-key");
     app.key(Key::Enter);
@@ -204,7 +204,7 @@ fn one_dropped_image_goes_in_the_body_and_several_files_go_on_the_draft() {
         }
         app.harness.run_steps(2);
     };
-    // Both before the draft's first save: after it, one with files waits out its pace.
+    // Both before the draft's first save. After it, a draft with files waits out its pace.
     drop(&mut app, &[&photo]);
     let cid = body_cid(&app);
     drop(&mut app, &[&photo, &notes]);
@@ -238,7 +238,7 @@ fn undoing_an_image_leaves_it_out_of_what_goes_to_gmail() {
         .push(Event::Paste(String::new()));
     app.harness.run_steps(2);
     let cid = body_cid(&app);
-    // Before the draft's first save: after it, a draft with files waits out its pace.
+    // Before the draft's first save. After it, a draft with files waits out its pace.
     app.press(Key::Z, COMMAND);
     assert!(
         !app.mail().compose_body().expect("a draft").contains("<img"),
@@ -265,8 +265,8 @@ impl egui::DroppedFile for Dropped {
     }
 }
 
-/// In Gmail web, a reply to the first conversation with `html` and `parts` (inline images),
-/// synced and the conversation opened.
+/// Writes a reply to the first conversation in Gmail web, with `html` and `parts` (inline
+/// images), then syncs and opens the conversation.
 fn open_gmail_web_draft(app: &mut Fixture, html: &str, parts: Vec<gmail::mime::Attachment>) {
     let thread = app.mail().inbox().threads()[0].id.clone();
     let gmail = app.gmail();
@@ -313,7 +313,7 @@ fn a_draft_written_in_gmail_shows_its_image_and_keeps_it() {
         "<div>Here's the chart:<br><img src=\"cid:chart@brightmoor\" width=\"200\" height=\"125\"></div>",
         vec![chart],
     );
-    // R takes the draft up; its image loads from the Gmail message it's in.
+    // R takes the draft up, and its image loads from the Gmail message it's in.
     app.key(Key::R);
     app.wait(1.0);
     assert!(
@@ -405,7 +405,7 @@ fn a_drafts_remote_images_follow_the_images_setting() {
             server.paths()
         );
         if !loads {
-            // ⌘K Show Images shows the focused draft's, for the session.
+            // ⌘K Show Images shows the focused draft's images, for the session.
             app.press(Key::K, COMMAND);
             app.type_text("show images");
             app.key(Key::Enter);

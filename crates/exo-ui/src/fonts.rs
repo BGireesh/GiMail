@@ -147,7 +147,7 @@ impl Face {
         FontFamily::Name(self.postscript_name().into())
     }
 
-    /// The face as `font-variant-ligatures: none` draws it: a copy whose ligature and contextual
+    /// The face as `font-variant-ligatures: none` draws it, a copy whose ligature and contextual
     /// alternate features are switched off (see [`without_ligatures`]).
     fn egui_family_without_ligatures(self) -> FontFamily {
         FontFamily::Name(format!("{}{NO_LIGATURES}", self.postscript_name()).into())
@@ -240,7 +240,7 @@ impl Font {
     }
 
     /// The same request with `font-variant-ligatures: none`, as inputs, textareas and the editor
-    /// have it: no `liga`, `clig`, `dlig` or `calt`, so Exo Sans's `fi` and `fl` don't join.
+    /// have it, with no `liga`, `clig`, `dlig` or `calt`, so Exo Sans's `fi` and `fl` don't join.
     pub const fn without_ligatures(self) -> Self {
         Self {
             ligatures: false,
@@ -349,7 +349,8 @@ impl FontBook {
                 (name.to_owned(), data),
             ] {
                 data.index = index;
-                // CoreText doesn't hint; egui's hinting snaps stems and visibly changes the shapes.
+                // CoreText doesn't hint, and egui's hinting snaps stems and visibly changes the
+                // shapes.
                 data.tweak.hinting = Some(false);
                 definitions.font_data.insert(key, Arc::new(data));
             }
@@ -418,7 +419,7 @@ const NO_LIGATURES: &str = "+noliga";
 const LIGATURE_FEATURES: [&[u8; 4]; 4] = [b"liga", b"clig", b"dlig", b"calt"];
 
 /// A copy of the font file `bytes` whose ligature features (`LIGATURE_FEATURES`) are renamed in
-/// its GSUB feature list, so a shaper no longer applies them; the glyphs and every other feature
+/// its GSUB feature list, so a shaper no longer applies them. The glyphs and every other feature
 /// (kerning included) stay. A file without GSUB is copied as is.
 fn without_ligatures(bytes: &[u8]) -> Vec<u8> {
     let mut out = bytes.to_vec();
@@ -430,7 +431,7 @@ fn without_ligatures(bytes: &[u8]) -> Vec<u8> {
     };
     let gsub = gsub.as_bytes();
     // The table's place in the file, then its header: versions, ScriptList and FeatureList
-    // offsets; the FeatureList is a count and 6-byte records whose first 4 bytes are the tag.
+    // offsets. The FeatureList is a count and 6-byte records whose first 4 bytes are the tag.
     let start = gsub.as_ptr() as usize - bytes.as_ptr() as usize;
     let read_u16 = |at: usize| {
         out.get(at..at + 2)
@@ -474,7 +475,7 @@ const BEFORE_EMOJI: [SystemFont; 2] = [
 /// Hiragino over STIX.
 const AFTER_EMOJI: [SystemFont; 11] = [
     // Chinese (and kana, in the same design as Hiragino Sans's). Chromium draws Chinese with
-    // PingFang SC, whose outlines are in Apple's `hvgl` table, which egui can't draw; this is
+    // PingFang SC, whose outlines are in Apple's `hvgl` table, which egui can't draw. This is
     // the system's other Simplified Chinese sans.
     [
         ("HiraginoSansGB-W3", HIRAGINO_GB),
@@ -589,8 +590,8 @@ fn instance_named(font: &FontRef<'_>, name: &str) -> Option<VariationCoords> {
 }
 
 /// A system font file, mapped once per process. Mapping instead of reading keeps the large ones
-/// (Apple SD Gothic Neo is 55 MB, Hiragino Sans GB 23 MB) out of memory: only the tables and glyphs in
-/// use are paged in.
+/// (Apple SD Gothic Neo is 55 MB, Hiragino Sans GB 23 MB) out of memory, since only the tables and
+/// glyphs in use are paged in.
 pub(crate) fn mapped(path: &'static str) -> Option<&'static [u8]> {
     /// Each file's bytes, or `None` where it's missing.
     type Files = HashMap<&'static str, Option<&'static [u8]>>;
@@ -618,8 +619,8 @@ fn measure(name: &'static str, bytes: &[u8], index: u32) -> Result<VerticalMetri
     let ascent = f32::from(hhea.ascender().to_i16()) / units_per_em;
     let descent = -f32::from(hhea.descender().to_i16()) / units_per_em;
     // Blink on macOS gives Courier and Helvetica (as Times) 15% more ascent, to match the
-    // metrics of their Windows counterparts (`SimpleFontData::PlatformInit`): Courier's 12px
-    // line is 14px, the baseline 11px down.
+    // metrics of their Windows counterparts (`SimpleFontData::PlatformInit`), so Courier's 12px
+    // line is 14px, with the baseline 11px down.
     let ascent = if [Face::Courier, Face::Helvetica]
         .iter()
         .any(|face| face.postscript_name() == name)

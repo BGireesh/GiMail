@@ -1,6 +1,7 @@
-//! Achievements, all counted on this Mac: conversations marked done, messages sent, Get Me To
-//! Zero's clearing and Inbox Zero's days and weekly streak; the popups when a count reaches a
-//! level, the streak's `Week N` animation and the Achievements dialog.
+//! Achievements, all counted on this Mac: conversations marked done, messages sent, conversations
+//! cleared with Get Me To Zero, and the days and weekly streak of Inbox Zero. The module also has
+//! the popups when a count reaches a level, the streak's `Week N` animation and the Achievements
+//! dialog.
 
 mod app;
 mod copy;
@@ -31,8 +32,8 @@ impl State {
         self.dialog
     }
 
-    /// The streak animation has the window: the header, Inbox Zero's button and the footer are
-    /// hidden.
+    /// Whether the streak animation has the window, which hides the header, Inbox Zero's button
+    /// and the footer.
     pub fn hides_chrome(&self, now: f64) -> bool {
         self.animation
             .is_some_and(|animation| animation.hides_chrome(now))
@@ -53,8 +54,8 @@ pub enum Action {
     Close,
 }
 
-/// Registers the palette's `Achievements` and its categories' rows, and while the dialog is open
-/// (`open`), its Escape.
+/// Registers the palette's `Achievements` row and a row for each category. While the dialog is
+/// open (`open`), it also registers the dialog's Escape.
 pub(crate) fn register(commands: &mut Commands<crate::commands::Action>, open: bool) {
     let act = crate::commands::Action::Achievements;
     let show = |view| act(Action::Show(view));
@@ -141,7 +142,7 @@ impl Kind {
         }
     }
 
-    /// The dialog's view a click on its popup opens.
+    /// The dialog's view that a click on its popup opens.
     pub fn view(self) -> View {
         match self {
             Self::MarkDone | Self::Gmtz => View::MarkDone,
@@ -208,7 +209,7 @@ impl View {
         }
     }
 
-    /// The `New` badges opening it clears.
+    /// The `New` badges leaving it clears.
     fn clears(self) -> &'static [Card] {
         match self {
             Self::Main => &[],
@@ -231,7 +232,7 @@ pub fn is_new(card: Card, seen: &Achievements) -> bool {
     seen.new_badges.contains(card.key())
 }
 
-/// A level reached: a popup.
+/// A level reached, which gets a popup.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Reached {
     pub kind: Kind,
@@ -247,12 +248,12 @@ struct Ladder {
     step: u64,
 }
 
-/// `dh`: conversations marked done.
+/// The levels of conversations marked done.
 const MARK_DONE: Ladder = Ladder {
     levels: &[50, 100, 300, 400, 1_000, 3_000, 5_000],
     step: 2_500,
 };
-/// `dm`: the Mark Done counts with a popup of their own.
+/// The Mark Done counts with a popup of their own.
 const MARK_DONE_FUN: &[u64] = &[
     150, 260, 300, 321, 451, 747, 1_111, 1_352, 1_440, 1_543, 1_618, 1_800, 1_984, 2_001, 2_222,
     2_600, 2_909, 3_000, 3_600, 4_047, 5_555, 7_777, 8_080, 10_000, 10_101, 11_000, 11_600, 14_000,
@@ -260,7 +261,7 @@ const MARK_DONE_FUN: &[u64] = &[
     60_000, 75_000, 80_000, 89_214, 99_999, 100_000, 102_015, 125_000, 148_157, 150_000, 175_000,
     186_282, 200_000, 209_117, 238_900, 250_000,
 ];
-/// `df`: messages sent.
+/// The levels of messages sent.
 const SENDS: Ladder = Ladder {
     levels: &[
         25, 100, 150, 500, 1_500, 3_000, 3_500, 4_000, 4_500, 5_500, 6_000, 6_500, 7_000, 8_000,
@@ -308,7 +309,7 @@ impl Ladder {
         self.levels[self.levels.len() - 1]
     }
 
-    /// `value` is a level, and the step to the next.
+    /// If `value` is a level, the step to the next one.
     fn level(&self, value: u64) -> Option<u64> {
         let index = self.levels.iter().position(|&level| level == value)?;
         Some(
@@ -328,8 +329,8 @@ impl Ladder {
     }
 }
 
-/// A level passed: marks the category's card `New`, then shows a popup unless this device has shown
-/// one for the count.
+/// For a level passed, marks the category's card `New`, then shows a popup unless this device has
+/// shown one for the count.
 fn passed(seen: &mut Achievements, kind: Kind, completed: u64, next: u64) -> Option<Reached> {
     if let Some(card) = kind.badge() {
         seen.new_badges.insert(card.key().to_owned());
@@ -358,7 +359,7 @@ pub fn mark_done(
     let before = statistics.archived_all_time;
     let after = before + count;
     statistics.archived_all_time = after;
-    // The highest milestone of its own crossed.
+    // The highest milestone with a popup of its own that this count crossed.
     let fun = MARK_DONE_FUN
         .iter()
         .rev()
@@ -453,7 +454,7 @@ pub fn cleared(
 /// What reaching Inbox Zero counted.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Hit {
-    /// The first Inbox Zero of the week: the streak moved on, and its animation plays.
+    /// The first Inbox Zero of the week, so the streak moved on and its animation plays.
     pub week: bool,
     /// A popup for a level reached.
     pub reached: Option<Reached>,
@@ -465,7 +466,7 @@ impl From<Hit> for Option<Reached> {
     }
 }
 
-/// Inbox Zero in Inbox or Important on `today`: the week's first moves the streak on, and each
+/// Inbox Zero in Inbox or Important on `today`. The week's first moves the streak on, and each
 /// day's first counts the day.
 pub fn hit_inbox_zero(statistics: &mut Statistics, seen: &mut Achievements, today: Date) -> Hit {
     let week = monday(today);
@@ -489,7 +490,7 @@ pub fn hit_inbox_zero(statistics: &mut Statistics, seen: &mut Achievements, toda
             .max(statistics.inbox_zero_streak_week_current);
         statistics.last_inbox_zero_week = Some(week.to_string());
     }
-    // The streak's level, else the days'.
+    // The streak's level if it reached one, else the days' level.
     let streak = u64::from(statistics.inbox_zero_streak_week_current);
     let days = u64::from(statistics.inbox_zero_days_all_time);
     let reached = match (
@@ -506,7 +507,8 @@ pub fn hit_inbox_zero(statistics: &mut Statistics, seen: &mut Achievements, toda
     }
 }
 
-/// Whether reaching Inbox Zero on `today` would count anything: a new week or a new day.
+/// Whether reaching Inbox Zero on `today` would count anything, as it does in a new week or on a
+/// new day.
 pub fn would_count(statistics: &Statistics, today: Date) -> bool {
     let parse = |day: &Option<String>| day.as_deref().and_then(|day| day.parse::<Date>().ok());
     parse(&statistics.last_inbox_zero_week).is_none_or(|last| last < monday(today))
@@ -580,7 +582,7 @@ pub fn title(reached: Reached) -> String {
     }
 }
 
-/// A popup's body, a line each; `pick` chooses from a pool, given its size.
+/// A popup's body, a line each. `pick` chooses from a pool, given the pool's size.
 pub fn body(reached: Reached, pick: impl FnOnce(usize) -> usize) -> Vec<String> {
     let next = grouped(reached.next);
     let special = |table: &[(u64, &'static [&'static str])]| {
@@ -643,7 +645,7 @@ pub fn body(reached: Reached, pick: impl FnOnce(usize) -> usize) -> Vec<String> 
     }
 }
 
-/// Under 1,000 as is, then `1k`, `1.5k`, `150k`, `1M`…, truncated.
+/// A value under 1,000 as is, and a larger one truncated: `1k`, `1.5k`, `150k`, `1M`…
 pub fn abbreviated(value: u64) -> String {
     if value < 1_000 {
         return value.to_string();

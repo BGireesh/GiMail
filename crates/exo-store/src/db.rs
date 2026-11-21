@@ -1,10 +1,10 @@
 //! The SQLite schema (toasty models), opening a database file, and the key-value table.
 //!
 //! Provider truth (`threads`, `messages`, `attachments`, `bodies`, `labels`) is kept apart
-//! from the local overlay (`outbox`); `list_ids` is materialized from both on every change, so
+//! from the local overlay (`outbox`). `list_ids` is materialized from both on every change, so
 //! list reads are a single indexed range scan.
 //!
-//! Changing a model here changes the schema: files written before it need a step in
+//! Changing a model here changes the schema, so files written before the change need a step in
 //! [`crate::migrations`], which says how.
 
 use std::path::{Path, PathBuf};
@@ -29,16 +29,17 @@ pub(crate) const IDENTITY: &str = "identity";
 pub(crate) const ALIASES: &str = "aliases";
 /// The draft messages Exo wrote, a JSON set in `kv`.
 pub(crate) const EXO_DRAFTS: &str = "exo_drafts";
-/// The held sends whose reminder is on their thread already, and which reminder, a JSON map in
-/// `kv`: Gmail sending them leaves the thread's reminder be.
+/// A JSON map in `kv` from each held send whose reminder is already on its thread to that
+/// reminder, so the thread's reminder is left alone when Gmail sends them.
 pub(crate) const GIVEN_REMINDERS: &str = "given_reminders";
-/// Set in `kv` by a new store's first sync until it has brought back the threads Gmail has under
-/// `[Exo]/Is Snoozed` that it has no reminder for ([`Store::return_orphaned_snoozes`]).
+/// Set in `kv` by a new store's first sync until the store has brought back the threads that
+/// Gmail has under `[Exo]/Is Snoozed` but that have no reminder
+/// ([`Store::return_orphaned_snoozes`]).
 ///
 /// [`Store::return_orphaned_snoozes`]: crate::Store::return_orphaned_snoozes
 pub(crate) const ORPHANED_SNOOZES: &str = "orphaned_snoozes";
-/// The newest message date, epoch milliseconds, of the conversations eviction let go of in `kv`:
-/// the pre-render fetches nothing that old back.
+/// The newest message date, in epoch milliseconds, of the conversations that eviction let go of,
+/// kept in `kv`. The pre-render fetches nothing that old back.
 pub(crate) const EVICTED_BEFORE: &str = "evicted_before";
 
 /// Thread-level provider facts.
@@ -47,7 +48,8 @@ pub(crate) const EVICTED_BEFORE: &str = "evicted_before";
 pub(crate) struct ThreadRow {
     #[key]
     pub id: String,
-    /// The newest `historyId` stored for this thread; a listed one above it means stale.
+    /// The newest `historyId` stored for this thread. A listed `historyId` above it means the
+    /// thread is stale.
     pub history_id: u64,
 }
 
@@ -60,7 +62,7 @@ pub(crate) struct MessageRow {
     #[index]
     pub thread_id: String,
     pub history_id: u64,
-    /// `internalDate`, epoch milliseconds: the message's date for sorting.
+    /// `internalDate` in epoch milliseconds, the message's date for sorting.
     pub internal_date: i64,
     pub label_ids: Vec<String>,
     pub subject: String,
@@ -122,14 +124,14 @@ pub(crate) struct BodyRow {
     pub message_id: String,
     pub html: Option<String>,
     pub text: Option<String>,
-    /// The text a reader sees, without the quoted reply and the signature the thread view hides
-    /// behind the `…`: what the search index holds. `None` until it's worked out
-    /// ([`crate::Store::index_text_with`]); the index has the whole text until then.
+    /// The text a reader sees, without the quoted reply and the signature that the thread view
+    /// hides behind the `…`. This is what the search index holds. `None` until it's worked out
+    /// ([`crate::Store::index_text_with`]), and until then the index has the whole text.
     pub visible: Option<String>,
 }
 
-/// A conversation with a body stored whose [`BodyRow::visible`] text isn't worked out yet,
-/// queued when the body is stored ([`crate::Store::index_text_with`]).
+/// A conversation that has a stored body whose [`BodyRow::visible`] text isn't worked out yet.
+/// It's queued when the body is stored ([`crate::Store::index_text_with`]).
 #[derive(Debug, toasty::Model)]
 #[table = "text_due"]
 pub(crate) struct TextDue {
@@ -161,8 +163,8 @@ pub(crate) struct ListEntry {
     pub sort: i64,
 }
 
-/// Who took part in each thread, for a contact's latest conversations: one row per address,
-/// lower-cased, and thread, with the thread's date. Materialized with `list_ids`.
+/// Who took part in each thread, for a contact's latest conversations. There's one row per thread
+/// and lower-cased address, with the thread's date. Materialized with `list_ids`.
 #[derive(Debug, toasty::Model)]
 #[table = "participants"]
 #[key(email, thread_id)]
@@ -182,15 +184,15 @@ pub(crate) struct ListCursor {
     pub id: String,
     /// The next `threads.list` page.
     pub page_token: Option<String>,
-    /// The oldest thread date the backfill has reached; only ever lowered.
+    /// The oldest thread date the backfill has reached. It's only ever lowered.
     pub min_sort: Option<i64>,
-    /// Gmail has no more pages: everything is covered.
+    /// Gmail has no more pages, so everything is covered.
     pub complete: bool,
     /// Threads listed so far, for the per-list cap.
     pub seen: u32,
-    /// The pass lists only threads with mail before this date, epoch milliseconds (Gmail's
-    /// `before:`): eviction moved the list's coverage forward to it, so the pass takes up where
-    /// what's stored ends rather than listing it all again.
+    /// The pass lists only threads with mail before this date, in epoch milliseconds (Gmail's
+    /// `before:`). Eviction moved the list's coverage forward to this date, so the pass takes up
+    /// where the stored threads end rather than listing them all again.
     pub before: Option<i64>,
 }
 
@@ -202,17 +204,17 @@ pub(crate) struct OutboxRow {
     #[key]
     #[auto]
     pub id: u64,
-    /// The thread id: one FIFO per thread.
+    /// The thread id, for one FIFO per thread.
     #[index]
     pub queue: String,
-    /// Coalescing key: a new row replaces an unstarted row with the same key at the queue's
+    /// Coalescing key. A new row replaces an unstarted row with the same key at the queue's
     /// tail.
     pub replace_key: Option<String>,
     #[column(type = text)]
     pub mutation: Json<crate::Mutation>,
     /// This row undoes `mutation`.
     pub undo: bool,
-    /// The Gmail calls still to make, in order; each is removed once Gmail acknowledges it.
+    /// The Gmail calls still to make, in order. Each is removed once Gmail acknowledges it.
     #[column(type = text)]
     pub steps: Json<Vec<crate::mutation::Step>>,
     /// Failures that count toward giving up (offline and auth failures don't).
@@ -239,13 +241,13 @@ pub(crate) struct DraftRow {
     pub message_id: Option<String>,
     #[column(type = text)]
     pub record: Json<crate::drafts::DraftRecord>,
-    /// The RFC 822 message the Gmail draft should hold: what sending sends.
+    /// The RFC 822 message that the Gmail draft should hold, which is what sending sends.
     pub raw: String,
     /// Bumped by every save.
     pub revision: u64,
     /// The revision Gmail has (0: none).
     pub pushed: u64,
-    /// Discarded: its Gmail draft is to be deleted, and the row with it.
+    /// Discarded, so its Gmail draft is to be deleted, and the row with it.
     pub discarded: bool,
     /// Held for sending until then (undo send).
     pub send_at: Option<jiff::Timestamp>,
@@ -259,8 +261,8 @@ pub(crate) struct DraftRow {
     pub failed_at: Option<jiff::Timestamp>,
 }
 
-/// A thread's reminder: when it brings the thread back and what cancels it. Not provider truth:
-/// Gmail only has the hidden labels.
+/// A thread's reminder: when it brings the thread back and what cancels it. Not provider truth,
+/// since Gmail only has the hidden labels.
 #[derive(Debug, Clone, toasty::Model)]
 #[table = "reminders"]
 pub(crate) struct ReminderRow {
@@ -270,11 +272,12 @@ pub(crate) struct ReminderRow {
     pub at: jiff::Timestamp,
     /// A reply doesn't cancel it (the picker's `regardless`).
     pub keep_on_reply: bool,
-    /// The thread's messages when it was set: a reply is a message not among them.
+    /// The thread's messages when it was set. A reply is a message not among them.
     pub message_ids: Vec<String>,
     /// When it was set.
     pub created_at: jiff::Timestamp,
-    /// When it brought the thread back, which then sorts there (the trigger message's date).
+    /// When it brought the thread back (the trigger message's date). The thread then sorts at
+    /// this time.
     pub fired_at: Option<jiff::Timestamp>,
     /// A reply cancelled it and the scheduler took its label off.
     pub aborted: bool,
@@ -303,7 +306,8 @@ pub(crate) struct CalendarRow {
 pub(crate) struct EventRow {
     pub calendar_id: String,
     pub id: String,
-    /// Start and end, epoch milliseconds; an all-day event's are its dates' UTC midnights.
+    /// Start and end, in epoch milliseconds. An all-day event's are the UTC midnights of its
+    /// dates.
     pub start: i64,
     pub end: i64,
     pub all_day: bool,
@@ -311,7 +315,7 @@ pub(crate) struct EventRow {
     pub event: Json<gmail::calendar::Event>,
 }
 
-/// A change to the calendar Calendar doesn't have yet. Not provider truth, like the outbox.
+/// A change to the calendar that Calendar doesn't have yet. Not provider truth, like the outbox.
 #[derive(Debug, toasty::Model)]
 #[table = "calendar_changes"]
 pub(crate) struct CalendarChangeRow {
@@ -321,7 +325,7 @@ pub(crate) struct CalendarChangeRow {
     pub id: u64,
     /// What the caller queued it under, to take it back with.
     pub token: u64,
-    /// The event and its series: one FIFO per event.
+    /// The event and its series, for one FIFO per event.
     pub queue: String,
     #[column(type = text)]
     pub change: Json<crate::CalendarChange>,
@@ -360,7 +364,7 @@ pub(crate) async fn open(path: &Path) -> Result<Db> {
     }
     let mut db = connect(path).await?;
     migrations::migrate(&mut db, path).await?;
-    // Without it eviction only frees pages for the file to reuse: a file that can't be rebuilt
+    // Without it, eviction only frees pages for the file to reuse. A file that can't be rebuilt
     // now (a disk too full for the copy) opens anyway, and the next open tries again.
     if let Err(error) = crate::evict::reclaimable(&db).await {
         log::warn!("the store keeps the space eviction frees for now: {error}");
@@ -368,13 +372,13 @@ pub(crate) async fn open(path: &Path) -> Result<Db> {
     Ok(db)
 }
 
-/// Makes the database at `path` again, empty, keeping what Gmail doesn't have when the old one
-/// still reads: its settings, drafts and queued changes, in the columns both schemas have. What
-/// can't be kept is dropped, logged.
+/// Makes the database at `path` again, empty. When the old one still reads, it keeps what Gmail
+/// doesn't have: its settings, drafts and queued changes, in the columns both schemas have. What
+/// can't be kept is dropped and logged.
 pub(crate) async fn clear(path: &Path) -> Result<()> {
     let old = PathBuf::from(format!("{}.cleared", path.display()));
     if old.exists() {
-        // A clear that stopped halfway: its old file still holds what to keep.
+        // A clear stopped halfway, and its old file still holds what to keep.
         remove(path)?;
     } else {
         for suffix in FILES {
@@ -402,9 +406,9 @@ pub(crate) async fn clear(path: &Path) -> Result<()> {
     remove(&old)
 }
 
-/// What Clear Cache and Restart copies from the old database: what Gmail doesn't have. The
-/// settings, the drafts (held and scheduled sends among them), the queued changes, the
-/// reminders' schedule and the calendar's queued changes. `kept_or_refilled` in
+/// What Clear Cache and Restart copies from the old database, which is what Gmail doesn't have: the
+/// settings, the drafts (held and scheduled sends among them), the queued changes, the reminders'
+/// schedule and the calendar's queued changes. `every_table_is_kept_or_refilled` in
 /// `tests/clear_cache.rs` lists the rest.
 const KEPT_TABLES: [&str; 5] = [
     "settings",
@@ -552,12 +556,12 @@ pub(crate) async fn kv_set<T: Serialize>(
     Ok(())
 }
 
-/// The lowest list date `list` may show without a gap: as far back as the list's own backfill or
-/// All Mail's reaches, whichever is further. `i64::MIN` once either is complete, since then every
-/// thread is stored; `None` before either has started. A split only ever holds inbox threads, so
-/// the Inbox's backfill covers it too.
+/// The lowest list date `list` may show without a gap, which is as far back as the list's own
+/// backfill or All Mail's reaches, whichever is further. `i64::MIN` once either is complete, since
+/// then every thread is stored, and `None` before either has started. A split only ever holds
+/// inbox threads, so the Inbox's backfill covers it too.
 pub(crate) async fn coverage(exec: &mut dyn Executor, list: &ListId) -> Result<Option<i64>> {
-    // Every scheduled send and reminder is Exo's own, so stored.
+    // Every scheduled send and reminder is Exo's own, so it's stored.
     if matches!(list, ListId::Scheduled | ListId::Reminders) {
         return Ok(Some(i64::MIN));
     }

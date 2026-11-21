@@ -1,6 +1,6 @@
-//! Inbox Zero's button: `You've hit Inbox Zero!`, or the weekly streak, white over the photo at the
-//! bottom left; it opens the Inbox Zero achievements. The app paints the photo and hides the right
-//! pane.
+//! Inbox Zero's button, which says `You've hit Inbox Zero!` or the weekly streak in white over the
+//! photo at the bottom left, and opens the Inbox Zero achievements. The app paints the photo and
+//! hides the right pane.
 
 use egui::{CursorIcon, Rect, Sense, Ui, Vec2, pos2};
 use exo_ui::{Family, Font, Placement, TextStyle, motion, paint_icon};
@@ -28,7 +28,8 @@ pub(super) fn show(
     hidden: bool,
 ) -> bool {
     let id = ui.id().with("share-inbox-zero");
-    // Hidden, it's gone at once and comes back over 150ms (`ease`); and below 600px wide it's gone.
+    // Hidden, it's gone at once and comes back over 150ms (`ease`). At 600px wide or less, it's
+    // gone.
     let opacity = motion::transition_in(
         ui.ctx(),
         id.with("shown"),
@@ -39,8 +40,8 @@ pub(super) fn show(
     if hidden || ui.ctx().content_rect().width() <= 600.0 {
         return false;
     }
-    // The button's box: at the bottom, 6px up, `calc(3.5rem + 40px - 20px + 6px)` (70px at ≤1152px)
-    // from the window's edge, then the clickable's padding: `10px 18px 10px 20px`.
+    // The button's box sits at the bottom, 6px up and `calc(3.5rem + 40px - 20px + 6px)` (70px at
+    // ≤1152px) from the window's edge. Then comes the clickable's padding, `10px 18px 10px 20px`.
     let left = content.left() - 40.0 + if compact { 70.0 } else { 3.5 * rem + 26.0 } + 20.0;
     let top = content.bottom() - 6.0 - 10.0 - COPY.line_height;
     let text = copy(streak);
@@ -81,7 +82,7 @@ pub(super) fn show(
         size,
     ));
     paint_icon(ui, name, icon, color);
-    // `Achievements` and a 🎉 5px after it, above.
+    // A tooltip above, with `Achievements` and a 🎉 5px after it.
     exo_ui::KeyTooltip {
         text: "Achievements 🎉",
         keys: &[],

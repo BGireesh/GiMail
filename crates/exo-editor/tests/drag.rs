@@ -1,5 +1,5 @@
 //! Dragging the selection within the body, as Chromium does on a Mac, and across the editor's edge
-//! with the Mac's drag (`exo_ui::text_drag`, its bridge played here).
+//! with the Mac's drag (`exo_ui::text_drag`), with the tests standing in for its bridge.
 
 use egui::{Event, Id, Key, Modifiers, PointerButton, Pos2, Rect, UiBuilder, pos2, vec2};
 use egui_kittest::Harness;
@@ -19,7 +19,7 @@ struct State {
     over: Option<Over>,
     dropped: Option<Dropped>,
     ended: Option<(Id, bool)>,
-    /// What the editor left for it, the last frame anything was.
+    /// What the editor left for the bridge, from the last frame it left anything.
     report: Report,
 }
 
@@ -204,8 +204,8 @@ fn a_word_dropped_before_itself_and_into_another_line() {
     );
     assert_eq!(text(&harness), "gamma alpha beta");
     harness.run_steps(40);
-    // The second line's end: the selection the drop left is by characters, so nothing is put
-    // between.
+    // At the second line's end, nothing is put between, because the selection the drop left is by
+    // characters.
     drag(
         &mut harness,
         pos2(ORIGIN.x + 15.0, 30.0),
@@ -226,8 +226,8 @@ fn a_word_dropped_before_itself_and_into_another_line() {
 /// Off the editor, right of it.
 const OUTSIDE: Pos2 = pos2(ORIGIN.x + 340.0, 30.0);
 
-/// Double-clicks `alpha` and drags it out of the editor, the button still down: the editor's id,
-/// from what it handed the bridge.
+/// Double-clicks `alpha` and drags it out of the editor with the button still down. Returns the
+/// editor's id, from what the editor handed the bridge.
 fn drag_alpha_out(harness: &mut Harness<'_, State>) -> Id {
     harness.state_mut().native = true;
     double_click(harness, ALPHA);
@@ -282,7 +282,7 @@ fn a_selection_copied_out_or_dropped_nowhere_stays() {
     button(&mut harness, OUTSIDE, false, Modifiers::NONE);
     assert_eq!(text(&harness), "alpha beta gamma");
     assert_eq!(harness.state().editor.selected_text(), "alpha");
-    // Over, a press puts the caret down again.
+    // With the drag over, a press puts the caret down again.
     button(&mut harness, END, true, Modifiers::NONE);
     button(&mut harness, END, false, Modifiers::NONE);
     assert!(harness.state().editor.selection().is_collapsed());
@@ -337,7 +337,7 @@ fn text_from_outside_goes_in_where_it_is_let_go_selected_in_one_undo_step() {
     assert_eq!(harness.state().editor.selected_text(), " delta");
     harness.state_mut().editor.undo();
     assert_eq!(text(&harness), "alpha beta gamma");
-    // HTML is cleaned as a paste's: its bold kept, its font not.
+    // HTML is cleaned as a paste is, so its bold is kept and its font isn't.
     harness.state_mut().dropped = Some(Dropped {
         at: ALPHA,
         html: Some("<span style=\"font-family: Times\"><b>bold</b></span>".into()),

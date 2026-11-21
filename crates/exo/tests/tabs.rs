@@ -1,7 +1,7 @@
-//! The window's tabs end to end, on one account: each keeps
-//! its own page, the shell's keys and the strip's buttons, ⌘⇧T, the 20-tab limit and coming back
-//! after a relaunch, and their links (`exo://…`): copied from the strip and with ⌃/, and opened.
-//! Tabs on two accounts are in `sign_in.rs`.
+//! The window's tabs end to end, on one account: each keeping its own page, the shell's keys and
+//! the strip's buttons, ⌘⇧T, the 20-tab limit and coming back after a relaunch, and the tabs'
+//! links (`exo://…`), copied from the strip and with ⌃/, and opened. Tabs on two accounts are in
+//! `sign_in.rs`.
 
 mod support;
 
@@ -23,7 +23,7 @@ fn open_thread(app: &Fixture) -> Option<String> {
     app.mail().thread().map(|thread| thread.id().to_owned())
 }
 
-/// Sent, with its first conversation open; returns the conversation.
+/// Goes to Sent and opens its first conversation. Returns that conversation.
 fn sent_conversation(app: &mut Fixture) -> String {
     app.key(Key::G);
     app.key(Key::T);
@@ -170,7 +170,7 @@ fn the_strip_opens_switches_and_closes_tabs() {
     assert_eq!(tabs(&app), (2, 1));
     app.key(Key::G);
     app.key(Key::T);
-    // Two pills share the 1130px between the margins: each 541px after its 8px margin.
+    // Two pills share the 1130px between the margins, so each is 541px after its 8px margin.
     app.click(pos2(83.0 + 270.0, 20.0));
     assert_eq!(tabs(&app), (2, 0));
     assert_ne!(*app.mail().list(), ListId::Sent);
@@ -225,7 +225,7 @@ fn leave_conversation(app: &mut Fixture) {
     assert!(open_thread(app).is_none());
 }
 
-/// What the last copy put on the clipboard, as text; its HTML is the same.
+/// What the last copy put on the clipboard, as text. Its HTML is the same.
 fn copied(app: &Fixture) -> Option<String> {
     let (html, text) = exo::clipboard::captured(&app.harness.ctx)?;
     assert_eq!(html, text, "`text/html` and `text/plain`");
@@ -238,7 +238,7 @@ fn the_strips_copy_button_copies_its_tabs_link() {
     exo::clipboard::capture(&app.harness.ctx);
     let opened = sent_conversation(&mut app);
     app.press(Key::T, COMMAND);
-    // The first pill's copy button, left of its ×: 31px in from its right edge at 624.
+    // The first pill's copy button, left of its ×, 31px in from the pill's right edge at 624.
     app.click(pos2(624.0 - 31.0, 20.0));
     assert_eq!(
         copied(&app),

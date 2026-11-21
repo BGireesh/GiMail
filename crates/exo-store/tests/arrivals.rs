@@ -1,5 +1,5 @@
-//! New mail (`SyncReport::arrived`): what a round of history brought that the store didn't
-//! have, and none from the first sync or a backfill.
+//! New mail (`SyncReport::arrived`) is what a round of history brought that the store didn't
+//! have. The first sync and backfills bring none.
 
 mod support;
 

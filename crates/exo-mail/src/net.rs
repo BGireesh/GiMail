@@ -21,7 +21,7 @@ pub(crate) type MayAnimate = Arc<Mutex<Vec<(String, Arc<[u8]>)>>>;
 /// [`ViewOptions::block_remote_content`](crate::ViewOptions::block_remote_content) only `cid:`
 /// URLs do.
 ///
-/// Implementations start the load and return; call [`Done::finish`] with the bytes from any
+/// Implementations start the load and return. Call [`Done::finish`] with the bytes from any
 /// thread when they arrive (drop it on failure), then [`BodyView::poll`](crate::BodyView::poll)
 /// on the UI thread to lay out with them.
 pub trait Fetch: Send + Sync + 'static {
@@ -38,7 +38,7 @@ pub struct Done {
 }
 
 impl Done {
-    /// A completion nobody waits for: what arrives is dropped.
+    /// A completion nobody waits for, so what arrives is dropped.
     pub(crate) fn ignored(url: &str) -> Self {
         Self {
             url: url.to_owned(),
@@ -48,7 +48,7 @@ impl Done {
         }
     }
 
-    /// Hands the loaded bytes to the body that asked for them; images are decoded here, on the
+    /// Hands the loaded bytes to the body that asked for them. Images are decoded here, on the
     /// calling thread.
     pub fn finish(self, bytes: Vec<u8>) {
         note_animation(&self.may_animate, &self.url, &bytes);
@@ -77,7 +77,7 @@ fn note_animation(may_animate: &MayAnimate, url: &str, bytes: &[u8]) {
 /// Adapts a [`Fetch`] to Blitz, answering `data:` URLs itself.
 pub(crate) struct FetchProvider {
     fetch: Arc<dyn Fetch>,
-    /// Remote URLs go to `fetch`; without, only inline attachments do (remote content is
+    /// Remote URLs go to `fetch`. Without this, only inline attachments do (remote content is
     /// blocked).
     remote: bool,
     /// How many responses have been handed over, for [`BodyView::poll`](crate::BodyView::poll).
@@ -130,7 +130,7 @@ pub fn decode_data_url(url: &str) -> Option<Vec<u8>> {
             .chars()
             .filter(|c| !c.is_ascii_whitespace())
             .collect();
-        // Forgiving base64, as browsers decode `data:` URLs: padding may be left off.
+        // Forgiving base64, as browsers decode `data:` URLs, so padding may be left off.
         let engine = base64::engine::GeneralPurpose::new(
             &base64::alphabet::STANDARD,
             base64::engine::GeneralPurposeConfig::new()

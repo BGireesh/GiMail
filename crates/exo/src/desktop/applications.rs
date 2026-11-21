@@ -1,15 +1,15 @@
-//! Move to Applications: Exo.app launched from outside an Applications folder asks to move
-//! itself there before its window opens, and if so moves and opens again from there. Where it is
-//! can be changed, it asks once (`Move to Applications`, `Do Not Move`), and never again once
-//! declined; where it can't, it says it needs to be moved (`Move to Applications`, `Cancel`,
-//! which quits).
+//! Move to Applications. Exo.app launched from outside an Applications folder asks to move itself
+//! there before its window opens, and if the answer is yes, moves and opens again from there. When
+//! the app and its folder can be changed, it asks once (`Move to Applications`, `Do Not Move`) and
+//! never again once declined. When they can't, it says it needs to be moved (`Move to
+//! Applications`, or `Cancel`, which quits).
 //!
-//! An app downloaded from the internet and opened where it is runs from a read-only copy macOS
-//! makes of it (App Translocation): Exo looks past the copy to the app itself. Moving copies the
-//! app into `/Applications` (`~/Applications` when that isn't writable), replacing one there,
-//! takes the download quarantine off the copy (which would have macOS translocate it again: an
-//! app moved by anything but the Finder stays quarantined), puts the original in the Trash, and
-//! opens the copy once this Exo has quit.
+//! An app downloaded from the internet and opened where it is runs from a read-only copy that macOS
+//! makes of it (App Translocation), so Exo looks past the copy to the app itself. Moving copies the
+//! app into `/Applications` (`~/Applications` when that isn't writable), replacing an app of the
+//! same name there, and takes the download quarantine off the copy. The quarantine would have macOS
+//! translocate the copy again, because an app moved by anything but the Finder stays quarantined.
+//! Then moving puts the original in the Trash and opens the copy once this Exo has quit.
 
 use std::path::{Path, PathBuf};
 
@@ -28,21 +28,21 @@ struct Saved {
 pub enum Moved {
     /// Run from where Exo is.
     Stay,
-    /// Exo moved, and opens again from there once this one quits: quit now.
+    /// Exo moved, and opens again from there once this one quits, so quit now.
     Relaunching,
-    /// Cancelled where Exo can't run from: quit.
+    /// Cancelled where Exo can't run from, so quit.
     Quit,
 }
 
-/// Where Exo.app is, the original when macOS runs a translocated copy, and whether it can be
+/// Where Exo.app is (the original when macOS runs a translocated copy), and whether it can be
 /// changed there.
 struct Location {
     app: PathBuf,
     writable: bool,
 }
 
-/// Offers to move Exo.app into an Applications folder, as it launches from outside one: see the
-/// module docs. `state` is the state folder, which keeps a declined offer. A bare binary, or an
+/// Offers to move Exo.app into an Applications folder when it launches from outside one (see the
+/// module docs). `state` is the state folder, which keeps a declined offer. A bare binary, or an
 /// app already in an Applications folder, isn't asked about. Call on the main thread before the
 /// event loop starts.
 pub fn offer(state: &Path) -> Moved {
@@ -112,13 +112,13 @@ fn ask(state: &Path, location: &Location, home: &Path) -> Moved {
     }
 }
 
-/// The dialog: a question, its message `Move to Applications`.
+/// The dialog's question. Its message is `Move to Applications`.
 enum Question {
-    /// Where Exo can be changed: `detail`, `Move to Applications` (default) and `Do Not Move`
-    /// (Escape).
+    /// Where Exo can be changed, the dialog has `detail`, `Move to Applications` (default) and `Do
+    /// Not Move` (Escape).
     Offer { detail: String },
-    /// Where it can't: `Exo needs to be in the Applications folder to run.`, `Move to
-    /// Applications` and `Cancel`.
+    /// Where it can't, the dialog has `Exo needs to be in the Applications folder to run.`, `Move
+    /// to Applications` and `Cancel`.
     Require,
 }
 
@@ -127,7 +127,7 @@ fn in_applications(app: &Path, home: &Path) -> bool {
     app.starts_with("/Applications") || app.starts_with(home.join("Applications"))
 }
 
-/// The detail's second line: in Downloads, on the Desktop, or none.
+/// The detail's second line, which says Exo is in Downloads or on the Desktop, or nothing.
 fn where_it_is(app: &Path, home: &Path) -> &'static str {
     if app.starts_with(home.join("Downloads")) {
         "\nIt is currently in your Downloads folder."
@@ -138,7 +138,7 @@ fn where_it_is(app: &Path, home: &Path) -> &'static str {
     }
 }
 
-/// Where Exo moves to: `/Applications` when it can be written to, else `~/Applications`.
+/// Where Exo moves to, which is `/Applications` when it can be written to, else `~/Applications`.
 fn destination(home: &Path) -> PathBuf {
     let system = Path::new("/Applications");
     if writable(system) {
@@ -154,13 +154,13 @@ fn writable(dir: &Path) -> bool {
     let Ok(path) = std::ffi::CString::new(dir.as_os_str().as_bytes()) else {
         return false;
     };
-    // SAFETY: a NUL-terminated path.
+    // SAFETY: `path` is a NUL-terminated path.
     unsafe { libc::access(path.as_ptr(), libc::W_OK) == 0 }
 }
 
-/// Copies `app` into `folder` (made if missing), replacing what's there by its name (into the
-/// Trash, by `trash`), takes the download quarantine off the copy, and with `remove` puts `app`
-/// in the Trash. Returns the copy.
+/// Copies `app` into `folder` (made if missing), takes the download quarantine off the copy, and
+/// with `remove` puts `app` in the Trash. Anything in `folder` with the app's name goes to the
+/// Trash first, by `trash`. Returns the copy.
 fn relocate(
     app: &Path,
     folder: &Path,
@@ -250,14 +250,15 @@ mod macos {
             translocated: *mut bool,
             error: *mut *const c_void,
         ) -> u8;
-        /// `SecTranslocateCreateOriginalPathForURL`: a +1 `CFURLRef`, or null.
+        /// `SecTranslocateCreateOriginalPathForURL`, which returns a +1 `CFURLRef`, or null.
         fn SecTranslocateCreateOriginalPathForURL(
             translocated: *const c_void,
             error: *mut *const c_void,
         ) -> *mut NSURL;
     }
 
-    /// Where Exo.app is: past its translocated copy, if macOS runs one. `None` for a bare binary.
+    /// Where Exo.app is, looking past its translocated copy if macOS runs one. `None` for a bare
+    /// binary.
     pub(super) fn location() -> Option<Location> {
         let bundle = NSBundle::mainBundle();
         bundle.bundleIdentifier()?;
@@ -268,18 +269,19 @@ mod macos {
         Some(Location { app, writable })
     }
 
-    /// The app a translocated copy at `url` was made from; `None` when `url` isn't one.
+    /// The app that a translocated copy at `url` was made from, or `None` when `url` isn't a copy.
     fn original(url: &NSURL) -> Option<Retained<NSURL>> {
         let url = std::ptr::from_ref(url).cast::<c_void>();
         let mut translocated = false;
-        // SAFETY: an `NSURL` is a `CFURLRef` (toll-free bridged); the errors aren't asked for.
+        // SAFETY: an `NSURL` is a `CFURLRef` (toll-free bridged), and the errors aren't asked for.
         let asked = unsafe {
             SecTranslocateIsTranslocatedURL(url, &mut translocated, std::ptr::null_mut())
         };
         if asked == 0 || !translocated {
             return None;
         }
-        // SAFETY: as above; the original comes back retained, which `from_raw` takes over.
+        // SAFETY: as above. The original comes back retained, and `from_raw` takes over that
+        // retain.
         unsafe {
             Retained::from_raw(SecTranslocateCreateOriginalPathForURL(
                 url,
@@ -288,13 +290,13 @@ mod macos {
         }
     }
 
-    /// Asks `question`, in front; whether to move.
+    /// Asks `question` with Exo in front, and returns whether to move.
     pub(super) fn confirm(question: &Question) -> bool {
         let Some(mtm) = MainThreadMarker::new() else {
             return false;
         };
         let app = NSApplication::sharedApplication(mtm);
-        // `app.focus()`. `activate` is macOS 14's, and Exo runs on 13.
+        // Exo comes to the front. `activate` is new in macOS 14, and Exo runs on 13.
         #[allow(deprecated)]
         app.activateIgnoringOtherApps(true);
         let alert = NSAlert::new(mtm);

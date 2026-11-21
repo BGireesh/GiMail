@@ -3,7 +3,7 @@
 //! and the theme the account's setting computes to.
 //!
 //! The menu lists only what works in Exo. Rows that need a server, AI, a team, billing, or a
-//! feature Exo doesn't have yet are left out; see [`menu`] for the full list.
+//! feature Exo doesn't have yet are left out. See [`menu`] for the full list.
 
 mod account_settings;
 mod auto_advance;
@@ -51,7 +51,7 @@ pub(crate) use split_inbox::{
     replace as replace_split, toggle as toggle_split,
 };
 
-/// The announcement the gear's dot is for: it shows until Settings is opened on this device.
+/// The announcement the gear's dot is for. The dot shows until Settings is opened on this device.
 const NEW_SETTING: &str = "2023-06-13-salespackUI";
 /// Where Escape closes a dialog.
 const DIALOG: &[Region] = &[Region::Dialog];
@@ -61,12 +61,12 @@ const ALERT: &[Region] = &[Region::Alert];
 /// What a settings command, row or button does.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Action {
-    /// Show the menu: the palette's `Settings`.
+    /// Show the menu, as the palette's `Settings` does.
     Show,
-    /// Show or hide the menu: the footer's gear.
+    /// Show or hide the menu, as the footer's gear does.
     Toggle,
-    /// Escape in the list or a thread while the menu shows: hides it, and the app runs the list's
-    /// or thread's own Escape too.
+    /// Escape in the list or a thread while the menu shows. It hides the menu, and the app runs
+    /// the list's or thread's own Escape too.
     Escape,
     /// Open a settings dialog.
     Open(Dialog),
@@ -78,10 +78,10 @@ pub enum Action {
     SetImages(RemoteContentBlocking),
     /// Open the shortcuts sheet.
     Shortcuts,
-    /// Add Split: the split library, or New Split Inbox without one; either
-    /// goes back to Split Inbox Settings.
+    /// Add Split, which opens the split library, or New Split Inbox without one. Either goes back
+    /// to Split Inbox Settings.
     NewSplit,
-    /// `Split Inbox Library`, from the menu or the palette: the same.
+    /// `Split Inbox Library`, from the menu or the palette, which does the same.
     SplitLibrary,
     /// Something in a split inbox dialog.
     Split(SplitEvent),
@@ -91,22 +91,23 @@ pub enum Action {
     Blocked(blocked_senders::Event),
     /// The menu's `Sign Out`, which the app carries out.
     SignOut,
-    /// The menu's `Achievements`, the app's dialog.
+    /// The menu's `Achievements`, which opens the app's dialog.
     Achievements,
     /// Something in the Accounts dialog, which the app carries out.
     Accounts(AccountEvent),
     /// A key in the Accounts dialog's color picker, which the app carries out.
     AccountPicker(exo_ui::PickerKey),
-    /// The menu's `Open at Login` row, Exo's own: turns the login item on or off.
+    /// The menu's `Open at Login` row, Exo's own, which turns the login item on or off.
     OpenAtLogin,
-    /// The menu's `Warn Before Quitting` row, Exo's own: turns the quit alert on or off.
+    /// The menu's `Warn Before Quitting` row, Exo's own, which turns the quit alert on or off.
     WarnBeforeQuitting,
-    /// The menu's `Calendar Accounts`, `Meeting Links` and `Timezones`,
-    /// which the app carries out: the menu goes and Calendar Settings opens.
+    /// The menu's `Calendar Accounts`, `Meeting Links` and `Timezones`, which the app carries out
+    /// by closing the menu and opening Calendar Settings.
     CalendarSettings,
-    /// Something in the Notifications dialog; `Enable a calendar` the app carries out.
+    /// Something in the Notifications dialog. The app carries out `Enable a calendar`.
     Notifications(NotificationsEvent),
-    /// `Enable/Disable Email Notifications` in the palette: the dialog's checkbox, with a hint.
+    /// `Enable/Disable Email Notifications` in the palette, which flips the dialog's checkbox and
+    /// shows a hint.
     ToggleEmailNotifications,
     /// Something in the Reminders dialog.
     Reminders(RemindersEvent),
@@ -146,7 +147,7 @@ pub enum Toggle {
     RsvpAndDone,
     /// `Show Sender Full Names` (`showSenderFullNames`).
     SenderFullNames,
-    /// `Quick Tips` (`quickTips.show`): the Quick Tips bar.
+    /// `Quick Tips` (`quickTips.show`), which shows the Quick Tips bar.
     QuickTips,
     /// `Autocomplete` (`typingAssistance/autocompleteEnabled`).
     Autocomplete,
@@ -201,7 +202,7 @@ pub enum Dialog {
 pub struct Settings {
     /// The menu is in the right pane.
     visible: bool,
-    /// Where the menu has scrolled; back to the top each time it opens.
+    /// Where the menu has scrolled, back to the top each time it opens.
     scroll: menu::Scroll,
     /// The dialog showing, or fading out.
     dialog: Option<Dialog>,
@@ -310,7 +311,7 @@ impl Settings {
         self.splits.library()
     }
 
-    /// Shows `Warn Before Quitting` for `warning`; with none, no row.
+    /// Shows `Warn Before Quitting` for `warning`, or no row without one.
     pub fn set_quit_warning(&mut self, warning: Option<crate::desktop::QuitWarning>) {
         self.quit_warning = warning;
     }
@@ -331,9 +332,6 @@ impl Settings {
         });
     }
 
-    /// Carries out `action`, with `current` the list on screen, and returns what it asks of the
-    /// What `key` does in the Accounts dialog's open color picker, `accounts` its rows: the
-    /// color an account changes to, if any.
     /// Split Inbox's sender picker, while a template's settings show it.
     pub(crate) fn sender_picker_mut(
         &mut self,
@@ -341,6 +339,8 @@ impl Settings {
         self.splits.sender_picker_mut()
     }
 
+    /// What `key` does in the Accounts dialog's open color picker, whose rows are `accounts`. It
+    /// gives the color an account changes to, if any.
     pub fn account_picker_key(
         &mut self,
         key: exo_ui::PickerKey,
@@ -354,6 +354,7 @@ impl Settings {
         self.splits.take_created_hidden()
     }
 
+    /// Carries out `action`, with `current` the list on screen, and returns what it asks of the
     /// app. `wrap` makes app actions of settings actions, for the toasts it shows.
     pub fn run<A: Clone + 'static>(
         &mut self,
@@ -379,7 +380,7 @@ impl Settings {
                     Dialog::Notifications => self.notifications.reset(),
                     Dialog::AutoAdvance => self.auto_advance = auto_advance::State::default(),
                     Dialog::Reminders => {
-                        // Opening the dialog stores the defaults when the account has none; an
+                        // Opening the dialog stores the defaults when the account has none. An
                         // `EXTERNAL` default trigger stays as it is.
                         let mut filled = account.settings().reminders.clone();
                         if filled.fill_defaults() {
@@ -578,7 +579,7 @@ impl Settings {
                     &blocked_senders::senders(&account.settings().blocked_senders),
                 );
                 if let Some(sender) = unblock {
-                    // Off the list (whatever its case), and its filter goes.
+                    // The sender comes off the list (whatever its case), and its filter goes.
                     account.update_settings(|settings| {
                         settings
                             .blocked_senders
@@ -617,9 +618,9 @@ impl Settings {
         )
     }
 
-    /// Downloads go to `choice`'s folder from now on, asking for one for
-    /// `Other…`; nothing changes for the folder already in use or a cancelled chooser. A folder
-    /// that can't be used says `Could not change download folder`.
+    /// Downloads go to `choice`'s folder from now on, asking for one for `Other…`. Nothing changes
+    /// for the folder already in use or a cancelled chooser. A folder that can't be used shows
+    /// `Could not change download folder`.
     fn choose_download_folder(&mut self, choice: downloads::Choice) {
         let folder = match choice {
             downloads::Choice::Downloads => crate::downloads::downloads_folder(),
@@ -650,8 +651,8 @@ impl Settings {
     }
 
     /// Registers Escape for hiding the menu while it shows, and the split dialogs' keys while one
-    /// is open. Call after the screens register their own Escape, which this shadows: Backspace,
-    /// which shares their action, leaves the menu.
+    /// is open. Call after the screens register their own Escape, which this shadows. Backspace,
+    /// which shares their action, leaves the menu as it is.
     pub fn register_escape<A: Clone + 'static>(
         &self,
         commands: &mut Commands<A>,
@@ -692,9 +693,9 @@ impl Settings {
             commands.add(key("REMINDERS_ENTER", Event::Enter, &["enter"]));
         }
         if self.dialog_open && self.dialog == Some(Dialog::AutoAdvance) {
-            // The dropdown has the keyboard from the start: the arrows
-            // open the list or move round it, Enter opens it or takes the row, and with it open,
-            // Tab takes the row and Escape closes it.
+            // The dropdown has the keyboard from the start. The arrows open the list or move round
+            // it, and Enter opens it or takes the row. With the list open, Tab takes the row and
+            // Escape closes the list.
             use auto_advance::Event;
             let key = |id: &'static str, event: Event, keys: &[&'static str]| {
                 Command::shortcut(id, wrap(Action::AutoAdvance(event)))
@@ -780,7 +781,7 @@ impl Settings {
                 ));
                 commands.add(key("DOWNLOADS_MENU_ESCAPE", Event::MenuClose, &["esc"]));
             } else {
-                // The dropdown has the keyboard: Enter or Space clicks it, an arrow opens it.
+                // The dropdown has the keyboard, so Enter or Space clicks it and an arrow opens it.
                 commands.add(key(
                     "DOWNLOADS_MENU_OPEN",
                     Event::ToggleMenu,
@@ -804,7 +805,7 @@ impl Settings {
             };
             commands.add(key("AUTO_BCC_TAB", Event::Tab(1), &["tab"]));
             commands.add(key("AUTO_BCC_SHIFT_TAB", Event::Tab(-1), &["shift+tab"]));
-            // Space types in the inputs; on a link or a trash can it's Enter.
+            // Space types in the inputs. On a link or a trash can it works as Enter.
             let activate: &[&str] = if self.auto_bcc.typing() {
                 &["enter"]
             } else {
@@ -979,8 +980,8 @@ impl Settings {
                 &["left", "shift+tab"],
                 ALERT,
             ));
-            // Escape runs the dialog's close (with the form's discard check); Enter its primary
-            // action.
+            // Escape runs the dialog's close (with the form's discard check), and Enter its
+            // primary action.
             commands.add(split(
                 "SPLIT_DIALOG_ESCAPE",
                 SplitEvent::Close,
@@ -998,7 +999,8 @@ impl Settings {
                     DIALOG,
                 ));
             }
-            // VIP's contact picker, over Enter and Escape while it takes them.
+            // The keys of VIP's contact picker, which win over Enter and Escape while the picker
+            // takes them.
             for (id, key, keys) in self.splits.picker_keys() {
                 commands.add(split(
                     id,
@@ -1039,7 +1041,7 @@ impl Settings {
     }
 
     /// Draws the dialog, if one is showing, over `area` (the window below the tab strip), and
-    /// returns what was clicked in it. `accounts` are the device's, for the Accounts dialog;
+    /// returns what was clicked in it. `accounts` are the device's, for the Accounts dialog, and
     /// `calendars` the account's, for Notifications.
     #[expect(
         clippy::too_many_arguments,
@@ -1294,7 +1296,7 @@ impl Settings {
     }
 }
 
-/// Flips `setting` in `account`'s settings; returns whether it's now on.
+/// Flips `setting` in `account`'s settings and returns whether it's now on.
 fn toggle(setting: Toggle, account: &mut Account) -> bool {
     let on = !toggled(setting, account.settings());
     account.update_settings(|settings| match setting {
@@ -1442,7 +1444,7 @@ pub fn register_typing<A: Clone + 'static>(
 /// Carries out what the Notifications dialog changed, in `account`'s settings.
 fn notify(event: NotificationsEvent, account: &mut Account) {
     match event {
-        // Off on this device; on clears the account's setting too.
+        // Turning it off applies to this device. Turning it on clears the account's setting too.
         NotificationsEvent::ToggleEmail => {
             let on = !account
                 .settings()
@@ -1479,7 +1481,7 @@ fn notify(event: NotificationsEvent, account: &mut Account) {
                 })
             });
         }
-        // The list's and the picker's own, or the app's (`Enable a calendar`).
+        // The list's and the picker's own events, or the app's (`Enable a calendar`).
         NotificationsEvent::ToggleMenu
         | NotificationsEvent::Highlight(_)
         | NotificationsEvent::Swatch(..)
@@ -1489,8 +1491,8 @@ fn notify(event: NotificationsEvent, account: &mut Account) {
     }
 }
 
-/// The calendar account calendar `id` is read through, whose settings it goes by (the mail
-/// account for one on no list).
+/// The calendar account that calendar `id` is read through, whose settings the calendar goes by.
+/// That's the mail account for a calendar on no list.
 fn calendar_holder(account: &Account, id: &str) -> String {
     let data = account.calendar().data();
     let listed = data
@@ -1518,7 +1520,7 @@ pub fn apply_theme(ctx: &Context, theme: Theme) {
     exo_ui::set_theme(ctx, computed(theme, ctx.system_theme()));
 }
 
-/// The theme `setting` draws with when the system appearance is `system`: Match System is Snow
+/// The theme `setting` draws with when the system appearance is `system`. Match System is Snow
 /// when the system doesn't say.
 pub fn computed(setting: Theme, system: Option<egui::Theme>) -> exo_ui::Theme {
     match setting {
@@ -1529,7 +1531,7 @@ pub fn computed(setting: Theme, system: Option<egui::Theme>) -> exo_ui::Theme {
 }
 
 /// Registers the settings commands for this frame, wrapping their actions with `wrap`.
-/// `theme` is the account's setting: each `Set Theme` row shows only when it would change it.
+/// `theme` is the account's setting, and each `Set Theme` row shows only when it would change it.
 /// Snow and Carbon are titled `Light` and `Dark`, with `Snow` and `Carbon` as aliases.
 /// `email_notifications` is whether they're on, which the toggle's title says.
 pub fn register<A: Clone + 'static>(
@@ -1645,7 +1647,7 @@ pub fn register<A: Clone + 'static>(
             "Auto Reminders",
         ]),
     );
-    // Its `score: 0.95` is a field the palette never reads: no default score.
+    // Its `score: 0.95` is a field the palette never reads, so it gets no default score.
     commands.add(
         gear(
             "ACCOUNT_SETTINGS",

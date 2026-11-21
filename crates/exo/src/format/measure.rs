@@ -1,9 +1,9 @@
 //! The text-width *estimate* and the "ideal" truncation, which together decide where list rows
 //! cut subjects, snippets and participant lists.
 //!
-//! Rendered text isn't measured for this: the estimate sums a fixed per-character table, and
-//! strings are cut at the cheapest nearby boundary. Both work in UTF-16 code units, like JavaScript
-//! strings, so an emoji counts as two characters of the default width.
+//! Rendered text isn't measured for this. The estimate sums a fixed per-character table, and
+//! strings are cut at the cheapest nearby boundary. Both work in UTF-16 code units, like
+//! JavaScript strings, so an emoji counts as two characters of the default width.
 
 use std::sync::LazyLock;
 
@@ -52,8 +52,8 @@ pub fn utf16_len(text: &str) -> usize {
     text.encode_utf16().count()
 }
 
-/// `text.substring(0, n)` / `text.substring(n)`, with `n` in UTF-16 units. A cut inside a
-/// surrogate pair moves before it (JavaScript would leave half an emoji).
+/// `text` split after its first `n` UTF-16 units, as JavaScript's `substring` splits it. A cut
+/// inside a surrogate pair moves before it (JavaScript would leave half an emoji).
 pub fn split_utf16(text: &str, n: usize) -> (&str, &str) {
     let mut units = 0;
     for (byte, c) in text.char_indices() {
@@ -65,7 +65,7 @@ pub fn split_utf16(text: &str, n: usize) -> (&str, &str) {
     (text, "")
 }
 
-/// `text.replace(/\s+/g, " ").trim()`.
+/// `text` with each run of JavaScript's whitespace made one space, and the ends trimmed.
 pub fn normalize_whitespace(text: &str) -> String {
     static SPACES: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(&format!("{JS_SPACE}+")).expect("valid regex"));
@@ -135,8 +135,8 @@ static BOUNDARIES: LazyLock<[Boundary; 5]> = LazyLock::new(|| {
     ]
 });
 
-/// The head of `text` cut at the cheapest boundary near `target`: each boundary kind's cost plus
-/// how far the cut lands from `target`.
+/// The head of `text`, cut at the cheapest boundary near `target`. A cut costs its boundary kind's
+/// cost plus how far it lands from `target`.
 fn split_ideally(text: &str, target: usize, strict: bool) -> String {
     let (window, _) = split_utf16(text, 2 * target);
     let mut best = f64::INFINITY;
@@ -197,7 +197,7 @@ fn js_split(text: &str, pattern: &Regex) -> Vec<String> {
         };
         let matched = captures.get(0).expect("group 0 always matches");
         if matched.end() == piece_start || matched.start() >= text.len() {
-            // An empty match where the last piece ended: try one character further.
+            // An empty match where the last piece ended, so try one character further.
             search_from = matched.start()
                 + text[matched.start()..]
                     .chars()

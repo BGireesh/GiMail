@@ -1,6 +1,6 @@
-//! The page a conversation prints from: HTML for the open thread under the print rules
-//! (`print.css`), each body in a shadow root of its own (`exo_mail::printable_body`), loading
-//! nothing but what the print view's handler answers.
+//! The page a conversation prints from. It's HTML for the open thread under the print rules
+//! (`print.css`), with each body in a shadow root of its own (`exo_mail::printable_body`), and it
+//! loads nothing but what the print view's handler answers.
 
 use std::fmt::Write as _;
 
@@ -13,15 +13,15 @@ const PRINT_CSS: &str = include_str!("print.css");
 
 /// The scheme Exo's own resources load from: `exo-print://font/<name>.ttf`.
 pub(super) const SCHEME: &str = "exo-print";
-/// Where a body's relative URLs resolve: on the remote scheme, on a reserved domain that the
-/// handler refuses (as `exo_mail`'s base does on screen).
+/// Where a body's relative URLs resolve, which is a reserved domain on the remote scheme that the
+/// handler refuses (as with `exo_mail`'s base on screen).
 pub(super) const BASE_URL: &str = "exo-https://exo.invalid/";
 
 /// Only what the print view's handler answers loads: fonts from Exo, a body's remote content
 /// through the guarded fetches, its inline attachments, and `data:` images. No scripts at all.
 const CONTENT_SECURITY_POLICY: &str = "default-src 'none'; img-src exo-https: exo-http: cid: data:; style-src 'unsafe-inline' exo-https: exo-http:; font-src exo-print: exo-https: exo-http: data:";
 
-/// The legacy icons the print rules show, each in the color its `[fill*=red]` rule prints.
+/// The legacy icons the printed page shows, each in the color it prints in.
 const PAPERCLIP: (&str, &str) = ("legacy/DEPRECATED_paperclip", "#000");
 const COLLAPSE: (&str, &str) = ("legacy/DEPRECATED_collapse", "rgba(0,0,0,0.7)");
 const PIXEL_BLOCKING: (&str, &str) = ("legacy/DEPRECATED_pixelBlocking", "rgba(0,0,0,0.45)");
@@ -50,7 +50,7 @@ pub(super) fn html(conversation: &Conversation) -> String {
          <meta http-equiv=\"x-dns-prefetch-control\" content=\"off\">\
          <title>{title}</title><style>{fonts}{PRINT_CSS}</style></head><body>",
         rem = page.rem(),
-        // To the hundredth: a float's last digits mean nothing to a layout.
+        // Rounded to the hundredth, since a float's last digits mean nothing to a layout.
         width = (page.width() * 100.0).round() / 100.0,
         title = text(&conversation.title),
         fonts = font_faces(),
@@ -206,8 +206,8 @@ fn header(html: &mut String, conversation: &Conversation) {
     html.push_str("</span></div></div>");
 }
 
-/// Shift-H's header: a row for each of From, To, Cc and Bcc, then the date (or status) and the
-/// chevron.
+/// The header that Shift-H shows, with a row for each of From, To, Cc and Bcc, then the date (or
+/// status) and the chevron.
 fn full_header(
     html: &mut String,
     rows: &[Row],

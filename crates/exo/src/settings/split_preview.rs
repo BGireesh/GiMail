@@ -1,6 +1,7 @@
-//! A split template's preview card: a white panel over the template's color with its name and
-//! icon and three rows of sample conversations, skeleton bars where a row has no text, all in
-//! Classic's grays (black at `.4`, skeletons `rgba(0, 0, 0, .12)`, row icons `.3`).
+//! A split template's preview card, a white panel over the template's color. It has the
+//! template's name and icon and three rows of sample conversations, with skeleton bars where a row
+//! has no text, all in Classic's grays (black at `.4`, skeletons `rgba(0, 0, 0, .12)`, row icons
+//! `.3`).
 
 use egui::{Color32, CornerRadius, Painter, Rect, Stroke, StrokeKind, Ui, pos2, vec2};
 use exo_store::{PreviewThread, Template};
@@ -113,7 +114,7 @@ pub(super) fn paint(ui: &Ui, rect: Rect, template: &Template, place: Place) {
         // In the settings, square corners.
         Place::Settings => CornerRadius::ZERO,
     };
-    // The background is the template's color at its own alpha; the panel is `#fff`.
+    // The background is the template's color at its own alpha. The panel is `#fff`.
     painter.rect_filled(rect, radius, color(template, true));
     let content = Rect::from_min_max(rect.min + vec2(12.0, 12.0), rect.max);
     painter.rect_filled(
@@ -126,12 +127,12 @@ pub(super) fn paint(ui: &Ui, rect: Rect, template: &Template, place: Place) {
         Color32::WHITE,
     );
 
-    // The header: the name, then 4px on its icon.
+    // The header has the name, then its icon 4px on.
     let left = content.left() + 20.0;
     let header = content.top() + 14.0;
     let icon = icon(template);
-    // With an icon the header's line grows to 14px: the 11px icon sits on the name's baseline,
-    // 2px above the name's own 12px line.
+    // With an icon the header's line grows to 14px, because the 11px icon sits on the name's
+    // baseline, 2px above the name's own 12px line.
     let name_top = if icon.is_some() { header + 2.0 } else { header };
     let name = HEADER.paint_line(&painter, pos2(left, name_top), &template.name, TEXT, None);
     if let Some((icon, brand)) = &icon {
@@ -150,7 +151,7 @@ pub(super) fn paint(ui: &Ui, rect: Rect, template: &Template, place: Place) {
             // A brand's logo at 65% opacity.
             paint_icon(ui, icon, at, Color32::WHITE.gamma_multiply(0.65));
         } else {
-            // The placeholder in the template's color; the rest (some carry a white backing
+            // The placeholder takes the template's color. The rest (some carry a white backing
             // square) keeps its own color.
             paint_icon_two_tone(ui, icon, at, tint, tint);
         }
@@ -174,7 +175,8 @@ pub(super) fn paint(ui: &Ui, rect: Rect, template: &Template, place: Place) {
             tint,
             reminders,
         );
-        // A label chip (`margin-top: 1px`) or an event's icon makes the row 9px; `row-gap: 9px`.
+        // A label chip (`margin-top: 1px`) or an event's icon makes the row 9px, and rows are 9px
+        // apart (`row-gap: 9px`).
         let tall = thread.is_some_and(|thread| {
             thread.label.is_some() || (thread.is_event && thread.subject.is_some())
         });
@@ -197,8 +199,8 @@ pub(super) fn paint(ui: &Ui, rect: Rect, template: &Template, place: Place) {
     );
 }
 
-/// A row 8px tall at `top`: the sender (or a skeleton bar) in a column at least 70px wide, 10px
-/// gap, then a label chip or shared icon, the subject (or a bar to the edge), an event's icon.
+/// A row 8px tall at `top`: the sender (or a skeleton bar) in a column at least 70px wide, a 10px
+/// gap, then a label chip or shared icon, the subject (or a bar to the edge), and an event's icon.
 #[expect(
     clippy::too_many_arguments,
     reason = "one row of the card, drawn from its layout"

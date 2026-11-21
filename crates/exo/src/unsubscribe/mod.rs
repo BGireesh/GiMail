@@ -1,6 +1,6 @@
-//! Unsubscribe: `⌘U` in the list or a thread, the palette's `Unsubscribe` and the thread header's
+//! Unsubscribe. `⌘U` in the list or a thread, the palette's `Unsubscribe` and the thread header's
 //! status all launch it. A conversation with nothing to unsubscribe from offers to block the sender
-//! instead; one from a sender who can be named opens the Unsubscribe picker; either way an alert
+//! instead. One from a sender who can be named opens the Unsubscribe picker. Either way, an alert
 //! asks first.
 //!
 //! How it unsubscribes ([`Target`]): a `mailto:` sends the request from your account
@@ -67,8 +67,8 @@ pub(crate) struct Plan {
 static IN_OR_LABEL: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)(^|\s)-?(in|label):").expect("valid regex"));
 
-/// The Unsubscribe picker for `unsubscribe`: no input; then `Block Domain: {domain}` unless the
-/// sender's domain is a webmail one or one of `own`.
+/// The Unsubscribe picker for `unsubscribe`, which has no input. After its three unsubscribe rows
+/// comes `Block Domain: {domain}`, unless the sender's domain is a webmail one or one of `own`.
 fn palette(unsubscribe: &Unsubscribe, own: &[String]) -> SubPalette<commands::Action> {
     let row = |id: &'static str, title: String, choice: Choice, icon: &'static str| {
         Command::new(
@@ -153,7 +153,7 @@ impl Mail {
     }
 
     /// Launches Unsubscribe on the one conversation actions apply to, once its messages are at
-    /// hand: the open thread's, or read from the store.
+    /// hand, either from the open thread or read from the store.
     fn launch_unsubscribe(&mut self) {
         let Some(id) = self.unsubscribe_thread() else {
             return;
@@ -184,8 +184,8 @@ impl Mail {
         }
     }
 
-    /// The account read `id`: if a launch asked for it and the conversation is still the one
-    /// actions apply to, the launch goes on.
+    /// Called when the account has read `id`. If a launch asked for it and the conversation is
+    /// still the one actions apply to, the launch goes on.
     pub(crate) fn unsubscribe_thread_read(
         &mut self,
         id: String,
@@ -206,10 +206,10 @@ impl Mail {
         }
     }
 
-    /// The picker for a sender with a plain address who isn't you; Unsubscribe's alert
-    /// straight away for anyone else; the offer to block when there's nothing to unsubscribe
-    /// from. Only a plain address names a sender, as the picker's other rows search for them
-    /// (`senders::is_plain_address`).
+    /// Opens the picker for a sender with a plain address who isn't you, Unsubscribe's alert
+    /// straight away for anyone else, or the offer to block when there's nothing to unsubscribe
+    /// from. Only a plain address names a sender, because the picker's other rows search by the
+    /// sender's address (`senders::is_plain_address`).
     fn unsubscribe_from(&mut self, thread: String, detail: Arc<ThreadDetail>) {
         let own = self.own_domains();
         let found = find(&detail, &own, |id| {
@@ -245,8 +245,8 @@ impl Mail {
                 .any(|alias| recipients::same_address(&alias.email, email))
     }
 
-    /// No unsubscribe link, so the offer to block the sender, unless there's none to block or it's
-    /// you.
+    /// With no unsubscribe link, offers to block the sender instead, unless there's no sender to
+    /// block or the sender is you.
     fn block_instead(&mut self, thread: String) {
         if let Some(sender) = self.actionable_sender() {
             self.pickers.confirm_block_instead(sender.email, thread);
@@ -282,8 +282,8 @@ impl Mail {
         self.pickers.confirm_unsubscribe(title, text, plan);
     }
 
-    /// `plan`'s alert said `Confirm`: it unsubscribes, says so unless the browser does it, and
-    /// for a bulk row moves on and Marks Done or Trashes all from the sender.
+    /// Called when `plan`'s alert said `Confirm`. It unsubscribes, says so unless the browser does
+    /// it, and for a bulk row moves on and Marks Done or Trashes all from the sender.
     pub(crate) fn unsubscribe_confirmed(&mut self, plan: Plan) {
         let Plan {
             thread,
@@ -346,8 +346,8 @@ impl Mail {
             ),
         };
         let query = scoped(query, &self.list);
-        // The loaded rows it's for, which show `Pending:` while it runs: the conversation, and
-        // the sender's others it would change.
+        // The loaded rows the bulk action is for, which show `Pending:` while it runs. These are
+        // the conversation and the sender's other conversations it would change.
         let sender = &unsubscribe.sender;
         let threads = self
             .inbox
@@ -363,7 +363,7 @@ impl Mail {
             .filter(|row| choice != Choice::MarkDone || !row.done)
             .map(|row| row.id.clone())
             .collect();
-        // Everything there is now.
+        // Everything the search matches now.
         let cutoff = ListCutoff {
             scope: Scope::Search(query.clone()),
             filter: None,
@@ -397,7 +397,8 @@ impl Mail {
             .toast(Toast::new(text).undo(commands::Action::Undo(token)));
     }
 
-    /// An undo ran: one of Unsubscribe's bulk actions says what's left (`Unsubscribed.`).
+    /// Called when an undo ran. Undoing one of Unsubscribe's bulk actions says what's left
+    /// (`Unsubscribed.`).
     pub(crate) fn unsubscribe_undone(&mut self, token: UndoToken) {
         if let Some(at) = self
             .unsubscribing
@@ -410,9 +411,10 @@ impl Mail {
         }
     }
 
-    /// Moves away from the conversation: the cursor moves one the way Auto Advance goes, or the
-    /// other way from the end; from a thread, that conversation opens, or the list shows when
-    /// there's none. With Auto Advance off the cursor stays and a thread goes back to the list.
+    /// Moves away from the conversation. The cursor moves one row the way Auto Advance goes, or the
+    /// other way from the end. From a thread, the conversation the cursor lands on opens, or the
+    /// list shows when there's none. With Auto Advance off the cursor stays and a thread goes back
+    /// to the list.
     fn move_away(&mut self) {
         let toward = self.account.settings().desktop_auto_advance.direction();
         let from = self.inbox.cursor().map(|row| row.id.clone());

@@ -1,5 +1,6 @@
 //! The system clipboard for copies egui's plain-text clipboard can't make (HTML, a subject with
-//! the search that finds it), and an in-memory stand-in that screenshots and tests install so they leave the user's alone.
+//! the search that finds it), and an in-memory stand-in that screenshots and tests install so
+//! they leave the user's clipboard alone.
 
 use std::sync::{Arc, Mutex};
 
@@ -11,8 +12,8 @@ fn id() -> egui::Id {
     egui::Id::new("exo::clipboard")
 }
 
-/// Puts `html`, with `text` as its plain-text alternative, on the clipboard: the system's, or
-/// the stand-in [`capture`] installed in `ctx`.
+/// Puts `html`, with `text` as its plain-text alternative, on the clipboard, which is the
+/// system's or the stand-in that [`capture`] installed in `ctx`.
 pub(crate) fn write(ctx: &egui::Context, html: &str, text: &str) {
     match ctx.data(|data| data.get_temp::<Captured>(id())) {
         Some(captured) => {
@@ -38,9 +39,9 @@ pub(crate) fn write(ctx: &egui::Context, html: &str, text: &str) {
 #[cfg(target_os = "macos")]
 const SEARCH_TYPE: &str = "build.miguel.exo.search-query";
 
-/// Puts `text` on the clipboard with `search`, the query that finds what was copied, beside it
-/// for the search bar to paste instead (`Copy Subject`): the system's, or the stand-in
-/// [`capture`] installed in `ctx`.
+/// Puts `text` on the clipboard with `search` beside it, for the search bar to paste instead
+/// (`Copy Subject`). `search` is the query that finds what was copied. The clipboard is the
+/// system's, or the stand-in that [`capture`] installed in `ctx`.
 pub(crate) fn write_with_search(ctx: &egui::Context, text: &str, search: &str) {
     match ctx.data(|data| data.get_temp::<Captured>(id())) {
         Some(captured) => {
@@ -108,7 +109,7 @@ fn system_search() -> Option<String> {
     None
 }
 
-/// The clipboard's HTML, if any: the system's, or the stand-in's.
+/// The clipboard's HTML, if any, read from the system's clipboard or the stand-in.
 pub(crate) fn read_html(ctx: &egui::Context) -> Option<String> {
     match ctx.data(|data| data.get_temp::<Captured>(id())) {
         Some(captured) => captured
@@ -119,8 +120,8 @@ pub(crate) fn read_html(ctx: &egui::Context) -> Option<String> {
     }
 }
 
-/// Puts `image` (straight RGBA) on the clipboard as a picture: the system's, or as a PNG the
-/// stand-in's, which [`read_image`] then reads.
+/// Puts `image` (straight RGBA) on the clipboard as a picture. It goes on the system's
+/// clipboard, or as a PNG on the stand-in, which [`read_image`] then reads.
 pub(crate) fn write_image(ctx: &egui::Context, image: &exo_mail::Image) {
     if ctx.data(|data| data.get_temp::<Captured>(id())).is_some() {
         let Some(buffer) =
@@ -149,7 +150,7 @@ pub(crate) fn write_image(ctx: &egui::Context, image: &exo_mail::Image) {
     }
 }
 
-/// The clipboard's plain text, if any: the system's, or the stand-in's.
+/// The clipboard's plain text, if any, read from the system's clipboard or the stand-in.
 pub(crate) fn read_text(ctx: &egui::Context) -> Option<String> {
     let text = match ctx.data(|data| data.get_temp::<Captured>(id())) {
         Some(captured) => captured
@@ -164,7 +165,7 @@ pub(crate) fn read_text(ctx: &egui::Context) -> Option<String> {
     text.filter(|text| !text.is_empty())
 }
 
-/// The files on the clipboard (copied in Finder), if that's what it holds; never the stand-in's.
+/// The files on the clipboard (copied in Finder), if that's what it holds. Never the stand-in's.
 pub(crate) fn read_files(ctx: &egui::Context) -> Vec<std::path::PathBuf> {
     if ctx.data(|data| data.get_temp::<Captured>(id())).is_some() {
         return Vec::new();
@@ -174,8 +175,8 @@ pub(crate) fn read_files(ctx: &egui::Context) -> Vec<std::path::PathBuf> {
         .unwrap_or_default()
 }
 
-/// The image on the clipboard, as a PNG: a screenshot taken to the clipboard, or an image copied
-/// from a page or Preview. The stand-in's, once [`capture`] installed one, is what
+/// The image on the clipboard, as a PNG, such as a screenshot taken to the clipboard or an image
+/// copied from a page or Preview. Once [`capture`] installed the stand-in, its image is what
 /// [`capture_image`] put there.
 pub(crate) fn read_image(ctx: &egui::Context) -> Option<Vec<u8>> {
     if ctx.data(|data| data.get_temp::<Captured>(id())).is_some() {
@@ -195,8 +196,8 @@ pub fn capture_image(ctx: &egui::Context, png: Vec<u8>) {
     ctx.data_mut(|data| data.insert_temp(image_id(), Arc::new(png)));
 }
 
-/// Puts `json` on the stand-in clipboard [`capture`] installs as Copy Attachments' files, for
-/// tests that paste another account's.
+/// Puts `json` on the stand-in clipboard that [`capture`] installs, as the files of Copy
+/// Attachments, for tests that paste another account's files.
 pub fn capture_attachments(ctx: &egui::Context, json: &str) {
     if ctx
         .data(|data| data.get_temp::<CapturedAttachments>(attachments_id()))
@@ -211,7 +212,7 @@ fn image_id() -> egui::Id {
     id().with("image")
 }
 
-/// The general pasteboard's PNG, or its TIFF made a PNG.
+/// The general pasteboard's PNG, or its TIFF converted to a PNG.
 #[cfg(target_os = "macos")]
 fn system_image() -> Option<Vec<u8>> {
     use objc2_app_kit::{
@@ -240,7 +241,7 @@ fn system_image() -> Option<Vec<u8>> {
     None
 }
 
-/// The pasteboard type Copy Attachments writes: JSON naming the files and their account.
+/// The pasteboard type Copy Attachments writes, which is JSON naming the files and their account.
 #[cfg(target_os = "macos")]
 const ATTACHMENTS: &str = "build.miguel.exo.attachments";
 
@@ -250,8 +251,8 @@ fn attachments_id() -> egui::Id {
 
 type CapturedAttachments = Arc<Mutex<Option<String>>>;
 
-/// Puts `json` (Copy Attachments' files) on the clipboard as all it holds: the system's, or
-/// the stand-in [`capture`] installed.
+/// Puts `json` (the files of Copy Attachments) on the clipboard as all it holds. The clipboard
+/// is the system's, or the stand-in that [`capture`] installed.
 pub(crate) fn write_attachments(ctx: &egui::Context, json: &str) {
     if let Some(captured) = ctx.data(|data| data.get_temp::<CapturedAttachments>(attachments_id()))
     {
@@ -268,8 +269,8 @@ pub(crate) fn write_attachments(ctx: &egui::Context, json: &str) {
     system_write_attachments(json);
 }
 
-/// The files Copy Attachments put on the clipboard, if it holds them: the system's, or the
-/// stand-in's.
+/// The files Copy Attachments put on the clipboard, if it holds them, read from the system's
+/// clipboard or the stand-in.
 pub(crate) fn read_attachments(ctx: &egui::Context) -> Option<String> {
     match ctx.data(|data| data.get_temp::<CapturedAttachments>(attachments_id())) {
         Some(captured) => captured
@@ -280,7 +281,8 @@ pub(crate) fn read_attachments(ctx: &egui::Context) -> Option<String> {
     }
 }
 
-/// The system clipboard holds Copy Attachments' files (and so no text: ⌘V still pastes them).
+/// Whether the system clipboard holds the files of Copy Attachments (and so no text, though ⌘V
+/// still pastes them).
 pub(crate) fn holds_attachments() -> bool {
     system_read_attachments().is_some()
 }

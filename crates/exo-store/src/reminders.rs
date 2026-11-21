@@ -1,11 +1,11 @@
-//! Reminders (Remind me): each thread's reminder is kept in `reminders`, and Exo brings threads
-//! back itself when they're due, from [`Store::return_reminders`], which the app calls when
-//! one is due while it runs and once it starts (so a reminder due while Exo was closed comes
-//! back at the next launch).
+//! Reminders (Remind me). Each thread's reminder is kept in `reminders`, and Exo brings threads
+//! back itself when they're due, from [`Store::return_reminders`]. The app calls that when a
+//! reminder is due while it runs, and once when it starts, so a reminder due while Exo was
+//! closed comes back at the next launch.
 //!
-//! Gmail sees reminders as labels: `[Exo]/Is Snoozed` while a reminder is set and, for Remind
-//! me's snooze, the thread out of the inbox; when it comes back, the inbox again and `[Exo]/ru`
-//! until it's read.
+//! Gmail sees reminders as labels. A thread has `[Exo]/Is Snoozed` while a reminder is set, and
+//! Remind me's snooze also takes it out of the inbox. When the thread comes back, it's in the
+//! inbox again and has `[Exo]/ru` until it's read.
 
 use std::collections::{HashMap, HashSet};
 
@@ -23,8 +23,8 @@ use crate::outbox::enqueue;
 use crate::store::{Inner, Store, load_view, reindex};
 use crate::view::ThreadView;
 
-/// The reminder change `mutation` makes to `view`'s thread, made: what the thread had before,
-/// for undo, or `None` for a mutation that doesn't touch reminders.
+/// Makes the reminder change that `mutation` makes to the thread of `view`. Returns what the
+/// thread had before, for undo, or `None` for a mutation that doesn't touch reminders.
 pub(crate) async fn apply(
     exec: &mut dyn Executor,
     view: &ThreadView,
@@ -36,7 +36,7 @@ pub(crate) async fn apply(
         Mutation::Remind {
             at, keep_on_reply, ..
         } => {
-            // Set on every message it has now; a reply is any other.
+            // Set on every message the thread has now, so a reply is any other message.
             let row = reminder_row(view, *at, *keep_on_reply, None, now);
             restore(exec, &view.id, Some(row)).await?;
         }
@@ -50,7 +50,8 @@ pub(crate) async fn apply(
     Ok(Some(previous))
 }
 
-/// A reminder for `view`'s thread at `at`, set on `set_on` (its messages now, when `None`).
+/// A reminder for the thread of `view` at `at`, set on `set_on`, or on the thread's messages now
+/// when that's `None`.
 fn reminder_row(
     view: &ThreadView,
     at: Timestamp,
@@ -110,11 +111,11 @@ impl Store {
         Ok(waiting(&mut db).await?.iter().map(|row| row.at).min())
     }
 
-    /// Brings back every thread whose reminder is due at `now`: into the inbox, sorted as if it
-    /// had just come in, "reminder unread" until it's read. A reminder a reply cancelled
-    /// ("if no reply") doesn't, and its label comes off; so does that of a thread in Spam or
-    /// Trash, which has nothing to come back to. Returns the threads brought back, oldest
-    /// reminder first. Flush afterwards.
+    /// Brings back every thread whose reminder is due at `now`. The thread goes into the inbox,
+    /// sorted as if it had just come in, and is "reminder unread" until it's read. A reminder
+    /// that a reply cancelled ("if no reply") doesn't bring its thread back, and its label comes
+    /// off. The label also comes off a thread in Spam or Trash, which has nothing to come back
+    /// to. Returns the threads brought back, oldest reminder first. Flush afterwards.
     ///
     /// # Errors
     /// On database failures, or [`Error::NotSynced`](crate::Error::NotSynced) before the first
@@ -123,7 +124,7 @@ impl Store {
         let router = self.inner.router();
         let me = &router.me;
         let mut db = self.inner.db.clone();
-        // Most looks find nothing to do: they don't need the write lock.
+        // Most looks find nothing to do, so they don't need the write lock.
         let rows = waiting(&mut db).await?;
         let ids: Vec<String> = rows.iter().map(|row| row.thread_id.clone()).collect();
         let views = crate::store::load_views(&mut db, &ids).await?;
@@ -221,10 +222,10 @@ impl Store {
 
 impl Store {
     /// Brings back to the inbox, once, the threads Gmail has under `[Exo]/Is Snoozed` that a new
-    /// store has no reminder for: their reminders were in a store signed out or cleared, or on
-    /// another Mac, and nothing here would ever return them. Until it has, a call lists the
-    /// label, stores what it lacks and returns them as due reminders return; after, it does
-    /// nothing. Returns the threads it brought back.
+    /// store has no reminder for. Their reminders were in a store that was signed out or
+    /// cleared, or on another Mac, so nothing here would ever return them. Until it has done
+    /// this once, a call lists the label, stores the threads it lacks and returns them the way
+    /// due reminders return. After that, it does nothing. Returns the threads it brought back.
     ///
     /// # Errors
     /// [`Error::Offline`] and the like when Gmail can't be reached (it tries again next time), and
@@ -318,11 +319,12 @@ impl Store {
 }
 
 impl Inner {
-    /// Puts held send `id`'s reminder on its thread, as Send and Schedule do, replacing the one
-    /// it had and leaving the thread where it is: from then on the thread shows it and is in
-    /// Reminders, and Gmail has `[Exo]/Is Snoozed`. A thread that isn't stored yet (a new
-    /// message's, before Gmail has it) gets it when it is, at the draft's first write or else its
-    /// send. Returns whether it changed the thread; flush then.
+    /// Puts the reminder of held send `id` on its thread, as Send and Schedule do, replacing the
+    /// thread's earlier reminder and leaving the thread where it is. From then on the thread
+    /// shows the reminder and is in Reminders, and Gmail has `[Exo]/Is Snoozed`. A thread that
+    /// isn't stored yet (a new message's thread, before Gmail has it) gets the reminder once
+    /// it's stored, at the draft's first write or else at its send. Returns whether it changed
+    /// the thread. Flush when it did.
     pub(crate) async fn give_reminder(&self, id: &str) -> Result<bool> {
         let _giving = self.giving.lock().await;
         let mut db = self.db.clone();
@@ -337,8 +339,9 @@ impl Inner {
         if given(&mut db).await?.get(id) == Some(&reminder) {
             return Ok(false);
         }
-        // Given before in this session (a send called off by Edit Message and scheduled again):
-        // that one comes off first, so undo puts back what the thread had before either.
+        // If a reminder was given before in this session (a send called off by Edit Message and
+        // scheduled again), that one comes off first, so undo puts back what the thread had
+        // before either.
         let earlier = self.given.lock().expect("never poisoned").remove(id);
         if let Some(earlier) = earlier {
             self.undo(earlier).await?;
@@ -350,7 +353,8 @@ impl Inner {
         };
         let undo = match self.apply(&[ThreadId::new(thread)], mutation).await {
             Ok(undo) => undo,
-            // Not stored yet, or before the first sync made the reminder labels: later, then.
+            // The thread isn't stored yet, or the first sync hasn't made the reminder labels, so
+            // the reminder waits until later.
             Err(Error::UnknownThread(_) | Error::NotSynced(_)) => return Ok(false),
             Err(error) => return Err(error),
         };
@@ -373,7 +377,7 @@ impl Inner {
         Ok(true)
     }
 
-    /// Undo send for held send `id`: the reminder it put on its thread comes off, and the one
+    /// Undo send for held send `id`. The reminder it put on its thread comes off, and the one
     /// the thread had comes back.
     pub(crate) async fn take_back_reminder(&self, id: &str) -> Result<()> {
         let _giving = self.giving.lock().await;
@@ -391,11 +395,11 @@ impl Inner {
         }
     }
 
-    /// Gives `thread` the reminder a draft carried, once Gmail has sent it into the thread, when
-    /// the send didn't (its thread wasn't stored yet), replacing the one it had. Like Remind me's
-    /// reminder mode it leaves the thread where it is. It's set on `set_on`, the messages a
-    /// scheduled send recorded (a reply since cancels an "if no reply" one), or else the thread's
-    /// messages now.
+    /// Gives `thread` the reminder a draft carried, once Gmail has sent the draft into the
+    /// thread, when the send couldn't because its thread wasn't stored yet. It replaces the
+    /// thread's earlier reminder, and like Remind me's reminder mode it leaves the thread where it
+    /// is. The reminder is set on `set_on`, the messages a scheduled send recorded (so a reply
+    /// since then cancels an "if no reply" reminder), or else on the thread's messages now.
     pub(crate) async fn remind_sent(
         &self,
         thread: &str,
@@ -434,7 +438,7 @@ impl Inner {
     }
 }
 
-/// The held sends whose reminder is on their thread, and which.
+/// The held sends whose reminder is on their thread, and the reminder each one gave.
 pub(crate) async fn given(exec: &mut dyn Executor) -> Result<HashMap<String, DraftReminder>> {
     Ok(db::kv_get(exec, GIVEN_REMINDERS).await?.unwrap_or_default())
 }

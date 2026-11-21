@@ -1,7 +1,7 @@
 //! The open conversation: the back gutter, the header with the subject, labels and actions, and
 //! the messages, collapsed or expanded, with their bodies from [`crate::body`].
 //!
-//! Keys aren't bound here; the operations they trigger are methods ([`ThreadView::next_message`],
+//! Keys aren't bound here. The operations they trigger are methods ([`ThreadView::next_message`],
 //! [`ThreadView::toggle_current`], …) for the app's commands to call.
 
 pub(crate) mod attachments;
@@ -72,7 +72,7 @@ pub(crate) enum Action {
     CommandPalette,
     /// The header's Remind Me button.
     Remind,
-    /// A label chip: show that label's list.
+    /// A label chip, which shows that label's list.
     ShowLabel(String),
     /// Open a URL in the system browser (a link in a body, the Unsubscribe link).
     OpenUrl(String),
@@ -80,23 +80,24 @@ pub(crate) enum Action {
     OpenUrlInBackground(String),
     /// The Show New Messages bar.
     ShowNewMessages,
-    /// The third click in a row on headers that expanded (or collapsed) a message: suggest ⇧O.
+    /// The third click in a row on headers that expanded (or collapsed) a message. Suggest ⇧O.
     ExpandAllHint { expand: bool },
-    /// The pointer settled on a participant or a `mailto:` link: show them in the right pane.
+    /// The pointer settled on a participant or a `mailto:` link. Show them in the right pane.
     ShowContact(Person),
-    /// Text was selected in the subject or a full header's addresses: suggest ⌘K's copy row.
+    /// Text was selected in the subject or a full header's addresses. Suggest ⌘K's copy row.
     CopyHint { subject: bool },
-    /// A participant's address in their tooltip: a new message to them, popped out when ⇧ was held.
+    /// A participant's address in their tooltip, which starts a new message to them, popped out
+    /// when ⇧ was held.
     ComposeTo(Person, bool),
     /// Something a copy tooltip put on the clipboard, for its `"…" copied to clipboard.`.
     Copied(String),
     /// The header's Unsubscribe.
     Unsubscribe,
-    /// An attachment card: preview it in Quick Look, or only download it when ⌘ or Ctrl was held
+    /// An attachment card, to preview in Quick Look, or only to download when ⌘ or Ctrl was held
     /// or the click was on its download icon.
     Download { attachment: Attachment, open: bool },
-    /// An image or message card, or an image in a body: Exo's viewer, over `attachments` from
-    /// `start`.
+    /// An image or message card, or an image in a body, to open in Exo's viewer over
+    /// `attachments` from `start`.
     Preview {
         attachments: Vec<Attachment>,
         start: usize,
@@ -110,21 +111,22 @@ pub(crate) enum Action {
     },
     /// Something for compose: a reply button, or a draft's own action.
     Compose(crate::compose::Action),
-    /// A header chevron expanded (or folded) a message's header: suggest Shift-H.
+    /// A header chevron expanded (or folded) a message's header. Suggest Shift-H.
     HeaderHint { expanded: bool },
-    /// A click on a body's `…` showed (or hid) its quoted text: suggest O.
+    /// A click on a body's `…` showed (or hid) its quoted text. Suggest O.
     QuoteHint { shown: bool },
-    /// The draft being typed in scrolled out of view: suggest popping it out.
+    /// The draft being typed in scrolled out of view. Suggest popping it out.
     PopOutHint,
     /// An invite card's RSVP: the invite, my answer recorded, and the answer.
     RespondToInvite(invite::Invite, invite::Response),
-    /// The pointer settled on an invite's When or a detected date: that day in the right pane.
+    /// The pointer settled on an invite's When or a detected date, to show that day in the right
+    /// pane.
     ShowDay(jiff::civil::Date),
-    /// An invite's Where that's a phone number: call it (`tel:` and digits, which the card
-    /// builds itself).
+    /// An invite's Where that's a phone number, to call (`tel:` and digits, which the card builds
+    /// itself).
     Dial(String),
-    /// A click on a detected date: a new event with the conversation's people and subject, the
-    /// form's day on that date.
+    /// A click on a detected date, for a new event with the conversation's people and subject and
+    /// the form's day set to that date.
     CreateEvent(jiff::civil::Date),
 }
 
@@ -135,7 +137,7 @@ struct Item {
     expanded: bool,
     header_expanded: bool,
     show_quoted: bool,
-    /// In Trash while the view doesn't show Trash: collapsed, it's the
+    /// In Trash while the view doesn't show Trash. Collapsed, the message is the
     /// `This message was moved to Trash.` marker, which the cursor skips.
     trashed: bool,
 }
@@ -152,7 +154,7 @@ enum Entry {
 }
 
 /// An entry where the last layout put it: its top in the column's content, its height (a
-/// message's with its footer hint), and its card's.
+/// message's with its footer hint), and its card's height.
 #[derive(Clone, Copy, Debug)]
 struct Placed {
     entry: Entry,
@@ -206,7 +208,7 @@ pub struct ThreadView {
     wanted: Option<String>,
     /// The message whose draft to bring into view.
     reveal_draft: Option<String>,
-    /// The draft being typed in showed when last looked at.
+    /// Whether the draft being typed in showed when last looked at.
     draft_was_in_view: bool,
     /// Scroll to the end once everything is measured (a reply was just sent).
     reveal_end: bool,
@@ -252,7 +254,7 @@ pub struct ThreadView {
     date_tip: Option<selection::DateTip>,
     /// Where each expanded body was drawn this frame.
     body_origins: HashMap<String, Pos2>,
-    /// Gmail can be reached: offline, a reply being sent says when it'll go.
+    /// Whether Gmail can be reached. Offline, a reply being sent says when it'll go.
     online: bool,
     /// Headers name senders in full (`showSenderFullNames`).
     full_names: bool,
@@ -260,8 +262,7 @@ pub struct ThreadView {
     pending: Option<String>,
     /// Your domains, whose mailing lists aren't unsubscribed from.
     own_domains: Vec<String>,
-    /// Messages arrived that the thread doesn't show yet: the Show New
-    /// Messages bar is up.
+    /// Messages arrived that the thread doesn't show yet, so the Show New Messages bar is up.
     has_new: bool,
     /// Messages to show as soon as a copy of the thread has them: replies sent from here.
     admitted: HashSet<String>,
@@ -272,7 +273,7 @@ pub struct ThreadView {
     zone: focus::Zone,
     /// The modifiers held as the last press in a body went down, for what it hits.
     click_modifiers: egui::Modifiers,
-    /// Clicks in a row on headers that expanded, or collapsed, a message: the third suggests ⇧O.
+    /// Clicks in a row on headers that expanded, or collapsed, a message. The third suggests ⇧O.
     clicks_in_a_row: (u8, u8),
     /// The header's status line, as last drawn.
     status: Option<header::Status>,
@@ -304,14 +305,14 @@ pub struct ThreadView {
     scrollbar_x: exo_ui::Scrollbar,
     /// When the account first signed in to Exo on this Mac, if known.
     joined: Option<jiff::Timestamp>,
-    /// Opened unread: it's marked read once its first copy is in, so the messages that were
-    /// unread open expanded.
+    /// The thread opened unread. It's marked read once its first copy is in, so the messages that
+    /// were unread open expanded.
     read_on_open: bool,
 }
 
 impl ThreadView {
     /// A view of thread `id` in account `me`, dated relative to `now`, with the invite photos in
-    /// `images`; it shows the thread once [`Self::set_detail`] has it.
+    /// `images`. It shows the thread once [`Self::set_detail`] has it.
     pub fn new(id: String, now: Zoned, me: String, images: PathBuf) -> Self {
         Self {
             id,
@@ -393,8 +394,8 @@ impl ThreadView {
         header::controls(self.status.as_ref())
     }
 
-    /// Whether the view includes Trash (the Trash list, a search): its trashed messages show as
-    /// any other. Set before the thread's first copy.
+    /// Whether the view includes Trash (the Trash list, a search), in which case its trashed
+    /// messages show as any other. Set before the thread's first copy.
     pub fn set_trash_shown(&mut self, shown: bool) {
         self.trash_shown = shown;
     }
@@ -417,7 +418,7 @@ impl ThreadView {
         self.full_names = full_names;
     }
 
-    /// Says the conversation was unread when it opened: [`Self::take_read_on_open`] says when to
+    /// Says the conversation was unread when it opened. [`Self::take_read_on_open`] says when to
     /// mark it read.
     pub fn set_read_on_open(&mut self) {
         self.read_on_open = true;
@@ -446,7 +447,7 @@ impl ThreadView {
     }
 
     /// The image attachments whose card thumbnails to fetch: those of the expanded messages,
-    /// whose cards show; each is asked for once.
+    /// whose cards show. Each is asked for once.
     pub(crate) fn thumbnail_requests(&mut self) -> Vec<Attachment> {
         let Some(detail) = self.detail.clone() else {
             return Vec::new();
@@ -462,7 +463,7 @@ impl ThreadView {
         )
     }
 
-    /// The `.ics` attachments to fetch for invite cards, by message; each message is looked at
+    /// The `.ics` attachments to fetch for invite cards, by message. Each message is looked at
     /// once.
     pub fn invite_requests(&mut self) -> Vec<(String, Attachment)> {
         let Some(detail) = self.detail.clone() else {
@@ -487,7 +488,7 @@ impl ThreadView {
         }
     }
 
-    /// What message `id`'s invite card is drawn with, `calendar` the notification's facts.
+    /// What message `id`'s invite card is drawn with. `calendar` is the notification's facts.
     fn invite_context<'a>(
         &'a self,
         id: &str,
@@ -559,15 +560,15 @@ impl ThreadView {
     }
 
     /// Whether `parsed` is to a signed-out calendar account, whose answer waits for it to sign
-    /// in: the card doesn't show it as given meanwhile.
+    /// in. Meanwhile the card doesn't show the answer as given.
     fn needs_sign_in(&self, parsed: &invite::Invite) -> bool {
         self.signed_out
             .iter()
             .any(|email| email == self.invite_me(parsed))
     }
 
-    /// `tab` in the messages: the keyboard to the focused message's invite card,
-    /// on its first button. Returns whether there was one.
+    /// `tab` in the messages: moves the keyboard to the focused message's invite card, on its
+    /// first button. Returns whether there was one.
     pub fn focus_invite(&mut self) -> bool {
         let found = self.focusable_invite().is_some();
         if found {
@@ -586,8 +587,8 @@ impl ThreadView {
         self.invite_focus.is_some() && self.focusable_invite().is_some()
     }
 
-    /// → / ↓ / tab and ← / ↑ in the card: the next or previous button, round.
-    /// `Add To Calendar` is alone, and stays.
+    /// → / ↓ / tab and ← / ↑ in the card: moves to the next or previous button, wrapping round.
+    /// `Add To Calendar` is alone, so the keyboard stays on it.
     pub fn move_invite_focus(&mut self, delta: isize) {
         let answerable = self
             .focusable_invite()
@@ -597,13 +598,14 @@ impl ThreadView {
         }
     }
 
-    /// Escape in the card: back to the messages.
+    /// Escape in the card: gives the keyboard back to the messages.
     pub fn blur_invite(&mut self) {
         self.invite_focus = None;
     }
 
-    /// Enter or space in the card: the focused button's answer, unless it's the
-    /// current one. Returns the invite with it recorded, and the answer.
+    /// Enter or space in the card: answers with the focused button, unless that's the current
+    /// answer. Returns the invite and the answer. The invite has the answer recorded, unless its
+    /// calendar account has to sign in first.
     pub fn submit_invite(&mut self) -> Option<(invite::Invite, invite::Response)> {
         let focus = self.invite_focus?;
         let id = self.focus.clone()?;
@@ -626,8 +628,8 @@ impl ThreadView {
         Some((answered, response))
     }
 
-    /// The calendar's answer to the invite with UID `uid`, shown on its cards: what was answered
-    /// before, from here or elsewhere, rather than the `.ics`'s.
+    /// Shows the calendar's answer to the invite with UID `uid` on its cards, rather than the
+    /// `.ics`'s answer. It's what was answered before, from here or elsewhere.
     pub fn show_calendar_answer(&mut self, uid: &str, response: invite::Response) {
         for parsed in self.invites.values_mut().filter(|parsed| parsed.uid == uid) {
             let me = parsed
@@ -712,8 +714,8 @@ impl ThreadView {
             .collect()
     }
 
-    /// The invite the right pane's calendar shows: the focused message's,
-    /// or with none focused, the first message's that has one.
+    /// The invite the right pane's calendar shows: the focused message's, or with none focused,
+    /// that of the first message that has one.
     pub fn invite(&self) -> Option<&invite::Invite> {
         match &self.focus {
             Some(focused) => self.invites.get(focused),
@@ -788,10 +790,10 @@ impl ThreadView {
         })
     }
 
-    /// Takes the latest copy of the thread. The first one
-    /// shows every message: the unread ones expanded, and always the last that isn't in Trash.
-    /// Later copies keep what the user expanded, and hold messages that arrived back behind the
-    /// Show New Messages bar, but for failed or scheduled sends and replies sent from here.
+    /// Takes the latest copy of the thread. The first copy shows every message, with the unread
+    /// ones expanded, and always the last that isn't in Trash. Later copies keep what the user
+    /// expanded, and hold messages that arrived back behind the Show New Messages bar, except
+    /// failed or scheduled sends and replies sent from here.
     pub fn set_detail(&mut self, detail: Arc<ThreadDetail>) {
         if self
             .detail
@@ -890,7 +892,7 @@ impl ThreadView {
 
     /// Focuses message `id`, expanded and in view, now or once a copy of the thread has it.
     pub fn focus_message(&mut self, id: &str) {
-        // One the Show New Messages bar holds back shows with the rest.
+        // A message the Show New Messages bar holds back shows with the rest.
         if self.has_new
             && !self.items.iter().any(|item| item.id == id)
             && self.message(id).is_some()
@@ -919,7 +921,7 @@ impl ThreadView {
         self.items.iter().position(|item| item.id == focus)
     }
 
-    /// The focused message's sender, for the contact pane: none when it's you.
+    /// The focused message's sender, for the contact pane. None when it's you.
     pub fn focused_sender(&self) -> Option<Person> {
         let message = self.message(self.focus.as_deref()?)?;
         let from = message.from.as_ref().filter(|from| !from.is_me)?;
@@ -971,8 +973,8 @@ impl ThreadView {
         }
     }
 
-    /// O: cycles the focused message: collapsed → expanded → quoted text shown → collapsed. A
-    /// message that can't collapse only toggles its quoted text.
+    /// O: cycles the focused message through collapsed → expanded → quoted text shown →
+    /// collapsed. A message that can't collapse only toggles its quoted text.
     pub fn toggle_current(&mut self, bodies: &Bodies) {
         let Some(at) = self.focus_index() else { return };
         let has_quoted = bodies
@@ -1019,8 +1021,8 @@ impl ThreadView {
         self.focus_at(to, delta);
     }
 
-    /// The message `delta` (±1) from `at` that the cursor can land on: a
-    /// trashed one only if it's expanded. Past the end it's the last; past the start, `at`.
+    /// The message `delta` (±1) from `at` that the cursor can land on, which is a trashed one
+    /// only if it's expanded. Past the end it's the last message, and past the start it's `at`.
     fn step(&self, at: usize, delta: isize) -> usize {
         let lands = |item: &Item| !(item.trashed && !item.expanded);
         let mut to = at;
@@ -1051,9 +1053,9 @@ impl ThreadView {
         }
     }
 
-    /// ↓ / ↑: scrolls within the focused message, and past its edge moves
-    /// to the next or previous message; pressed, not held (`repeat`), past the first message to
-    /// the header and past the last to the Show New Messages bar.
+    /// ↓ / ↑: scrolls within the focused message, and past its edge moves to the next or previous
+    /// message. A press that isn't held (`repeat`) moves past the first message to the header,
+    /// and past the last to the Show New Messages bar.
     pub fn arrow(&mut self, delta: isize, repeat: bool) {
         let Some(at) = self.focus_index() else { return };
         let Some(&(top, height)) = self.tops.get(at) else {
@@ -1074,7 +1076,7 @@ impl ThreadView {
         }
     }
 
-    /// Space / ⇧Space: a page down or up, then focus the message nearest the middle.
+    /// Space / ⇧Space: scrolls a page down or up, then focuses the message nearest the middle.
     pub fn page(&mut self, direction: isize) {
         let page = self.viewport - MESSAGES_PADDING_TOP - SLACK;
         let to = self.clamp_scroll(self.scroll + direction as f32 * page);
@@ -1095,7 +1097,8 @@ impl ThreadView {
         }
     }
 
-    /// `g g` / ⌘↑ and ⇧G / ⌘↓: the first or last message, scrolled to the top or bottom.
+    /// `g g` / ⌘↑ and ⇧G / ⌘↓: focuses the first or last message and scrolls to the top or
+    /// bottom.
     pub fn jump(&mut self, to_end: bool) {
         let at = if to_end {
             self.items.len().saturating_sub(1)
@@ -1146,7 +1149,7 @@ impl ThreadView {
         self.admitted.insert(id.to_owned());
     }
 
-    /// Message `from` is now `to` (Gmail's copy of a sent reply took its place): it keeps its
+    /// Message `from` is now `to` (Gmail's copy of a sent reply took its place). It keeps its
     /// expansion and the focus.
     pub fn rename_message(&mut self, from: &str, to: &str) {
         for item in self.items.iter_mut().filter(|item| item.id == from) {
@@ -1158,9 +1161,9 @@ impl ThreadView {
     }
 
     /// Paints the thread view in `rect` (the content pane) and handles the mouse. `region` is
-    /// where the keyboard is: the messages' focus bar shows while it's theirs.
-    /// `drafts` are the thread's drafts, drawn under the messages they answer; `typing` says
-    /// one of them has the keyboard, so its bottom is kept in view.
+    /// where the keyboard is, and the messages' focus bar shows while the keyboard is theirs.
+    /// `drafts` are the thread's drafts, drawn under the messages they answer. `typing` says one
+    /// of them has the keyboard, so its bottom is kept in view.
     #[expect(
         clippy::too_many_arguments,
         reason = "one screen, drawn from the app's state; a struct would only rename them"
@@ -1214,8 +1217,8 @@ impl ThreadView {
             header::height(ui, &layout, &detail, &self.chips, self.status.is_some());
         let messages_top = layout.header.top() + header_height + MESSAGES_MARGIN_TOP;
 
-        // Find scrolls to a match out of view, at once (Chromium's `ScrollRectToVisible`): down
-        // the messages, and across a widened column.
+        // Find scrolls at once to a match out of view (Chromium's `ScrollRectToVisible`), down the
+        // messages and across a widened column.
         let find = ui.id().with("thread-find");
         let reveal = exo_ui::find::reveal(&ctx, find);
 
@@ -1395,11 +1398,10 @@ impl ThreadView {
         }
         self.tops = tops;
         self.entries = entries;
-        // Where what's added after the messages goes: past the last
-        // one's margin.
+        // Where what's added after the messages goes: past the last entry's margin.
         self.end = y + previous_margin.unwrap_or(0.0);
-        // The table grows so the collapsed messages
-        // above the first expanded one can scroll away, and the end can scroll a little past.
+        // The table grows so the collapsed messages above the first expanded one can scroll
+        // away, and the end can scroll a little past.
         let table_top = MESSAGES_PADDING_TOP + CARD_MARGIN_TOP;
         let natural = y - table_top;
         let collapsed_scroll = if collapsed_before > 4 {
@@ -1415,8 +1417,8 @@ impl ThreadView {
             self.end
         };
 
-        // Scrolling: the first layout with every expanded body measured lands where a newly
-        // opened thread starts; later, keys animate and the wheel scrolls.
+        // On the first layout with every expanded body measured, the scroll lands where a newly
+        // opened thread starts. Later, keys animate it and the wheel scrolls it.
         let measured = self
             .items
             .iter()
@@ -1441,7 +1443,7 @@ impl ThreadView {
         if typing && self.animation.is_none() {
             self.keep_draft_in_view(&draft_heights);
         }
-        // The draft being typed in scrolled away: suggest popping it out.
+        // When the draft being typed in scrolls away, suggest popping it out.
         if typing {
             let in_view = self.draft_in_view(&draft_heights);
             if self.draft_was_in_view && !in_view {
@@ -1557,9 +1559,10 @@ impl ThreadView {
         actions
     }
 
-    /// A press and drag in the header's text selects it, and lets go of the bodies' selection.
-    /// Letting go on the subject with text selected suggests Copy Subject, and letting go with the
-    /// selection in a full header's addresses Copy Recipients (with the messages' keyboard).
+    /// A press and drag in the header's text selects it and clears the bodies' selection. Letting
+    /// go on the subject with text selected suggests Copy Subject. Letting go with the selection
+    /// in a full header's addresses suggests Copy Recipients, while the messages have the
+    /// keyboard.
     fn select_header_text(
         &mut self,
         ui: &Ui,
@@ -1699,7 +1702,7 @@ impl ThreadView {
         let mut selected = None;
         // The invite whose When is under the pointer: its message, and when it starts.
         let mut on_when = None;
-        // Every message counts, out of view or not: find searches them all.
+        // Every message counts, in view or not, because find searches them all.
         let searching = exo_ui::find::searching(ui.ctx());
         for placed in self.entries.clone() {
             let layout = &match placed.entry {
@@ -1976,8 +1979,8 @@ impl ThreadView {
                 }
             }
         }
-        // In a layer of their own, so neither the column nor its cards cut their
-        // shadows; under the thread's header.
+        // The tooltips go in a layer of their own, so neither the column nor its cards cut their
+        // shadows. The layer stays under the thread's header.
         let mut tooltips = ui.painter().clone();
         tooltips.set_clip_rect(Rect::from_x_y_ranges(
             ui.ctx().content_rect().x_range(),
@@ -2034,8 +2037,8 @@ impl ThreadView {
         );
     }
 
-    /// A click on a header expanded (or folded) a message: the third
-    /// in a row each way suggests ⇧O.
+    /// Counts a click on a header that expanded (or folded) a message. The third in a row each
+    /// way suggests ⇧O.
     fn count_toggle(&mut self, expanded: bool, actions: &mut Vec<Action>) {
         let (expands, collapses) = &mut self.clicks_in_a_row;
         let (counted, other) = if expanded {
@@ -2117,7 +2120,7 @@ impl ThreadView {
             }
         }
         let multi_click = self.clicks.is_some_and(|(.., count)| count > 1);
-        // A selection starts where the button went down, not where the drag was recognized; after
+        // A selection starts where the button went down, not where the drag was recognized. After
         // a double or triple click, the drag extends that word or paragraph.
         if response.drag_started() && !multi_click {
             self.selecting = None;
@@ -2136,7 +2139,7 @@ impl ThreadView {
         {
             bodies.select_to(id, local(at));
         }
-        // A right-click: the shell's menu for what it's on.
+        // A right-click opens the shell's menu for what it's on.
         if response.secondary_clicked()
             && let Some(at) = response
                 .interact_pointer_pos()
@@ -2151,7 +2154,7 @@ impl ThreadView {
                 .filter(|at| body.contains(*at))
         {
             bodies.clear_selection();
-            // ⌘ on a link opens it in the background; what the click hit comes back later.
+            // ⌘ on a link opens it in the background. What the click hit comes back later.
             self.click_modifiers = ui.input(|input| input.modifiers);
             bodies.click(id, local(at));
         }
@@ -2165,7 +2168,7 @@ impl ThreadView {
     /// What a click in a body landed on.
     fn clicked(&mut self, id: &str, hit: &Hit, bodies: &Bodies, actions: &mut Vec<Action>) {
         match hit {
-            // `#id` scrolls to the anchor; `mailto:` opens compose (the app's), and ⌘ opens a
+            // `#id` scrolls to the anchor. `mailto:` opens compose (the app's), and ⌘ opens a
             // web link in the background.
             Hit::Link { href } if href.starts_with('#') => bodies.find_anchor(id, &href[1..]),
             Hit::Link { href } if self.click_modifiers.command => {
@@ -2203,9 +2206,9 @@ impl ThreadView {
         }
     }
 
-    /// Where a newly opened thread scrolls: past all but four of the collapsed
-    /// messages above the first expanded one, or, when the only expanded message is the last,
-    /// with it `IDEAL_TOP` below the top.
+    /// Where a newly opened thread scrolls: past all but four of the collapsed messages above the
+    /// first expanded one. When the only expanded message is the last, the scroll puts that
+    /// message `IDEAL_TOP` below the top instead.
     fn initial_scroll(&self, collapsed_scroll: f32) -> f32 {
         let first_expanded = self.items.iter().position(|item| item.expanded);
         let target = match first_expanded {
@@ -2226,14 +2229,14 @@ impl ThreadView {
         };
         let body = message::body_offset(self.items[at].header_expanded, message);
         let invite = self.invite_block(ui, id, self.item_layout(layout, at).inner.width(), bodies);
-        // The messages start under the header's bottom padding; once scrolled, the header ends
+        // The messages start under the header's bottom padding. Once scrolled, the header ends
         // `SCROLLED_INSET` above its bottom.
         let under_header = -MESSAGES_MARGIN_TOP - header::SCROLLED_INSET;
         self.animation = None;
         self.scroll = self.clamp_scroll(self.tops[at].0 + body + invite + top - under_header);
     }
 
-    /// Brings a draft into view: a card that fits is scrolled up to its top; otherwise its draft's
+    /// Brings a draft into view. A card that fits is scrolled up to its top. Otherwise the draft's
     /// bottom is brought into view.
     fn scroll_to_draft(&mut self, id: &str) {
         let Some(at) = self.items.iter().position(|item| item.id == id) else {
@@ -2284,8 +2287,8 @@ impl ThreadView {
             })
     }
 
-    /// N moving onto a message just below the fold scrolls a step; a
-    /// message that's out of view scrolls to `IDEAL_TOP` below the top.
+    /// N moving onto a message just below the fold scrolls a step. A message that's out of view
+    /// scrolls to `IDEAL_TOP` below the top.
     fn scroll_to_message(&mut self, id: &str, direction: isize) {
         let Some(at) = self.items.iter().position(|item| item.id == id) else {
             return;
@@ -2308,18 +2311,17 @@ pub(crate) struct PaneCard<'a> {
     pub title: &'a str,
     pub height: f32,
     pub above: f32,
-    /// The pop-out hint goes under the card: a new message started in a conversation, untouched
-    /// yet.
+    /// Whether the pop-out hint goes under the card, for a new message started in a conversation
+    /// and not touched yet.
     pub pop_out_hint: bool,
-    /// The card holds no form: a read-only
-    /// snippet.
+    /// Whether the card is a read-only snippet, with no form.
     pub read_only: bool,
 }
 
-/// The thread pane for a new message: the back gutter, the title
-/// (`New Message`) with the conversation arrows, and one card holding the compose form, which
-/// `form` draws into the card's content column (left, top, width) and whose height the card says;
-/// it's also given the message column's extent, which tooltips stay inside, and the card.
+/// The thread pane for a new message: the back gutter, the title (`New Message`) with the
+/// conversation arrows, and one card holding the compose form. `form` draws the form into the
+/// card's content column (left, top, width), at the height `pane` gives. `form` is also given the
+/// message column's extent, which tooltips stay inside, and the card.
 pub(crate) fn new_message_pane(
     ui: &mut Ui,
     rect: Rect,
@@ -2437,8 +2439,8 @@ pub(crate) fn popout_column(rect: Rect, rem: f32, window_width: f32) -> (f32, f3
 }
 
 /// How far the pop-out slides left, out of the contact pane's way, while the pointer rests over
-/// that pane: in a content pane `rect` too narrow for both
-/// columns, until the pop-out ends where the thread's does. Zero when they fit.
+/// that pane. In a content pane `rect` too narrow for both columns, it slides until the pop-out
+/// ends where the thread's does. Zero when they fit.
 pub(crate) fn popout_slide(rect: Rect, rem: f32, window_width: f32) -> f32 {
     let container = container(rect, rem, window_width, true);
     let columns = container.width();
@@ -2490,8 +2492,8 @@ fn container(rect: Rect, rem: f32, window_width: f32, popped_out: bool) -> Rect 
 
 /// The thread's container and the back gutter beside it in a content pane `rect`, and the list
 /// layout's left pane width. The gutter is `flex: 5.25 0 0; max-width: clamp(300px, 416px, …)`
-/// and the thread `flex: 1 1 calc(640px + 8rem)` with `max-width: calc(100% - 4rem)`, centred:
-/// spare room grows both, and whatever the thread can't take goes to the gutter. Beside a
+/// and the thread `flex: 1 1 calc(640px + 8rem)` with `max-width: calc(100% - 4rem)`, centred.
+/// Spare room grows both, and whatever the thread can't take goes to the gutter. Beside a
 /// popped-out draft the thread's basis is `calc(2 * (640px + 7rem))` and it may take the whole
 /// pane.
 fn container_and_gutter(
@@ -2566,7 +2568,7 @@ impl Layout {
         let (container, action_pane, left_pane) =
             container_and_gutter(rect, rem, window_width, popped_out);
         let basis = SANDBOX_MAX_WIDTH + 8.0 * rem;
-        // The header and the messages: `max-width: calc(640px + 8rem)`, centred; beside a
+        // The header and the messages have `max-width: calc(640px + 8rem)`, centred. Beside a
         // popped-out draft (`align-items: flex-start`) the header is up to twice as wide and the
         // messages take the pop-out's width, both at the left.
         let (header, column) = if popped_out {
@@ -2629,7 +2631,7 @@ impl Layout {
         self.rem
     }
 
-    /// The pane is beside a popped-out draft.
+    /// Whether the pane is beside a popped-out draft.
     pub(super) fn popped_out(&self) -> bool {
         self.popped_out
     }
@@ -2664,8 +2666,9 @@ impl Layout {
     }
 }
 
-/// What a click on `attachment`, one of `among`, asks for: Exo's viewer over the images and
-/// messages among them when `preview` and it's one, else Quick Look or a download.
+/// What a click on `attachment`, one of `among`, asks for. With `preview`, an image or a message
+/// opens Exo's viewer over the images and messages among them. Anything else gets Quick Look or a
+/// download.
 fn open_file<'a>(
     among: impl Iterator<Item = &'a Attachment>,
     attachment: Attachment,

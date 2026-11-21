@@ -11,15 +11,16 @@ use crate::mailbox::ThreadSummary;
 /// What is selected.
 #[derive(Clone, Debug, Default)]
 pub(super) struct Selection {
-    /// Rows selected one by one: any row without a cutoff, rows newer than it with one.
+    /// Rows selected one by one: any row when there's no cutoff, or rows newer than the cutoff when
+    /// there is one.
     picked: HashSet<String>,
-    /// A select-all's cutoff: every row dated at or before it is selected, loaded or not, but the
-    /// excluded.
+    /// A select-all's cutoff. Every row dated at or before it is selected, loaded or not, except
+    /// the excluded rows.
     cutoff: Option<Timestamp>,
     /// Rows at or before the cutoff unselected one by one.
     excluded: HashSet<String>,
-    /// The topmost selected row when the cutoff was set, and where it was: the hint names it, and
-    /// says the list changed once the cutoff row moves.
+    /// The topmost selected row when the cutoff was set, and where that row was. The hint names the
+    /// row, and says the list changed once the cutoff row moves.
     target: Option<(usize, String)>,
 }
 
@@ -33,8 +34,8 @@ impl Selection {
             && !self.excluded.contains(&thread.id)
     }
 
-    /// Selects `thread`. Returns whether to hint at ⌘A: four or more rows picked one by one,
-    /// without a select-all.
+    /// Selects `thread`. Returns whether to hint at ⌘A, which is when four or more rows are picked
+    /// one by one without a select-all.
     pub(super) fn insert(&mut self, thread: &ThreadSummary) -> bool {
         self.excluded.remove(&thread.id);
         if self.cutoff.is_none_or(|cutoff| thread.received > cutoff) {
@@ -51,8 +52,9 @@ impl Selection {
         }
     }
 
-    /// ⌘A on `rows[at]`: it and every row dated at or before it, loaded or not, keeping what was
-    /// selected above it. Rows above it with its own date that weren't selected stay out.
+    /// ⌘A on `rows[at]`, which selects it and every row dated at or before it, loaded or not, and
+    /// keeps what was selected above it. Rows above it with the same date that weren't selected
+    /// stay out.
     pub(super) fn select_from(&mut self, rows: &[&ThreadSummary], at: usize) {
         let Some(from) = rows.get(at) else { return };
         let date = from.received;
@@ -63,7 +65,7 @@ impl Selection {
         }
         let cutoff = self.cutoff.map_or(date, |cutoff| cutoff.max(date));
         self.cutoff = Some(cutoff);
-        // Rows from here down are the cutoff's now.
+        // The cutoff covers the rows from here down now.
         let covered: HashSet<&str> = rows[at..]
             .iter()
             .filter(|row| row.received <= date)
@@ -87,7 +89,7 @@ impl Selection {
         *self = Self::default();
     }
 
-    /// Anything is selected, or a select-all is on.
+    /// Whether anything is selected, or a select-all is on.
     pub(super) fn is_active(&self) -> bool {
         !self.picked.is_empty() || self.cutoff.is_some()
     }
@@ -97,15 +99,15 @@ impl Selection {
         self.cutoff
     }
 
-    /// Forgets rows `listed` no longer has.
+    /// Forgets rows that `listed` no longer has.
     pub(super) fn retain(&mut self, listed: impl Fn(&str) -> bool) {
         self.picked.retain(|id| listed(id));
         self.excluded.retain(|id| listed(id));
     }
 
-    /// How many conversations are selected, out of the list's `total`: with a select-all, the total
-    /// less the rows excluded and the unpicked ones above the cutoff. Also whether the rows above
-    /// the cutoff changed since it was set.
+    /// How many conversations are selected, out of the list's `total`. With a select-all, that's
+    /// the total less the excluded rows and the unpicked rows above the cutoff. Also returns
+    /// whether the rows above the cutoff changed since it was set.
     pub(super) fn count(&self, rows: &[&ThreadSummary], total: usize) -> (usize, bool) {
         let Some(cutoff) = self.cutoff else {
             return (self.picked.len(), false);
@@ -125,8 +127,8 @@ impl Selection {
         )
     }
 
-    /// The select-all hint's copy for `count` of `total` selected, `name` being what the list holds
-    /// (`conversations`, `drafts`), when its total is `complete`.
+    /// The select-all hint's copy for `count` of `total` selected, where `name` is what the list
+    /// holds (`conversations`, `drafts`) and `complete` says whether its total is complete.
     pub(super) fn message(
         &self,
         rows: &[&ThreadSummary],

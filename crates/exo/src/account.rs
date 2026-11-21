@@ -1,15 +1,15 @@
 //! One Gmail account's mail, as the UI sees it.
 //!
-//! The UI is immediate-mode and synchronous; the store is async. An [`Account`] runs the store,
-//! its sync and outbox loops and every Gmail call on a tokio runtime of its own. The UI sends it
-//! requests (show a list, apply a mutation, undo) that return at once, and reads the latest
-//! [`Snapshot`] of the list on screen each frame without waiting; each new snapshot asks egui to
-//! repaint. Nothing in `ui()` blocks on the network or the database.
+//! The UI is immediate-mode and synchronous, while the store is async. An [`Account`] runs the
+//! store, its sync and outbox loops and every Gmail call on a tokio runtime of its own. The UI
+//! sends it requests (show a list, apply a mutation, undo) that return at once, and each frame
+//! reads the latest [`Snapshot`] of the list on screen without waiting. Each new snapshot asks egui
+//! to repaint. Nothing in `ui()` blocks on the network or the database.
 //!
-//! Each page showing the account (a tab's) has its own [`Account`]: a handle on
-//! the account, which they share, with a view of its own in the account's worker (its list,
-//! conversation, search, filter and contact) and its own snapshots ([`Account::view`]). The
-//! account closes when its last handle goes.
+//! Each page that shows the account (a tab's) has its own [`Account`]. That's a handle on the
+//! account the pages share, with a view of its own in the account's worker (its list, conversation,
+//! search, filter and contact) and snapshots of its own ([`Account::view`]). The account closes
+//! when its last handle goes.
 
 use std::{
     cell::{Cell, RefCell},
@@ -43,58 +43,58 @@ use crate::power::{Power, PowerSource};
 use crate::recovery::{self, Restarts};
 
 /// How often to sync ([`sync_every`]): about every 25 s while the window is focused (for want of
-/// push); every minute, `FAST`, while it shows the account otherwise and for an account off
-/// screen on mains; every five minutes, `MEDIUM`, for one off screen on battery.
+/// push); every minute (`FAST`) while the window shows the account otherwise, and for an account
+/// off screen on mains; every five minutes (`MEDIUM`) for an account off screen on battery.
 const FOCUSED: Duration = Duration::from_secs(25);
 const FAST: Duration = Duration::from_secs(60);
 const MEDIUM: Duration = Duration::from_secs(300);
 /// While Gmail is unreachable, how soon to try again (the connection coming back also syncs at
 /// once).
 const OFFLINE_RETRY: Duration = Duration::from_secs(5);
-/// A sync this long after the last one that reached Gmail follows a gap (asleep, offline): of
-/// its new mail, only the newest notifies. Twice the slowest pace, off screen on battery.
+/// A sync this long after the last one that reached Gmail follows a gap (asleep or offline), so
+/// only the newest of its new mail notifies. This is twice the slowest pace, off screen on battery.
 const NOTIFY_GAP: jiff::SignedDuration = jiff::SignedDuration::from_mins(10);
-/// While something is down, how often to check whether it's back: every 10 s while the window
-/// shows and every minute while it's hidden.
+/// While something is down, how often to check whether it's back. Every 10 s while the window
+/// shows, and every minute while it's hidden.
 const CHECK_VISIBLE: Duration = Duration::from_secs(10);
 const CHECK_HIDDEN: Duration = Duration::from_secs(60);
 /// Rows a list reads at first, and how many more each time it scrolls near its end.
 const PAGE: usize = 100;
-/// Undos kept for toasts; only the newest toast's can run, but a mutation and its toast can
+/// Undos kept for toasts. Only the newest toast's undo can run, but a mutation and its toast can
 /// cross in flight.
 const UNDOS: usize = 8;
 /// How long a remote image may take before the body gives up on it.
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(30);
-/// The longest the reminder scheduler sleeps before looking at the clock again: a Mac asleep
-/// doesn't advance the timer it sleeps on.
+/// The longest the reminder scheduler sleeps before looking at the clock again, because a Mac
+/// that's asleep doesn't advance the timer the scheduler sleeps on.
 const REMINDER_RECHECK: Duration = Duration::from_secs(60);
-/// The most a remote image may weigh: past it the body gives up on the image rather than let a
+/// The most a remote image may weigh. Past it, the body gives up on the image rather than let a
 /// sender fill memory (a 30 s download can be gigabytes).
 const MAX_DOWNLOAD: usize = 25 << 20;
-/// How long quitting waits for held sends and saved drafts to go out, and signing out for the
-/// drafts waiting out their pace.
+/// How long quitting waits for held sends and saved drafts to go out, and how long signing out
+/// waits for the drafts waiting out their pace.
 const QUIT_GRACE: Duration = Duration::from_secs(5);
 /// How long signing out waits for the account's tasks to stop before its files go.
 const STOP_GRACE: Duration = Duration::from_secs(2);
-/// How long after the first sync the store first evicts what it no longer keeps
-/// ([`Store::evict`]), out of the launch's way, and how often after.
+/// How long after the first sync the store first evicts what it no longer keeps ([`Store::evict`]),
+/// to stay out of the launch's way, and how often it evicts after that.
 const EVICT_AFTER: Duration = Duration::from_secs(60);
 const EVICT_EVERY: Duration = Duration::from_secs(24 * 60 * 60);
-/// How many conversations stored for their rows alone each pre-render fetches the bodies of, and
-/// how often one runs (100 rows every ten minutes), the first a minute after the first sync, out
-/// of the launch's way as eviction is.
+/// How many of the conversations stored for their rows alone each pre-render fetches the bodies of,
+/// and how often a pre-render runs (100 rows every ten minutes). The first runs a minute after the
+/// first sync, out of the launch's way like eviction.
 const PRERENDER: usize = 100;
 const PRERENDER_AFTER: Duration = Duration::from_secs(60);
 const PRERENDER_EVERY: Duration = Duration::from_secs(10 * 60);
 
-/// Where `email`'s Gmail parts are kept: `~/Library/Caches/Exo/<account>/parts`, a cache macOS
-/// may empty, which signing out and Clear Cache delete.
+/// Where the Gmail parts of `email` are kept: `~/Library/Caches/Exo/<account>/parts`. macOS may
+/// empty this cache, and signing out and Clear Cache delete it.
 pub(crate) fn parts_cache(email: &str) -> Option<PathBuf> {
     std::env::home_dir().map(|home| home.join("Library/Caches/Exo").join(email).join("parts"))
 }
 
-/// Who an account is and how to reach its mail. Sign-in will produce these; until then `main`
-/// builds them for a running gmail-mock.
+/// Who an account is and how to reach its mail. Sign-in builds these from the account's grant, and
+/// the tests build them for a gmail-mock.
 #[derive(Clone)]
 pub struct Credentials {
     /// The account's address, which also names its store.
@@ -134,7 +134,7 @@ pub enum Presence {
     Visible,
     /// On screen, the window minimized or hidden.
     Background,
-    /// Another account is on screen: no tab shows this one.
+    /// Another account is on screen, and no tab shows this one.
     OffScreen,
 }
 
@@ -168,23 +168,23 @@ pub struct Snapshot {
     /// How many threads the inbox's tabs have locally: Inbox, Important, Other and each enabled
     /// split.
     pub counts: crate::splits::Counts,
-    /// Some thread is muted: the folder drawer lists Muted.
+    /// Whether some thread is muted, which makes the folder drawer list Muted.
     pub muted: bool,
     /// More rows exist past `threads`, locally or in Gmail.
     pub more: bool,
     /// The list is still being fetched (the first sync, or a backfill of it).
     pub loading: bool,
-    /// Every thread of the list is stored: Gmail has none older than the store has.
+    /// Whether every thread of the list is stored, meaning Gmail has none older than the store has.
     pub complete: bool,
     /// The account's labels.
     pub labels: Vec<Label>,
-    /// The contact pane's address, lower-cased, and their latest conversations in local mail
-    /// (its Mail section), newest first.
+    /// The contact pane's address, lower-cased, and that contact's latest conversations in local
+    /// mail (the pane's Mail section), newest first.
     pub contact: Option<(String, Vec<RecentThread>)>,
     /// The open thread, with every message, when it's stored locally.
     pub thread: Option<Arc<ThreadDetail>>,
-    /// Of its messages, those stored without their body, which show placeholders until they're
-    /// in.
+    /// Those of the open thread's messages stored without their body, which show placeholders until
+    /// the bodies are in.
     pub bodiless: Vec<String>,
     /// Every draft compose has saved.
     pub drafts: Vec<StoredDraft>,
@@ -235,8 +235,8 @@ pub enum Event {
     DraftFailed(DraftFailure),
     /// A draft is waiting for the network.
     DraftsOffline,
-    /// Drafts an earlier run saved without some of their files, by id: saving each again now
-    /// that Gmail answers fetches them, and writes it to Gmail once it has them all.
+    /// Drafts, by id, that an earlier run saved without some of their files. Saving each again now
+    /// that Gmail answers fetches the files, and writes the draft to Gmail once it has them all.
     Incomplete(Vec<String>),
     /// Some of a draft's attachments couldn't be read or fetched, so its save left them off.
     AttachmentsFailed {
@@ -245,7 +245,8 @@ pub enum Event {
         /// How many.
         count: usize,
     },
-    /// An undo send came back: whether the draft was still unsent (held, or failed meanwhile).
+    /// An undo send came back, saying whether the draft was still unsent (held, or failed
+    /// meanwhile).
     SendTakenBack {
         /// The draft.
         id: String,
@@ -259,13 +260,13 @@ pub enum Event {
         /// Because Gmail was out of reach.
         offline: bool,
     },
-    /// What [`Account::ask_unsent`] asked for: what Gmail doesn't have yet.
+    /// What Gmail doesn't have yet, as [`Account::ask_unsent`] asked for.
     Unsent(exo_store::Unsent),
-    /// What [`Account::read_thread`] read: the thread, or `None` when it isn't stored.
+    /// The thread [`Account::read_thread`] read (its detail is `None` when it isn't stored).
     Thread {
         /// The thread asked for.
         id: String,
-        /// It, with every message.
+        /// The thread, with every message.
         detail: Option<Arc<ThreadDetail>>,
     },
 }
@@ -287,7 +288,8 @@ enum ViewRequest {
     Filter(Option<Filter>),
     /// Let go of the list's sticky rows.
     Unstick,
-    /// The view's page came on screen: the store's hooks for the list on screen follow it.
+    /// The view's page came on screen, so the store's hooks for the list on screen follow this
+    /// view.
     Focus,
 }
 
@@ -310,7 +312,7 @@ enum Request {
     ReadThread(ThreadId),
     /// Queue a one-click unsubscribe from this link and post it.
     Unsubscribe(String),
-    /// Block a sender, or send them to Important or Other; undone with `undo`'s token.
+    /// Block a sender, or send them to Important or Other, undone with the token `undo`.
     Sender {
         job: crate::senders::SenderJob,
         undo: UndoToken,
@@ -319,25 +321,25 @@ enum Request {
     Unblock(String),
     /// From the account's own tasks.
     ContactFillFailed(String),
-    /// From the sync loop: a round ended, and whether it reached Gmail.
+    /// From the sync loop, when a round ended. `reached` says whether it reached Gmail.
     Synced {
         reached: bool,
     },
-    /// From the account's own tasks: the files incomplete drafts lacked were fetched again, but
-    /// for these (by uuid), which trying again won't get.
+    /// From the account's own tasks, once the files that incomplete drafts lacked were fetched
+    /// again, except these (by uuid), which trying again won't get.
     FilesFetched(Vec<String>),
     Backfilled(ListId),
-    /// From the account's own tasks: the open thread's bodies were fetched (or couldn't be).
+    /// From the account's own tasks, once the open thread's bodies were fetched (or couldn't be).
     BodiesLoaded(ThreadId),
-    /// Fetch this thread's bodies, if they aren't stored: the list's cursor rests on it.
+    /// Fetch this thread's bodies if they aren't stored, because the list's cursor rests on it.
     Prefetch(ThreadId),
-    /// From the account's own tasks: bringing back snoozed threads with no reminder failed, to
-    /// try again at the next sync.
+    /// From the account's own tasks, when bringing back snoozed threads with no reminder failed.
+    /// The next sync tries again.
     OrphansFailed,
-    /// From the account's own tasks: a thread's bodies were prefetched (or couldn't be).
+    /// From the account's own tasks, once a thread's bodies were prefetched (or couldn't be).
     Prefetched(ThreadId),
     Refresh,
-    /// Boxed: the settings document is several times the other requests' size.
+    /// Boxed, because the settings document is several times the size of the other requests.
     SaveSettings(Box<Settings>),
     SaveDeviceSettings(DeviceSettings),
     /// Save a draft as `email` with its attachments' bytes added.
@@ -355,38 +357,38 @@ enum Request {
     CancelSend(String),
     /// Cancel the held send and take back the reminder it put on its thread.
     UndoSend(String),
-    /// Give the message just sent as this draft a reminder, or take it off: the held draft's,
-    /// else (it went) the thread's.
+    /// Give the message just sent as this draft a reminder, or take its reminder off. The reminder
+    /// goes on the held draft, or on the thread if the draft already went.
     RemindSent {
         draft: String,
         thread: Option<String>,
         reminder: Option<exo_store::DraftReminder>,
     },
     RecoverDraft(String),
-    /// Write every draft Gmail lacks now, not at its pace: the account is being left.
+    /// Write every draft Gmail lacks now, not at its pace, because the account is being left.
     WriteDraftsNow,
     /// Write every draft Gmail lacks now, then count what it still doesn't have, for
     /// [`Event::Unsent`].
     Unsent,
-    /// Read the address book: stored mail now, Google contacts in the background when they're
-    /// missing or stale.
+    /// Read the address book, from stored mail now and from Google contacts in the background when
+    /// those are missing or stale.
     LoadAddressBook,
     /// From the task that scored stored mail.
     MailContacts(Arc<Vec<ScoredContact>>),
     /// From the task that listed Google contacts and "other contacts".
     GoogleContacts(Arc<Vec<GoogleContact>>),
-    /// Quitting: send every draft held for undo now, write the drafts saved on the way out, and
+    /// On quitting, send every draft held for undo now, write the drafts saved on the way out, and
     /// say when done.
     SendHeldNow(tokio::sync::oneshot::Sender<()>),
-    /// From the account's own tasks: a page of Gmail's matches for the search with this
-    /// number, or `None` when Gmail couldn't be reached.
+    /// From the account's own tasks, a page of Gmail's matches for the search with this number
+    /// (`None` when Gmail couldn't be reached).
     SearchPage(u64, Option<GmailPage>),
 }
 
-/// One account as one page sees it: a handle on the account (its store and the tasks that keep
+/// One account as one page sees it. It's a handle on the account (its store and the tasks that keep
 /// it in sync, seen from the UI thread) with a view of its own, whose snapshots carry the page's
-/// list, conversation, search, filter and contact. Another page of the account has another
-/// handle ([`Account::view`]).
+/// list, conversation, search, filter and contact. Another page of the account has another handle
+/// ([`Account::view`]).
 pub struct Account {
     shared: Rc<Shared>,
     view: ViewId,
@@ -418,15 +420,15 @@ struct Events {
 struct CalendarAccounts {
     /// Signs them in, once the app says ([`Account::sign_in_calendars_with`]).
     auth: Option<CalendarAuth>,
-    /// The ones read, and their tokens, which say when Google refuses a grant.
+    /// The accounts read, with their tokens, which say when Google refuses a grant.
     tokens: Vec<(String, exo_auth::Tokens)>,
     signing_in: Option<CalendarSignIn>,
 }
 
-/// What every handle on an account shares: the account.
+/// The account itself, which every handle on it shares.
 struct Shared {
     email: String,
-    /// The folder draft attachments' bytes are kept in.
+    /// The folder that holds the bytes of draft attachments.
     files: PathBuf,
     /// Wakes the task that writes to Gmail.
     flush: Wake,
@@ -449,7 +451,7 @@ struct Shared {
     power: watch::Sender<Power>,
     events: RefCell<Events>,
     loader: Loader,
-    /// The UI's copy of the settings: changes apply here at once and are saved behind it.
+    /// The UI's copy of the settings. Changes apply here at once and are saved in the background.
     settings: RefCell<Versioned>,
     /// How many times [`Account::apply`] was called.
     applies: AtomicU64,
@@ -461,7 +463,8 @@ struct Shared {
     notifier: watch::Sender<Option<Notifier>>,
     /// Where one-click unsubscribes may post.
     reach: crate::unsubscribe::Reach,
-    /// What time it is for the reminder scheduler: the app's clock, once it has one.
+    /// What time it is for the reminder scheduler, which is the app's clock once the app has set
+    /// one.
     clock: Arc<std::sync::RwLock<crate::Clock>>,
     /// Wakes the reminder scheduler, to look at the clock now.
     reminders: Wake,
@@ -500,10 +503,11 @@ impl Repaint {
     }
 }
 
-/// Whether the account's store still works once open, read from its database's errors: a
-/// corrupt file or a full disk stops the account at once, failures that may pass (I/O) after five
-/// in a row, and the app shows the teardown a store that won't open gets (`teardown`). The
-/// worker's reads, which follow every change and flush, and sync's writes find them.
+/// Whether the account's store still works once open, judged from its database's errors. A corrupt
+/// file or a full disk stops the account at once, and failures that may pass (I/O) stop it after
+/// five in a row. The app then shows the same teardown as for a store that won't open (`teardown`).
+/// These errors surface in the worker's reads, which follow every change and flush, and in sync's
+/// writes.
 pub(crate) struct Health {
     unusable: std::sync::Mutex<Option<exo_store::Unusable>>,
     /// Failures that may pass, in a row.
@@ -621,8 +625,9 @@ impl Wake {
 struct Wakes(Arc<tokio::sync::Mutex<mpsc::UnboundedReceiver<Busy>>>);
 
 impl Wakes {
-    /// Waits for a wake and takes every one made since, which one run of the loop answers: it
-    /// counts as busy until the returned guard drops. `None` once nothing can wake it.
+    /// Waits for a wake and takes every one made since, because one run of the loop answers them
+    /// all. The run counts as busy until the returned guard drops. `None` once nothing can wake the
+    /// loop.
     async fn next(&mut self) -> Option<Busy> {
         let mut receiver = self.0.lock().await;
         let busy = receiver.recv().await?;
@@ -631,8 +636,8 @@ impl Wakes {
     }
 }
 
-/// The default splits for the account `email` (`SplitInbox::defaults`): Team covers its domain,
-/// unless that's a webmail one.
+/// The default splits for the account `email` (`SplitInbox::defaults`). Team covers the account's
+/// domain, unless that's a webmail one.
 fn default_splits(email: &str) -> Vec<exo_store::SplitInbox> {
     let me = [email.to_owned()];
     exo_store::SplitInbox::defaults(
@@ -645,8 +650,8 @@ fn default_splits(email: &str) -> Vec<exo_store::SplitInbox> {
 }
 
 impl Account {
-    /// Opens `credentials`' store in `dir` and starts syncing it; `ctx` repaints on new data while
-    /// the account is on screen ([`Account::set_on_screen`]), which it is to start with.
+    /// Opens the store for `credentials` in `dir` and starts syncing it. `ctx` repaints on new data
+    /// while the account is on screen ([`Account::set_on_screen`]), which it is to start with.
     ///
     /// # Errors
     /// When the store can't be opened, or the runtime can't start.
@@ -666,10 +671,12 @@ impl Account {
             tokens,
         } = credentials;
         let reach = crate::unsubscribe::Reach::of(&endpoints);
-        // Remote content may come from this Mac only when Gmail does too: gmail-mock's images.
+        // Remote content may come from this Mac only when Gmail does too, as gmail-mock's images
+        // do.
         let local_gmail = crate::remote_content::serves_gmail_locally(&endpoints);
         let store = runtime.block_on(Store::open(dir, &email, endpoints, tokens))?;
-        // On gmail-mock, beside the store: a test's or a screenshot's cache is its own.
+        // On gmail-mock, the parts cache sits beside the store, so a test's or a screenshot's cache
+        // is its own.
         let parts = if local_gmail {
             Some(dir.join(format!("{email}.parts")))
         } else {
@@ -751,7 +758,7 @@ impl Account {
         // What an earlier run left unsent goes now: a send held when Exo crashed, or when
         // Google signed the account out.
         flush.wake();
-        // A loop that runs again after a panic starts as at opening, woken: its timers went
+        // A loop that runs again after a panic starts woken, as at opening, because its timers went
         // with it.
         recovery::spawn(&restarts, {
             let (store, requests, presence, power, notify, sync_now, health) = (
@@ -972,8 +979,8 @@ impl Account {
         }
     }
 
-    /// Another handle on the account, for another page: a view of its own, on the inbox with
-    /// nothing open, whose first snapshot is this one's latest without its list, conversation,
+    /// Another handle on the account, for another page. Its view is its own, on the inbox with
+    /// nothing open, and its first snapshot is this handle's latest without its list, conversation,
     /// search and contact.
     pub fn view(&self) -> Self {
         let view = self
@@ -1004,8 +1011,8 @@ impl Account {
         self.shared.requests.post(Request::View(self.view, request));
     }
 
-    /// Takes up the settings another page of the account changed since this one last looked: a
-    /// page does as it starts a frame or comes on screen.
+    /// Takes up the settings another page of the account changed since this one last looked. A page
+    /// does this as it starts a frame or comes on screen.
     pub fn catch_up(&mut self) {
         let latest = self.shared.settings.borrow();
         if latest.version != self.settings.version {
@@ -1021,17 +1028,17 @@ impl Account {
     }
 
     /// A number for an undo ([`Account::apply`], [`Account::sender_job`], [`Account::bulk`]),
-    /// the account's own: no other page's undo has it.
+    /// unique to the account, so no other page's undo has it.
     pub fn undo_token(&self) -> UndoToken {
         self.shared
             .next_undo
             .replace(self.shared.next_undo.get() + 1)
     }
 
-    /// Signs calendar accounts in with `auth` from now on, and reads the ones the settings list
-    /// as signed in, with their grants (from the Keychain, the first time: this can block, as
-    /// opening the mail's grant does). One whose grant is gone is listed as signed out; a grant
-    /// the settings don't list any more is forgotten.
+    /// Signs calendar accounts in with `auth` from now on, and reads the ones the settings list as
+    /// signed in, with their grants. The first time, the grants come from the Keychain, which can
+    /// block, as opening the mail's grant does. An account whose grant is gone is listed as signed
+    /// out, and a grant the settings don't list any more is forgotten.
     pub fn sign_in_calendars_with(&mut self, auth: CalendarAuth) {
         let email = self.shared.email.clone();
         let held = auth
@@ -1090,9 +1097,9 @@ impl Account {
         self.shared.calendar_accounts.borrow_mut()
     }
 
-    /// Starts signing a calendar account in: `hint` names the one asked for (`Sign in again`, an
-    /// invite's). Abandons a sign-in in flight. Returns whether it started: a session without
-    /// Exo's sign-in can't.
+    /// Starts signing a calendar account in, with `hint` naming the one asked for
+    /// (by `Sign in again`, or an invite's). Abandons a sign-in in flight. Returns whether it
+    /// started, which it can't in a session without Exo's sign-in.
     pub fn sign_in_calendar(&mut self, hint: Option<&str>) -> bool {
         let mut calendars = self.calendar_accounts();
         let Some(CalendarAuth { auth, browser }) = calendars.auth.clone() else {
@@ -1115,9 +1122,9 @@ impl Account {
         true
     }
 
-    /// The outcome of the calendar sign-in in flight, once it has one. A calendar account
-    /// signed in is listed (`authed`) and read, its calendars loading; the mail account's own
-    /// address changes nothing.
+    /// The outcome of the calendar sign-in in flight, once it has one. A calendar account that
+    /// signs in is listed (`authed`) and read, and its calendars start loading. Signing in as the
+    /// mail account's own address changes nothing.
     pub fn poll_calendar_sign_in(&mut self) -> Option<Result<String, exo_auth::Error>> {
         let mut calendars = self.calendar_accounts();
         let outcome = calendars.signing_in.as_mut()?.outcome.try_recv().ok()?;
@@ -1184,8 +1191,8 @@ impl Account {
         });
     }
 
-    /// Removes calendar account `email`: its grant is forgotten, it leaves the settings, and its
-    /// calendars and the events only they had go. The mail account's own can't be.
+    /// Removes calendar account `email`. Its grant is forgotten, it leaves the settings, and its
+    /// calendars go, with the events only they had. The mail account's own can't be removed.
     pub fn remove_calendar_account(&mut self, email: &str) {
         if email == self.shared.email {
             return;
@@ -1210,8 +1217,8 @@ impl Account {
         self.shared.notifier.send_replace(notifier);
     }
 
-    /// Paces the account's syncs off screen by `source` from now on ([`sync_every`]); until then
-    /// it's plugged in.
+    /// Paces the account's syncs off screen by `source` from now on ([`sync_every`]). Until then,
+    /// the account counts as plugged in.
     pub fn follow_power(&self, source: &PowerSource) {
         let (own, mut power) = (self.shared.power.clone(), source.subscribe());
         self.shared.loader.runtime.spawn(async move {
@@ -1225,7 +1232,7 @@ impl Account {
         });
     }
 
-    /// Has the reminder scheduler look at the clock now: the minute changed, maybe by more
+    /// Has the reminder scheduler look at the clock now, for when the minute changed, maybe by more
     /// than the scheduler slept (a Mac asleep).
     pub fn check_reminders(&self) {
         self.shared.reminders.wake();
@@ -1260,8 +1267,8 @@ impl Account {
         self.ask(ViewRequest::Open(thread.map(ThreadId::new)));
     }
 
-    /// Fetches `thread`'s bodies ahead of its opening when they aren't stored: the list's cursor
-    /// rests on it.
+    /// Fetches the bodies of `thread` ahead of its opening, when they aren't stored, because the
+    /// list's cursor rests on it.
     pub fn prefetch(&self, thread: &str) {
         self.shared
             .requests
@@ -1288,9 +1295,9 @@ impl Account {
         ));
     }
 
-    /// Runs `query` ahead of being asked for: Gmail's first page of its
-    /// matches is fetched, without holding up what's on screen, so that running it with
-    /// [`search`](Self::search) shows them at once. One at a time: a newer one replaces it.
+    /// Runs `query` ahead of being asked for. Gmail's first page of its matches is fetched without
+    /// holding up what's on screen, so that running the query with [`search`](Self::search) shows
+    /// them at once. One preload runs at a time, and a newer one replaces it.
     pub fn preload_search(&self, query: &str, snippet_tokens: i64) {
         self.ask(ViewRequest::Preload(query.to_owned(), snippet_tokens));
     }
@@ -1301,15 +1308,14 @@ impl Account {
         self.ask(ViewRequest::Filter(filter));
     }
 
-    /// Lets the list's rows that stay after an action took them out of it go
-    /// (as entering search does).
+    /// Lets go of the rows that stayed in the list after an action took them out of it (as entering
+    /// search does).
     pub fn unstick(&self) {
         self.ask(ViewRequest::Unstick);
     }
 
-    /// Applies `mutation` to `threads`; undo it with `undo`'s token while its toast shows.
-    /// Returns the call's number: snapshots whose [`Snapshot::applied`] reaches it show its
-    /// effect.
+    /// Applies `mutation` to `threads`, undone with the token `undo` while its toast shows. Returns
+    /// the call's number. Snapshots whose [`Snapshot::applied`] reaches it show its effect.
     pub fn apply(&self, threads: &[String], mutation: Mutation, undo: Option<UndoToken>) -> u64 {
         let threads = threads.iter().map(|id| ThreadId::new(id.clone())).collect();
         self.shared.requests.post(Request::Apply {
@@ -1321,36 +1327,36 @@ impl Account {
         self.shared.applies.fetch_add(1, Ordering::SeqCst) + 1
     }
 
-    /// Runs `job` (blocks a sender, sends one to Important or Other); [`Account::undo`] with
+    /// Runs `job` (blocks a sender, or sends one to Important or Other). [`Account::undo`] with
     /// `undo` undoes it, even while it runs.
     pub fn sender_job(&self, job: crate::senders::SenderJob, undo: UndoToken) {
         self.shared.requests.post(Request::Sender { job, undo });
     }
 
-    /// Deletes the Gmail filters blocking `from`, an address or domain (Blocked Senders'
-    /// Unblock); the block list is the caller's.
+    /// Deletes the Gmail filters blocking `from`, an address or domain (Unblock in Blocked
+    /// Senders). Updating the block list is up to the caller.
     pub fn unblock(&self, from: &str) {
         self.shared.requests.post(Request::Unblock(from.to_owned()));
     }
 
-    /// Creates the label `name` in Gmail; [`Event::LabelCreated`] or
-    /// [`Event::LabelNotCreated`] follows.
+    /// Creates the label `name` in Gmail. [`Event::LabelCreated`] or [`Event::LabelNotCreated`]
+    /// follows.
     pub fn create_label(&self, name: &str) {
         self.shared
             .requests
             .post(Request::CreateLabel(name.to_owned()));
     }
 
-    /// Reads thread `id` from the store, for [`Event::Thread`]: what an action on a
-    /// conversation not open needs of its messages.
+    /// Reads thread `id` from the store, for [`Event::Thread`]. An action on a conversation that
+    /// isn't open reads its messages this way.
     pub fn read_thread(&self, id: &str) {
         self.shared
             .requests
             .post(Request::ReadThread(ThreadId::new(id.to_owned())));
     }
 
-    /// Unsubscribes with a one-click POST to `url` (RFC 8058), now or, offline, once Gmail can
-    /// be reached; a quit meanwhile doesn't lose it.
+    /// Unsubscribes with a one-click POST to `url` (RFC 8058), now, or once Gmail can be reached
+    /// when offline. A quit meanwhile doesn't lose it.
     pub fn unsubscribe(&self, url: &url::Url) {
         self.shared
             .requests
@@ -1369,7 +1375,7 @@ impl Account {
         }
     }
 
-    /// Queues a bulk action; [`Account::undo`] with `token` undoes it.
+    /// Queues a bulk action. [`Account::undo`] with `token` undoes it.
     pub fn bulk(&self, token: UndoToken, request: crate::bulk::Request) {
         self.shared.bulk.submit(token, request);
     }
@@ -1385,13 +1391,13 @@ impl Account {
         self.ask(ViewRequest::Contact(email.to_lowercase()));
     }
 
-    /// The network changed: checks now whether Gmail still answers, as the OS's network changing
-    /// does ([`exo_store::Store::network_changed`]).
+    /// Checks now whether Gmail still answers after the network changed, as a change to the OS's
+    /// network does ([`exo_store::Store::network_changed`]).
     pub fn network_changed(&self) {
         self.shared.network.wake();
     }
 
-    /// Sets how often to sync; gaining focus syncs at once.
+    /// Sets how often to sync. Gaining focus syncs at once.
     pub fn set_presence(&self, presence: Presence) {
         let changed = self
             .shared
@@ -1402,9 +1408,9 @@ impl Account {
         }
     }
 
-    /// Whether the account's mail is on screen, this handle's page showing it: off screen, its
-    /// new data asks for no frame. Coming on screen asks for one, for what came meanwhile, and
-    /// the store's hooks for the list on screen follow this handle's view.
+    /// Whether the account's mail is on screen, with this handle's page showing it. Off screen, the
+    /// account's new data asks for no frame. Coming on screen asks for one, for what came
+    /// meanwhile, and the store's hooks for the list on screen follow this handle's view.
     pub fn set_on_screen(&self, on_screen: bool) {
         if !self
             .shared
@@ -1435,8 +1441,9 @@ impl Account {
         self.events.take()
     }
 
-    /// Nothing is in flight: no request, sync, flush, backfill or fetch is running or asked for,
-    /// and the latest snapshot has read every change to the store. For screenshots and tests.
+    /// Whether nothing is in flight, meaning no request, sync, flush, backfill or fetch is running
+    /// or asked for, and the latest snapshot has read every change to the store. For screenshots
+    /// and tests.
     pub fn is_idle(&self) -> bool {
         self.shared.requests.busy.load(Ordering::SeqCst) == 0
             && self.shared.published.load(Ordering::SeqCst) == *self.shared.changes.borrow()
@@ -1449,7 +1456,7 @@ impl Account {
         *self.shared.progress.borrow()
     }
 
-    /// How draft `id`'s files stand with Gmail (compose's cards); none are up for a draft the
+    /// How the files of draft `id` stand with Gmail (compose's cards). None are up for a draft the
     /// store doesn't know of yet.
     pub fn upload(&self, id: &str) -> exo_store::Upload {
         self.shared
@@ -1460,7 +1467,7 @@ impl Account {
             .unwrap_or_default()
     }
 
-    /// Why the account's store stopped working since it opened, if it did: the app shows the
+    /// Why the account's store stopped working since it opened, if it did. The app shows the
     /// teardown for it, as for a store that wouldn't open.
     pub fn unusable(&self) -> Option<exo_store::Unusable> {
         self.shared.health.unusable()
@@ -1476,8 +1483,8 @@ impl Account {
         &self.settings.settings
     }
 
-    /// Changes the account's settings: at once for the UI, every page of it, saved in the
-    /// background.
+    /// Changes the account's settings, at once for the UI on every page of the account, and saves
+    /// them in the background.
     pub fn update_settings(&mut self, change: impl FnOnce(&mut Settings)) {
         self.catch_up();
         let mut settings = Settings::clone(&self.settings.settings);
@@ -1491,8 +1498,8 @@ impl Account {
         }
     }
 
-    /// Saves `draft` as `email`: locally at once, to Gmail once it has every file and its pace
-    /// allows (at most every 5 s while it's typed in, 30 s with files).
+    /// Saves `draft` as `email`, locally at once and to Gmail once it has every file and its pace
+    /// allows (at most every 5 s while it's typed in, or every 30 s with files).
     pub fn save_draft(&self, draft: Draft, email: gmail::mime::Email) {
         self.shared.requests.post(Request::SaveDraft {
             draft: Box::new(draft),
@@ -1500,7 +1507,7 @@ impl Account {
         });
     }
 
-    /// The folder draft attachments' bytes go in, each named by its uuid.
+    /// The folder that holds the bytes of draft attachments, each named by its uuid.
     pub fn draft_files(&self) -> &Path {
         &self.shared.files
     }
@@ -1540,28 +1547,29 @@ impl Account {
         self.shared.requests.post(Request::WriteDraftsNow);
     }
 
-    /// Reads (again) everyone compose can suggest into snapshots: stored mail, scored, and
+    /// Reads (again) everyone compose can suggest into snapshots, from stored mail (scored) and
     /// Google contacts.
     pub fn load_address_book(&self) {
         self.shared.requests.post(Request::LoadAddressBook);
     }
 
-    /// Takes back a held send; [`Event::SendTakenBack`] says whether it was still held.
+    /// Takes back a held send. [`Event::SendTakenBack`] says whether it was still held.
     pub fn cancel_send(&self, id: &str) {
         self.shared
             .requests
             .post(Request::CancelSend(id.to_owned()));
     }
 
-    /// Undo send: takes back a held send and the reminder it put on its thread, as
-    /// [`cancel_send`](Self::cancel_send) answered.
+    /// Undo send. Takes back a held send and the reminder it put on its thread, answered as
+    /// [`cancel_send`](Self::cancel_send) is.
     pub fn undo_send(&self, id: &str) {
         self.shared.requests.post(Request::UndoSend(id.to_owned()));
     }
 
-    /// Gives the message just sent as draft `id` `reminder`, or takes it off (the follow-up
-    /// hint's `Set reminder`, and its toast's Undo): while the send is held, the draft and its
-    /// thread get it, as at Send; once it's gone, `thread` does, without being marked done.
+    /// Gives `reminder` to the message just sent as draft `id`, or takes the reminder off
+    /// (`Set reminder` on the follow-up hint, and Undo on its toast). While the send is held, the
+    /// draft and its thread get the reminder, as at Send. Once the send has gone, `thread` gets
+    /// it, without being marked done.
     pub fn remind_sent(
         &self,
         id: &str,
@@ -1575,15 +1583,15 @@ impl Account {
         });
     }
 
-    /// Asks what Gmail doesn't have yet (signing out asks first), once the drafts waiting out
-    /// their pace are written; [`Event::Unsent`] answers.
+    /// Asks what Gmail doesn't have yet (signing out asks first), once the drafts waiting out their
+    /// pace are written. [`Event::Unsent`] answers.
     pub fn ask_unsent(&self) {
         self.shared.requests.post(Request::Unsent);
     }
 
-    /// Stops the account for good without sending what it holds, as signing out does: held
-    /// sends, queued changes and the calendar's held changes stay unsent. Its tasks are stopped
-    /// when this returns; its store closes once every handle on the account is dropped.
+    /// Stops the account for good without sending what it holds, as signing out does. Held sends,
+    /// queued changes and the calendar's held changes stay unsent. The account's tasks are stopped
+    /// when this returns, and its store closes once every handle on the account is dropped.
     pub fn discard(&mut self) {
         let runtime = self.shared.runtime.take();
         if let Some(runtime) = runtime {
@@ -1613,7 +1621,7 @@ impl Account {
 }
 
 impl Drop for Account {
-    /// Its view goes; the account closes with its last handle ([`Shared`]'s drop).
+    /// The handle's view goes. The account closes with its last handle (when [`Shared`] drops).
     fn drop(&mut self) {
         self.shared.requests.post(Request::RemoveView(self.view));
     }
@@ -1621,18 +1629,18 @@ impl Drop for Account {
 
 impl Drop for Shared {
     fn drop(&mut self) {
-        // Queued mutations are in the store's outbox and go out on the next launch. Held sends
-        // go now rather than wait for one, for a few seconds at most, and so do
-        // the drafts the app saved on its way out. So do the calendar's changes still held for
-        // Undo; what Calendar can't take now stays queued for the next launch.
+        // Queued mutations are in the store's outbox and go out on the next launch. Held sends go
+        // now, for a few seconds at most, rather than wait for the next launch, and so do the
+        // drafts the app saved on its way out and the calendar's changes still held for Undo. What
+        // Calendar can't take now stays queued for the next launch.
         let Some(runtime) = self.runtime.get_mut().take() else {
             return;
         };
         if self.calendar.held() > 0 {
             runtime.block_on(self.calendar.send_now(QUIT_GRACE));
         }
-        // Asked even when no snapshot shows a held send: the worker handles requests in turn,
-        // so a Send still queued is held, then sent.
+        // Asked even when no snapshot shows a held send. The worker handles requests in turn, so a
+        // Send still queued is held, then sent.
         let (requests, flush) = (self.requests.clone(), self.flush.clone());
         let _ = runtime.block_on(async move {
             let (done, wait) = tokio::sync::oneshot::channel();
@@ -1650,14 +1658,14 @@ impl Drop for Shared {
 struct SenderJobState {
     /// What it changed, once it's done.
     done: Option<crate::senders::Done>,
-    /// Undo was asked for: the task undoes it as soon as it's done.
+    /// Whether undo was asked for, in which case the task undoes the job as soon as it's done.
     undo: bool,
 }
 
-/// The task that owns what's on screen: it handles requests in order and publishes snapshots.
+/// The task that owns what's on screen. It handles requests in order and publishes snapshots.
 struct Worker {
     store: Store,
-    /// What compose suggests from: mail's contacts with Google's merged in.
+    /// What compose suggests from (mail's contacts with Google's merged in).
     address_book: Option<Arc<Vec<ScoredContact>>>,
     /// Stored mail's contacts, as last scored.
     mail_contacts: Option<Arc<Vec<ScoredContact>>>,
@@ -1665,10 +1673,10 @@ struct Worker {
     google_contacts: Option<(Arc<Vec<GoogleContact>>, std::time::Instant)>,
     /// A Google listing is under way.
     listing_google: bool,
-    /// Drafts whose last save left attachments off, with that save (the message without its
-    /// files) to make again once they can be had: `None` when retrying won't get them.
+    /// Drafts whose last save left attachments off, with that save (the message without its files)
+    /// to make again once the files can be had. The save is `None` when retrying won't get them.
     incomplete: HashMap<String, Option<Box<(Draft, gmail::mime::Email)>>>,
-    /// Their files are being fetched again, off this task.
+    /// The files of the incomplete drafts are being fetched again, off this task.
     fetching_files: bool,
     repaint: Repaint,
     requests: Requests,
@@ -1682,7 +1690,7 @@ struct Worker {
     /// How drafts' files stand with Gmail, which compose's cards show.
     uploads: watch::Receiver<exo_store::Uploads>,
     events: std::sync::mpsc::Sender<Event>,
-    /// The account's views, one a page: what each one's snapshots carry.
+    /// The account's views, one per page, with what each one's snapshots carry.
     views: HashMap<ViewId, ViewState>,
     /// The view on screen, which the store's hooks for the list on screen follow.
     focused: ViewId,
@@ -1701,7 +1709,7 @@ struct Worker {
     /// Addresses whose conversations were asked of Gmail this session (or are being).
     filled: HashSet<String>,
     undos: Vec<(UndoToken, Undo)>,
-    /// Sender jobs by undo token: what each changed once it's done, and whether undo was asked
+    /// Sender jobs by undo token, with what each changed once it's done and whether undo was asked
     /// for before then.
     sender_jobs: Vec<(UndoToken, Arc<std::sync::Mutex<SenderJobState>>)>,
     /// How many apply requests were handled.
@@ -1709,13 +1717,13 @@ struct Worker {
     flush: Wake,
     /// The number the next search gets.
     searches: u64,
-    /// The account's background's failures (`recovery`).
+    /// The failures of the account's background (`recovery`).
     restarts: Arc<Restarts>,
     /// Whether the store still works.
     health: Arc<Health>,
 }
 
-/// What one of the account's views shows (a page's), which its snapshots follow.
+/// What one of the account's views (a page's) shows, which its snapshots follow.
 struct ViewState {
     snapshot: watch::Sender<Arc<Snapshot>>,
     list: ListId,
@@ -1729,8 +1737,8 @@ struct ViewState {
     search: Option<Searching>,
     /// The search run ahead of being asked for, which snapshots don't show.
     preload: Option<Searching>,
-    /// The search whose preload's Gmail page is on its way, maybe one since replaced: a
-    /// preload asks Gmail only once none is.
+    /// The search whose preload is waiting on a Gmail page, maybe a search since replaced. A
+    /// preload asks Gmail only when no such page is on its way.
     preloading: Option<u64>,
     /// The list's filter.
     filter: Option<Filter>,
@@ -1760,7 +1768,7 @@ impl ViewState {
         }
     }
 
-    /// Whether search `id`'s Gmail page is this view's: its search's, its preload's, or one it
+    /// Whether the Gmail page of search `id` is this view's: its search's, its preload's, or one it
     /// waits on.
     fn searches(&self, id: u64) -> bool {
         self.preloading == Some(id)
@@ -1802,7 +1810,7 @@ impl Searching {
     }
 }
 
-/// Whether two searches are the same list: the same query, one trailing space aside.
+/// Whether two searches are the same list, meaning the same query, one trailing space aside.
 fn same_search(a: &str, b: &str) -> bool {
     a.strip_suffix(' ').unwrap_or(a) == b.strip_suffix(' ').unwrap_or(b)
 }
@@ -1818,10 +1826,10 @@ pub fn snippet_tokens(window_width: f32) -> i64 {
 }
 
 impl Worker {
-    /// Keeps the rows `mutation` stars or unstars in Starred where they are in `view`, the view
-    /// it was applied from (starring sticks them and doesn't dismiss them), and lets go of held
-    /// rows anything else but marking read or unread acts on: those dismiss a row that's no
-    /// longer starred, and unstick it.
+    /// Keeps the rows that `mutation` stars or unstars in Starred where they are in `view`, the
+    /// view it was applied from (starring sticks them and doesn't dismiss them). Any other mutation
+    /// but marking read or unread lets go of the held rows it acts on, in every view, because such
+    /// a mutation dismisses a row that's no longer starred and unsticks it.
     fn hold(&mut self, view: ViewId, threads: &[ThreadId], mutation: &Mutation) {
         match mutation {
             Mutation::Star | Mutation::Unstar => {
@@ -1865,10 +1873,11 @@ impl Worker {
                 biased;
                 request = requests.recv() => {
                     let Some(request) = request else { return };
-                    // The contact pane's person changing only needs their conversations, which
-                    // go out at once rather than with a re-read of everything.
+                    // When the contact pane's person changes, only their conversations are needed,
+                    // and those go out at once rather than with a re-read of everything.
                     let reread = !matches!(request, Request::View(_, ViewRequest::Contact(_)));
-                    // A request that panics is dropped; those after it are answered (`recovery`).
+                    // A request that panics is dropped, and the ones after it are still answered
+                    // (`recovery`).
                     let handled = AssertUnwindSafe(async {
                         self.handle(request).await;
                         if reread {
@@ -1899,14 +1908,14 @@ impl Worker {
                 }
                 // The footer's `Updating: k of n`.
                 Ok(()) = self.progress.changed() => self.repaint.request(),
-                // Compose's cards' upload bars.
+                // The upload bars on compose's cards.
                 Ok(()) = self.uploads.changed() => self.repaint.request(),
             }
         }
     }
 
-    /// After a panic: waits as [`Restarts::failed`] says and returns `true`, or `false` once Exo
-    /// gives up.
+    /// After a panic, waits as [`Restarts::failed`] says and returns `true`, or returns `false`
+    /// once Exo gives up.
     async fn recovered(&self) -> bool {
         let Some(wait) = self.restarts.failed() else {
             return false;
@@ -2054,7 +2063,7 @@ impl Worker {
                             Ok(done) => done,
                             Err(error) => return log::error!("a sender job: {error}"),
                         };
-                        // Undone while it ran: undo it now.
+                        // Undone while it ran, so undo it now.
                         let done = {
                             let mut state =
                                 state.lock().expect("sender job lock is never poisoned");
@@ -2135,7 +2144,7 @@ impl Worker {
                     self.fetch_missing_files();
                     self.resave_incomplete().await;
                     self.return_orphaned_snoozes();
-                    // Opened while Gmail couldn't be reached: their bodies now.
+                    // Threads opened while Gmail couldn't be reached get their bodies now.
                     let open: HashSet<ThreadId> = self
                         .views
                         .values()
@@ -2195,7 +2204,7 @@ impl Worker {
                 }
             }
             Request::SendDraft { id, .. } if self.incomplete.contains_key(&id) => {
-                // Sending would leave files off; the user gets the draft back instead.
+                // Sending would leave files off, so the user gets the draft back instead.
                 let reason = SendFailure::Other;
                 let _ = self
                     .events
@@ -2286,8 +2295,8 @@ impl Worker {
                     });
             }
             Request::Unsent => {
-                // Signing out: drafts that only wait out their pace go first, so what's counted is
-                // what Gmail can't take. Past the grace the write goes on, and what it hasn't
+                // On signing out, drafts that only wait out their pace go first, so what's counted
+                // is what Gmail can't take. Past the grace, the write goes on, and what it hasn't
                 // written yet counts.
                 let (store, events, flush, repaint, busy) = (
                     self.store.clone(),
@@ -2326,8 +2335,9 @@ impl Worker {
                         }
                         drop(busy);
                     });
-                // Google is slow and changes little: listed once a session, again when stale,
-                // and never waited for (nor counted as busy, so the UI's quiet doesn't hang on it).
+                // Google is slow and changes little, so its contacts are listed once a session,
+                // again when stale, and never waited for (nor counted as busy, so the UI's quiet
+                // doesn't hang on the listing).
                 let stale = self
                     .google_contacts
                     .as_ref()
@@ -2355,7 +2365,7 @@ impl Worker {
                 match self.store.drafts().await {
                     Ok(drafts) => {
                         let now = jiff::Timestamp::now();
-                        // Undo send's holds, not scheduled sends: those wait for their time, or
+                        // Only undo send's holds, not scheduled sends, which wait for their time or
                         // the next launch.
                         for draft in drafts.iter().filter(|draft| {
                             draft.send_at.is_some_and(|at| at > now)
@@ -2447,7 +2457,8 @@ impl Worker {
                 if view.search.as_ref().is_some_and(|search| search.raw == raw) {
                     return;
                 }
-                // The search run ahead for it shows what it has at once; any other is dropped.
+                // The search run ahead for this query shows what it has at once, and any other
+                // preload is dropped.
                 let search = match view
                     .preload
                     .take()
@@ -2480,8 +2491,8 @@ impl Worker {
                 if asked(&view.search) || asked(&view.preload) {
                     return;
                 }
-                // Like a search run for the screen, it reads the local index as it starts: what
-                // that finds shows as found there, not as Gmail's hits.
+                // Like a search run for the screen, the preload reads the local index as it starts.
+                // What the index finds shows as found there, not as Gmail's hits.
                 let mut preload = Searching::new(
                     &mut self.searches,
                     &raw,
@@ -2502,8 +2513,9 @@ impl Worker {
         }
     }
 
-    /// Asks Gmail for `view`'s preloaded search's first page, once no other preload's is on its
-    /// way: run ahead as the user types, they'd otherwise pile up behind Gmail's pace.
+    /// Asks Gmail for the first page of the search `view` preloads, once no other preload's page is
+    /// on its way. Preloads run ahead as the user types, so they'd otherwise pile up behind Gmail's
+    /// pace.
     fn fetch_preload_page(
         store: &Store,
         requests: &Requests,
@@ -2522,8 +2534,8 @@ impl Worker {
         }
     }
 
-    /// Fetches `search`'s next page in the background, unless one is on its way or Gmail has
-    /// no more; whether it did.
+    /// Fetches the next page of `search` in the background, unless one is on its way or Gmail has
+    /// no more. Returns whether it did.
     fn fetch_page(
         store: &Store,
         requests: &Requests,
@@ -2546,8 +2558,8 @@ impl Worker {
                 Ok(page) => Some(page),
                 Err(error) => {
                     log::warn!("searching Gmail: {error}");
-                    // Only an unreachable Gmail leaves the results partial; anything else ends
-                    // Gmail's part of the search.
+                    // An unreachable or throttled Gmail leaves the results partial. Any other error
+                    // ends Gmail's part of the search.
                     if matches!(
                         error,
                         exo_store::Error::Offline(_) | exo_store::Error::Throttled { .. }
@@ -2602,9 +2614,9 @@ impl Worker {
         self.repaint.request();
     }
 
-    /// Saves `draft` as `email` with its attachments' bytes added, and returns how many couldn't
-    /// be had. A draft missing some is kept on the device, not written to Gmail, and
-    /// saved again once a sync round that reaches Gmail has fetched them
+    /// Saves `draft` as `email` with the bytes of its attachments added, and returns how many
+    /// couldn't be had. A draft missing some is kept on the device, not written to Gmail. It's
+    /// saved again once a sync round that reaches Gmail has fetched the missing files
     /// ([`fetch_missing_files`](Self::fetch_missing_files)), if what kept them away passes.
     async fn save_draft(&mut self, mut draft: Draft, email: gmail::mime::Email) -> usize {
         let mut full = email.clone();
@@ -2624,8 +2636,8 @@ impl Worker {
         missing.files
     }
 
-    /// Fetches the files incomplete drafts lack into the draft files, in a task of its own (a
-    /// fetch can wait out Gmail's rate limiting), then has them saved again
+    /// Fetches the files that incomplete drafts lack into the draft files, in a task of its own (a
+    /// fetch can wait out Gmail's rate limiting), then has the drafts saved again
     /// ([`complete_drafts`](Self::complete_drafts)).
     fn fetch_missing_files(&mut self) {
         if self.fetching_files || !self.incomplete.values().any(Option::is_some) {
@@ -2659,9 +2671,9 @@ impl Worker {
             });
     }
 
-    /// The first time a sync round reaches Gmail, hands the drafts an earlier run saved without
-    /// some of their files back to the UI to save again (its record makes their message), so
-    /// they don't wait for their next edit.
+    /// The first time a sync round reaches Gmail, hands back to the UI the drafts that an earlier
+    /// run saved without some of their files, to save again (each draft's record makes its
+    /// message), so they don't wait for their next edit.
     async fn resave_incomplete(&mut self) {
         if std::mem::replace(&mut self.resaved, true) {
             return;
@@ -2685,8 +2697,8 @@ impl Worker {
         }
     }
 
-    /// Once a session, has the store bring back the snoozed threads it has no reminder for (a new
-    /// store's), off this task; a round that fails tries again at the next sync.
+    /// Once a session, has the store bring back the snoozed threads it has no reminder for (such as
+    /// a new store's), off this task. A round that fails tries again at the next sync.
     fn return_orphaned_snoozes(&mut self) {
         if std::mem::replace(&mut self.orphans, true) {
             return;
@@ -2711,8 +2723,8 @@ impl Worker {
             });
     }
 
-    /// Saves again the incomplete drafts whose files are all in the draft files now: they go to
-    /// Gmail, and an account held off screen for them can close.
+    /// Saves again the incomplete drafts whose files are all in the draft files now, so they go to
+    /// Gmail and an account held off screen for them can close.
     async fn complete_drafts(&mut self) {
         let files = self.store.draft_files().to_owned();
         let ready: Vec<(Draft, gmail::mime::Email)> = self
@@ -2732,9 +2744,9 @@ impl Worker {
         }
     }
 
-    /// Fetches an open thread's bodies when they aren't stored (it was stored for its row
-    /// alone), unless they're on their way: snapshots carry it meanwhile, its messages without
-    /// them as placeholders.
+    /// Fetches an open thread's bodies when they aren't stored (the thread was stored for its row
+    /// alone), unless they're on their way. Meanwhile, snapshots carry the thread with placeholders
+    /// for the messages that lack bodies.
     async fn load_bodies(&mut self, thread: ThreadId) {
         if self.opening.contains(&thread) {
             return;
@@ -2760,9 +2772,9 @@ impl Worker {
             });
     }
 
-    /// Fetches more of `list`, a view's, from Gmail when what's stored doesn't fill `limit`.
+    /// Fetches more of a view's `list` from Gmail when what's stored doesn't fill `limit`.
     async fn backfill_if_short(&mut self, list: &ListId, limit: usize) {
-        // Until the first round of sync, its own backfill fills the inbox lists.
+        // Until the first round of sync is done, sync's own backfill fills the inbox lists.
         if !self.synced || self.backfilling.contains(list) {
             return;
         }
@@ -2791,8 +2803,8 @@ impl Worker {
             });
     }
 
-    /// Reads what each view shows and publishes it: what's the account's once, then each view's
-    /// list, conversation, contact and search.
+    /// Reads what each view shows and publishes it. What belongs to the account is read once, then
+    /// each view's list, conversation, contact and search.
     async fn publish(&mut self) {
         self.published
             .store(*self.changes.borrow_and_update(), Ordering::SeqCst);
@@ -2943,16 +2955,17 @@ impl Worker {
     }
 }
 
-/// How much of a part `size` bytes long has arrived, in percent: of the whole answer when Gmail
-/// says how long it is, else of the base64 JSON it sends for that size (about 1.33 × the size).
+/// How much of a part `size` bytes long has arrived, in percent. The percentage is of the whole
+/// answer when Gmail says how long it is, else of the base64 JSON it sends for that size (about
+/// 1.33 × the size).
 fn percent(transfer: gmail::Transfer, size: u64) -> f32 {
     let total = transfer.total.unwrap_or(4 * size.div_ceil(3) + 32).max(1);
     (100.0 * transfer.done as f32 / total as f32).min(100.0)
 }
 
-/// Loads bytes for the UI without blocking it: attachments through Gmail, remote images straight
-/// from the sender's server. Cheap to clone; what it has in flight keeps the
-/// account from being [idle](Account::is_idle).
+/// Loads bytes for the UI without blocking it: attachments through Gmail, and remote images
+/// straight from the sender's server. Cheap to clone. What it has in flight keeps the account from
+/// being [idle](Account::is_idle).
 #[derive(Clone)]
 pub struct Loader {
     runtime: tokio::runtime::Handle,
@@ -3018,15 +3031,14 @@ impl Loader {
         });
     }
 
-    /// Part `part` of message `message` (an attachment, an inline image) if the account keeps
-    /// it, read now without asking Gmail: a draft's or a message's inline image drawn at once,
+    /// Part `part` of message `message` (an attachment, an inline image) if the account keeps it,
+    /// read now without asking Gmail. This lets a draft's or a message's inline image draw at once,
     /// and offline. [`attachment`](Self::attachment) reads the same cache first.
     pub fn cached_part(&self, message: &str, part: &str) -> Option<Vec<u8>> {
         self.store.cached_part(message, part)
     }
 
-    /// Runs `task` on the account's store off the UI thread and hands what it comes to to
-    /// `done`.
+    /// Runs `task` on the account's store off the UI thread and hands its result to `done`.
     pub(crate) fn run<T: Send + 'static, F: std::future::Future<Output = T> + Send + 'static>(
         &self,
         task: impl FnOnce(Store) -> F + Send + 'static,
@@ -3072,13 +3084,14 @@ impl Loader {
 /// The files [`attach`] couldn't put on a message.
 struct Missing {
     files: usize,
-    /// Each was a Gmail part Gmail couldn't hand over just then (out of reach, rate limiting,
-    /// failing), so a later try may get it; not a file gone from disk or a part gone from Gmail.
+    /// Whether each was a Gmail part that Gmail couldn't hand over just then (out of reach, rate
+    /// limiting, failing), so a later try may get it, rather than a file gone from disk or a part
+    /// gone from Gmail.
     passing: bool,
 }
 
-/// Puts the bytes of a draft's `attachments` on `email` ([`shown`] ones), fetching Gmail
-/// parts into the draft files the first time. Says what couldn't be had.
+/// Puts the bytes of a draft's `attachments` (the [`shown`] ones) on `email`, fetching Gmail parts
+/// into the draft files the first time. Says what couldn't be had.
 async fn attach(
     store: &Store,
     email: &mut gmail::mime::Email,
@@ -3105,8 +3118,8 @@ async fn attach(
     missing
 }
 
-/// Of a draft's `attachments`, those that go on `email`: all but the inline images its HTML no
-/// longer shows.
+/// The `attachments` of a draft that go on `email`, which is all but the inline images the email's
+/// HTML no longer shows.
 fn shown<'a>(
     email: &gmail::mime::Email,
     attachments: &'a [DraftAttachment],
@@ -3123,8 +3136,8 @@ fn shown<'a>(
         .collect()
 }
 
-/// The bytes of `attachment`, from the draft files, or from Gmail into them the first time.
-/// Failing, whether a later try may get them ([`passes`]).
+/// The bytes of `attachment`, from the draft files, or from Gmail into them the first time. On
+/// failure, whether a later try may get them ([`passes`]).
 async fn file_bytes(store: &Store, attachment: &DraftAttachment) -> Result<Vec<u8>, bool> {
     let path = store.draft_files().join(&attachment.uuid);
     match (std::fs::read(&path), &attachment.source) {
@@ -3164,8 +3177,8 @@ async fn file_bytes(store: &Store, attachment: &DraftAttachment) -> Result<Vec<u
     }
 }
 
-/// Gmail couldn't hand a part over for a reason that passes: it was out of reach, rate limiting
-/// the account or signing it out, or failing (5xx). Not when it said the part is gone.
+/// Whether Gmail couldn't hand a part over for a reason that passes: it was out of reach, rate
+/// limiting the account or signing it out, or failing (5xx). Not when it said the part is gone.
 fn passes(error: &exo_store::Error) -> bool {
     match error {
         exo_store::Error::Offline(_)
@@ -3176,9 +3189,9 @@ fn passes(error: &exo_store::Error) -> bool {
     }
 }
 
-/// How long after a sync the next one is due. While the window shows the account: about 25 s
-/// focused, else a minute on either power source, hidden or minimized too: a hidden window still
-/// shows the account. Off screen: a minute on mains, five on battery.
+/// How long after a sync the next one is due. While the window shows the account, that's about 25 s
+/// when focused, else a minute on either power source, even hidden or minimized, because a hidden
+/// window still shows the account. Off screen, it's a minute on mains and five on battery.
 fn sync_every(presence: Presence, power: Power) -> Duration {
     match (presence, power) {
         (Presence::Focused, _) => FOCUSED,
@@ -3239,7 +3252,7 @@ async fn sync_loop(
     let Some(mut busy) = now.next().await else {
         return;
     };
-    // When a sync last reached Gmail; none yet, so the first catches up quietly.
+    // When a sync last reached Gmail. None has yet, so the first catches up quietly.
     let mut reached: Option<jiff::Timestamp> = None;
     loop {
         let wait = {
@@ -3247,7 +3260,7 @@ async fn sync_loop(
             let result = loop {
                 let result = store.sync().await;
                 synced.send_replace(true);
-                // Every list has its first page after one round: an empty one is empty, and the
+                // Every list has its first page after one round, so an empty one is empty, and the
                 // list on screen can backfill on its own while the rounds go on.
                 requests.post(Request::Synced {
                     reached: result.is_ok(),
@@ -3275,7 +3288,7 @@ async fn sync_loop(
                     let left = until.duration_since(jiff::Timestamp::now());
                     Some(Duration::try_from(left).unwrap_or(OFFLINE_RETRY))
                 }
-                // The offline bar says so; a line every retry would fill the log (`logging`).
+                // The offline bar says so, and a line every retry would fill the log (`logging`).
                 Err(exo_store::Error::Offline(_)) => Some(OFFLINE_RETRY),
                 Err(error) => {
                     health.failed(&error);
@@ -3301,8 +3314,8 @@ async fn sync_loop(
     }
 }
 
-/// Evicts the mail and events the store no longer keeps: [`EVICT_AFTER`] the
-/// first sync, then every [`EVICT_EVERY`].
+/// Evicts the mail and events the store no longer keeps, [`EVICT_AFTER`] the first sync and then
+/// every [`EVICT_EVERY`].
 async fn evict_loop(store: Store, mut first_sync: watch::Receiver<bool>) {
     if first_sync.wait_for(|synced| *synced).await.is_err() {
         return;
@@ -3316,10 +3329,11 @@ async fn evict_loop(store: Store, mut first_sync: watch::Receiver<bool>) {
     }
 }
 
-/// Fetches the bodies of [`PRERENDER`] conversations stored for their rows alone
-/// [`PRERENDER_AFTER`] the first sync (not at once, while the launch is backfilling the lists),
-/// then every [`PRERENDER_EVERY`], as eviction keeps them, their parts, and the search index's
-/// text of every body that came in. Offline, the fetching stops and waits for the next pass.
+/// Fetches the bodies of [`PRERENDER`] conversations stored for their rows alone, only those
+/// eviction keeps, then their parts and the search index's text of every body that came in. The
+/// first pass runs [`PRERENDER_AFTER`] the first sync (not at once, while the launch is backfilling
+/// the lists), then one every [`PRERENDER_EVERY`]. Offline, the fetching stops and waits for the
+/// next pass.
 async fn prerender_loop(store: Store, requests: Requests, mut first_sync: watch::Receiver<bool>) {
     if first_sync.wait_for(|synced| *synced).await.is_err() {
         return;
@@ -3349,9 +3363,9 @@ async fn prerender_loop(store: Store, requests: Requests, mut first_sync: watch:
     }
 }
 
-/// Notifies about `thread`, which a reminder just brought back, in the account `notify` names:
-/// its newest message even though it's been read, unless the thread is muted or out of the
-/// inbox, notifications are off, or it's the user's own.
+/// Notifies about `thread`, which a reminder just brought back, in the account `notify` names. The
+/// notification is for its newest message, even though it's been read, unless the thread is muted
+/// or out of the inbox, notifications are off, or the message is the user's own.
 async fn notify_returned(
     store: &Store,
     (account, notifier): &(String, watch::Receiver<Option<Notifier>>),
@@ -3377,8 +3391,9 @@ async fn notify_returned(
     }
 }
 
-/// Posts the notifications a sync's new mail calls for in the account `notify` names, after a
-/// `gap` only the newest's ([`mail_notifications::notifying`]), when it has a notifier.
+/// Posts the notifications a sync's new mail calls for in the account `notify` names, when the
+/// account has a notifier. After a `gap`, only the newest arrival notifies
+/// ([`mail_notifications::notifying`]).
 async fn notify_arrivals(
     store: &Store,
     (account, notifier): &(String, watch::Receiver<Option<Notifier>>),
@@ -3407,11 +3422,11 @@ async fn notify_arrivals(
     );
 }
 
-/// Brings threads back when their reminders come due, on the device: at once for
-/// those due while Exo was closed, and then as each comes due, as long as Exo runs, with a
-/// notification for each to the notifier of the account `notify` names. It waits for the first
-/// sync, so a reply that came meanwhile cancels an "if no reply" reminder before it would fire,
-/// and looks again whenever the store changes.
+/// Brings threads back when their reminders come due, on the device. Threads due while Exo was
+/// closed come back at once, and the rest as each comes due, as long as Exo runs, each with a
+/// notification to the notifier of the account `notify` names. It waits for the first sync, so a
+/// reply that came meanwhile cancels an "if no reply" reminder before it would fire, and looks
+/// again whenever the store changes.
 async fn reminder_loop(
     store: Store,
     clock: Arc<std::sync::RwLock<crate::Clock>>,
@@ -3504,15 +3519,15 @@ async fn connection_loop(
 /// How long a listing of Google contacts is used before it's listed again.
 const GOOGLE_CONTACTS_FRESH: Duration = Duration::from_secs(60 * 60);
 
-/// A Google contact or "other contact": an address and its display name.
+/// A Google contact or "other contact", with an address and its display name.
 #[derive(Debug)]
 struct GoogleContact {
     email: String,
     name: Option<String>,
 }
 
-/// Google contacts and "other contacts" (at most five pages of each), best-effort: what a
-/// listing that fails has so far. A listing that gets no answer shows the offline bar.
+/// Google contacts and "other contacts" (at most five pages of each), best-effort, so a listing
+/// that fails gives what it has so far. A listing that gets no answer shows the offline bar.
 async fn google_contacts(store: &Store) -> Vec<GoogleContact> {
     const FIELDS: &str = "names,emailAddresses";
     let mut people = Vec::new();
@@ -3623,9 +3638,9 @@ fn events_for_drafts(
     }
 }
 
-/// Writes every draft Gmail lacks now, its pace and backoff notwithstanding, and
-/// tells the UI what that did; the push loop, woken after, takes the retries over. Off the
-/// worker, which a slow upload would otherwise hold up.
+/// Writes every draft Gmail lacks now, its pace and backoff notwithstanding, and tells the UI what
+/// that did. The push loop, woken after, takes over the retries. Runs off the worker, which a slow
+/// upload would otherwise hold up.
 async fn write_drafts_now(store: &Store, events: &std::sync::mpsc::Sender<Event>, flush: &Wake) {
     match store.push_drafts_now().await {
         Ok(report) => events_for_drafts(
@@ -3641,8 +3656,8 @@ async fn write_drafts_now(store: &Store, events: &std::sync::mpsc::Sender<Event>
 }
 
 /// Waits until the clock reads `at`. A sleeping Mac stops a timer's clock (`Instant` doesn't
-/// advance), so a send scheduled for the morning would go as late as the Mac slept: the clock is
-/// read again at least every minute.
+/// advance), so a send scheduled for the morning would go as late as the Mac slept. To prevent
+/// that, the clock is read again at least every minute.
 async fn sleep_until(at: jiff::Timestamp) {
     const CHECK: Duration = Duration::from_secs(60);
     while let Ok(left) = Duration::try_from(at.duration_since(jiff::Timestamp::now())) {
@@ -3696,7 +3711,7 @@ async fn flush_loop(
                     || !report.sent.is_empty()
                     || !report.failed.is_empty()
                     || report.offline;
-                // A held send's reminder queued its label: flush again at once.
+                // A held send's reminder queued its label, so flush again at once.
                 let reminded = report.reminded.then(jiff::Timestamp::now);
                 events_for_drafts(
                     &events,
@@ -3898,7 +3913,7 @@ mod tests {
                 .filter(|notice| notice.key.starts_with("EMAIL-"))
                 .collect::<Vec<_>>()
         };
-        // Its newest message someone else's: the user's own never notify.
+        // Its newest message is someone else's, because the user's own never notify.
         let theirs = |thread: &ThreadSummary| {
             runtime
                 .block_on(account.shared.loader.store.latest_arrival(&thread.id))
@@ -3988,7 +4003,7 @@ mod tests {
             account.set_presence(Presence::Focused);
             settle(&account);
         };
-        // The mock's calendar is near today, so reminders may come too; only mail counts here.
+        // The mock's calendar is near today, so reminders may come too. Only mail counts here.
         let mail = || {
             notifier
                 .posted()
@@ -4128,7 +4143,7 @@ mod tests {
         account.set_presence(Presence::OffScreen);
         settle(&account);
         let quota = server.url().join("/__mock/quota").expect("path");
-        // What sync's look for new mail spent: the pre-render's pass a minute in isn't sync.
+        // What sync spent looking for new mail. The pre-render's pass a minute in isn't sync.
         let units = || {
             runtime.block_on(async {
                 reqwest::get(quota.clone())
@@ -4145,7 +4160,7 @@ mod tests {
 
         std::thread::sleep(Duration::from_secs(62));
         assert_eq!(units(), synced, "on battery, no sync a minute later");
-        // Plugged in, the sync due a minute after the last goes at once: one `history.list`.
+        // Plugged in, the sync due a minute after the last goes at once, as one `history.list`.
         power.set(Power::Plugged);
         let plugged = Instant::now();
         while units() == synced {

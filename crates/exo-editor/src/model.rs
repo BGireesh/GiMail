@@ -1,6 +1,6 @@
-//! The document: Squire's DOM, flattened into a list of leaf blocks.
+//! The document, which is the body's DOM flattened into a list of leaf blocks.
 //!
-//! Squire edits plain DOM: leaf blocks (`div`, `li`, …) holding inline content, nested in
+//! The body is plain DOM, made of leaf blocks (`div`, `li`, …) holding inline content, nested in
 //! containers (`ul`/`ol`, `blockquote`, wrapper `div`s). Here each leaf block carries its chain
 //! of containers (its *path*, outermost first). Consecutive blocks whose paths share a container
 //! id are in the same element, so `<ul><li>a</li><ul><li>b</li></ul></ul>` is two blocks with
@@ -64,7 +64,7 @@ impl Element {
         match self.tag.as_str() {
             "ul" => ContainerKind::List { ordered: false },
             "ol" => ContainerKind::List { ordered: true },
-            // `blockquote[style*="border:none"]` is an indent: the body CSS gives it no bar.
+            // `blockquote[style*="border:none"]` is an indent, which the body CSS gives no bar.
             "blockquote"
                 if self
                     .attr("style")
@@ -157,7 +157,7 @@ impl Run {
 /// What a leaf block holds.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Content {
-    /// Inline content; empty for an empty line (`<div><br></div>`).
+    /// Inline content, which is empty for an empty line (`<div><br></div>`).
     Inline(Vec<Run>),
     /// A horizontal rule (`<div><hr></div>`).
     Rule,
@@ -181,8 +181,8 @@ pub struct Block {
     pub element: Element,
     /// What it holds.
     pub content: Content,
-    /// Whether the markup ends in a `<br>`: the placeholder of an empty line, or the one Squire
-    /// leaves after text (where it draws nothing). Kept so drafts round-trip byte for byte.
+    /// Whether the markup ends in a `<br>`, either the placeholder of an empty line or one left
+    /// after text (where it draws nothing). Kept so drafts round-trip byte for byte.
     pub trailing_break: bool,
 }
 
@@ -261,8 +261,8 @@ impl Block {
         }
     }
 
-    /// Gives it the placeholder `<br>` a browser needs to show its last line: an empty line,
-    /// or one after a soft break, has no height without it.
+    /// Gives it the placeholder `<br>` a browser needs to show its last line, because an empty
+    /// line, or one after a soft break, has no height without it.
     pub(crate) fn fix_placeholder(&mut self) {
         if let Content::Inline(runs) = &self.content
             && runs.last().is_none_or(|run| run.piece == Piece::Break)
@@ -323,8 +323,9 @@ impl Block {
             .any(|container| container.element.container_kind() == ContainerKind::Quote)
     }
 
-    /// The marks text typed at `offset` takes: those of the character before it, or at the
-    /// start of the block those of the character after it (where the browser puts the caret).
+    /// The marks that text typed at `offset` takes. They're those of the character before it, or,
+    /// at the start of the block, those of the character after it (where the browser puts the
+    /// caret).
     pub fn marks_at(&self, offset: usize) -> Vec<Element> {
         let runs = self.runs();
         let mut start = 0;
@@ -425,7 +426,7 @@ pub(crate) fn normalize(runs: &mut Vec<Run>) {
     *runs = out;
 }
 
-/// A place between two positions of a block: `offset` positions from its start.
+/// A place between two positions of a block, `offset` positions from its start.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Pos {
     /// The block's index.

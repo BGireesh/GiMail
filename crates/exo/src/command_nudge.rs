@@ -1,9 +1,9 @@
-//! The palette's first-run nudge. For an account that joined after 2025-01-13 (first signed in
-//! to Exo on this Mac), until it has seen the nudge or used a triage key, with conversations in
-//! the list: 3s after the mail opens, the next palette shows `Try: label, folder, trash, or
-//! unread` in a sliding gradient; leaving a conversation for the list opens the palette with
-//! `Remember: use ⌘K to perform any action in seconds!`. Closing the palette with either up, or
-//! triaging, marking done or replying, is the end of it.
+//! The palette's first-run nudge. It's for an account that joined after 2025-01-13 (first signed
+//! in to Exo on this Mac) and has conversations in the list, until it has seen the nudge or used
+//! a triage key. 3s after the mail opens, the next palette shows `Try: label, folder, trash, or
+//! unread` in a sliding gradient. Leaving a conversation for the list opens the palette with
+//! `Remember: use ⌘K to perform any action in seconds!`. Closing the palette with either nudge
+//! up, or triaging, marking done or replying, ends the nudge.
 
 use jiff::Timestamp;
 
@@ -47,8 +47,8 @@ impl crate::Mail {
             && self.inbox.count() > 0
     }
 
-    /// Once a frame, before the palette draws: the timer, the palette closing on a nudge, and
-    /// the palette's placeholder.
+    /// Runs once a frame, before the palette draws. Handles the timer, the palette closing on a
+    /// nudge, and the palette's placeholder.
     pub(crate) fn command_nudge_frame(&mut self, now: f64) {
         let due = self.command_nudge_due();
         let opened = *self.command_nudge.opened.get_or_insert(now);
@@ -81,8 +81,8 @@ impl crate::Mail {
             .map(Nudge::placeholder)
     }
 
-    /// Records the nudge as seen: a triage key, Done, a reply or moving between conversations
-    /// ends the nudge.
+    /// Records the nudge as seen, since a triage key, Done, a reply or moving between
+    /// conversations ends it.
     pub(crate) fn dismiss_command_nudge(&mut self) {
         if self.command_nudge_due() {
             self.account
@@ -98,7 +98,7 @@ impl crate::Mail {
         }
     }
 
-    /// Back from a conversation to the list, which with the nudge due opens the palette on its
+    /// Back from a conversation to the list. With the nudge due, this opens the palette on its
     /// reminder.
     pub(crate) fn command_nudge_left_thread(&mut self) {
         if self.thread.is_none() && self.command_nudge_due() {

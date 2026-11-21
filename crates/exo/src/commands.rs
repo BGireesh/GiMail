@@ -1,7 +1,7 @@
 //! The thread list's commands, with their keys, regions, palette titles, aliases and scores,
 //! registered every frame for what's on screen, and the toast copy for what they do.
 //!
-//! Only what works end to end is registered: no AI. Compose, search and the list filters
+//! Only what works end to end is registered, so there's no AI. Compose, search and the list filters
 //! register their own (`compose::register_shortcuts`, `search::register`,
 //! `filter::register`).
 
@@ -98,8 +98,7 @@ pub enum Action {
     /// Clear the selection.
     DeselectAll,
     /// Escape or Backspace: clear the selection, or go back. Escape goes back to where the back
-    /// stack began, which for a list is the home list; Backspace
-    /// goes back to the previous list.
+    /// stack began, which for a list is the home list. Backspace goes back to the previous list.
     Back {
         /// Escape rather than Backspace.
         escape: bool,
@@ -134,7 +133,7 @@ pub enum Action {
     ThreadLeftHeld,
     /// → in the messages, pressed or held: scrolls a widened column right.
     ThreadRight,
-    /// ⇧N: show the new messages, or else focus the last message; Enter on the bar.
+    /// ⇧N, or Enter on the bar: show the new messages, or else focus the last message.
     ShowNewMessages,
     /// A key in the thread's header.
     ThreadHeader(crate::thread::HeaderKey),
@@ -172,7 +171,7 @@ pub enum Action {
     Preview(crate::attachment_files::viewer::Action),
     /// Copy the thread's subject (`Copy Subject`).
     CopySubject,
-    /// Print the open conversation (`Print`, ⌘P, File ▸ Print): the macOS print panel.
+    /// Print the open conversation (`Print`, ⌘P, File ▸ Print) through the macOS print panel.
     Print,
     /// Save the open conversation as a PDF (`Save as PDF`).
     SaveAsPdf,
@@ -244,7 +243,7 @@ fn header_keys(commands: &mut Commands<Action>) {
     commands.add(header("HEADER_LEFT", HeaderKey::Step(-1)).key("left"));
     commands.add(header("HEADER_RIGHT", HeaderKey::Step(1)).key("right"));
     commands.add(header("HEADER_ENTER", HeaderKey::Enter).key("enter"));
-    // Enter goes back as the button does; ↑ and ↓ move between conversations.
+    // Enter goes back as the button does. ↑ and ↓ move between conversations.
     commands.add(
         Command::shortcut("ACTION_PANE_ENTER", Action::LeaveThread)
             .key("enter")
@@ -269,11 +268,11 @@ fn header_keys(commands: &mut Commands<Action>) {
 
 /// What the thread view's commands depend on this frame.
 pub struct ThreadContext {
-    /// The focused message is collapsed, so Enter expands it.
+    /// Whether the focused message is collapsed, so Enter expands it.
     pub focus_collapsed: bool,
-    /// The Show New Messages bar has the keyboard, so Enter shows them.
+    /// Whether the Show New Messages bar has the keyboard, so Enter shows the new messages.
     pub new_messages_focused: bool,
-    /// The focused message's remote images are blocked and it has some (`SHOW_IMAGES`).
+    /// Whether the focused message has remote images and they're blocked (`SHOW_IMAGES`).
     pub show_images: bool,
 }
 
@@ -423,8 +422,8 @@ pub fn register_thread(commands: &mut Commands<Action>, cx: &ThreadContext) {
             .regions(MESSAGES_AND_NEW),
     );
     header_keys(commands);
-    // Print and Save as PDF, in the thread view. ⌘P belongs in the File menu; until Exo's menu
-    // has Print, the key is the row's.
+    // Print and Save as PDF, in the thread view. ⌘P belongs in the File menu, but until Exo's
+    // menu has Print, the key is the row's.
     commands.add(
         Command::new("PRINT", "Print", Action::Print)
             .key("mod+p")
@@ -443,8 +442,8 @@ pub fn register_thread(commands: &mut Commands<Action>, cx: &ThreadContext) {
     }
 }
 
-/// `Show Images`: the focused message's remote images, or the focused draft's, which the Images
-/// setting blocks.
+/// Registers `Show Images`, which shows the remote images that the Images setting blocks in the
+/// focused message or the focused draft.
 pub fn register_show_images(commands: &mut Commands<Action>) {
     commands.add(
         Command::new("SHOW_IMAGES", "Show Images", Action::ShowImages)
@@ -459,7 +458,7 @@ pub fn register_show_images(commands: &mut Commands<Action>) {
 pub struct Context<'a> {
     /// The list on screen.
     pub list: &'a ListId,
-    /// The threads actions apply to: the selection, or the cursor's.
+    /// The threads that actions apply to, which are the selection or the cursor's.
     pub threads: &'a [&'a ThreadSummary],
     /// The account's labels.
     pub labels: &'a [Label],
@@ -469,27 +468,28 @@ pub struct Context<'a> {
     pub home: ListId,
     /// Where `g o` goes: Other, or the Inbox.
     pub other: ListId,
-    /// Important and Other are off (`unifiedInbox`).
+    /// Whether Important and Other are off (`unifiedInbox`).
     pub unified: bool,
     /// The one actionable conversation's sender, if it isn't you.
     pub sender: Option<&'a crate::pickers::Sender>,
     /// Your addresses' domains.
     pub own_domains: &'a [String],
-    /// The selection is exactly the loaded rows: Remove all Labels is
-    /// only offered then.
+    /// Whether the selection is exactly the loaded rows. Remove all Labels is only offered then.
     pub exact: bool,
 }
 
 /// The palette's copy rows that apply.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct CopyRows {
-    /// A thread is open: Copy Conversation Contents.
+    /// Whether a thread is open, which offers Copy Conversation Contents.
     pub thread: bool,
-    /// A message in it has focus: Copy Message Contents and Copy Recipients.
+    /// Whether a message in it has focus, which offers Copy Message Contents and Copy Recipients.
     pub message: bool,
-    /// The thread has a subject: Copy Subject, in the list only once something is typed.
+    /// Whether the thread has a subject, which offers Copy Subject (in the list only once
+    /// something is typed).
     pub subject: bool,
-    /// The focused message has files besides its inline images: Copy Attachments.
+    /// Whether the focused message has files besides its inline images, which offers Copy
+    /// Attachments.
     pub attachments: bool,
 }
 
@@ -510,7 +510,7 @@ fn navigation(commands: &mut Commands<Action>) {
             .repeat(Action::Move(1))
             .regions(THREAD_LIST),
     );
-    // K and P stay in the list (`contained`); ↑ leaves it from the first row.
+    // K and P stay in the list. ↑ leaves it from the first row.
     commands.add(
         Command::shortcut("PREVIOUS", Action::Move(-1))
             .keys(["k", "p", "ctralt+k", "ctralt+p"])
@@ -730,7 +730,7 @@ fn conversation(commands: &mut Commands<Action>, cx: &Context<'_>) {
         row("TRASH", "Trash", trash_action.clone(), "data/discard", 6.0).aliases(["Delete"])
     };
     commands.add(trash.keys(["#", "del"]));
-    // On UK keyboards ⇧3 types `£`; `#` is the key by Enter, or ⌥3 on a Mac.
+    // On UK keyboards ⇧3 types `£`, and `#` is the key by Enter, or ⌥3 on a Mac.
     commands.add(
         Command::shortcut("TRASH_UK", trash_action)
             .keys(["\\", "alt+3"])
@@ -738,8 +738,8 @@ fn conversation(commands: &mut Commands<Action>, cx: &Context<'_>) {
             .regions(CONVERSATION),
     );
 
-    // `!` opens the Mark Spam picker, which offers blocking, for a single sender, and reports
-    // spam directly otherwise (`crate::pickers`).
+    // For a single sender, `!` opens the Mark Spam picker, which offers blocking. Otherwise it
+    // reports spam directly (`crate::pickers`).
     let spam = if all(|thread| thread.has_label("SPAM")) || *cx.list == ListId::Spam {
         row(
             "MARK_SPAM",
@@ -817,8 +817,8 @@ fn conversation(commands: &mut Commands<Action>, cx: &Context<'_>) {
     labels(commands, cx.exact);
     reminders(commands, cx);
 
-    // `e` marks done and `⇧E` not done anywhere but Spam; the palette row, which toggles, isn't
-    // offered for a draft not in a conversation yet, which stays in the inbox.
+    // `e` marks done and `⇧E` not done anywhere but Spam. The palette row, which toggles, isn't
+    // offered for a draft that isn't in a conversation yet, since that draft stays in the inbox.
     if *cx.list == ListId::Spam {
         return;
     }
@@ -858,8 +858,8 @@ fn conversation(commands: &mut Commands<Action>, cx: &Context<'_>) {
     }
 }
 
-/// `Unsubscribe` (`⌘U`) for one conversation, in the list and in a thread: a Gmail account always
-/// has it, and with nothing to unsubscribe from it offers to block the sender.
+/// `Unsubscribe` (`⌘U`) for one conversation, in the list and in a thread. A Gmail account always
+/// has it, and with nothing to unsubscribe from, it offers to block the sender.
 fn unsubscribe(commands: &mut Commands<Action>, cx: &Context<'_>) {
     if let [thread] = cx.threads
         && !thread.draft_only
@@ -911,7 +911,7 @@ fn block(commands: &mut Commands<Action>, cx: &Context<'_>) {
 }
 
 /// `Move to Important` and `Move to Other` for one conversation while Important and Other are
-/// on, each but where the list on screen is that one.
+/// on, each except where the list on screen is that one.
 fn important_or_other(commands: &mut Commands<Action>, cx: &Context<'_>) {
     let [thread] = cx.threads else { return };
     if cx.unified || thread.draft_only {
@@ -944,8 +944,8 @@ fn important_or_other(commands: &mut Commands<Action>, cx: &Context<'_>) {
     }
 }
 
-/// Move, then the label commands, and the keys that take threads out of
-/// the list on screen. Without an exact selection, `⇧Y` only says why it can't.
+/// Move, then the label commands, and the keys that take threads out of the list on screen.
+/// Without an exact selection, `⇧Y` only says why it can't.
 fn labels(commands: &mut Commands<Action>, exact: bool) {
     use crate::pickers::Action::{OpenLabel, OpenMove, RemoveAll, RemoveFromList};
     let row = |id: &'static str, title: &'static str, action, icon: &'static str, score: f64| {
@@ -1024,8 +1024,8 @@ fn labels(commands: &mut Commands<Action>, exact: bool) {
     );
 }
 
-/// `Remind Me` and, for threads with one, `Remove Reminder(s)`: not for drafts being written, and
-/// only for an exact selection, where `H` says why it can't.
+/// `Remind Me` and, for threads with one, `Remove Reminder(s)`. They're not for drafts being
+/// written, and only for an exact selection. Without one, `H` says why it can't.
 fn reminders(commands: &mut Commands<Action>, cx: &Context<'_>) {
     use crate::remind::Action::{Open, Remove};
     // ⌘⇧H is compose's own in the reply pane.
@@ -1099,7 +1099,7 @@ fn copy(commands: &mut Commands<Action>, rows: CopyRows) {
             .regions(CONVERSATION)
     };
     if rows.message {
-        // Both copy the message; pasting it (⌘V) makes the new draft.
+        // Both copy the message, and pasting it (⌘V) makes the new draft.
         commands.add(
             row(
                 "COPY_MESSAGE_TO_DRAFT",
@@ -1207,7 +1207,7 @@ fn go_to(commands: &mut Commands<Action>, cx: &Context<'_>) {
     for late in lists::late_go_tos() {
         commands.add(go(&late));
     }
-    // `g i` goes home and `g o` to Other, the Inbox for either with the unified inbox.
+    // `g i` goes home and `g o` to Other. With the unified inbox, both go to the Inbox.
     commands.add(
         Command::shortcut("GO_HOME", Action::Go(cx.home.clone()))
             .key("g i")

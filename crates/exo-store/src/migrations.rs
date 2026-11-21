@@ -1,14 +1,14 @@
-//! The database's migrations: how a file gets this build's schema, made new or brought up from
-//! an older Exo's in place, keeping everything in it.
+//! The database's migrations, which give a file this build's schema: a new file from scratch,
+//! and an older Exo's file in place, keeping everything in it.
 //!
 //! Each migration is a file of hand-written SQL in `crates/exo-store/migrations/`, listed in
 //! [`FILES`] and run by toasty's `MigrationSet`. Toasty records each in its `__toasty_migrations`
 //! table by id and applies those a file hasn't run, each in a transaction of its own. A new file
 //! runs them all from `0001_baseline.sql`, so nothing but the migrations makes the schema. Exo
-//! hands toasty one file at a time, so a failure names its file ([`Error::Upgrade`]). Those
-//! before it stay applied, the failed one is rolled back, and the next open tries it again. A
-//! file that has run a migration this build doesn't know (a newer Exo applied it) isn't touched
-//! ([`Error::UnknownSchema`]).
+//! hands toasty one migration at a time, so a failure names its migration ([`Error::Upgrade`]).
+//! The migrations before it stay applied, the failed one is rolled back, and the next open tries
+//! it again. A file that has run a migration this build doesn't know (because a newer Exo
+//! applied it) isn't touched ([`Error::UnknownSchema`]).
 //!
 //! Toasty's generator (`toasty-cli`) isn't used. It writes `ADD COLUMN … NOT NULL` with no
 //! default, which SQLite refuses on a table with rows, and it knows nothing of the search index.
@@ -24,16 +24,17 @@
 //!    print(hex(secrets.randbits(63)))"`), and never change the id. Toasty knows a migration by
 //!    its id, so a file renumbered because two branches each added one still counts as run where
 //!    it ran.
-//! 3. Write its statements as a new file has them (`sqlite3 <file> .schema` on a new store
-//!    prints them; so does `an_upgraded_file_has_a_new_files_schema` for the tables that
-//!    differ): quoted names, and toasty's types (`TEXT` for strings, JSON and times, `BIGINT`
-//!    for `i64`, `INTEGER` for `u32` and `u64`, `BOOLEAN`). Toasty runs one statement at a
-//!    time, so put a line reading `-- #[toasty::breakpoint]` between statements. For example:
+//! 3. Write its statements the way a new file has them, with quoted names and toasty's types
+//!    (`TEXT` for strings, JSON and times, `BIGINT` for `i64`, `INTEGER` for `u32` and `u64`,
+//!    `BOOLEAN`). `sqlite3 <file> .schema` on a new store prints them, and so does
+//!    `an_upgraded_file_has_a_new_files_schema` for the tables that differ. Toasty runs one
+//!    statement at a time, so put a line reading `-- #[toasty::breakpoint]` between statements.
+//!    For example:
 //!    - a new model: its `CREATE TABLE`, then a `CREATE INDEX` for each `#[index]`;
 //!    - a new `#[index]`: its `CREATE INDEX`;
 //!    - a new `Option` field: `ALTER TABLE "drafts" ADD COLUMN "remind_at" TEXT;`
 //!    - any other new field: SQLite adds a `NOT NULL` column only with a value for the rows
-//!      already there, so give it theirs: `ALTER TABLE "drafts" ADD COLUMN "pinned" BOOLEAN NOT
+//!      already there, so give it a default: `ALTER TABLE "drafts" ADD COLUMN "pinned" BOOLEAN NOT
 //!      NULL DEFAULT 0;` (toasty writes every column, so the default fills only those rows);
 //!    - a removed field or model: `DROP INDEX` for its indexes, then `ALTER TABLE … DROP
 //!      COLUMN …` or `DROP TABLE …`;
@@ -42,21 +43,22 @@
 //!      `DROP TABLE "t"`, `ALTER TABLE "t_new" RENAME TO "t"`, then its indexes;
 //!    - rows that need new values: `UPDATE`s in the same file.
 //!
-//!    A `Json<T>` column's `T` isn't part of the schema: keep what older Exos wrote readable
-//!    (`#[serde(default)]`), or rewrite it in a migration. Migrations are SQL only: one that
+//!    A `Json<T>` column's `T` isn't part of the schema, so keep what older Exos wrote readable
+//!    (`#[serde(default)]`), or rewrite it in a migration. Migrations are SQL only. One that
 //!    needs Rust (indexing every thread again for a new search column) needs this module
 //!    extended first.
 //! 4. Run exo-store's tests. The ones here make a new file with every migration and check it has
-//!    the models' schema. They also bring `tests/fixtures/store-0001.sqlite3` (a file that has
-//!    run the baseline, with synced mail, bodies, the search index, calendar events, drafts, a
-//!    held send, a queued change and settings) through every migration, and check that the result
-//!    has a new file's schema, has lost nothing, and syncs without downloading mail again. Add a test
-//!    of what your migration does to rows already there (a new column's value on the fixture's
-//!    drafts, say); `tests::upgraded_fixture` gives you the fixture with every migration run.
+//!    the models' schema. They also bring `tests/fixtures/store-0001.sqlite3` through every
+//!    migration, and check that the result has a new file's schema, has lost nothing, and syncs
+//!    without downloading mail again. The fixture is a file that has run the baseline, with
+//!    synced mail, bodies, the search index, calendar events, drafts, a held send, a queued
+//!    change and settings. Add a test of what your migration does to rows already there (a new
+//!    column's value on the fixture's drafts, say). `tests::upgraded_fixture` gives you the
+//!    fixture with every migration run.
 //!
-//! Never change, reorder or remove a migration once it's on `build`: files out there have run
-//! it. When two branches each add one, the branch that lands second renumbers its file after
-//! the other's, keeps its id, and runs the tests again.
+//! Never change, reorder or remove a migration once it's on `build`, because files out there
+//! have run it. When two branches each add one, the branch that lands second renumbers its file
+//! after the other's, keeps its id, and runs the tests again.
 
 use std::path::Path;
 
@@ -116,7 +118,7 @@ pub(crate) async fn migrate(db: &mut Db, path: &Path) -> Result<()> {
     apply(db, path, FILES).await
 }
 
-/// Refuses a file that has run a migration [`FILES`] doesn't have: a newer Exo's.
+/// Refuses a file that has run a migration [`FILES`] doesn't have, one from a newer Exo.
 async fn refuse_unknown(db: &mut Db, path: &Path) -> Result<()> {
     let rows = toasty::sql::query("SELECT id, name FROM __toasty_migrations ORDER BY applied_at")
         .exec(db)
@@ -162,19 +164,19 @@ async fn apply(db: &Db, path: &Path, files: &'static [MigrationFile]) -> Result<
     Ok(())
 }
 
-/// `file`'s id as toasty stores it: an `INTEGER`. Every id has 63 bits.
+/// `file`'s id as toasty stores it, as an `INTEGER`. Every id has 63 bits.
 fn id(file: &MigrationFile) -> i64 {
     i64::try_from(file.id()).expect("migration ids have 63 bits")
 }
 
 #[cfg(test)]
 mod tests {
-    //! `tests/fixtures/store-0001.sqlite3` is the file Exo wrote at 2a2832a syncing gmail-mock's
-    //! default mailbox, every list backfilled and its first bodies fetched, the search index, a
-    //! week of the calendar, three drafts (one in Gmail, one held to send in 2030, one on this
-    //! device only), a star Gmail hasn't got and the Carbon theme; with the baseline recorded as
-    //! run, as files from then have it. It stands for those files, so it's never written
-    //! again.
+    //! `tests/fixtures/store-0001.sqlite3` is the file Exo wrote at 2a2832a while syncing
+    //! gmail-mock's default mailbox. It has every list backfilled and its first bodies fetched,
+    //! the search index, a week of the calendar, three drafts (one in Gmail, one held to send in
+    //! 2030, one on this device only), a star Gmail hasn't got and the Carbon theme. The baseline
+    //! is recorded as run, as files from then have it. The fixture stands for those files, so
+    //! it's never written again.
 
     use std::collections::{BTreeMap, BTreeSet};
     use std::path::PathBuf;
@@ -275,10 +277,10 @@ mod tests {
             .collect()
     }
 
-    /// What must match between an upgraded file and a new one, one sorted line per column,
-    /// index, `AUTOINCREMENT` key and virtual table, each starting with its table; toasty's own
-    /// table aside. Column order and defaults may differ: `ADD COLUMN` appends, and its default
-    /// only fills rows already there.
+    /// What must match between an upgraded file and a new one: one sorted line per column,
+    /// index, `AUTOINCREMENT` key and virtual table, each starting with its table, leaving out
+    /// toasty's own table. Column order and defaults may differ, because `ADD COLUMN` appends,
+    /// and its default only fills rows already there.
     async fn schema(db: &mut Db) -> Vec<String> {
         const SCHEMA: &str = r#"
             SELECT m.name || ' column ' || c.name || ' ' || c.type || CASE WHEN c."notnull" THEN ' NOT NULL' ELSE '' END || CASE WHEN c.pk THEN ' PRIMARY KEY ' || c.pk ELSE '' END
@@ -330,8 +332,8 @@ mod tests {
         );
     }
 
-    /// Every table's columns and rows (sorted), SQLite's own and the search index's internals
-    /// aside.
+    /// Every table's columns and rows (sorted), leaving out SQLite's own tables and the search
+    /// index's internals.
     type Contents = BTreeMap<String, (Vec<String>, Vec<Vec<String>>)>;
 
     async fn contents(db: &mut Db) -> Contents {
@@ -423,8 +425,8 @@ mod tests {
                 .map(|file| file.name().to_owned())
                 .collect::<Vec<_>>()
         );
-        // The models as toasty makes them, with nothing else: the search index is the
-        // migrations' alone.
+        // The models as toasty makes them, with nothing else, because only the migrations make
+        // the search index.
         let mut models = db::connect(&dir.0.join("models.sqlite3"))
             .await
             .expect("creates a file");
@@ -533,7 +535,7 @@ mod tests {
         let dir = TempDir::new("migrate-kept");
         let path = fixture(&dir.0);
         let mut db = db::connect(&path).await.expect("opens the file as it is");
-        // Its mail came from another gmail-mock: take up history where this one is.
+        // Its mail came from another gmail-mock, so take up history where this one is.
         let gmail = gmail::Client::new(
             server.endpoints(),
             gmail::StaticToken(DEV_ACCESS_TOKEN.into()),
@@ -599,7 +601,7 @@ mod tests {
     }
 
     /// Two migrations after the real ones: a table, then what toasty's generator writes for a
-    /// new `i64` field, which SQLite refuses on `drafts`, with rows.
+    /// new `i64` field, which SQLite refuses on `drafts` because it has rows.
     static FAILING: &[MigrationFile] = &[
         MigrationFile::new(
             1,
@@ -612,7 +614,7 @@ mod tests {
             r#"ALTER TABLE "drafts" ADD COLUMN "remind_at" BIGINT NOT NULL"#,
         ),
     ];
-    /// The same, the second fixed.
+    /// The same, with the second fixed.
     static FIXED: &[MigrationFile] = &[
         MigrationFile::new(
             1,
@@ -787,7 +789,7 @@ mod tests {
             error.to_string().contains("Cannot add a NOT NULL column"),
             "{error}"
         );
-        // The first stays: each migration is its own transaction.
+        // The first stays, because each migration is its own transaction.
         assert_eq!(
             run_so_far(&mut db).await,
             [

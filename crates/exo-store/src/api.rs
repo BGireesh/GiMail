@@ -1,9 +1,9 @@
-//! Every Gmail call goes through [`Api::call`], one retry policy for sync and the outbox: backoff
-//! with jitter on network errors, 5xx, rate limits and `Precondition check failed`; Gmail's retry
-//! hints honored; one token refresh on 401. Before it goes out, a call spends its quota units
-//! from the account's [`Budget`], which paces calls under Gmail's quota and holds them while
-//! Gmail is rate limiting the account. How each Gmail call ends tells the account's [`Network`]
-//! what's down and what's back.
+//! Every Gmail call goes through [`Api::call`], which applies one retry policy for sync and the
+//! outbox. It backs off with jitter on network errors, 5xx, rate limits and
+//! `Precondition check failed`, honors Gmail's retry hints, and refreshes the token once on 401.
+//! Before it goes out, a call spends its quota units from the account's [`Budget`], which paces
+//! calls under Gmail's quota and holds them while Gmail is rate limiting the account. How each
+//! Gmail call ends tells the account's [`Network`] what's down and what's back.
 
 use std::path::Path;
 use std::time::Duration;
@@ -18,7 +18,7 @@ use crate::quota::{Budget, Lane, MAX_WAIT, Quota};
 
 pub(crate) struct Api {
     client: Client,
-    /// The first retry's delay; later ones double.
+    /// The first retry's delay. Later ones double.
     base: Duration,
     budget: Budget,
     network: Network,
@@ -29,10 +29,12 @@ pub(crate) struct Api {
 pub(crate) enum Failure {
     /// No response at all.
     Offline(gmail::Error),
-    /// Gmail is rate limiting the account and takes calls again then, later than a call waits.
+    /// Gmail is rate limiting the account and takes calls again at this time, which is later
+    /// than a call waits.
     Throttled(Timestamp),
-    /// Gmail won't send mail for the account until then (its sending limit, `(Mail sending)`),
-    /// later than a call waits. Only sending is held: the account's other calls go on.
+    /// Gmail won't send mail for the account until this time (its sending limit,
+    /// `(Mail sending)`), which is later than a call waits. Only sending is held, and the
+    /// account's other calls go on.
     SendingLimited(Timestamp),
     /// 401 even with a fresh token.
     Unauthorized(gmail::Error),
@@ -115,7 +117,7 @@ impl Api {
         self.network.subscribe()
     }
 
-    /// Asks for Gmail's profile, once (`users.getProfile`: 1 unit).
+    /// Asks for Gmail's profile, once (`users.getProfile`, 1 unit).
     pub async fn ping(&self) -> Result<(), Failure> {
         self.call(Lane::Act, 1, |gmail| gmail.profile())
             .await
@@ -128,7 +130,7 @@ impl Api {
     }
 
     /// Runs the Gmail call `make` builds for `lane`, trying up to `attempts` times. Sync passes
-    /// a handful; the outbox passes 1 and retries at its own pace.
+    /// a handful, and the outbox passes 1 and retries at its own pace.
     pub async fn call<'a, T: DeserializeOwned + 'a>(
         &'a self,
         lane: Lane,
@@ -142,7 +144,7 @@ impl Api {
     }
 
     /// [`call`](Self::call) for Google's other APIs (Calendar, People), whose quotas are their
-    /// own: neither paced nor paused by Gmail's.
+    /// own, so Gmail's quota neither paces nor pauses them.
     pub async fn request<'a, T: DeserializeOwned + 'a>(
         &'a self,
         attempts: u32,
@@ -151,8 +153,8 @@ impl Api {
         self.send(&self.client, None, attempts, make).await
     }
 
-    /// [`request`](Self::request) through `client`, another account's (a calendar account's),
-    /// on this account's connection and retry policy.
+    /// [`request`](Self::request) through `client`, which belongs to another account (a
+    /// calendar account), on this account's connection and retry policy.
     pub async fn request_with<'a, T: DeserializeOwned + 'a>(
         &'a self,
         client: &'a Client,
@@ -167,8 +169,9 @@ impl Api {
         &self.client
     }
 
-    /// Runs the call through `client`, telling the connection how it ended: Gmail's (`lane`
-    /// set) for every service, another API's for the network and Google's sign-in alone.
+    /// Runs the call through `client`, and tells the connection how it ended. A Gmail call
+    /// (`lane` set) reports on every service, and another API's call reports only on the network
+    /// and Google's sign-in.
     async fn send<'a, T: DeserializeOwned + 'a>(
         &'a self,
         client: &'a Client,
@@ -250,7 +253,7 @@ impl Api {
                 Kind::Permanent => return Err(Failure::Permanent(error)),
                 Kind::RateLimited(after) => {
                     let wait = after.unwrap_or_else(|| self.delay(attempt));
-                    // Gmail's sending limit holds sending alone, for hours at a time: it pauses
+                    // Gmail's sending limit holds only sending, for hours at a time, and pauses
                     // nothing else.
                     let sending = sending_limit(&error);
                     if lane.is_some() && !sending {
@@ -280,7 +283,8 @@ impl Api {
         }
     }
 
-    /// When the outbox retries after `failures` failures: in `min(120 s, base × 2^failures)`.
+    /// When the outbox retries after `failures` failures, which is
+    /// `min(120 s, base × 2^failures)` from now.
     pub fn postpone(&self, failures: u32) -> Timestamp {
         from_now(
             self.base
@@ -307,7 +311,7 @@ fn classify(error: &gmail::Error) -> Kind {
             Some(_) => Kind::Permanent,
         },
         gmail::Error::Api(api) => {
-            // These count anywhere in the body; `rateLimitExceeded` also finds
+            // These count anywhere in the body, so `rateLimitExceeded` also finds
             // `userRateLimitExceeded`.
             let says = |needle: &str| mentions(api, needle);
             match api.code {
@@ -330,8 +334,8 @@ fn classify(error: &gmail::Error) -> Kind {
     }
 }
 
-/// Gmail's daily sending limit, which it answers sends with as a rate limit "mentioning
-/// `(Mail sending)`" (the Gmail API's "Resolve errors", 429) for hours, where its other calls
+/// Gmail's daily sending limit. For hours, Gmail answers sends with a rate limit "mentioning
+/// `(Mail sending)`" (the Gmail API's "Resolve errors", 429), while the account's other calls
 /// still go.
 fn sending_limit(error: &gmail::Error) -> bool {
     matches!(error, gmail::Error::Api(api) if mentions(api, "(Mail sending)"))
@@ -351,7 +355,7 @@ fn mentions(api: &gmail::ApiError, needle: &str) -> bool {
 }
 
 /// How long Gmail asks to wait: the `Retry after <RFC 3339>` it writes into rate-limit
-/// messages, or a `google.rpc.RetryInfo` detail's `retryDelay` (`"12s"`). Google's APIs put
+/// messages, or the `retryDelay` of a `google.rpc.RetryInfo` detail (`"12s"`). Google's APIs put
 /// retry hints in the error body rather than a `Retry-After` header.
 fn retry_after(api: &gmail::ApiError) -> Option<Duration> {
     let in_message = || {

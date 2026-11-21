@@ -1,9 +1,9 @@
-//! Key bindings in Mousetrap's notation.
+//! Key bindings and the notation they're written in.
 //!
 //! A binding is a string such as `"e"`, `"shift+e"`, `"mod+k"`, `"#"` or `"g i"` (a sequence:
-//! `g`, then `i`). `mod` is ⌘ on a Mac and Ctrl elsewhere; `ctralt` is Ctrl on a Mac and Alt
+//! `g`, then `i`). `mod` is ⌘ on a Mac and Ctrl elsewhere, and `ctralt` is Ctrl on a Mac and Alt
 //! elsewhere. Shifted symbols mean Shift plus the US-layout key that types them, so `"#"` is
-//! Shift+3 and `"?"` is Shift+/, exactly as Mousetrap binds them.
+//! Shift+3 and `"?"` is Shift+/.
 
 use egui::{Key, Modifiers, os::OperatingSystem};
 
@@ -30,9 +30,9 @@ impl Chord {
         }
     }
 
-    /// The chord a key press is, with shifted symbols folded back onto their US-layout key: egui
-    /// reports Shift+/ as `?` (logical key) but Shift+3 as `3` (`#` has no `Key`), so both end up
-    /// as base key plus Shift.
+    /// The chord a key press is, with shifted symbols folded back onto their US-layout key. egui
+    /// reports Shift+/ as `?` (the logical key) but Shift+3 as `3` (`#` has no `Key`), and the
+    /// folding makes both the base key plus Shift.
     pub(crate) fn from_event(key: Key, modifiers: Modifiers) -> Self {
         let base = unshift(key);
         Self {
@@ -57,7 +57,7 @@ impl Chord {
     }
 }
 
-/// The US-layout key a shifted symbol is typed with (Mousetrap's `_SHIFT_MAP`).
+/// The US-layout key a shifted symbol is typed with.
 fn unshift(key: Key) -> Option<Key> {
     Some(match key {
         Key::Exclamationmark => Key::Num1,
@@ -78,8 +78,8 @@ pub(crate) struct Binding {
 }
 
 impl Binding {
-    /// Parses one Mousetrap binding (`"mod+shift+k"`, `"g i"`) for `os`, or `None` if it isn't
-    /// valid notation.
+    /// Parses one binding (`"mod+shift+k"`, `"g i"`) for `os`, or `None` if it isn't valid
+    /// notation.
     pub(crate) fn parse(spec: &str, os: OperatingSystem) -> Option<Self> {
         let chords = steps(spec)
             .map(|step| parse_chord(step, os))
@@ -122,7 +122,7 @@ fn parse_chord(step: &str, os: OperatingSystem) -> Option<Chord> {
     Some(chord)
 }
 
-/// A Mousetrap key name as a chord (with Shift for shifted symbols).
+/// A binding's key name as a chord (with Shift for shifted symbols).
 fn key_named(name: &str) -> Option<Chord> {
     let shifted = |key| Chord {
         shift: true,

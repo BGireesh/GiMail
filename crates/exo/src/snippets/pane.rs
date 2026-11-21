@@ -26,8 +26,8 @@ const VARIABLES: [&str; 6] = [
     "{sender_full_name}",
 ];
 
-/// Paints the pane in `pane` (inside its border): `snippet`, when one is highlighted, over the
-/// tips without the variables; else the tips.
+/// Paints the pane in `pane`, inside its border. When a snippet is highlighted, paints `snippet`
+/// over the tips without the variables, and otherwise the tips alone.
 pub(crate) fn show(
     painter: &Painter,
     pane: Rect,

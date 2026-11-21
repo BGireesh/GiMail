@@ -1,9 +1,9 @@
-//! Asking before quitting: ⌘Q, the app menu's `Quit Exo` and the Dock's Quit show a native alert
+//! Asking before quitting. ⌘Q, the app menu's `Quit Exo` and the Dock's Quit show a native alert
 //! first, since closing the window is how to put Exo away and quitting stops what it does in the
-//! background. It shows while the settings menu's `Warn Before Quitting` is on, which it is to
-//! start with. The alert's `Do not ask again` (macOS's own checkbox), ticked as the user quits,
-//! turns the setting off; turning it on again brings the alert back. The setting is app-wide, in
-//! `quit.json` in the state folder, beside `window.json`.
+//! background. The alert shows while the settings menu's `Warn Before Quitting` is on, which it is
+//! to start with. Ticking the alert's `Do not ask again` (macOS's own checkbox) while quitting
+//! turns the setting off, and turning the setting on again brings the alert back. The setting is
+//! app-wide, kept in `quit.json` in the state folder, beside `window.json`.
 //!
 //! macOS ending the session (logging out, restarting, shutting down) quits without asking, since
 //! an alert then would cancel the logout. So does Exo quitting by itself, which goes straight to
@@ -36,7 +36,7 @@ struct Saved {
     warn_before_quitting: bool,
 }
 
-/// `Warn Before Quitting`, Exo's own setting: whether quitting asks first. Cheap to clone; the
+/// `Warn Before Quitting`, Exo's own setting for whether quitting asks first. Cheap to clone. The
 /// clones are one setting, which the quit alert and the settings menu share.
 #[derive(Clone, Debug)]
 pub struct QuitWarning(Arc<Warning>);
@@ -48,8 +48,8 @@ struct Warning {
 }
 
 impl QuitWarning {
-    /// The setting kept in `state`, the state folder: on, unless it was turned off. A file that
-    /// can't be read leaves it on.
+    /// The setting kept in `state`, the state folder, which is on unless it was turned off. A file
+    /// that can't be read leaves it on.
     pub fn load(state: &Path) -> Self {
         let path = state.join(FILE_NAME);
         let saved = match std::fs::read(&path) {
@@ -92,8 +92,9 @@ impl QuitWarning {
         }
     }
 
-    /// The alert was answered: `quit` or not, with `Do not ask again` ticked or not. Ticked with
-    /// `Quit`, the setting goes off; ticked with `Cancel`, nothing changes. Whether to quit.
+    /// The alert was answered, with `quit` or not and with `Do not ask again` ticked or not. Ticked
+    /// with `Quit`, the setting goes off. Ticked with `Cancel`, nothing changes. Returns whether to
+    /// quit.
     pub fn answered(&self, quit: bool, dont_ask: bool) -> bool {
         if quit && dont_ask {
             self.set(false);

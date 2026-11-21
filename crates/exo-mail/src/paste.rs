@@ -83,7 +83,7 @@ pub fn prepare_paste(html: &str) -> String {
 }
 
 /// Colours: Slack's Lato text is black, an unreadable colour snaps to the theme's, and black (or
-/// white) goes so the text takes the theme's; a `<font color>` that snaps to black goes.
+/// white) goes so the text takes the theme's. A `<font color>` that snaps to black goes too.
 fn snap_colors(element: &NodeRef) {
     let mut style = Style::of(element);
     if style.get("font-family").contains("Slack-Lato") {
@@ -105,7 +105,7 @@ fn snap_colors(element: &NodeRef) {
     }
 }
 
-/// Excel's styles: each rule of the sheet's first `<style>` is appended to the style of what it
+/// Excel's styles. Each rule of the sheet's first `<style>` is appended to the style of what it
 /// selects. Excel writes simple selectors (`td`, `.xl65`, `br`), which are what's matched.
 fn inline_sheet(document: &NodeRef, body: &NodeRef) {
     let Some(sheet) = dom::select_first(document, |node| dom::is(node, "style")) else {
@@ -152,8 +152,8 @@ fn inline_sheet(document: &NodeRef, body: &NodeRef) {
     }
 }
 
-/// Word's list paragraphs (`[style*="mso-list:l"]`) rebuilt as lists: a run of adjacent ones is
-/// one list, nested by each one's `level`, numbered when its bullet (`mso-list:Ignore`) has a
+/// Word's list paragraphs (`[style*="mso-list:l"]`) rebuilt as lists. A run of adjacent ones is
+/// one list, nested by each one's `level`, and numbered when its bullet (`mso-list:Ignore`) has a
 /// digit.
 fn word_lists(body: &NodeRef) {
     let items = dom::select(body, |node| {
@@ -217,7 +217,8 @@ fn word_lists(body: &NodeRef) {
     }
 }
 
-/// A Word list paragraph's bullet or number (`[style*="Ignore"]`).
+/// A Word list paragraph's bullet or number, whose `style` contains `Ignore` (as in
+/// `mso-list:Ignore`).
 fn is_bullet(node: &NodeRef) -> bool {
     dom::attr(node, "style").is_some_and(|style| style.contains("Ignore"))
 }
@@ -236,7 +237,7 @@ fn level(item: &NodeRef) -> usize {
 
 /// Blank lines between spaced paragraphs: an empty line after a paragraph (`div` or `p`, not
 /// in a list or table, with something to show) whose margin with the next paragraph is 6px or
-/// more; a `p` without a margin of its own has 16px when the page has no `<style>`.
+/// more. A `p` without a margin of its own has 16px when the page has no `<style>`.
 fn blank_lines(body: &NodeRef, unstyled: bool) {
     let paragraph = |node: &NodeRef| dom::is(node, "div") || dom::is(node, "p");
     let visible = |node: &NodeRef| {

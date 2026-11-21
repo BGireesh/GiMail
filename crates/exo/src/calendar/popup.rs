@@ -14,8 +14,8 @@ const SHADOWS: [(f32, f32, [f32; 2]); 3] = [
 /// Classic's `border-radius: 4px`.
 const RADIUS: u8 = 4;
 
-/// Paints a popup's card over `rect` (snapped): its shadows, Classic's corners and its fill,
-/// white, Carbon `#2f3237`.
+/// Paints a popup's card over `rect` (snapped): its shadows, Classic's corners, and its fill
+/// (white, Carbon `#2f3237`).
 pub fn paint_card(painter: &Painter, rect: Rect) {
     let theme = exo_ui::theme(painter.ctx());
     let carbon = usize::from(theme == Theme::Carbon);
@@ -39,8 +39,9 @@ pub fn fill(theme: Theme) -> Color32 {
     }
 }
 
-/// The window inset 18px; 16px beside the target and 21px above its top, or 8px above or below
-/// it; never shorter than 350px when squeezed.
+/// A popup stays 18px inside the window. Beside the target it sits 16px away and 21px above the
+/// target's top, and above or below the target it sits 8px away. Squeezed, it's never shorter
+/// than 350px.
 const INSET: f32 = 18.0;
 const SIDE_GAP: f32 = 16.0;
 const SIDE_RAISE: f32 = 21.0;
@@ -67,9 +68,9 @@ pub struct Placement {
 }
 
 impl Placement {
-    /// A `width` × `height` popup right of `target` while that leaves it in the week's left three
-    /// sevenths, else left, above, below, or squeezed above or below; kept inside `window` inset
-    /// 18px. `pane` shifts it for the right pane.
+    /// A `width` × `height` popup right of `target` while that leaves the popup in the week's left
+    /// three sevenths, or else left, above, below, or squeezed above or below. It's kept 18px
+    /// inside `window`, and `pane` shifts it for the right pane.
     pub fn place(
         &mut self,
         window: Rect,

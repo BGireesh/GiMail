@@ -4,10 +4,10 @@
 //! future mail.
 //!
 //! A relabel goes straight to Gmail rather than through the outbox, since most of the threads
-//! it touches aren't stored; syncs along the way and afterwards bring the stored ones up to date.
+//! it touches aren't stored. Syncs along the way and afterwards bring the stored ones up to date.
 //! Taking labels off stored threads is done on the messages that carry them, a thousand at a
-//! time (`messages.batchModify`, 50 quota units), as for a single thread; everything else is one
-//! `threads.modify` (10 units) a thread.
+//! time (`messages.batchModify`, 50 quota units), as for a single thread. Everything else is one
+//! `threads.modify` (10 units) per thread.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -38,8 +38,8 @@ const CHUNK: usize = 500;
 /// Most message ids `messages.batchModify` takes.
 const BATCH_IDS: usize = 1000;
 
-/// The categories a sender filter can send mail to; a new one replaces a filter on the same
-/// sender with the other.
+/// The categories a sender filter can send mail to. A new filter for one replaces a filter on the
+/// same sender for the other.
 const CATEGORIES: [&str; 2] = ["CATEGORY_PERSONAL", "CATEGORY_SOCIAL"];
 
 /// The threads a bulk action is for.
@@ -60,8 +60,8 @@ pub struct ListCutoff {
     pub scope: Scope,
     /// The filter narrowing it: Unread or Starred, the ones Gmail can search for.
     pub filter: Option<Filter>,
-    /// Threads these pass are left alone (Get Me To Zero's `Keep unread emails`, `Keep starred
-    /// emails`): Unread or Starred.
+    /// Unread or Starred. Threads these filters pass are left alone (Get Me To Zero's
+    /// `Keep unread emails` and `Keep starred emails`).
     pub keep: Vec<Filter>,
     /// The date of the row the select-all started from.
     pub before: Timestamp,
@@ -72,7 +72,7 @@ pub struct ListCutoff {
 pub enum Scope {
     /// A list.
     List(ListId),
-    /// A search's results, by the query as typed: its Gmail form is what the search itself asks
+    /// A search's results, by the query as typed. Its Gmail form is what the search itself asks
     /// Gmail.
     Search(String),
 }
@@ -87,7 +87,7 @@ pub struct Progress {
 }
 
 impl Progress {
-    /// How many threads it's changing: none until they're all found.
+    /// How many threads it's changing. It's 0 until they're all found.
     pub fn total(&self) -> usize {
         self.total.load(Ordering::Relaxed)
     }
@@ -112,8 +112,8 @@ impl Progress {
     }
 }
 
-/// What a bulk relabel changed, which undoing it reverses: threads with the labels each gained
-/// and lost (only those it didn't have, and those it had).
+/// What a bulk relabel changed, which undoing it reverses: threads with the labels each one
+/// gained (only those it didn't have) and lost (only those it had).
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Relabelled {
     groups: Vec<Relabel>,
@@ -160,7 +160,8 @@ impl Relabelled {
     }
 }
 
-/// The Gmail label a filter passes threads carrying: only Unread's and Starred's are labels.
+/// The Gmail label carried by the threads that a filter passes. Only Unread's and Starred's are
+/// labels.
 fn label_of(filter: Filter) -> Result<&'static str> {
     match filter {
         Filter::Unread => Ok(UNREAD),
@@ -170,10 +171,10 @@ fn label_of(filter: Filter) -> Result<&'static str> {
     }
 }
 
-/// `{query} before:{t}` and the filter's operator: the list's own query in parentheses, so an
-/// `OR` in it (a split's query is the user's) groups inside them and can't reach past the cutoff.
-/// `before:` takes seconds and excludes its own: the second after the cutoff's keeps threads
-/// dated within it.
+/// `{query} before:{t}` and the filter's operator, with the list's own query in parentheses. An
+/// `OR` in it (a split's query is the user's) then groups inside them and can't reach past the
+/// cutoff. `before:` takes seconds and excludes the second it names, so using the second after
+/// the cutoff's keeps threads dated within the cutoff's second.
 fn before_query(query: Option<&str>, filter: Option<Filter>, before: Timestamp) -> Result<String> {
     let filter = match filter.map(label_of).transpose()? {
         None => None,
@@ -191,8 +192,8 @@ fn before_query(query: Option<&str>, filter: Option<Filter>, before: Timestamp) 
     Ok(parts.join(" "))
 }
 
-/// `{query} after:{t}`: what the list has dated after the cutoff, whatever the filter (the second
-/// after the cutoff's, as [`before_query`] takes it).
+/// `{query} after:{t}`, which finds what the list has dated after the cutoff, whatever the
+/// filter. `t` is the second after the cutoff's, as [`before_query`] takes it.
 fn after_query(query: Option<&str>, before: Timestamp) -> String {
     let seconds = before.as_second() + 1;
     match query.filter(|query| !query.trim().is_empty()) {
@@ -237,8 +238,8 @@ impl Store {
         }
     }
 
-    /// Every thread Gmail finds of `cutoff`'s list at or before its date, carrying `label` if
-    /// one is given.
+    /// Every thread of `cutoff`'s list that Gmail finds at or before the cutoff's date, carrying
+    /// `label` if one is given.
     async fn find_before(&self, cutoff: &ListCutoff, label: Option<&str>) -> Result<Vec<ThreadId>> {
         let mut query = self.scope_query(&cutoff.scope).await?;
         query.q = Some(before_query(
@@ -253,7 +254,7 @@ impl Store {
         self.find(query).await
     }
 
-    /// Every thread Gmail finds of `cutoff`'s list with mail since its date.
+    /// Every thread of `cutoff`'s list that Gmail finds with mail since the cutoff's date.
     async fn find_after(&self, cutoff: &ListCutoff) -> Result<Vec<ThreadId>> {
         let mut query = self.scope_query(&cutoff.scope).await?;
         query.q = Some(after_query(query.q.as_deref(), cutoff.before));
@@ -286,10 +287,10 @@ impl Store {
     }
 
     /// Adds `add` and removes `remove` on every message of `threads`, then syncs so stored
-    /// threads show it. Returns the threads Gmail changed; a thread that's gone is skipped.
+    /// threads show it. Returns the threads Gmail changed. A thread that's gone is skipped.
     ///
     /// # Errors
-    /// When Gmail can't be reached; threads already changed stay changed.
+    /// When Gmail can't be reached. Threads already changed stay changed.
     pub async fn relabel(
         &self,
         threads: &[ThreadId],
@@ -304,12 +305,12 @@ impl Store {
     }
 
     /// Applies `mutation` to every thread of `target`, to whole threads, recording in `done`
-    /// what changed as it goes, so even a failed or stopped one can be undone
+    /// what changed as it goes, so even a failed or stopped bulk action can be undone
     /// ([`Self::undo_bulk`]). A thread is changed only where it differs (a label added where it's
-    /// missing, removed where it's there), which is what makes the undo exact: stored threads are
-    /// read as the user sees them; for the others Gmail is asked which carry each label. A stored
-    /// thread the list's query finds is only taken when the list on screen has it at or before
-    /// the cutoff: the query only approximates the list.
+    /// missing, removed where it's there), which is what makes the undo exact. Stored threads are
+    /// read as the user sees them, and for the others Gmail is asked which carry each label. A
+    /// stored thread that the list's query finds is only taken when the list on screen has it at
+    /// or before the cutoff, because the query only approximates the list.
     ///
     /// # Errors
     /// When Gmail can't be reached or refuses a query, when the list's filter can't be searched
@@ -392,7 +393,7 @@ impl Store {
     /// gained.
     ///
     /// # Errors
-    /// When Gmail can't be reached; what was put back by then stays put back.
+    /// When Gmail can't be reached. What was put back by then stays put back.
     pub async fn undo_bulk(&self, done: &Relabelled, progress: &Progress) -> Result<()> {
         progress.start(done.len());
         for group in done.groups.iter().rev() {
@@ -503,8 +504,8 @@ impl Store {
         Ok((threads, carried))
     }
 
-    /// Of the stored `threads`, those `cutoff`'s list has at or before its date (and its filter
-    /// passes); a search's are all its own.
+    /// Of the stored `threads`, those that `cutoff`'s list has at or before the cutoff's date and
+    /// that its filter passes. For a search, they're all its own.
     async fn listed_by(
         &self,
         cutoff: &ListCutoff,
@@ -551,7 +552,7 @@ impl Store {
     /// Adds `add` and removes `remove` on every message of `threads` until done or `progress`
     /// is stopped, counting them in `progress` and recording in `changed` what Gmail changed.
     /// A relabel that only removes takes the labels off the stored threads' messages that carry
-    /// them in batches; the rest are changed whole.
+    /// them in batches. The rest are changed whole.
     async fn modify_threads(
         &self,
         threads: &[ThreadId],
@@ -667,7 +668,7 @@ impl Store {
     }
 
     /// `threads.modify` on `threads`, a round of [`CONCURRENCY`] at a time until done or
-    /// `progress` is stopped; a thread that's gone is skipped.
+    /// `progress` is stopped. A thread that's gone is skipped.
     async fn modify_whole(
         &self,
         threads: &[ThreadId],
@@ -680,7 +681,7 @@ impl Store {
             add_label_ids: add.to_vec(),
             remove_label_ids: remove.to_vec(),
         };
-        // In rounds rather than a stream: a stream's closure makes the future unsendable
+        // In rounds rather than a stream, because a stream's closure makes the future unsendable
         // (rust-lang/rust#100013), and tasks spawn this.
         for round in threads.chunks(CONCURRENCY) {
             if progress.is_stopped() {
@@ -730,11 +731,12 @@ impl Store {
         (thread.clone(), result.map(drop))
     }
 
-    /// Creates the filter giving mail from `from` the label `label` (`TRASH` blocks a sender or
-    /// domain; a category sends them to Important or Other), shaped as Exo's own are (`from`
-    /// alone, one label added). A category filter replaces the sender's filter for the other one.
-    /// Returns the new filter's id, none when Gmail already had it (made in Gmail web, say: undo
-    /// leaves it), and the replaced filter.
+    /// Creates the filter that gives mail from `from` the label `label`, shaped as Exo's own
+    /// filters are (`from` alone, one label added). `TRASH` blocks a sender or domain, and a
+    /// category sends them to Important or Other. A category filter replaces the sender's filter
+    /// for the other category. Returns the new filter's id, or none when Gmail already had the
+    /// filter (made in Gmail on the web, say, in which case undo leaves it), and the replaced
+    /// filter.
     ///
     /// # Errors
     /// When Gmail can't be reached or refuses the filter.
@@ -794,7 +796,7 @@ impl Store {
                 {
                     Ok(created) => created.id.unwrap_or_default(),
                     // An attempt whose answer was lost made it, so the retry was refused as a
-                    // duplicate: the filter there now is this one, since it wasn't there before.
+                    // duplicate. The filter there now is this one, since it wasn't there before.
                     Err(failure) => {
                         let made = self
                             .inner
@@ -868,9 +870,9 @@ impl Store {
         Ok(())
     }
 
-    /// Unblocks `from`, an address or domain: deletes the filters that block it, those shaped
-    /// exactly as a block makes them (`from` alone, Trash added and nothing else), and leaves
-    /// what they trashed in Trash. Returns how many it deleted.
+    /// Unblocks `from`, an address or domain. It deletes the filters that block it, which are
+    /// those shaped exactly as a block makes them (`from` alone, Trash added and nothing else),
+    /// and leaves what they trashed in Trash. Returns how many it deleted.
     ///
     /// # Errors
     /// When Gmail can't be reached.

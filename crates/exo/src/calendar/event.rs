@@ -45,11 +45,11 @@ impl Rsvp {
 /// How a block is drawn.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Style {
-    /// Accepted, or mine: a coloured fill.
+    /// A coloured fill, for an event accepted or mine.
     Filled,
-    /// Declined or not answered: an outline.
+    /// An outline, for an event declined or not answered.
     Bordered,
-    /// Maybe: the fill, in a dashed outline.
+    /// The fill in a dashed outline, for a maybe.
     Dashed,
 }
 
@@ -62,7 +62,7 @@ pub struct Event {
     pub title: String,
     pub start: Zoned,
     pub end: Zoned,
-    /// In the all-day row: Calendar says it's all-day, or it lasts a day or more.
+    /// In the all-day row, because Calendar says it's all-day or it lasts a day or more.
     pub all_day: bool,
     pub color: CalendarColor,
     /// My answer.
@@ -77,20 +77,21 @@ pub struct Event {
     pub calendar_id: String,
     /// Calendar's id for it (none for such an invite).
     pub id: Option<String>,
-    /// I may change it: I organize it on a calendar I can write to.
+    /// I may change it, because I organize it on a calendar I can write to.
     pub editable: bool,
-    /// What its block says for the time instead of its own range: a draft typed in another zone.
+    /// What its block says for the time instead of its own range, for a draft typed in another
+    /// zone.
     pub time_text: Option<String>,
-    /// A slot of availability being shared, and whether it can be shared: as long as the
-    /// meeting and not over.
+    /// A slot of availability being shared, and whether it can be shared (it must be as long as
+    /// the meeting and not over).
     pub share: Option<bool>,
-    /// What its block says while hovered: why a slot can't be shared.
+    /// What its block says while hovered, which is why a slot can't be shared.
     pub tooltip: Option<&'static str>,
 }
 
 impl Event {
-    /// `event` from `calendar`, for `me`, coloured by `colors` (each calendar's colour from the
-    /// settings), its times in `tz`. `None` for an event without usable times.
+    /// The `stored` event from `calendar`, for `me`, coloured by `colors` (each calendar's colour
+    /// from the settings), its times in `tz`. `None` for an event without usable times.
     pub fn new(
         stored: &StoredEvent,
         calendar: Option<&CalendarListEntry>,
@@ -135,8 +136,8 @@ impl Event {
         });
         let writable = matches!(access, Some("owner" | "writer"))
             || (access == Some("writerWithoutPrivateAccess") && !private);
-        // A new event Calendar hasn't got yet is editable too: its edit waits behind it in its
-        // queue.
+        // A new event that Calendar hasn't got yet is editable too. The edit waits behind the new
+        // event in its queue.
         let editable = organizer && writable && event.event_type.as_deref() != Some("fromGmail");
         let creator = event
             .creator
@@ -258,7 +259,7 @@ impl Event {
         }
     }
 
-    /// The block is drawn: declined events are left off unless the settings show them.
+    /// Whether the block is drawn. Declined events are left off unless the settings show them.
     pub fn shown(&self, show_declined: bool) -> bool {
         show_declined || self.rsvp != Some(Rsvp::Declined)
     }
@@ -272,7 +273,8 @@ impl Event {
         }
     }
 
-    /// On `day`: starts before its end and ends after its start.
+    /// Whether it's on `day`, which means it starts before the day ends and ends after the day
+    /// starts.
     pub fn on(&self, day: Date) -> bool {
         let tz = self.start.time_zone().clone();
         let (Ok(from), Ok(to)) = (
@@ -331,7 +333,8 @@ fn google_color(id: &str) -> Option<CalendarColor> {
     CalendarColor::from_name(name)
 }
 
-/// An event's key: the calendar and the event, an instance by its series and original start.
+/// An event's key: the calendar and the event, with an instance keyed by its series and original
+/// start.
 pub(crate) fn unique_key(stored: &StoredEvent, event: &ApiEvent, start: &Zoned) -> String {
     let id = match &event.recurring_event_id {
         Some(series) => {
@@ -347,8 +350,8 @@ pub(crate) fn unique_key(stored: &StoredEvent, event: &ApiEvent, start: &Zoned) 
     format!("{}_{id}", stored.calendar_id)
 }
 
-/// Each calendar's colour, over every signed-in calendar account: the settings' colour, else
-/// blue.
+/// Each calendar's colour, over every signed-in calendar account. That's the colour in the
+/// settings, or else blue.
 pub fn colors(settings: &Settings) -> BTreeMap<String, CalendarColor> {
     let mut colors = BTreeMap::new();
     for account in settings

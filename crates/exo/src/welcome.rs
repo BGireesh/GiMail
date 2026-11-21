@@ -1,7 +1,7 @@
-//! The welcome splash: the first time an account opens on this Mac, its photo covers the
+//! The welcome splash. The first time an account opens on this Mac, its photo covers the
 //! window, under the tab strip as the sign-in screen's does, for at least five seconds and until
-//! the mail is ready; then the first-run flow decides what comes next and it fades out over
-//! 500 ms. The keys are its while it covers the window.
+//! the mail is ready. Then the first-run flow decides what comes next, and the splash fades out
+//! over 500 ms. It takes the keys while it covers the window.
 //!
 //! Classic's look: the photo (`install-bg.jpg`) under a 50% black scrim, the welcome in 16px
 //! bold over two 16px lines, centered, and `Getting ready…` with the spinner 56px from the
@@ -30,8 +30,8 @@ const HEADER_GAP: f32 = 24.0;
 /// The lines under it and `Getting ready…`: 16px/24px in the splash's `#ededed`.
 const BODY: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 16.0, 24.0);
 const INK: Color32 = Color32::from_rgb(0xed, 0xed, 0xed);
-/// The bottom row: 56px from the bottom; the 16px spinner, 9px, then the text, padded
-/// 4px at the top, so the row is 28px.
+/// The bottom row, 56px from the bottom: the 16px spinner, 9px, then the text, padded 4px at
+/// the top, so the row is 28px.
 const LOWER_BOTTOM: f32 = 56.0;
 const SPINNER: f32 = 16.0;
 const SPINNER_GAP: f32 = 9.0;
@@ -48,9 +48,9 @@ const GETTING_READY: &str = "Getting ready…";
 /// Where the splash is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Phase {
-    /// Covering the window, the keys its.
+    /// Covering the window and taking the keys.
     Covering,
-    /// It just gave way: the first-run flow decides now, and it fades.
+    /// It just gave way. The first-run flow decides now, and the splash fades.
     Decide,
     /// Fading out.
     Fading,
@@ -84,18 +84,19 @@ impl Welcome {
         }
     }
 
-    /// It covers the window: the keys are its, and the tab is a sign-in screen's.
+    /// Whether it covers the window, in which case it takes the keys and the tab is a sign-in
+    /// screen's.
     pub(crate) fn covers(&self) -> bool {
         self.hiding.is_none()
     }
 
-    /// The photo is decoded. For screenshots and tests.
+    /// Whether the photo is decoded. For screenshots and tests.
     pub(crate) fn is_idle(&self) -> bool {
         self.photo.is_loaded()
     }
 
     /// Draws a frame over `window`, then the tab strip with `tab` on it, and says where it is.
-    /// `name` is the account's name, whose first word greets it; `ready` says its mail is
+    /// `name` is the account's name, whose first word greets it. `ready` says its mail is
     /// ready.
     pub(crate) fn show(
         &mut self,
@@ -156,7 +157,8 @@ impl Welcome {
                 );
                 paint_text(&painter, window, name, text);
                 paint_lower(&painter, window, now);
-                // The tab strip stays over the page: over the photo while it covers the window.
+                // The tab strip stays over the page, and over the photo while the splash covers
+                // the window.
                 let backdrop = if self.covers() {
                     chrome::Backdrop::Photo
                 } else {
@@ -175,8 +177,8 @@ impl Welcome {
 }
 
 impl crate::Mail {
-    /// The account just opened on this Mac for the first time: the welcome splash, until it's
-    /// been past it (quitting before then shows it again).
+    /// The account just opened on this Mac for the first time, so the welcome splash shows until
+    /// the account has been past it (quitting before then shows it again).
     pub fn welcome_first_time(&mut self) {
         self.account
             .update_device_settings(|device| device.splash_pending = true);
@@ -193,7 +195,7 @@ impl crate::Mail {
         }
     }
 
-    /// The welcome splash covers the window.
+    /// Whether the welcome splash covers the window.
     pub fn welcome_covers(&self) -> bool {
         self.welcome.as_ref().is_some_and(Welcome::covers)
     }

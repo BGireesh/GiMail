@@ -52,7 +52,7 @@ async fn a_401_refreshes_the_token() {
     let gmail = gmail::Client::new(harness.auth.endpoints().clone(), tokens.clone());
     assert!(gmail.gmail().profile().await.is_ok());
 
-    // Google expired the token early (the mock's clock jumped past its expiry): the client
+    // Google expired the token early (the mock's clock jumped past its expiry). The client
     // hands the rejected token back, so the caller's one retry gets a fresh one.
     harness.advance_clock(2).await;
     let error = gmail.gmail().profile().await.unwrap_err();
@@ -91,7 +91,7 @@ async fn a_revoked_grant_asks_to_sign_in_again() {
     assert_eq!(sign_in_again(&error), Some(EMAIL), "{error}");
     assert!(tokens.needs_sign_in());
 
-    // Settled without asking Google again: it fails the same way with Google gone.
+    // This is settled without asking Google again, so it fails the same way with Google gone.
     let Harness { server, auth, .. } = harness;
     drop(server);
     let error = tokens.access_token().await.unwrap_err();

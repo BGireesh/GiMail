@@ -38,7 +38,7 @@ pub(crate) const OPERATORS: &str = "(is|in|label|l|has|category|from|to|cc|bcc|s
 /// What a suggestion is.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Kind {
-    /// An operator to finish typing a value after (`syntax-firstpart`: `from:`).
+    /// An operator to finish typing a value after (`from:`).
     Operator,
     /// `me`.
     Me,
@@ -46,7 +46,7 @@ pub(crate) enum Kind {
     Label,
     /// A category (`category:social`).
     Category,
-    /// Someone from local mail; inserting it inserts their address.
+    /// Someone from local mail. Inserting it inserts their address.
     Contact {
         /// Their name, if mail had one.
         name: Option<String>,
@@ -166,8 +166,8 @@ pub(crate) fn increasing_substrings(text: &str, everywhere: bool) -> Vec<String>
     out
 }
 
-/// Whether the people found answer `raw`: the bar asks for them only when its last word could be
-/// someone (`text` or an address operator's value).
+/// Whether the people found answer `raw`, which they do when its last word could be someone
+/// (`text` or an address operator's value). Only then does the bar ask for them.
 pub(crate) fn wants_contacts(raw: &str) -> bool {
     last_word(raw).is_some_and(|(kind, value, _)| {
         matches!(kind, TokenKind::Text | TokenKind::Contact) && !value.trim().is_empty()
@@ -226,7 +226,7 @@ pub(crate) fn suggest(
         (false, true) => syntax,
         _ => people,
     };
-    // Longer typed text first; at equal length, people last.
+    // Longer typed text first, and at equal length, people last.
     merged.sort_by(|a, b| {
         b.original
             .len()
@@ -330,8 +330,8 @@ fn label_suggestions(field: &str, value: &str, labels: &[LabelChoice]) -> Vec<Su
     scored.into_iter().map(|(_, _, item)| item).collect()
 }
 
-/// A label suggestion: a name with spaces or punctuation in quotes; `in:category_…` as
-/// `category:…`.
+/// A label suggestion, with a name that has spaces or punctuation in quotes, and
+/// `in:category_…` as `category:…`.
 fn label_item(field: &str, value: &str, name: &str, original: &str) -> Suggestion {
     let name = if name
         .chars()
@@ -440,8 +440,8 @@ fn format_for_search(email: &str, name: Option<&str>, word: &str, words: &[Strin
     )
 }
 
-/// `text` cut where the typed `original` (or its part after the last operator) matches,
-/// case-insensitively: `(text, matched)` runs.
+/// `text` cut into `(text, matched)` runs where the typed `original` (or its part after the last
+/// operator) matches, case-insensitively.
 pub(crate) fn highlight<'a>(text: &'a str, original: &str) -> Vec<(&'a str, bool)> {
     static OPERATOR: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(OPERATORS).expect("valid regex"));
@@ -450,7 +450,8 @@ pub(crate) fn highlight<'a>(text: &'a str, original: &str) -> Vec<(&'a str, bool
         return vec![(text, false)];
     }
     let lower = text.to_lowercase();
-    // Lower-casing kept every byte where it was; otherwise nothing is highlighted.
+    // Highlighting needs lower-casing to keep every byte where it was. Otherwise nothing is
+    // highlighted.
     if lower.len() != text.len() {
         return vec![(text, false)];
     }

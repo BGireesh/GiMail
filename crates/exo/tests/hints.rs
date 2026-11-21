@@ -26,7 +26,7 @@ const ROW_COMMAND: Pos2 = Pos2::new(920.0, 136.0);
 /// The rail's Mail and Calendar.
 const RAIL_MAIL: Pos2 = Pos2::new(20.0, 83.0);
 const RAIL_CALENDAR: Pos2 = Pos2::new(20.0, 112.0);
-/// The Quick Tips bar's cross: `2rem` (13.5px) in from the right, the bar's 32px at the bottom.
+/// The Quick Tips bar's cross, `2rem` (13.5px) in from the right of the 32px bar at the bottom.
 const QUICK_TIPS_CLOSE: Pos2 = Pos2::new(1246.0, 784.0);
 
 /// Opens the palette and runs the row `query` ranks first.

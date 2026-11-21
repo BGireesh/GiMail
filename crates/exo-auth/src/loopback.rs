@@ -34,8 +34,8 @@ mod copy {
 
 /// Accepts connections until one carries this attempt's redirect: a request for `/` with
 /// `code`, `error` or `state`, whose `state` is `state`. A redirect with another `state` (a
-/// stale tab, or a page that found the port) is told the attempt expired, anything else
-/// (`/favicon.ico`) gets a 404, and the wait goes on. Returns the redirect's URL and its
+/// stale tab, or a page that found the port) is told the attempt expired. Anything else
+/// (`/favicon.ico`) gets a 404. Either way, the wait goes on. Returns the redirect's URL and its
 /// connection, to answer once sign-in finishes.
 pub(crate) async fn receive(listener: &TcpListener, state: &str) -> io::Result<(Url, TcpStream)> {
     let mut reading = JoinSet::new();
@@ -75,8 +75,8 @@ pub(crate) fn param(url: &Url, name: &str) -> Option<String> {
 /// Reads a request head and returns its target, resolved against the loopback origin.
 async fn read_request(mut stream: TcpStream) -> io::Result<(Url, TcpStream)> {
     let mut head = Vec::new();
-    // The whole head, not just the request line: closing a socket with unread input resets the
-    // connection, and the browser would show its own error instead of the page.
+    // Read the whole head, not just the request line. Closing a socket with unread input resets
+    // the connection, and the browser would show its own error instead of the page.
     let read_head = async {
         let mut chunk = [0; 2048];
         while !head.windows(4).any(|window| window == b"\r\n\r\n") {
@@ -101,7 +101,7 @@ async fn read_request(mut stream: TcpStream) -> io::Result<(Url, TcpStream)> {
     Ok((target, stream))
 }
 
-/// Answers the redirect with how sign-in went. The browser may have gone; that's fine.
+/// Answers the redirect with how sign-in went. The browser may have gone, which is fine.
 pub(crate) async fn respond<T>(mut stream: TcpStream, result: &Result<T, Error>) {
     let (status, text) = match result {
         Ok(_) => ("200 OK", copy::SIGNED_IN),
@@ -187,8 +187,9 @@ mod tests {
         assert!(page.contains("Thanks for allowing Exo!"));
     }
 
-    // Reads the accepted connection directly: the paused clock jumps ahead whenever the runtime
-    // waits on the real socket, so timing a connection from before `accept` flakes under load.
+    // Reads the accepted connection directly, because the paused clock jumps ahead whenever the
+    // runtime waits on the real socket. Timing a connection from before `accept` flakes under
+    // load.
     #[tokio::test(start_paused = true)]
     async fn a_request_trickling_in_is_dropped_when_its_time_is_up() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -196,7 +197,7 @@ mod tests {
             .await
             .unwrap();
         let (reading, _) = listener.accept().await.unwrap();
-        // A byte every 4 s: no read waits long, but the head never ends.
+        // A byte every 4 s, so no read waits long, but the head never ends.
         tokio::spawn(async move {
             for byte in b"GET /?state=s HTTP/1.1\r\nHost: x\r\n".iter().cycle() {
                 if writing.write_all(&[*byte]).await.is_err() {

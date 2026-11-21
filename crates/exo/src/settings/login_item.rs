@@ -1,8 +1,8 @@
-//! Open at Login, a setting of Exo's own: Exo as a login item, through fastframe-autostart
+//! Open at Login, a setting of Exo's own, makes Exo a login item through fastframe-autostart
 //! (`SMAppService.mainApp`). It's off until it's turned on.
 //!
-//! macOS keeps the only record: the setting reads it back each time the menu opens, so a change
-//! made in System Settings › General › Login Items shows. Both reading and changing it can
+//! macOS keeps the only record, so the setting reads it back each time the menu opens, and a
+//! change made in System Settings › General › Login Items shows. Both reading and changing it can
 //! block, so they run off the UI thread.
 
 use std::sync::{Arc, Mutex, PoisonError};
@@ -12,7 +12,7 @@ use fastframe_autostart::{Autostart, Start, State};
 /// Exo's login item, as macOS last said.
 #[derive(Debug)]
 pub struct LoginItem {
-    /// On or off; `None` until read, and where Exo can't be a login item (a bare binary, as
+    /// On or off, or `None` until read and where Exo can't be a login item (a bare binary, as
     /// `cargo run` starts it).
     on: Arc<Mutex<Option<bool>>>,
     /// Repainted when macOS answers.
@@ -51,7 +51,7 @@ impl LoginItem {
     fn spawn(&self, call: impl FnOnce(&Autostart) -> std::io::Result<State> + Send + 'static) {
         let (on, ctx) = (Arc::clone(&self.on), self.ctx.clone());
         std::thread::spawn(move || {
-            // macOS goes by the bundle; the name is for other systems' entries.
+            // macOS goes by the bundle. The name is for other systems' entries.
             let autostart = Autostart::new("exo", "Exo");
             let state = call(&autostart).unwrap_or_else(|error| {
                 log::warn!("changing Exo's login item: {error}");
@@ -68,7 +68,7 @@ impl LoginItem {
     }
 }
 
-/// What the setting shows for `state`: on once registered, approved or not.
+/// What the setting shows for `state`. It's on once registered, approved or not.
 fn shown(state: State) -> Option<bool> {
     match state {
         State::Unsupported => None,

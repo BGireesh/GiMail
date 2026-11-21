@@ -1,14 +1,15 @@
-//! The search index's text: each message's visible text, without the quoted reply and the
-//! signature the thread view hides behind the `…`. Working it out takes exo-mail's render
-//! pipeline, which the store doesn't depend on, so the app hands the store the function that
-//! does ([`Store::index_text_with`]).
+//! The search index's text, which is each message's visible text without the quoted reply and
+//! the signature that the thread view hides behind the `…`. Working it out takes exo-mail's
+//! render pipeline, which the store doesn't depend on, so the app hands the store the function
+//! that does ([`Store::index_text_with`]).
 //!
-//! Storing a body queues its conversation (`text_due`, which the migration that made it filled
-//! with every conversation stored before); the app's pre-render pass then works out the text of
-//! what's queued ([`Store::index_texts`]) off the runtime's threads, keeps it beside the body
-//! ([`BodyRow::visible`]) and indexes the conversation again. A message whose reply-to's body
-//! isn't stored waits for it: the conversation is queued again when it comes. Until then, and in
-//! a store without the function, the index holds a body's whole text.
+//! Storing a body queues its conversation in `text_due`, which the migration that created the
+//! table filled with every conversation stored before. The app's pre-render pass then works out
+//! the text of what's queued ([`Store::index_texts`]) off the runtime's threads, keeps it beside
+//! the body ([`BodyRow::visible`]) and indexes the conversation again. A message waits until the
+//! body of the message it replies to is stored, and its conversation is queued again when that
+//! body comes. Until then, and in a store without the function, the index holds a body's whole
+//! text.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -36,8 +37,9 @@ pub struct TextSource {
     pub rfc822_id: String,
     /// The names of its files (not its inline images).
     pub attachment_names: Vec<String>,
-    /// The message it replies to, before it in the slice: the one its `In-Reply-To` names, else
-    /// the one before it in the conversation, as the thread view reads each message against.
+    /// The message it replies to, which comes before it in the slice. That's the one its
+    /// `In-Reply-To` names, else the one before it in the conversation, the same message the
+    /// thread view reads each message against.
     pub replying_to: Option<usize>,
 }
 
@@ -45,31 +47,31 @@ pub struct TextSource {
 /// one it replies to), in their order.
 pub type IndexText = Arc<dyn Fn(&[TextSource]) -> Vec<String> + Send + Sync>;
 
-/// Conversations worked out per batch, between which the pass pauses.
+/// Conversations worked out per batch. The pass pauses between batches.
 const BATCH: usize = 50;
 /// The pause after each batch, so sync and the user's writes go first.
 const PAUSE: std::time::Duration = std::time::Duration::from_millis(50);
-/// `?1` of the queued conversations, the last queued first: new mail before what was stored
-/// before visible text.
+/// `?1` of the queued conversations, the last queued first, so new mail goes before the
+/// conversations stored before the store had visible text.
 const DUE: &str = "SELECT thread_id FROM text_due ORDER BY rowid DESC LIMIT ?1";
 /// The messages of conversation `?1` with a body and no visible text.
 const LACKING: &str = "SELECT b.message_id FROM bodies b JOIN messages m ON m.id = b.message_id WHERE m.thread_id = ?1 AND b.visible IS NULL";
 
 impl Store {
-    /// Has the search index hold each message's visible text, worked out by `text` (exo-mail's
-    /// render pipeline, in the app), rather than its whole body. The first call counts.
+    /// Makes the search index hold each message's visible text, worked out by `text` (exo-mail's
+    /// render pipeline, in the app), rather than its whole body. Only the first call counts.
     pub fn index_text_with(&self, text: IndexText) {
         let _ = self.inner.index_text.set(text);
     }
 
     /// Works out the visible text of every conversation whose bodies came in since the last
-    /// time, in batches, newest first, and indexes them again with it. It calls Gmail for
-    /// nothing, and tells [`changes`](Self::changes) nothing: lists and conversations look the
+    /// time, in batches, newest first, and indexes them again with it. It makes no Gmail calls
+    /// and tells [`changes`](Self::changes) nothing, because lists and conversations look the
     /// same. Does nothing without [`index_text_with`](Self::index_text_with). Returns how many
     /// it went through.
     ///
     /// # Errors
-    /// On database failures; what was worked out before stays.
+    /// On database failures. What was worked out before the failure stays.
     pub async fn index_texts(&self) -> Result<usize> {
         let mut done = 0;
         loop {
@@ -85,7 +87,8 @@ impl Store {
 
 impl Inner {
     /// Works out the visible text of up to `limit` queued conversations and indexes them again
-    /// with it, one at a time, the work itself on a blocking thread. Returns how many it did.
+    /// with it, one at a time, with the work itself on a blocking thread. Returns how many it
+    /// did.
     async fn index_texts(&self, limit: usize) -> Result<usize> {
         let Some(text) = self.index_text.get().cloned() else {
             return Ok(0);
@@ -105,7 +108,7 @@ impl Inner {
                 let (text, sources) = (text.clone(), work.sources.clone());
                 match tokio::task::spawn_blocking(move || text(&sources)).await {
                     Ok(worked_out) => texts = worked_out,
-                    // Not tried again: the index keeps the whole text.
+                    // Not tried again, so the index keeps the whole text.
                     Err(error) => {
                         log::error!("working out the visible text of thread {thread}: {error}")
                     }
@@ -130,7 +133,7 @@ impl Inner {
                 crate::search::unindex(write.exec(), thread).await?;
                 reindex(write.exec(), thread, &self.router()).await?;
             }
-            // A body stored meanwhile keeps it queued.
+            // A body stored meanwhile keeps the conversation queued.
             if work.bodied_since(write.exec(), thread).await?.is_empty() {
                 toasty::sql::statement("DELETE FROM text_due WHERE thread_id = ?1")
                     .bind(thread.clone())
@@ -164,9 +167,9 @@ struct Work {
 }
 
 impl Work {
-    /// Reads `thread`: every message with a body and no visible text yet whose reply-to's body
-    /// is stored too, with what it replies to. Drafts reply to nothing, as the thread view leaves
-    /// them to compose.
+    /// Reads `thread`, taking each message that has a body but no visible text yet, if the
+    /// message it replies to has its body stored too, along with that message. Drafts reply to
+    /// nothing, because the thread view leaves them to compose.
     async fn read(exec: &mut dyn Executor, thread: &str) -> Result<Self> {
         let mut rows = MessageRow::filter_by_thread_id(thread).exec(exec).await?;
         rows.sort_by(|a, b| (a.internal_date, &a.id).cmp(&(b.internal_date, &b.id)));

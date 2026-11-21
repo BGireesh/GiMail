@@ -17,7 +17,7 @@ use crate::tokens::Access;
 use crate::{Account, CALENDAR_SCOPES, Error, SCOPES, loopback};
 
 /// How long sign-in waits for the browser to come back. It's long enough to type a password and
-/// a second factor; the sign-in screen can give up sooner by dropping the future.
+/// a second factor. The sign-in screen can give up sooner by dropping the future.
 pub const TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
 /// What an account signs in for.
@@ -86,8 +86,8 @@ pub(crate) async fn authorize<T>(
     result
 }
 
-/// Exchanges the redirect's code (its `state` is this attempt's), and checks the account it
-/// signed in: every scope `purpose` asks for, and for mail, a mailbox.
+/// Exchanges the code in the redirect, whose `state` is this attempt's, and checks the account
+/// it signed in. The account needs every scope `purpose` asks for and, for mail, a mailbox.
 async fn exchange(
     oauth: &OAuthClient,
     endpoints: &Endpoints,

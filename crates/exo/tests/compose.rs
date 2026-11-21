@@ -220,7 +220,7 @@ fn a_reply_is_a_draft_in_its_thread_and_an_untouched_one_leaves_nothing() {
             .any(|(subject, id)| subject == "Re: Design crit moved to 3pm" && *id == thread),
         "the reply draft is in its thread: {drafts:?}"
     );
-    // Leaving keeps it; the row reads as a draft.
+    // Leaving keeps the draft, and the row reads as a draft.
     app.key(Key::Escape);
     app.key(Key::Escape);
     let row = app
@@ -359,7 +359,7 @@ fn a_draft_left_without_its_files_at_a_quit_gets_them_after_the_relaunch() {
         draft_files(&app, subject).is_empty(),
         "not written without its file"
     );
-    // Quit and opened again, the file still out of reach; then Gmail hands it over.
+    // The app quits and opens again with the file still out of reach. Then Gmail hands it over.
     app.relaunch();
     app.fault(None);
     app.sync();
@@ -497,7 +497,8 @@ fn share_availabilitys_tip_shows_a_week_after_joining_until_its_closed() {
         app.mail().compose_availability_tip(),
         "joined over a week ago"
     );
-    // Its close icon, at the right of its title, under the reply's calendar icon at 1280×800.
+    // The tip's close icon, at the right of the tip's title, under the reply's calendar icon at
+    // 1280×800.
     app.click(egui::pos2(859.0, 382.0));
     assert!(
         app.mail()
@@ -534,8 +535,9 @@ fn a_pop_out_taller_than_the_window_scrolls_its_body_to_the_caret() {
         app.type_text(&format!("line {line}"));
         app.key(Key::Enter);
     }
-    // At 800px the form stops at `100vh - 120px` under the 41px strip, its footer (68px) on the
-    // window's bottom: the body scrolls between the subject and the footer, the caret in view.
+    // At 800px the form stops at `100vh - 120px` under the 41px strip, with its footer (68px) on
+    // the window's bottom. The body scrolls between the subject and the footer and keeps the caret
+    // in view.
     let caret = app
         .mail()
         .compose_caret()
@@ -556,9 +558,9 @@ fn a_reply_taller_than_the_window_scrolls_its_body_and_keeps_its_top_in_view() {
         app.type_text(&format!("line {line}"));
         app.key(Key::Enter);
     }
-    // At 800px the reply stops at `100vh - 116px` under the 41px strip (643px): the thread keeps
-    // its bottom in view and the body scrolls to the caret, so its header shows too (the form
-    // spans 125–768).
+    // At 800px the reply stops at `100vh - 116px` under the 41px strip (643px). The thread keeps
+    // its bottom in view and the body scrolls to the caret, so the reply's header shows too (the
+    // form spans 125–768).
     let caret = app
         .mail()
         .compose_caret()
@@ -567,7 +569,7 @@ fn a_reply_taller_than_the_window_scrolls_its_body_and_keeps_its_top_in_view() {
         caret.top() > 125.0 && caret.bottom() < 768.0 - 52.0,
         "the caret ({caret:?}) shows above the footer"
     );
-    // The wheel over its body scrolls the body, not the thread.
+    // The wheel over the reply's body scrolls the body, not the thread.
     let thread = app
         .mail()
         .thread()
@@ -785,7 +787,7 @@ fn tab_from_the_body_reaches_send_and_the_reply_shows_in_its_thread_at_once() {
         Some(sending.as_str()),
         "focused"
     );
-    // Instant Send: Gmail's copy takes its place, focus and all.
+    // With Instant Send, Gmail's copy takes the held reply's place, focus and all.
     app.press(Key::Z, COMMAND.plus(Modifiers::SHIFT));
     app.wait(0.5);
     app.sync();
@@ -939,8 +941,8 @@ fn a_draft_goes_to_gmail_at_most_every_5_s_and_its_last_edit_once_they_are_up() 
     app.wait(1.5);
     assert!(in_gmail(|| draft_raw(&app, "Paced").contains("Hi there")));
     let written = std::time::Instant::now();
-    // Saved on the device a second after the key, to Gmail once 5 s have passed since its last
-    // write, by itself.
+    // The edit is saved on the device a second after the key, and to Gmail by itself once 5 s
+    // have passed since the draft's last write.
     app.type_text(" again");
     app.wait(1.5);
     assert!(
@@ -1136,7 +1138,7 @@ impl Drop for LoneAccount {
 
 #[test]
 fn quitting_right_after_send_still_sends() {
-    // The account alone, closed the moment Send is asked for: before its worker has published
+    // The account alone, closed the moment Send is asked for, before its worker has published
     // the held send.
     let lone = LoneAccount::new("quit-send");
     let account = lone.open();
@@ -1190,7 +1192,7 @@ fn quitting_after_saving_a_draft_unchanged_leaves_gmails_as_it_is() {
         "written"
     );
     let message = lone.draft_message("quit.3@brightmoor.co");
-    // Saved again with nothing changed, its message dated a second later, then quitting.
+    // Saved again with nothing changed (its message dated a second later), then quitting.
     std::thread::sleep(std::time::Duration::from_millis(1100));
     LoneAccount::save(&account, "quit.3@brightmoor.co", "Unchanged");
     assert!(wait_for(10, || account.is_idle()), "saved");
@@ -1210,8 +1212,8 @@ fn quitting_after_saving_a_draft_unchanged_leaves_gmails_as_it_is() {
 fn a_send_held_when_google_signs_the_account_out_fails_as_logged_out() {
     let lone = LoneAccount::new("signed-out-send");
     let account = lone.open();
-    // Google stops taking the account's token: closing the account (as the sign-out does) sends
-    // what it holds, which fails.
+    // Google stops taking the account's token. Closing the account (as the sign-out does) sends
+    // what it holds, and that send fails.
     lone.fault(Some(
         serde_json::json!({"path": "/", "status": 401, "times": 100_000}),
     ));
@@ -1222,8 +1224,8 @@ fn a_send_held_when_google_signs_the_account_out_fails_as_logged_out() {
     );
     drop(account);
     lone.fault(None);
-    // Signed in again: a failed draft, `Send failed: logged out of Google`, which goes only when
-    // the user sends it again (not late, by itself).
+    // Signed in again, the draft has failed with `Send failed: logged out of Gmail`, and it goes
+    // only when the user sends it again (not late, by itself).
     let account = lone.open();
     let started = std::time::Instant::now();
     let failure = || {
@@ -1266,7 +1268,7 @@ fn a_reply_gmail_wont_send_stays_in_its_thread_as_a_failed_draft() {
         Some("Message failed to send because it was too large."),
         "sent this session: the alert says so"
     );
-    // See Message: the failed draft in its thread, a message rather than a draft to edit.
+    // See Message shows the failed draft in its thread, as a message rather than a draft to edit.
     app.key(Key::Enter);
     app.settle();
     let failure = |app: &Fixture| {
@@ -1304,8 +1306,8 @@ fn a_reply_gmail_wont_send_stays_in_its_thread_as_a_failed_draft() {
     assert!(!sent_subjects(&app).contains(&"Re: Design crit moved to 3pm".to_owned()));
 }
 
-/// Waits for Gmail's drafts to show `done`: the save that typing a message ends with reaches
-/// Gmail up to 5 s after the draft's first write.
+/// Waits for Gmail's drafts to show `done`. The save that ends a typed message reaches Gmail up
+/// to 5 s after the draft's first write.
 fn in_gmail(done: impl FnMut() -> bool) -> bool {
     wait_for(10, done)
 }
@@ -1421,7 +1423,7 @@ fn a_draft_saved_without_its_files_goes_to_gmail_once_they_can_be_had() {
         message_id: Some("files-retry.1@brightmoor.co".into()),
         ..gmail::mime::Email::default()
     };
-    // Gmail is out of reach: the file can't be fetched, and neither can history.
+    // Gmail is out of reach, so neither the file nor history can be fetched.
     lone.fault(Some(serde_json::json!({"method": "GET", "path": format!("/gmail/v1/users/me/messages/{message}"), "status": 503, "times": 100_000})));
     lone.fault(Some(serde_json::json!({"method": "GET", "path": "/gmail/v1/users/me/history", "status": 400, "times": 100_000})));
     let draft = exo_store::Draft {
@@ -1434,7 +1436,7 @@ fn a_draft_saved_without_its_files_goes_to_gmail_once_they_can_be_had() {
         sending: false,
     };
     account.save_draft(draft, email);
-    // A sync round that fails, as offline, then off screen (switched away from).
+    // A sync round fails as it would offline, then the app goes off screen (switched away from).
     account.set_presence(exo::account::Presence::Visible);
     account.set_presence(exo::account::Presence::Focused);
     assert!(
@@ -1459,7 +1461,7 @@ fn a_draft_saved_without_its_files_goes_to_gmail_once_they_can_be_had() {
     };
     assert!(drafts(&gmail).is_empty(), "not written without its file");
 
-    // Back online: the next round (5 s after a failed one) saves it again, with the file.
+    // Back online, the next round (5 s after a failed one) saves the draft again, with the file.
     lone.fault(None);
     assert!(
         wait_for(30, || !unwritten() && account.is_idle()),
@@ -1504,7 +1506,7 @@ fn a_reply_sent_offline_waits_for_the_network_where_it_shows() {
     assert!(app.mail().status_bar().is_some(), "offline");
     app.press(Key::Enter, COMMAND);
     app.settle();
-    // `Send: when online` in its thread and on its row, which draw from these.
+    // `Send: when online` shows in the thread and on the row, which draw from these flags.
     let sending = app
         .mail()
         .thread()
@@ -1520,8 +1522,8 @@ fn a_reply_sent_offline_waits_for_the_network_where_it_shows() {
     assert_eq!(row, Some(true), "its row knows a send waits");
 }
 
-/// In Gmail web, a reply to the first conversation with a file, synced and the conversation
-/// opened: its thread and the draft's message.
+/// Writes a reply with a file to the first conversation in Gmail web, then syncs and opens the
+/// conversation. Returns the thread and the draft's message.
 fn open_gmail_web_draft_with_a_file(app: &mut Fixture) -> (String, String) {
     let thread = app.mail().inbox().threads()[0].id.clone();
     let gmail = app.gmail();
@@ -1568,7 +1570,7 @@ fn open_gmail_web_draft_with_a_file(app: &mut Fixture) -> (String, String) {
 fn a_draft_written_in_gmail_keeps_its_files_once_exo_saves_it() {
     let mut app = start("compose-adopt-files");
     open_gmail_web_draft_with_a_file(&mut app);
-    // R takes up the draft on the message it answers; typing makes Exo save it to Gmail.
+    // R takes up the draft on the message it answers, and typing makes Exo save it to Gmail.
     app.key(Key::R);
     app.type_text(" Thanks!");
     app.wait(1.5);
@@ -1593,7 +1595,7 @@ fn a_gmail_draft_taken_over_offline_stays_one_draft_with_its_files() {
     app.key(Key::R);
     app.type_text(" Thanks!");
     app.wait(1.5);
-    // The thread closed and opened again before Gmail has the edit.
+    // The thread is closed and opened again before Gmail has the edit.
     app.key(Key::Escape);
     app.key(Key::Escape);
     assert!(app.mail().thread().is_none(), "back to the list");
@@ -1659,10 +1661,10 @@ fn a_gmail_draft_saved_while_its_files_cant_be_had_keeps_them() {
     );
 }
 
-/// The Gmail quota units `act` costs, counted from when the app is quiet and Gmail has every
-/// draft it holds (what came before, such as a save's refresh, isn't counted) to when it's that
-/// way again (a save that waits out its pace included: 30 s with files). Sync's `history.list`
-/// isn't counted ([`Fixture::units`]).
+/// The Gmail quota units `act` costs. Counting starts when the app is quiet and Gmail has every
+/// draft the app holds, so what came before (such as a save's refresh) isn't counted. It ends
+/// when that's true again, including a save that waits out its pace (30 s with files). Sync's
+/// `history.list` isn't counted ([`Fixture::units`]).
 fn cost(app: &mut Fixture, act: impl FnOnce(&mut Fixture)) -> u64 {
     let synced = |app: &mut Fixture| {
         let account = app.mail().account();
@@ -1771,7 +1773,7 @@ fn a_reply_opened_and_left_without_edits_is_not_written_again() {
     assert!(draft_raw(&app, "Re: Design crit moved to 3pm").contains("Sounds good"));
 }
 
-/// The message Gmail's draft with `subject` holds.
+/// The message that Gmail's draft with `subject` holds.
 fn draft_message(app: &Fixture, subject: &str) -> Option<String> {
     let gmail = app.gmail();
     app.block_on(async {
@@ -1796,8 +1798,8 @@ fn draft_message(app: &Fixture, subject: &str) -> Option<String> {
     })
 }
 
-/// Opens the draft-only conversation `subject` from the list: its draft in the new-message pane,
-/// To focused.
+/// Opens the draft-only conversation `subject` from the list, which puts its draft in the
+/// new-message pane with To focused.
 fn open_draft_row(app: &mut Fixture, subject: &str) {
     for key in [Key::K, Key::J] {
         for _ in 0..30 {

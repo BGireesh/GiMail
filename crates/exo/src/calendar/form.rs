@@ -2,7 +2,7 @@
 //! About and (when creating) the calendar, with Save and Cancel below. The week view shows it as
 //! a 464px modal beside the event; the right pane shows it over a day of the calendar.
 //!
-//! The form holds what it edits as [`Values`]; editing an event compares them with the event's
+//! The form holds what it edits as [`Values`]. Editing an event compares them with the event's
 //! own to know what changed.
 
 use std::collections::BTreeMap;
@@ -46,9 +46,9 @@ const VALUE_LEFT: f32 = PADDING_X + ICON + 12.0;
 /// The fields' text: 12px/16px, the input nudged `top: 1px`, an underline 2px under it.
 const SMALL: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 12.0, 16.0);
 const UNDERLINE: f32 = 2.0;
-/// A guest's line under the input: 24px, 4px apart (`gap: 4px`), the first 7px under the input,
-/// 322px at most; a 20px avatar 2px down, then 8px on, inside the content's 1px border and 7px of
-/// padding, the swatch and 8px after it the name.
+/// A guest's line under the input is 24px tall and 322px at most, 4px from the next (`gap: 4px`),
+/// with the first 7px under the input. It holds a 20px avatar 2px down, then, 8px on and inside the
+/// content's 1px border and 7px of padding, the swatch, and the name 8px after the swatch.
 const GUEST: f32 = 24.0;
 const GUEST_GAP: f32 = 4.0;
 const GUESTS_TOP: f32 = 7.0;
@@ -58,19 +58,20 @@ const AVATAR: f32 = 20.0;
 /// keyboard is on the guest (`#aeb1dd` in both).
 const GUEST_HOVER_CARBON: Color32 = Color32::from_rgb(0x63, 0x69, 0x73);
 const GUEST_FOCUS: Color32 = Color32::from_rgb(0xae, 0xb1, 0xdd);
-/// The optional toggle and `Remove`: 24px boxes at the content's right, the cross's box over its
-/// padding and the toggle's 4px under the cross's (`margin: -4px; margin-right: -8px`); the
-/// toggle's 16px icon and the cross's 8px, both `#a3a3a3`.
+/// The optional toggle and `Remove` are 24px boxes at the content's right. The cross's box sits
+/// over the content's padding, and the toggle's sits 4px under the cross's
+/// (`margin: -4px; margin-right: -8px`). The toggle's icon is 16px and the cross's 8px, both
+/// `#a3a3a3`.
 const GUEST_BUTTON: f32 = 24.0;
 const GUEST_ICON: Color32 = Color32::from_rgb(0xa3, 0xa3, 0xa3);
 /// A guest's swatch: 8px, 2px corners.
 const SWATCH: f32 = 8.0;
 /// The right pane lists four guests while the field isn't focused, then `+ {n} more`.
 const PANE_GUESTS: usize = 4;
-/// About (the compose editor): 12px/16px lines of the email font (`Family::SansEmail`), the font's
-/// content area 15px from the line's top (the placeholder, painted here, is 1px lower, at `.35`);
-/// the text stops short of the scrollbar's 11px gutter (`scrollbar-gutter: stable`) over
-/// `padding-bottom: 2px` and a 2px border; hovered, the box 6px wider each side takes `#f5f7fa` /
+/// About (the compose editor) has 12px/16px lines of the email font (`Family::SansEmail`), with
+/// the font's content area 15px from the line's top. The placeholder, painted here, is 1px lower,
+/// at `.35`. The text stops short of the scrollbar's 11px gutter (`scrollbar-gutter: stable`), over
+/// `padding-bottom: 2px` and a 2px border. Hovered, a box 6px wider each side takes `#f5f7fa` /
 /// `#363a40`.
 const ABOUT_TEXT: exo_editor::BodyText = exo_editor::BodyText {
     style: TextStyle::new(Font::new(Family::SansEmail, 400), 12.0, 16.0),
@@ -80,19 +81,20 @@ const ABOUT_TEXT: exo_editor::BodyText = exo_editor::BodyText {
 };
 const ABOUT_GUTTER: f32 = 11.0;
 const ABOUT_HOVER_OUTSET: f32 = 6.0;
-/// Who's suggestions: 12px under the input's box, in the week's modal from 14px left of it and at
-/// most 420px wide with 12px of padding, in the right pane across the form less 10px each side;
-/// 52px items (name over address, 12px/16px nudged `top: 1px`, between 10px paddings) from 3px down
-/// (and nudged `top: 1px`), 6px under the last.
+/// Who's suggestions sit 12px under the input's box. In the week's modal they start 14px left of
+/// the input and are at most 420px wide with 12px of padding. In the right pane they span the form
+/// less 10px each side. The 52px items (name over address, 12px/16px nudged `top: 1px`, between
+/// 10px paddings) start 3px down (and are nudged `top: 1px`), and the list ends 6px under the last.
 const SUGGESTION: f32 = 10.0 + 16.0 + 16.0 + 10.0;
 const SUGGESTIONS_BELOW: f32 = 20.0 + 12.0;
 const SUGGESTIONS_TOP: f32 = 3.0 + 1.0;
 const SUGGESTIONS_BOTTOM: f32 = 6.0;
-/// The calendar's list: 276px wide, at most 40vh tall before it scrolls, 12px under the input's
-/// box; in the right pane from 10px inside the form, in the week's modal tethered under the input.
-/// Its rows are 12px/16px between 10px paddings (two lines and more for a name that wraps,
-/// `overflow-wrap: anywhere`), laid out from 3px down to 6px under the last and nudged `top: 1px`;
-/// a calendar's 9px swatch (2px corners, 2px down) at the row's right, 16px clear of the name.
+/// The calendar's list is 276px wide, at most 40vh tall before it scrolls, and 12px under the
+/// input's box. In the right pane it starts 10px inside the form, and in the week's modal it's
+/// tethered under the input. Its rows are 12px/16px between 10px paddings (two lines and more for a
+/// name that wraps, `overflow-wrap: anywhere`), laid out from 3px down to 6px under the last and
+/// nudged `top: 1px`. A calendar's 9px swatch (2px corners, 2px down) sits at the row's right, 16px
+/// clear of the name.
 const CALENDAR_LIST_WIDTH: f32 = 276.0;
 const CALENDAR_LIST_MAX_HEIGHT: f32 = 0.4;
 const CALENDAR_ROW_PADDING: f32 = 10.0;
@@ -101,7 +103,7 @@ const CALENDAR_SWATCH_GAP: f32 = 16.0;
 /// The footer: a 1px border (the modal's), `padding: 15px 36px 16px` around Classic's 32px
 /// dialog-style buttons 12px apart (`top: 2.5px`).
 pub const FOOTER_HEIGHT: f32 = 1.0 + 15.0 + 32.0 + 16.0;
-/// The right pane's, without the border, over the app's footer.
+/// The right pane's footer, without the border, over the app's footer.
 pub const PANE_FOOTER_HEIGHT: f32 = FOOTER_HEIGHT - 1.0;
 const FOOTER_X: f32 = 36.0;
 const BUTTON_NUDGE: f32 = 2.5;
@@ -151,9 +153,9 @@ impl Field {
         }
     }
 
-    /// How far under the row's top its icon starts: its label's nudge (Who's and the meeting
-    /// link's `top: 1px`, About's `top: 3px`, the calendar's `top: 2px`), the icon at the label's
-    /// top, Meet's 3px lower in its own label.
+    /// How far under the row's top its icon starts. That's its label's nudge (Who's and the
+    /// meeting link's `top: 1px`, About's `top: 3px`, the calendar's `top: 2px`), with the icon at
+    /// the label's top, except Meet's, which is 3px lower in its own label.
     fn icon_top(self) -> f32 {
         match self {
             Field::Guests => 1.0,
@@ -195,7 +197,7 @@ pub struct Guest {
     pub optional: bool,
     /// Their answer, as Calendar has it.
     pub response: Option<String>,
-    /// The guest is the event's calendar (me): not shown, kept when saving.
+    /// The guest is the event's calendar (me), which isn't shown but is kept when saving.
     pub me: bool,
     pub organizer: bool,
 }
@@ -223,7 +225,7 @@ pub struct Values {
     pub meeting: Meeting,
     /// The calendar it goes on.
     pub calendar: String,
-    /// A new event's rule: none doesn't repeat.
+    /// A new event's rule. With none, it doesn't repeat.
     pub repeat: Option<exo_store::Recurrence>,
 }
 
@@ -254,7 +256,7 @@ pub struct EventForm {
     pub week: bool,
     guest_input: String,
     guest_error: bool,
-    /// The guests' calendars' colours, and the column a hover expanded.
+    /// The colours of the guests' calendars, and the column a hover expanded.
     pub guest_colors: super::guests::Colors,
     /// The highlighted suggestion, or (`chip`) guest.
     suggestion: usize,
@@ -268,7 +270,7 @@ pub struct EventForm {
     /// The field that had the keyboard last frame, and the last one that had it.
     focused: Option<Field>,
     last_focused: Field,
-    /// The right pane's form has given the keyboard to the mail (a click there, ⌘D): its keys
+    /// The right pane's form has given the keyboard to the mail (a click there, ⌘D). Its keys
     /// no longer work, and it says how to come back ([`paint_away_hint`]).
     pub away: bool,
     /// When's list has come over the day under the right pane's form.
@@ -289,11 +291,12 @@ pub struct EventForm {
     pub about_menu: Option<exo_editor::ContextMenu>,
     /// A word About's autocorrect pill learned, for the app's hint.
     pub about_learned: Option<String>,
-    /// Where's highlighted place, and whether Escape closed its list (until the text changes).
+    /// The place highlighted under Where, and whether Escape closed its list (until the text
+    /// changes).
     place: Option<usize>,
     places_closed: bool,
-    /// What's typed in the calendar's field, which starts empty each time it takes the keyboard;
-    /// its list's highlighted row and scroll.
+    /// What's typed in the calendar's field, which starts empty each time it takes the keyboard,
+    /// and its list's highlighted row and scroll.
     calendar_input: String,
     calendar_selected: usize,
     calendar_scroll: f32,
@@ -305,9 +308,9 @@ pub struct EventForm {
 }
 
 /// The hint while the right pane's form has given the keyboard to the mail:
-/// `To instantly move back here, hit` `⌘` `D` 24px under the form (`margin-top: 24px`), its
-/// 24px line 2px in from the fields' left and 1px down, at `.35`, the keys in blue caps, fading
-/// in over 150ms. Returns the room it takes above the day.
+/// `To instantly move back here, hit` `⌘` `D`, 24px under the form (`margin-top: 24px`). Its
+/// 24px line sits 2px in from the fields' left and 1px down, at `.35`, with the keys in blue caps,
+/// and it fades in over 150ms. Returns the room it takes above the day.
 pub fn paint_away_hint(ui: &Ui, form_bottom_left: Pos2, away: bool) -> f32 {
     const HINT: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 12.0, 24.0);
     const MARGIN_TOP: f32 = 24.0;
@@ -337,8 +340,8 @@ pub fn paint_away_hint(ui: &Ui, form_bottom_left: Pos2, away: bool) -> f32 {
     MARGIN_TOP + HINT.line_height
 }
 
-/// A click on a guest's tooltip: its text composes to them (popped out with ⇧), its icon copies
-/// their address.
+/// A click on a guest's tooltip. Its text composes to them (popped out with ⇧), and its icon
+/// copies their address.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ChipTip {
     Compose(Address, bool),
@@ -408,7 +411,7 @@ impl Suggestion {
 }
 
 impl EventForm {
-    /// A new event's form, the title focused.
+    /// A new event's form, with the title focused.
     pub fn create(values: Values, week: bool) -> Self {
         Self::new(
             Mode::Create,
@@ -420,7 +423,8 @@ impl EventForm {
         )
     }
 
-    /// `event`'s form, `focus` focused: When's start time, as the details' time opens it.
+    /// `event`'s form, with `focus` focused (for When, its start time, as the details' time opens
+    /// it).
     pub fn edit(values: Values, edited: Edited, week: bool, focus: Field) -> Self {
         let mut form = Self::new(
             Mode::Edit,
@@ -451,7 +455,7 @@ impl EventForm {
             exo_editor::Editor::from_html(&values.about)
         };
         about.set_body_text(ABOUT_TEXT);
-        // About doesn't detect dates: `see you tomorrow` gets no `sh-date`.
+        // About doesn't detect dates, so `see you tomorrow` isn't marked as one.
         about.set_settings(exo_editor::Settings {
             skip_dates: true,
             ..exo_editor::Settings::default()
@@ -534,11 +538,9 @@ impl EventForm {
         }
     }
 
-    /// Moves the keyboard to `field` (the palette's `Edit …` rows, a row of the details); an
-    /// edited When to its start date, its first input.
-    /// Whether the day under the right pane's form makes room for When's list: once the list has
-    /// come within 10px of the day's top (`day_top`) while something's typed, as long as When has
-    /// the keyboard and isn't emptied.
+    /// Whether the day under the right pane's form makes room for When's list. It does once the
+    /// list has come within 10px of the day's top (`day_top`) while something's typed, as long as
+    /// When has the keyboard and isn't emptied.
     pub fn when_covers(&mut self, day_top: f32) -> bool {
         let typing = self.focused == Some(Field::When) && !self.when.text.is_empty();
         if !typing {
@@ -552,7 +554,7 @@ impl EventForm {
         self.when_covered
     }
 
-    /// Gives the keyboard to the mail: the field that had it lets go.
+    /// Gives the keyboard to the mail, so the field that had it lets go.
     pub fn give_up_keyboard(&mut self, ctx: &egui::Context) {
         self.away = true;
         if self.focused.is_some() {
@@ -564,12 +566,14 @@ impl EventForm {
         }
     }
 
-    /// Takes the keyboard back: to the field that had it last.
+    /// Takes the keyboard back to the field that had it last.
     pub fn take_keyboard(&mut self) {
         self.focus(self.last_focused);
     }
 
-    /// Puts the keyboard on `field`, the form's again if it had given it up.
+    /// Puts the keyboard on `field` (the palette's `Edit …` rows, a row of the details), making
+    /// it the form's again if the form had given it up. An edited event's When takes it on its
+    /// start date, its first input.
     pub fn focus(&mut self, field: Field) {
         self.away = false;
         self.focus = Some(field);
@@ -596,8 +600,8 @@ impl EventForm {
             .then_some(text)
     }
 
-    /// Escape: closes the dropdown or the suggestions; in When and the calendar's field, clears
-    /// the text.
+    /// Escape closes the dropdown or the suggestions, and in When and the calendar's field it
+    /// clears the text.
     pub fn close_dropdown(&mut self) {
         if self.typing_when() && !self.when.text.is_empty() {
             self.when.clear();
@@ -622,8 +626,8 @@ impl EventForm {
         self.mode == Mode::Create && self.focused == Some(Field::When)
     }
 
-    /// When's text changed: in the right pane the draft's time goes until a suggestion is taken;
-    /// the week view keeps it.
+    /// When's text changed. In the right pane the draft's time goes until a suggestion is taken,
+    /// while the week view keeps it.
     fn when_edited(&mut self) {
         if !self.week {
             self.values.when = None;
@@ -650,8 +654,8 @@ impl EventForm {
     }
 
     /// The draft's times as the calendar shows them, and the time its block shows when it was
-    /// typed in another zone: in the right pane, the highlighted suggestion while When lists
-    /// some.
+    /// typed in another zone. In the right pane, these come from the highlighted suggestion while
+    /// When lists some.
     pub fn draft_when(&self, now: &Zoned) -> Option<(Zoned, Zoned, Option<String>)> {
         if let Some(choice) = self.when_preview() {
             return Some((
@@ -716,8 +720,8 @@ impl EventForm {
         )
     }
 
-    /// Takes what's typed in Who as guests, if it's valid; marks the field otherwise. Returns
-    /// whether it was.
+    /// Takes what's typed in Who as guests if it's valid, and marks the field otherwise. Returns
+    /// whether it was valid.
     pub fn commit_guests(&mut self) -> bool {
         if self.guest_input.trim().is_empty() {
             return true;
@@ -825,8 +829,8 @@ impl EventForm {
         };
         let mut focused = None;
 
-        // Header: the title, after the colour square's room (the square itself stays empty: no
-        // way of opening the form gives it a colour).
+        // Header: the title, after the colour square's room. The square itself stays empty, since
+        // no way of opening the form gives it a colour.
         let top = rect.top()
             + if pane {
                 HEADER_TOP_PANE
@@ -865,8 +869,8 @@ impl EventForm {
         self.scroll = self.scroll.clamp(0.0, (content - body.height()).max(0.0));
         let mut y = body.top() + BODY_TOP - self.scroll;
         let mut overlay = None;
-        // A focused input's underline hangs 1px under its row (the box starts 1px down), which
-        // the right pane's last row ends the form on.
+        // A focused input's underline hangs 1px under its row (the box starts 1px down). The right
+        // pane's last row ends the form on that underline.
         let clip = ui
             .clip_rect()
             .intersect(body.with_max_y(body.bottom() + 1.0));
@@ -956,8 +960,8 @@ impl EventForm {
         }
     }
 
-    /// Paints Save and Cancel in `footer`, its top border unless in the right pane; Save glows
-    /// while it has the keyboard (`:focus`). Returns what was clicked.
+    /// Paints Save and Cancel in `footer`, with its top border unless in the right pane. Save
+    /// glows while it has the keyboard (`:focus`). Returns what was clicked.
     pub fn footer(&mut self, ui: &Ui, footer: Rect, pane: bool) -> Option<FormAction> {
         let ctx = ui.ctx().clone();
         let palette = exo_ui::palette(&ctx);
@@ -976,8 +980,8 @@ impl EventForm {
         for (label, action) in [("Save", FormAction::Save), ("Cancel", FormAction::Cancel)] {
             let save = action == FormAction::Save;
             let id = exo_ui::id(ui.ctx(), ("calendar-form-button", label));
-            // Save and Cancel: Classic's uppercase dialog buttons; a disabled Save is unfilled in
-            // Carbon too (`background: none`).
+            // Save and Cancel are Classic's uppercase dialog buttons. A disabled Save is unfilled
+            // in Carbon too (`background: none`).
             let button = exo_ui::DialogAction::new(
                 label,
                 if save {
@@ -996,7 +1000,8 @@ impl EventForm {
             );
             x = rect.right() + BUTTON_GAP;
             let response = button.show(ui, id, rect);
-            // Once the pointer is up: a click elsewhere takes the keyboard from what has it.
+            // Save takes the keyboard only once the pointer is up, because a click elsewhere takes
+            // the keyboard from what has it.
             if save && self.focus_save && !ui.input(|input| input.pointer.any_down()) {
                 self.focus_save = false;
                 response.request_focus();
@@ -1007,7 +1012,7 @@ impl EventForm {
                 (FormAction::Cancel, Mode::Create) => ("Cancel Event", &["⌘", "shift", ","]),
                 (FormAction::Cancel, Mode::Edit) => ("Discard changes", &["⌘", "shift", ","]),
             };
-            // Shown while the button has the keyboard; 16px over the button.
+            // Shown 16px over the button while it has the keyboard.
             KeyTooltip { text: tip, keys }.show_at_focused(
                 ui,
                 &response,
@@ -1082,8 +1087,8 @@ impl EventForm {
                     .map(Suggestion::Contact)
                     .collect()
             }
-            // An empty field of a new event's first suggests the conversation's people, up to
-            // 200.
+            // An empty field for a new event's first guest suggests the conversation's people, up
+            // to 200.
             _ if self.guest_input.is_empty()
                 && self.values.guests.is_empty()
                 && self.mode == Mode::Create
@@ -1239,8 +1244,8 @@ impl EventForm {
                 pos2(content.right() - GUEST_BUTTON, content.top()),
                 Vec2::splat(GUEST_BUTTON),
             );
-            // `(optional)`, else `(busy)` / `(OOO)`, at `.35` 4px after the name, which gives way
-            // to it (`flex-shrink: 0`) and is cut before the toggle.
+            // `(optional)`, else `(busy)` / `(OOO)`, at `.35` 4px after the name. The name gives
+            // way to the note (`flex-shrink: 0`) and is cut before the toggle.
             let note = if guest.optional {
                 Some("(optional)")
             } else {
@@ -1365,8 +1370,8 @@ impl EventForm {
         response.has_focus()
     }
 
-    /// When: a new event's typed time with its suggestions, listed across the `form`; editing an
-    /// event, its dates, times and zone ([`WhenEdit`]).
+    /// When: for a new event, the typed time with its suggestions listed across the `form`, and
+    /// for an edit, the event's dates, times and zone ([`WhenEdit`]).
     fn when_row(
         &mut self,
         ui: &mut Ui,
@@ -1423,7 +1428,7 @@ impl EventForm {
                 self.commit_when(self.when.selected, shown.now);
             }
         } else if had_focus && enter {
-            // Nothing to take: the field keeps the keyboard, which the input gave up.
+            // With nothing to take, the field keeps the keyboard, which the input gave up.
             self.focus = Some(Field::When);
         }
         if let Some(line) =
@@ -1445,7 +1450,7 @@ impl EventForm {
         response.has_focus()
     }
 
-    /// An edited event's When, its changes taken.
+    /// An edited event's When, with its changes taken.
     fn edited_when(&mut self, ui: &mut Ui, value: Rect, shown: &Shown<'_>) -> bool {
         let Some((start, end)) = self.values.when.clone() else {
             return false;
@@ -1462,7 +1467,7 @@ impl EventForm {
             match change {
                 when_edit::Change::Times(start, end) => self.values.when = Some((start, end)),
                 when_edit::Change::AllDay => self.toggle_all_day(),
-                // A new zone: the same clock times in it.
+                // A new zone keeps the same clock times in it.
                 when_edit::Change::Zone(tz) => {
                     if let Some((start, end)) = &self.values.when
                         && let (Ok(start), Ok(end)) = (
@@ -1478,7 +1483,7 @@ impl EventForm {
         focused
     }
 
-    /// Makes the event all day, over the start's days, or takes it back to a time: half an hour
+    /// Makes the event all day, over the start's days, or takes it back to a time, half an hour
     /// from 9:00 on its start's day.
     pub fn toggle_all_day(&mut self) {
         let Some((start, end)) = self.values.when.clone() else {
@@ -1503,7 +1508,7 @@ impl EventForm {
     }
 
     /// Where: the input, and the places found for it while it has the keyboard. ↓ and ↑ move
-    /// through them, Enter takes the highlighted one, else moves on.
+    /// through them, and Enter takes the highlighted one or else moves on.
     #[allow(clippy::too_many_arguments)] // The row's place, what it shows and what it opens over the `form`.
     fn location_row(
         &mut self,
@@ -1574,7 +1579,7 @@ impl EventForm {
         response.has_focus()
     }
 
-    /// Takes `place` as Where, its list closed until the text changes.
+    /// Takes `place` as Where, with its list closed until the text changes.
     fn pick_place(&mut self, place: &Place) {
         self.values.location = place.location();
         self.place = None;
@@ -1684,8 +1689,8 @@ impl EventForm {
         response.has_focus()
     }
 
-    /// Repeat: the rule's name, the presets for the event's start when clicked, `Custom` opening
-    /// its dialog.
+    /// Repeat: the rule's name and, when clicked, the presets for the event's start, with `Custom`
+    /// opening its dialog.
     fn repeat_row(
         &mut self,
         ui: &mut Ui,
@@ -1706,7 +1711,7 @@ impl EventForm {
         if focus || response.clicked() {
             response.request_focus();
         }
-        // A placeholder while it doesn't repeat: `.35`.
+        // A placeholder at `.35` while it doesn't repeat.
         let ink = if self.values.repeat.is_none() {
             palette.ink(0.35, 0.35)
         } else {
@@ -1724,8 +1729,8 @@ impl EventForm {
                 Color32::from_rgb(0xae, 0xb1, 0xdd),
             );
         }
-        // Enter on the focused trigger also clicks it (egui's); it opens the list, and with the
-        // list open it's the list's.
+        // Enter on the focused trigger also clicks it (egui's). That opens the list, and with the
+        // list open, Enter is the list's.
         let enter = ui.input(|input| input.key_pressed(egui::Key::Enter));
         if (response.clicked() && !enter)
             || (response.has_focus() && enter && self.dropdown.is_none())
@@ -1805,7 +1810,7 @@ impl EventForm {
         }
     }
 
-    /// Escape in the Custom dialog: its open list, else the dialog.
+    /// Escape in the Custom dialog closes its open list, or else the dialog.
     pub fn escape_custom(&mut self) {
         if let Some(custom) = &mut self.custom
             && !custom.escape()
@@ -1817,8 +1822,8 @@ impl EventForm {
 
     /// The calendar it goes on: a field showing the calendar's name, which empties as it takes the
     /// keyboard and lists the writable calendars by account under it, filtered by what's typed.
-    /// ↑/↓ move through them round the ends, Enter or a click takes one and moves on to Save;
-    /// leaving empties it.
+    /// ↑/↓ move through them round the ends, and Enter or a click takes one and moves on to Save.
+    /// Leaving the field empties it.
     #[allow(clippy::too_many_arguments)] // The row's place, what it shows and what it opens over the `form`.
     fn calendar_row(
         &mut self,
@@ -1850,13 +1855,14 @@ impl EventForm {
                     let id = calendar.id.clone();
                     self.pick_calendar(id);
                 } else {
-                    // Nothing to take: the field keeps the keyboard (egui's Enter lets it go).
+                    // With nothing to take, the field keeps the keyboard (egui's Enter lets it
+                    // go).
                     self.focus = Some(Field::Calendar);
                 }
             }
         }
-        // Without the keyboard it shows the calendar's name; with it (or taking it back), what's
-        // typed.
+        // Without the keyboard it shows the calendar's name, and with it (or taking it back)
+        // what's typed.
         let typing = had_focus || focus;
         let mut text = if typing {
             std::mem::take(&mut self.calendar_input)
@@ -1883,7 +1889,7 @@ impl EventForm {
             self.calendar_input = text;
         }
         if response.has_focus() && !had_focus {
-            // Taking the keyboard: from the top, the first calendar highlighted.
+            // Taking the keyboard starts from the top, with the first calendar highlighted.
             self.calendar_selected = 0;
             self.calendar_scroll = 0.0;
         } else if had_focus && !response.has_focus() && self.focus != Some(Field::Calendar) {
@@ -1899,15 +1905,15 @@ impl EventForm {
         response.has_focus()
     }
 
-    /// Takes calendar `id`: the field empties and Save takes the keyboard.
+    /// Takes calendar `id`. The field empties and Save takes the keyboard.
     fn pick_calendar(&mut self, id: String) {
         self.values.calendar = id;
         self.calendar_input.clear();
         self.focus_save = true;
     }
 
-    /// Scrolls the calendar list to show its highlighted row: the top for the first row, else as
-    /// little as it takes.
+    /// Scrolls the calendar list to show its highlighted row, to the top for the first row and
+    /// otherwise as little as it takes.
     fn calendar_keep_in_view(&mut self, rows: &[CalendarRow<'_>], ctx: &egui::Context) {
         let (top, bottom) = calendar_row_span(ctx, rows, self.calendar_selected);
         let (_, viewport) = calendar_list_heights(ctx, rows);
@@ -1920,7 +1926,8 @@ impl EventForm {
         }
     }
 
-    /// About: the compose editor in `rect`, its border focused, the box hovered while it isn't.
+    /// About: the compose editor in `rect`, with its border while focused and its hovered box
+    /// while not.
     /// Returns whether it has the keyboard.
     fn about_row(&mut self, ui: &mut Ui, rect: Rect, focus: bool) -> bool {
         let palette = exo_ui::palette(ui.ctx());
@@ -1997,8 +2004,8 @@ impl EventForm {
         self.values.about = about_html(&self.about);
     }
 
-    /// About has the keyboard: its formatting keys apply, and Escape is the editor's when it
-    /// has something open.
+    /// About has the keyboard, so its formatting keys apply, and Escape is the editor's when the
+    /// editor has something open.
     pub fn about_focused(&self) -> bool {
         self.focused == Some(Field::About)
     }
@@ -2055,7 +2062,7 @@ impl EventForm {
                     12.0
                 };
                 let (background, selected) = suggestion_fills(palette, false);
-                // The text `.5`, what matches `.9`.
+                // The text at `.5`, and what matches at `.9`.
                 let inks = (palette.ink(0.9, 0.9), palette.ink(0.5, 0.5));
                 let query = self.guest_input.trim().to_lowercase();
                 egui::Area::new(exo_ui::id(&ctx, "calendar-form-suggestions"))
@@ -2149,8 +2156,8 @@ impl EventForm {
                 form,
                 pane,
             } => {
-                // Where's list: in the week's modal 4px under the input's box from its left,
-                // 420px wide; in the right pane as Who's.
+                // In the week's modal, Where's list is 420px wide and 4px under the input's box,
+                // from its left. In the right pane it's placed as Who's.
                 let (left, right, top) = if pane {
                     (
                         form.left() + 10.0,
@@ -2171,7 +2178,7 @@ impl EventForm {
                 );
                 let padding = 2.0 * exo_ui::rem(ctx.content_rect().width(), false) - 10.0;
                 let (background, selected) = suggestion_fills(palette, !pane);
-                // The name `.35`, what matches `.9`; the address `.5`.
+                // The name at `.35`, what matches at `.9`, and the address at `.5`.
                 let (dim, matched, address) = (
                     palette.ink(0.35, 0.35),
                     palette.ink(0.9, 0.9),
@@ -2322,8 +2329,8 @@ impl EventForm {
         let lines = calendar_row_lines(ctx, &rows);
         let (content, height) = calendar_list_heights(ctx, &rows);
         let window = ctx.content_rect();
-        // 12px under the input's 20px box; in the modal it turns over to 12px above the input
-        // when it would leave the window, and stays inside the window.
+        // 12px under the input's 20px box. In the modal it turns over to 12px above the input
+        // when it would leave the window, and it stays inside the window.
         let mut top = below.top() + SUGGESTIONS_BELOW;
         let left = if pane {
             form.left() + 10.0
@@ -2366,7 +2373,8 @@ impl EventForm {
                 );
                 area.painter()
                     .rect_filled(snapped, CornerRadius::same(4), background);
-                // Not `hovered()`, which a press elsewhere's widget clears on the frame it takes one.
+                // Not `hovered()`, which a widget pressed elsewhere clears on the frame it takes
+                // the press.
                 let _ = area.allocate_rect(list, Sense::hover());
                 let over = area.rect_contains_pointer(list);
                 if over {
@@ -2483,10 +2491,10 @@ enum CalendarRow<'a> {
     Calendar(&'a CalendarOption),
 }
 
-/// The calendar's list for what's `typed`: with nothing typed, every calendar as `calendars`
-/// lists them (the mail account's first); else those whose name matches (`command-score` above
-/// 0), best first. Each account's calendars follow its address, in the order the accounts first
-/// come, once there's more than one account.
+/// The calendar's list for what's `typed`. With nothing typed, it's every calendar as `calendars`
+/// lists them (the mail account's first), and otherwise those whose name matches (`command-score`
+/// above 0), best first. Each account's calendars follow its address, in the order the accounts
+/// first come, once there's more than one account.
 fn calendar_rows<'a>(calendars: &'a [CalendarOption], typed: &str) -> Vec<CalendarRow<'a>> {
     let mut matching: Vec<(f64, &CalendarOption)> = calendars
         .iter()
@@ -2568,7 +2576,7 @@ fn calendar_label(calendars: &[CalendarOption], id: &str) -> String {
     }
 }
 
-/// The list's rows' side padding, `calc(2rem - 10px)`.
+/// The side padding of the list's rows, `calc(2rem - 10px)`.
 fn calendar_list_padding(ctx: &egui::Context) -> f32 {
     2.0 * exo_ui::rem(ctx.content_rect().width(), false) - 10.0
 }
@@ -2613,8 +2621,9 @@ fn calendar_list_heights(ctx: &egui::Context, rows: &[CalendarRow<'_>]) -> (f32,
     )
 }
 
-/// The suggestion lists' fills and their highlighted row's: Classic's literals. One `tethered`
-/// under its input in the week's modal is outside the form, on its own Carbon `#2f3237`.
+/// The suggestion lists' fills and their highlighted row's, which are Classic's literals. A list
+/// `tethered` under its input in the week's modal is outside the form, on its own Carbon
+/// `#2f3237`.
 fn suggestion_fills(palette: &exo_ui::Palette, tethered: bool) -> (Color32, Color32) {
     match palette.theme {
         exo_ui::Theme::Snow => (Color32::WHITE, Color32::from_rgb(0xf2, 0xf4, 0xfa)),
@@ -2641,7 +2650,8 @@ fn paint_occurrences(
     let lower = text.to_lowercase();
     let mut x = 0.0;
     let mut from = 0;
-    // Lower-casing keeps these strings' lengths for the letters places have; else no matches.
+    // Lower-casing keeps these strings' lengths for the letters places have. When it doesn't,
+    // nothing matches.
     let found = if query.is_empty() || lower.len() != text.len() {
         Vec::new()
     } else {
@@ -2868,7 +2878,8 @@ mod tests {
         );
     }
 
-    /// The writable calendars of `fixtures/calendar-accounts.json`, as the form lists them.
+    /// The writable calendars of the mail account and a second calendar account, as the form
+    /// lists them.
     fn calendars() -> Vec<CalendarOption> {
         let option = |account: &str, id: &str, name: &str| CalendarOption {
             account: account.into(),
@@ -2922,8 +2933,8 @@ mod tests {
             listed(&calendar_rows(&calendars, "team")),
             ["Brightmoor Team"]
         );
-        // Best first, each account's calendars together under it, the accounts in the order
-        // their best come.
+        // Best first, with each account's calendars together under it and the accounts in the
+        // order their best calendars come.
         assert_eq!(
             listed(&calendar_rows(&calendars, "e")),
             [

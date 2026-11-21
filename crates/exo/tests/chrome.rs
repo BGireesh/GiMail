@@ -19,8 +19,8 @@ fn header_icons_point_and_name_their_shortcut() {
         CursorIcon::PointingHand,
         "compose"
     );
-    // `Compose` `C` shows once the pointer has rested a 100ms poll, fading in over 200ms: its
-    // box 8px under the 32px button (y 67–99), centred on it.
+    // `Compose` `C` shows once the pointer has rested for a 100ms poll, fading in over 200ms. Its
+    // box sits 8px under the 32px button (y 67–99), centred on it.
     app.wait(0.5);
     let image = app.harness.render().expect("renders");
     let background = exo_ui::palette(&app.harness.ctx).tooltip_background_default;

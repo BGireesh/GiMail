@@ -70,7 +70,7 @@ const MEANINGFUL_WHEN_BLANK: &[&str] = &[
     "A", "TABLE", "THEAD", "TBODY", "TFOOT", "TH", "TD", "IFRAME", "SCRIPT", "AUDIO", "VIDEO",
 ];
 
-/// A node of the tree; `name` is upper-case, as the DOM has it.
+/// A node of the tree. `name` is upper-case, as the DOM has it.
 #[derive(Clone, Debug)]
 pub(super) enum Kind {
     Element {
@@ -236,7 +236,7 @@ impl Tree {
         })
     }
 
-    /// Takes `id` out of the tree, which it leaves with its subtree.
+    /// Takes `id` and its subtree out of the tree.
     pub(super) fn detach(&mut self, id: usize) {
         if let Some(parent) = self.nodes[id].parent.take() {
             self.nodes[parent].children.retain(|child| *child != id);
@@ -442,7 +442,7 @@ fn process(tree: &Tree, id: usize, code: bool) -> String {
     output
 }
 
-/// Node `id` as Markdown: its rule's, with the whitespace at its edges moved outside.
+/// Node `id` as Markdown, as its rule converts it, with the whitespace at its edges moved outside.
 fn replacement(tree: &Tree, id: usize, code: bool) -> String {
     let mut content = process(tree, id, code);
     let (leading, trailing) = flanking_whitespace(tree, id);
@@ -461,8 +461,8 @@ fn is_blank(tree: &Tree, id: usize) -> bool {
         && !tree.has_descendant(id, MEANINGFUL_WHEN_BLANK)
 }
 
-/// The whitespace at the edges of an inline element's text, which moves outside its Markdown; ASCII
-/// whitespace already next to a space is dropped.
+/// The whitespace at the edges of an inline element's text, which moves outside its Markdown.
+/// ASCII whitespace already next to a space is dropped.
 fn flanking_whitespace(tree: &Tree, id: usize) -> (String, String) {
     if tree.is_block(id) {
         return (String::new(), String::new());

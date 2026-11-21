@@ -1,4 +1,5 @@
-//! `/__mock/` endpoints for tests and UI work. Unauthenticated; not part of any Google API.
+//! `/__mock/` endpoints for tests and UI work. They're unauthenticated and not part of any Google
+//! API.
 
 use std::sync::Arc;
 
@@ -314,7 +315,7 @@ async fn clock(State(app): Shared) -> axum::Json<Value> {
     axum::Json(json!({ "now": world.clock.now().to_string() }))
 }
 
-/// Moves the clock; it keeps running from the new time.
+/// Moves the clock, which keeps running from the new time.
 async fn set_clock(
     State(app): Shared,
     axum::Json(request): axum::Json<SetClock>,
@@ -331,8 +332,8 @@ async fn expire_history(State(app): Shared) -> Response {
     StatusCode::NO_CONTENT.into_response()
 }
 
-/// Arms a fault: the next `times` requests whose path starts with `path` (and whose method
-/// matches, if given) fail with `status`; with `after`, once they've taken effect.
+/// Arms a fault. The next `times` requests whose path starts with `path` (and whose method
+/// matches, if given) fail with `status`. With `after`, they fail once they've taken effect.
 async fn add_fault(State(app): Shared, axum::Json(fault): axum::Json<Fault>) -> Response {
     app.lock().faults.push(fault);
     StatusCode::NO_CONTENT.into_response()

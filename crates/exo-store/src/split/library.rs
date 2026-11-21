@@ -1,6 +1,6 @@
-//! The Split Inbox Library: templates for splits, by category and role (`library.splits`). Exo
-//! ships the catalogue as `assets/split-library.json`, or reads another of its shape; this module
-//! gives the templates shape and their rules.
+//! The Split Inbox Library, which holds templates for splits by category and role
+//! (`library.splits`). Exo ships the catalogue as `assets/split-library.json`, or reads another
+//! file of the same shape. This module gives the templates their shape and their rules.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -24,7 +24,7 @@ pub struct SplitLibrary {
     pub role_list: Vec<String>,
 }
 
-/// A category or role: a named list of templates.
+/// A category or role, which is a named list of templates.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Section {
@@ -62,7 +62,7 @@ pub struct Template {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Properties {
-    /// Senders, `from:` each.
+    /// Senders, each matched with `from:`.
     pub senders: Option<Senders>,
     /// A query besides the senders, and what the settings say about it.
     pub query: Option<QueryProperty>,
@@ -108,9 +108,9 @@ pub struct AutoLabels {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(default)]
 pub struct Preview {
-    /// `#rrggbbaa`: the card's color, and its alpha for the backdrop.
+    /// The card's color as `#rrggbbaa`, with the alpha used for the backdrop.
     pub color: String,
-    /// Up to three rows; missing ones (or none) show skeleton bars.
+    /// Up to three rows. Missing rows (or no rows at all) show skeleton bars.
     pub threads: Option<Vec<Option<PreviewThread>>>,
 }
 
@@ -118,9 +118,9 @@ pub struct Preview {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct PreviewThread {
-    /// The sender; a skeleton bar without one.
+    /// The sender, or a skeleton bar without one.
     pub from: Option<String>,
-    /// The subject; a skeleton bar without one.
+    /// The subject, or a skeleton bar without one.
     pub subject: Option<String>,
     /// A label chip before the subject.
     pub label: Option<String>,
@@ -153,10 +153,10 @@ impl std::str::FromStr for SplitLibrary {
 }
 
 impl SplitLibrary {
-    /// The library as this account sees it: templates that need auto labels are left out, as
-    /// Exo has none (News, which works without them, stays), and so are Shared (a team feature)
-    /// and Reminders; sections keep the templates that are left. Team's senders are
-    /// `team_domains`, the account's.
+    /// The library as this account sees it. Templates that need auto labels are left out,
+    /// because Exo has none, except News, which works without them. Shared (a team feature) and
+    /// Reminders are left out too, and sections keep the templates that are left. Team's
+    /// senders become `team_domains`, the account's.
     #[must_use]
     pub fn for_account(mut self, team_domains: &[String]) -> Self {
         self.templates.retain(|_, template| {
@@ -240,7 +240,7 @@ impl SplitLibrary {
             .collect()
     }
 
-    /// The template that describes `split`: by kind, else by template.
+    /// The template that describes `split`, found by kind, or else by the split's template.
     pub fn template_for(&self, split: &SplitInbox) -> Option<&Template> {
         self.templates.values().find(|template| {
             (template.kind.is_some() && template.kind == split.kind)
@@ -259,7 +259,8 @@ impl SplitLibrary {
 }
 
 impl Template {
-    /// The split this template set up, among `splits`: the one of its kind, or from it.
+    /// The split among `splits` that this template set up: the one of its kind, or the one made
+    /// from it.
     pub fn split_in<'a>(
         &self,
         splits: impl IntoIterator<Item = &'a SplitInbox>,
@@ -272,8 +273,8 @@ impl Template {
             })
     }
 
-    /// The definition for `senders` (without auto labels): `from:` each sender, then the
-    /// template's query.
+    /// The definition for `senders`, without auto labels. It puts `from:` before each sender,
+    /// then adds the template's query.
     pub fn query_with(&self, senders: &[String]) -> String {
         let mut unique: Vec<&str> = Vec::new();
         for sender in senders {

@@ -1,6 +1,7 @@
-//! The solid checkbox: a 14px square in a 15px box. Checked, it's filled with the accent
-//! (`#aeb1dd`) with 2px corners and a tick in the background color (`#fff`, `#27292d` in Carbon);
-//! unchecked, a 13px outline of black (white in Carbon) at a quarter opacity with 1.5px corners.
+//! The solid checkbox, a 14px square in a 15px box. Checked, it's filled with the accent
+//! (`#aeb1dd`) with 2px corners and a tick in the background color (`#fff`, `#27292d` in Carbon).
+//! Unchecked, it's a 13px outline of black (white in Carbon) at a quarter opacity with 1.5px
+//! corners.
 
 use egui::{Color32, CornerRadius, Painter, Pos2, Rect, Shape, Stroke, StrokeKind, pos2, vec2};
 
@@ -22,8 +23,8 @@ pub fn paint_checkbox(painter: &Painter, at: Pos2, checked: bool, palette: &Pale
     );
 }
 
-/// [`paint_checkbox`] in a colour of its own, checked `fill` with a `tick` (a calendar's
-/// checkbox: its swatch and accepted text colour).
+/// [`paint_checkbox`] in a colour of its own, filled with `fill` and a `tick` when checked (a
+/// calendar's checkbox, in its swatch and accepted text colour).
 pub fn paint_tinted_checkbox(
     painter: &Painter,
     at: Pos2,
@@ -74,15 +75,15 @@ pub fn paint_checkbox_inks(
     }
 }
 
-/// The legacy checkbox (the Reminders dialog's): a 15×14 background SVG at `at`, a box with 2px
-/// corners in a 1px `#999` line open at its top right (the line stops at 9px across the top and 8px
-/// down the right), and checked, a `#6FBEEA` tick through the gap, 2px wide. Both themes draw it
-/// the same.
+/// The legacy checkbox (the Reminders dialog's), a 15×14 background SVG at `at`. It's a box with
+/// 2px corners in a 1px `#999` line open at its top right (the line stops at 9px across the top
+/// and 8px down the right), with a 2px-wide `#6FBEEA` tick through the gap when checked. Both
+/// themes draw it the same.
 pub fn paint_legacy_checkbox(painter: &Painter, at: Pos2, checked: bool) {
     const LINE: Color32 = Color32::from_rgb(0x99, 0x99, 0x99);
     const TICK: Color32 = Color32::from_rgb(0x6f, 0xbe, 0xea);
     let at = crate::pixel_snap(Rect::from_min_size(at, vec2(15.0, 14.0))).min;
-    // The line's middle, 0.5px in from the box's edges: its corners are quarter circles of
+    // The line's middle runs 0.5px in from the box's edges, so its corners are quarter circles of
     // 1.5px, drawn anticlockwise from `start`.
     let corner = |center: Pos2, start: f32| {
         (1..=4).map(move |step| {

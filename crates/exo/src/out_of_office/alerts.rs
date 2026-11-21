@@ -12,8 +12,8 @@ use jiff::tz::TimeZone;
 const BOLD: TextStyle = TextStyle::new(Font::new(Family::Sans, 700), 14.0, 20.0);
 /// A link in an alert's text: `#54acdc`.
 const LINK: Color32 = Color32::from_rgb(0x54, 0xac, 0xdc);
-/// The opt-out row: `margin: 20px 0 24px`, `rgba(0, 0, 0, .55)`; its label 8px after the 14px box,
-/// 1px up; the row 21px tall.
+/// The opt-out row has `margin: 20px 0 24px` and `rgba(0, 0, 0, .55)`, with its label 8px after
+/// the 14px box and 1px up. The row is 21px tall.
 const OPT_OUT_ABOVE: f32 = 20.0;
 const OPT_OUT_HEIGHT: f32 = 21.0;
 /// Its `margin-bottom: 24px` swallows the text's own 8px.
@@ -28,13 +28,13 @@ const OPT_OUT: &str = "Don't show this again";
 pub enum Alert {
     /// The dialog was asked for offline.
     Offline,
-    /// Gmail couldn't be read when the dialog opened: it closes the dialog too.
+    /// Gmail couldn't be read when the dialog opened. This alert closes the dialog too.
     SyncFailed,
     /// Gmail didn't take the save.
     SaveFailed,
     /// Closing a changed form.
     Discard,
-    /// A file was pasted in the message; `email` for the Gmail settings link.
+    /// A file was pasted in the message, with `email` for the Gmail settings link.
     PastedFile {
         /// The account's address.
         email: String,
@@ -81,7 +81,7 @@ impl Alert {
         }
     }
 
-    /// The text as plain text, `<p>`s on lines of their own. For tests.
+    /// The text as plain text, with `<p>`s on lines of their own. For tests.
     pub fn text(&self, tz: &TimeZone) -> String {
         self.paragraphs(tz)
             .iter()

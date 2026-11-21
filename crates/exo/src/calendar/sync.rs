@@ -3,14 +3,14 @@
 //! Google Calendar, sends the changes made to events, and publishes what it has for the UI to
 //! read each frame.
 //!
-//! Exo has no server for Calendar to push changes through, so it polls: the days on screen every
-//! minute while the window is focused, every five minutes otherwise, and the calendar lists every
-//! ten: the mail account's and those of the calendar accounts signed in.
+//! Exo has no server for Calendar to push changes through, so it polls. It reads the days on
+//! screen every minute while the window is focused and every five minutes otherwise, and the
+//! calendar lists every ten, for the mail account and the calendar accounts signed in.
 //!
 //! Changes go into the store's calendar queue ([`CalendarChange`]), which shows them on the
 //! calendar at once, keeps them across a quit and sends them once the connection allows. New
 //! events, edits and deletions are held ten seconds first, so Undo can take one back before anyone
-//! hears of it; Undo also takes back a change still waiting for the connection. After a panic the
+//! hears of it. Undo also takes back a change still waiting for the connection. After a panic the
 //! task runs again (`recovery`), and finds its queue as it was.
 
 use std::{
@@ -60,7 +60,7 @@ pub struct Window {
 #[derive(Clone, Debug, Default)]
 pub struct Data {
     /// The calendars of every calendar account read, each once with the account it's read
-    /// through, once listed (the store's copy, then Google's).
+    /// through, once they're listed (the store's copy, then Google's).
     pub calendars: Option<Vec<AccountCalendar>>,
     /// Calendar accounts just signed in whose list hasn't come yet.
     pub loading_accounts: BTreeSet<String>,
@@ -73,7 +73,7 @@ pub struct Data {
     /// A new window's events are being fetched.
     pub loading: bool,
     /// Free/busy as last asked for (my shown calendars, for Find Time): each calendar's busy
-    /// spans, or `None` when Calendar won't say; and the time it covers.
+    /// spans, or `None` when Calendar won't say, and the time it covers.
     pub busy: BTreeMap<String, Option<Vec<(Timestamp, Timestamp)>>>,
     pub busy_range: Option<(Timestamp, Timestamp)>,
     /// Series' `recurrence` lines, by `{calendar}/{series}`, as asked for this session.
@@ -87,7 +87,7 @@ pub struct Data {
 pub struct GuestCalendar {
     /// The time it was last asked for.
     pub range: (Timestamp, Timestamp),
-    /// Being read; what it had before stays meanwhile.
+    /// Being read. What it had before stays meanwhile.
     pub loading: bool,
     pub events: GuestEvents,
 }
@@ -101,7 +101,7 @@ pub enum GuestEvents {
     Shown(Vec<Event>),
     /// Calendar won't show them.
     Hidden,
-    /// Calendar couldn't be reached; asked again once the connection is back.
+    /// Calendar couldn't be reached. It's asked again once the connection is back.
     Failed,
 }
 
@@ -110,8 +110,8 @@ pub enum GuestEvents {
 pub enum Failure {
     /// An answer to an event.
     Respond,
-    /// An answer to the invite with this UID, from conversation `thread`; `gone` when the event
-    /// has been deleted or cancelled.
+    /// An answer to the invite with this UID, from conversation `thread`, with `gone` when the
+    /// event has been deleted or cancelled.
     RespondToInvite {
         uid: String,
         thread: Option<String>,
@@ -130,8 +130,8 @@ pub enum Failure {
 }
 
 impl Failure {
-    /// What `change`, queued under `token`, failing (`gone`: its event has been deleted or
-    /// cancelled) means for the UI.
+    /// What it means for the UI that `change`, queued under `token`, failed. `gone` says its event
+    /// has been deleted or cancelled.
     fn of(token: u64, change: CalendarChange, gone: bool) -> Self {
         match change {
             CalendarChange::Create { calendar, event } => Self::Create {
@@ -167,7 +167,8 @@ enum Request {
     SendNow(oneshot::Sender<()>),
     /// Read this thread's invite.
     Invite(String),
-    /// The calendar accounts read changed: list them again, `added` (just signed in) first.
+    /// The calendar accounts read changed, so list them again, with `added` (just signed in)
+    /// first.
     Accounts {
         added: Option<String>,
     },
@@ -199,7 +200,7 @@ struct Tokens {
     undone: HashSet<u64>,
 }
 
-/// What the UI and the task share: it outlives the task's runs.
+/// What the UI and the task share, which outlives the task's runs.
 struct Shared {
     data: watch::Sender<Arc<Data>>,
     busy: AtomicUsize,
@@ -230,7 +231,7 @@ pub struct CalendarSync {
 
 impl CalendarSync {
     /// Starts the task on the current runtime, and again after a panic as `restarts` says,
-    /// fetching invites with `loader`; `repaint` asks for a frame when data arrives.
+    /// fetching invites with `loader`. `repaint` asks for a frame when data arrives.
     pub(crate) fn start(
         store: Store,
         loader: Loader,
@@ -407,7 +408,7 @@ impl CalendarSync {
         self.post(Request::Invite(id.to_owned()));
     }
 
-    /// Reads calendar account `email`'s calendars with `tokens` from now on: it signed in
+    /// Reads calendar account `email`'s calendars with `tokens` from now on, because it signed in
     /// (`added`), which shows `Loading calendars` until its list comes, or the account opened.
     pub fn read_account(
         &self,
@@ -428,8 +429,8 @@ impl CalendarSync {
         });
     }
 
-    /// Stops reading calendar account `email`: Google signed it out, or it was `removed`, which
-    /// forgets its list and the events only it had.
+    /// Stops reading calendar account `email`, because Google signed it out or it was `removed`.
+    /// Removing it forgets its list and the events only it had.
     pub fn forget_account(&self, email: &str, removed: bool) {
         self.post(Request::Forget {
             email: email.to_owned(),
@@ -450,7 +451,8 @@ impl CalendarSync {
     }
 }
 
-/// A token for a change: random, so this session's never meet one an earlier session queued.
+/// A token for a change. It's random, so this session's tokens never meet one an earlier session
+/// queued.
 fn token() -> u64 {
     // SQLite's integers are signed.
     getrandom::u64().unwrap_or_else(|_| Timestamp::now().as_nanosecond().unsigned_abs() as u64) >> 1
@@ -472,7 +474,7 @@ struct Task {
     fetched: Vec<(String, Range<Date>, Instant)>,
     /// When the calendar list was last fetched.
     listed: Option<Instant>,
-    /// When the next queued change is due: its hold is over, or its backoff.
+    /// When the next queued change is due, once its hold or its backoff is over.
     retry_at: Option<Timestamp>,
 }
 
@@ -709,7 +711,7 @@ impl Task {
         }
     }
 
-    /// Finds thread `id`'s invite in the store and fetches its `.ics` off the task; the bytes
+    /// Finds thread `id`'s invite in the store and fetches its `.ics` off the task. The bytes
     /// come back as a request.
     async fn load_invite(&self, id: String) {
         let detail = match self
@@ -749,7 +751,7 @@ impl Task {
     }
 
     /// Marks `guests`' calendars as loading over `range` and reads each off the task, at once and
-    /// side by side; with the connection down, they fail.
+    /// side by side. With the connection down, they fail.
     fn load_guests(&self, guests: Vec<String>, range: (Timestamp, Timestamp)) {
         let down = self.down();
         let mut data = Data::clone(&self.shared.data.borrow());
@@ -798,7 +800,7 @@ impl Task {
         }
     }
 
-    /// The connection is back: guests' calendars that couldn't be read are asked for again.
+    /// Once the connection is back, asks again for guests' calendars that couldn't be read.
     fn retry_guests(&self) {
         if self.down() {
             return;
@@ -823,8 +825,9 @@ impl Task {
         }
     }
 
-    /// Whether Calendar is out of reach too: the network or Google's sign-in is down, or nothing
-    /// of Google's answers. Gmail's own limits and a disabled Gmail don't hold the calendar.
+    /// Whether Calendar is out of reach too, because the network or Google's sign-in is down or
+    /// nothing of Google's answers. Gmail's own limits and a disabled Gmail don't hold the
+    /// calendar.
     fn down(&self) -> bool {
         matches!(
             self.connection.borrow().outage,
@@ -853,8 +856,8 @@ impl Task {
             };
             self.retry_at = next;
             for queued in due {
-                // Going out, it can't be taken back. One taken back since it was read waits
-                // for Undo's request, which drops it.
+                // Once it's going out, a change can't be taken back. A change taken back since it
+                // was read waits for Undo's request, which drops it.
                 let undoable = {
                     let mut tokens = self.shared.tokens();
                     if tokens.undone.contains(&queued.token) {
@@ -980,7 +983,7 @@ impl Task {
         fetched_any
     }
 
-    /// Reads the window's events from the store, the queued changes made to them, and
+    /// Reads the window's events and the queued changes made to them from the store, and
     /// publishes them.
     async fn read(&self) {
         let Some(window) = &self.window else { return };

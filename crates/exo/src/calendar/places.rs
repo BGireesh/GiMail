@@ -1,6 +1,6 @@
-//! Where's suggestions: places for what's typed, from Apple Maps, MapKit's local search completer,
-//! which needs no key and no billing. A place's name and address are the completer's title and
-//! subtitle.
+//! The Where field's suggestions: places for what's typed, from Apple Maps through MapKit's local
+//! search completer, which needs no key and no billing. A place's name and address are the
+//! completer's title and subtitle.
 
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -15,8 +15,8 @@ pub struct Place {
 }
 
 impl Place {
-    /// What Where takes for it: `{name}, {address}`, the address alone when it starts with the
-    /// name, the name alone without one.
+    /// What Where takes for it: `{name}, {address}`, the address alone when the address starts
+    /// with the name, or the name alone when there's no address.
     pub fn location(&self) -> String {
         if self.address.is_empty() {
             self.name.clone()
@@ -28,11 +28,11 @@ impl Place {
     }
 }
 
-/// Places every ask is answered with instead of Apple Maps', for tests and screenshots.
+/// Places that answer every ask instead of Apple Maps, for tests and screenshots.
 static ANSWERS: Mutex<Option<Vec<Place>>> = Mutex::new(None);
 
 /// Answers every ask of two characters or more with `places`, instead of asking Apple Maps (the
-/// shot example's and the tests' stand-in for the network).
+/// stand-in for the network in the shot example and the tests).
 pub fn answer_with(places: Vec<Place>) {
     *ANSWERS.lock().unwrap_or_else(PoisonError::into_inner) = Some(places);
 }
@@ -48,7 +48,7 @@ pub struct Places {
 }
 
 impl Places {
-    /// Asks for places matching `text`, unless it was asked last; under two characters, or
+    /// Asks for places matching `text`, unless `text` was asked last. Under two characters, or
     /// offline, there are none. Answers come in later and repaint `ctx`.
     pub fn ask(&mut self, ctx: &egui::Context, text: &str, online: bool) {
         if text == self.asked {
@@ -176,8 +176,8 @@ mod macos {
     }
 
     impl Completer {
-        /// A completer telling `found` and `ctx` what it finds; only on the main thread, whose
-        /// run loop calls its delegate.
+        /// A completer telling `found` and `ctx` what it finds. It works only on the main thread,
+        /// whose run loop calls the completer's delegate.
         pub fn new(found: Arc<Mutex<Vec<Place>>>, ctx: egui::Context) -> Option<Self> {
             let mtm = MainThreadMarker::new()?;
             let delegate = Delegate::alloc(mtm).set_ivars(Answers { found, ctx });

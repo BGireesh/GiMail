@@ -1,13 +1,13 @@
-//! Exo's log: every line to stderr and, for the running Exo, to `~/Library/Logs/Exo/Exo.log`,
-//! macOS's place for an app's logs (Console lists it). Each run starts the file afresh and keeps
-//! the run before's as `Exo.previous.log`; a run whose file reaches [`MAX_LOG`] starts it afresh
-//! again, its lines so far becoming `Exo.previous.log`. Panics go to `panic.log` there too
-//! (fastframe-log's hook).
+//! Exo's log. Every line goes to stderr and, for the running Exo, to
+//! `~/Library/Logs/Exo/Exo.log`, macOS's place for an app's logs (Console lists it). Each run
+//! starts the file afresh and keeps the previous run's file as `Exo.previous.log`. A run whose
+//! file reaches [`MAX_LOG`] starts it afresh again, and its lines so far become
+//! `Exo.previous.log`. Panics go to `panic.log` there too (fastframe-log's hook).
 //!
 //! It's fastframe-log's logger (its line, filter, file and permissions) with that cap, which
 //! fastframe-log doesn't have.
 //!
-//! No line may carry mail, tokens or addresses: call sites don't format them, and every line
+//! No line may carry mail, tokens or addresses. Call sites don't format them, and every line
 //! goes through [`redacted`] in case an error quotes one (a store's path is its account's
 //! address, an HTTP error quotes its URL).
 
@@ -21,10 +21,10 @@ use fastframe_log::redact;
 const APP: &str = "Exo";
 
 /// The filter without `RUST_LOG`: Exo's own warnings (why a download, a sync or a send failed),
-/// every crate's errors, and the start line; other crates' warnings (wgpu's, winit's) are noise.
+/// every crate's errors, and the start line. Other crates' warnings (wgpu's, winit's) are noise.
 const FILTER: &str = "error,Exo=info,exo=warn,exo_auth=warn,exo_commands=warn,exo_editor=warn,exo_mail=warn,exo_store=warn,exo_ui=warn,gmail=warn";
 
-/// The most `Exo.log` grows to before it starts afresh: the two files hold twice this at most.
+/// The most `Exo.log` grows to before it starts afresh, so the two files hold twice this at most.
 const MAX_LOG: u64 = 10 << 20;
 
 /// The folder Exo's logs go in: `~/Library/Logs/Exo`.
@@ -33,14 +33,14 @@ pub fn folder() -> Option<PathBuf> {
 }
 
 /// Starts logging to stderr and, given `folder`, to `Exo.log` and `panic.log` in it. Call once,
-/// first thing; only the running Exo passes a folder, since the file starts afresh each run.
+/// first thing. Only the running Exo passes a folder, since the file starts afresh each run.
 pub fn init(folder: Option<&Path>) {
     let mut builder = env_logger::Builder::new();
     builder.parse_filters(std::env::var("RUST_LOG").as_deref().unwrap_or(FILTER));
     let mut unkept = None;
     if let Some(folder) = folder {
-        // The place a panic happened, and its message without addresses or links: Exo's are
-        // `expect`s and the like, which quote no mail.
+        // The place a panic happened, and its message without addresses or links. Exo's panics
+        // are `expect`s and the like, which quote no mail.
         fastframe_log::log_panics_with(
             folder.join("panic.log"),
             APP,
@@ -83,7 +83,8 @@ pub fn init(folder: Option<&Path>) {
 }
 
 /// The run's log file, which starts afresh past `max` bytes, keeping what it had as the
-/// previous log. Every line goes to stderr too, best effort: a launch from the Finder has none.
+/// previous log. Every line goes to stderr too, best effort, since a launch from the Finder has
+/// none.
 struct Capped {
     path: PathBuf,
     file: std::fs::File,
@@ -92,7 +93,7 @@ struct Capped {
 }
 
 impl Capped {
-    /// Starts the log at `path` afresh, the last run's kept as [`fastframe_log::previous_log`].
+    /// Starts the log at `path` afresh, keeping the last run's as [`fastframe_log::previous_log`].
     fn create(path: PathBuf, max: u64) -> std::io::Result<Self> {
         if let Some(folder) = path.parent() {
             let mut builder = std::fs::DirBuilder::new();
@@ -112,7 +113,7 @@ impl Capped {
     /// Moves the log at `path`, if any, to the previous log, and makes a new one only the user
     /// can read.
     fn start(path: &Path) -> std::io::Result<std::fs::File> {
-        // The earlier lines are worth more than a failed rename: the new file is made either way.
+        // The new file is made even when the rename fails, which loses the earlier lines.
         let _ = std::fs::rename(path, fastframe_log::previous_log(path));
         let mut options = std::fs::OpenOptions::new();
         options.write(true).create(true).truncate(true);
@@ -122,7 +123,7 @@ impl Capped {
 }
 
 impl Write for Capped {
-    /// Writes `line`, one record: env_logger writes each whole.
+    /// Writes `line`, one record, since env_logger writes each record whole.
     fn write(&mut self, line: &[u8]) -> std::io::Result<usize> {
         let _ = std::io::stderr().write_all(line);
         if self.written > 0 && self.written + line.len() as u64 > self.max {

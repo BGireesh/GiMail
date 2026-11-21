@@ -20,15 +20,15 @@ const OLD_TOP: f32 = 111.0;
 const RULE_TOP: f32 = 166.0;
 const RANGE_TOP: f32 = 184.0;
 const MORE_TOP: f32 = 219.0;
-/// The buttons' row: `margin: 16px 0 7px` around its 28px; Classic's buttons sit 3px down in it.
+/// The buttons' row: `margin: 16px 0 7px` around its 28px. Classic's buttons sit 3px down in it.
 const ACTIONS_ROW: f32 = 254.0;
 const ACTIONS_TOP: f32 = ACTIONS_ROW + 3.0;
-/// The age's row is 34px in Classic (the dropdown's `padding-top: 3px; margin-top: 1px`), each
-/// "More options" row 32px; together they take the button's 20px and 44 more.
+/// The age's row is 34px in Classic (the dropdown's `padding-top: 3px; margin-top: 1px`), and
+/// each "More options" row is 32px. Together they take the button's 20px and 44 more.
 const RANGE_ROW: f32 = 34.0;
 const OPTION_ROW: f32 = 32.0;
 const OPTIONS_EXTRA: f32 = 44.0;
-/// The body under the header, to the actions' row's margin.
+/// The body under the header, down to the margin of the actions' row.
 const BODY_HEIGHT: f32 = ACTIONS_ROW + 28.0 + 7.0;
 /// The label's 12px before the dropdown.
 const LABEL_GAP: f32 = 12.0;
@@ -38,8 +38,8 @@ const CHECKBOX_COLUMN: f32 = 30.0;
 /// The action buttons: 8px apart, the last 13px past the content's right edge.
 const ACTION_GAP: f32 = 8.0;
 const ACTIONS_OVERHANG: f32 = 13.0;
-/// The open list sits 18px left of the dropdown's text and 26px below its top, under Classic's 19px
-/// button.
+/// The open list sits 18px left of the dropdown's text and 26px below its top, under Classic's
+/// 19px button.
 const MENU_OFFSET: Vec2 = vec2(-18.0, 26.0);
 
 /// An age to clean up past.
@@ -81,7 +81,7 @@ pub(crate) const RANGES: [Range; 5] = [
 ];
 
 impl Range {
-    /// Messages dated before this are old: today's midnight, that far back.
+    /// Messages dated before this are old. It's today's midnight, that far back.
     pub(crate) fn before(&self, now: &Zoned) -> Timestamp {
         let midnight = now.start_of_day().unwrap_or_else(|_| now.clone());
         midnight
@@ -112,13 +112,13 @@ pub(crate) struct State {
     pub keep_unread: bool,
     /// `Keep starred emails`.
     pub keep_starred: bool,
-    /// The checkboxes show (`More options…` was clicked).
+    /// Whether the checkboxes show (`More options…` was clicked).
     more: bool,
     /// The age list is open, with this row highlighted.
     menu: Option<usize>,
     focus: Focus,
-    /// The button marked `selected` (filled and glowing): `Let's go!` at first, then whichever
-    /// button last had the keyboard.
+    /// The button marked `selected` (filled and glowing), which is `Let's go!` at first, then
+    /// whichever button last had the keyboard.
     selected: Focus,
 }
 
@@ -164,7 +164,7 @@ pub enum Event {
 }
 
 impl State {
-    /// Applies `event`; returns what's left for the app (choices it acts on, or closing).
+    /// Applies `event`. Returns what's left for the app (choices it acts on, or closing).
     pub(crate) fn handle(&mut self, event: Event) -> Option<Event> {
         match event {
             Event::ToggleMenu => {
@@ -239,8 +239,8 @@ impl State {
         .concat()
     }
 
-    /// The query the bulk action runs, as the Bulk Actions dialog shows it: `before:` as a local
-    /// date, `in:inbox` left out.
+    /// The query the bulk action runs, as the Bulk Actions dialog shows it, with `before:` as a
+    /// local date and `in:inbox` left out.
     pub(crate) fn display_query(&self, before: &Zoned) -> String {
         let mut parts = Vec::new();
         if self.keep_starred {
@@ -308,8 +308,8 @@ fn draw(ui: &mut Ui, body: Rect, state: &State) -> Option<Event> {
 
     // `Clean up emails older than:` and the age dropdown, both `rgba(0, 0, 0, .7)`
     // (the label and the dropdown's button). The value's focus underline
-    // (`box-shadow: 0 2px #aeb1dd`) never shows in Classic: its `padding-top: 3px` puts the value
-    // at the bottom of the button, which clips it (`overflow: hidden`).
+    // (`box-shadow: 0 2px #aeb1dd`) never shows in Classic, because its `padding-top: 3px` puts
+    // the value at the bottom of the button, which clips the underline (`overflow: hidden`).
     let ink = tokens.ink(0.7, 0.7);
     let label = "Clean up emails older than:";
     let label_width = RANGE_LABEL.paint_line(
@@ -413,7 +413,7 @@ fn draw(ui: &mut Ui, body: Rect, state: &State) -> Option<Event> {
         }
     }
 
-    // `Do this later` and `Let's go! ✨`, right-aligned; the confirm button is always filled, and
+    // `Do this later` and `Let's go! ✨`, right-aligned. The confirm button is always filled, and
     // the selected one glows (the secondary never fills here).
     let actions_top = top + ACTIONS_TOP + if state.more { OPTIONS_EXTRA } else { 0.0 };
     let confirm = DialogAction::new("Let's go! ✨", ActionKind::Primary)

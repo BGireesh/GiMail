@@ -1,5 +1,5 @@
-//! A new event's When: the typed text, read by the time parser as the calendar reads it, its
-//! three suggestions listed under the field, committed with Enter, Tab or a click.
+//! A new event's When: the typed text, read by the time parser as the calendar reads it, and its
+//! three suggestions, listed under the field and committed with Enter, Tab or a click.
 
 use egui::{Color32, CornerRadius, Rect, Sense, Ui, pos2, vec2};
 use exo_ui::{BoxShadow, Family, Font, TextStyle, Theme};
@@ -9,8 +9,8 @@ use crate::time_suggest::{self, Options, ZoneTime};
 
 /// The suggestions' text, 12px/16px.
 const SMALL: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 12.0, 16.0);
-/// A suggestion: 10px over and under a 16px line, the first 3px down (and every one nudged
-/// `top: 1px`), 6px under the last.
+/// A suggestion has 10px over and under a 16px line. The first is 3px down (and every one is
+/// nudged `top: 1px`), and the list ends 6px under the last.
 const ITEM: f32 = 10.0 + 16.0 + 10.0;
 const LIST_TOP: f32 = 3.0;
 const LIST_BOTTOM: f32 = 6.0;
@@ -18,7 +18,7 @@ const LIST_BOTTOM: f32 = 6.0;
 const INPUT: f32 = 20.0;
 /// The list sits 12px under the input.
 const GAP: f32 = 12.0;
-/// The line with the time here, under the input: 4px under it, 8px over the next row.
+/// The line with the time here, 4px under the input and 8px over the next row.
 pub const ZONE_LINE: f32 = 4.0 + 16.0 + 8.0;
 /// Where that line's text sits, from the input line's top.
 pub const ZONE_LINE_TOP: f32 = INPUT + 4.0;
@@ -40,7 +40,7 @@ pub struct Choice {
 pub struct When {
     /// What the input holds.
     pub text: String,
-    /// The times the text was written for; a change made elsewhere (the grid, ⌘⇧=) writes the
+    /// The times the text was written for. A change made elsewhere (the grid, ⌘⇧=) writes the
     /// new ones out.
     written: Option<(Option<(Zoned, Zoned)>, bool)>,
     /// The zone the time was typed in.
@@ -76,14 +76,14 @@ impl When {
         self.written = Some((when.cloned(), all_day));
     }
 
-    /// The text changed: its suggestions, and whether it reads as anything.
+    /// The text changed. Finds its suggestions again, and whether it reads as anything.
     pub fn edited(&mut self, now: &Zoned) {
         self.choices = suggest(&self.text, now);
         self.selected = 0;
         self.error = !self.text.is_empty() && self.choices.is_empty();
     }
 
-    /// The field took the keyboard: without a time yet, the text's suggestions.
+    /// The field took the keyboard. Without a time yet, it lists the text's suggestions.
     pub fn focused(&mut self, has_time: bool, now: &Zoned) {
         self.choices = if has_time {
             Vec::new()
@@ -93,7 +93,7 @@ impl When {
         self.selected = 0;
     }
 
-    /// Escape: the text gone.
+    /// Escape, which clears the text.
     pub fn clear(&mut self) {
         self.text.clear();
         self.choices.clear();
@@ -113,7 +113,7 @@ impl When {
         }
     }
 
-    /// Takes suggestion `index`: the text becomes its time written out, in the zone it was typed
+    /// Takes suggestion `index`. The text becomes its time written out, in the zone it was typed
     /// in with that zone's abbreviation (written as an all-day event when the form already was
     /// one). Returns its start, end and whether it's all day.
     pub fn commit(&mut self, index: usize, all_day: bool, now: &Zoned) -> Option<Choice> {
@@ -159,9 +159,9 @@ impl When {
         ))
     }
 
-    /// Paints the list under the field's `input` line, 12px under its box:
-    /// in the week's modal from 14px left of the input, at most 410px wide; in the right pane
-    /// across `form` less 10px each side. Returns the suggestion clicked.
+    /// Paints the list under the field's `input` line, 12px under its box. In the week's modal it
+    /// starts 14px left of the input and is at most 410px wide, and in the right pane it spans
+    /// `form` less 10px each side. Returns the suggestion clicked.
     pub fn paint_list(
         &mut self,
         ui: &Ui,
@@ -363,9 +363,9 @@ fn parts(start: &Zoned, end: &Zoned, all_day: bool, now: &Zoned) -> Parts {
     }
 }
 
-/// The field's text: `Tue, Nov 17th 9:00 – 9:30 AM`, the end's date when it's another day, the
-/// year outside this one, `Thu, Nov 26th (all day)` or `Thu, Nov 26th – Fri, Nov 27th` for
-/// all-day events.
+/// The field's text: `Tue, Nov 17th 9:00 – 9:30 AM`, with the end's date when it's another day
+/// and the year outside this one, or `Thu, Nov 26th (all day)` or `Thu, Nov 26th – Fri, Nov 27th`
+/// for all-day events.
 pub fn when_text(start: &Zoned, end: &Zoned, all_day: bool, now: &Zoned) -> String {
     let parts = parts(start, end, all_day, now);
     let mut text = if all_day {
@@ -426,7 +426,8 @@ fn time_label(choice: &Choice, now: &Zoned) -> Vec<(String, bool)> {
 }
 
 /// A suggestion's length: `30 mins`, `1 hr`, `1.5 hrs`, `all day`, `3 days`, `2 wks`, `4 mos`,
-/// `1 yr`; or, when the suggestions are in several zones, the start here (`9:00 AM EST`).
+/// `1 yr`. When the suggestions are in several zones, it's the start here instead
+/// (`9:00 AM EST`).
 fn duration_text(choice: &Choice, many_zones: bool, now: &Zoned) -> String {
     if many_zones {
         return format!(

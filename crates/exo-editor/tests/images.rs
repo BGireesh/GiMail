@@ -310,9 +310,9 @@ fn release(harness: &mut Harness<'_, State>, at: Pos2) {
 
 #[test]
 fn an_image_grows_its_line_box_and_sits_on_the_baseline() {
-    // `Here it is` and a 400×250 image make a 259px line (the image above the baseline, the text's
-    // 9px of descent and leading below), the text's caret on that baseline, and the caret after the
-    // image (no text beside it) the line's whole height.
+    // `Here it is` and a 400×250 image make a 259px line, with the image above the baseline and
+    // the text's 9px of descent and leading below it. The text's caret sits on that baseline, and
+    // the caret after the image (with no text beside it) is the line's whole height.
     let mut harness = harness(with_screenshot());
     assert_eq!(harness.state().height, 259.0);
     assert_eq!(
@@ -371,7 +371,8 @@ fn clicking_an_image_focuses_it_and_its_handle_drags_the_width() {
 
 #[test]
 fn a_block_image_alone_is_as_tall_as_it_is() {
-    // `display: block` makes a block box: no strut's descent under it, as an inline image has.
+    // `display: block` makes a block box, which has no strut's descent under it the way an inline
+    // image does.
     let height = |style: &str| {
         let mut editor = Editor::from_html(&format!(
             r#"<div><img src="cid:logo" width="100" height="50"{style}></div>"#
@@ -419,7 +420,8 @@ fn wait_for(harness: &mut Harness<'_, State>, done: impl Fn(&mut Harness<'_, Sta
 
 #[test]
 fn a_kept_tables_images_load_as_the_bodys_and_draw_in_it() {
-    // A table-built signature: its logo by Content-ID (as Exo puts images in), a remote icon.
+    // A signature built from a table, with its logo by Content-ID (as Exo puts images in) and a
+    // remote icon.
     let signature = r#"<div>Hi</div><table><tbody><tr><td><img src="" src-cid="logo" width="40" height="20"></td><td>Maya Raman<br>CEO</td></tr><tr><td><img src="https://x.io/in.png" width="16" height="16"></td></tr></tbody></table><div><br></div>"#;
     let mut harness = harness(Editor::from_html(signature));
     let requests: Vec<String> = harness
@@ -495,8 +497,8 @@ fn a_kept_tables_remote_images_show_blocked_under_the_images_setting() {
     harness.run_steps(2);
     let image = harness.render().expect("renders");
     let scale = image.width() as f32 / 720.0;
-    // The blocked image's box, from the cell's top left (2px of spacing, 1px of padding): its 1px
-    // border `rgba(0, 0, 0, .2)` inside it, darker than its middle.
+    // The blocked image's box starts 2px of spacing and 1px of padding in from the cell's top
+    // left. The box's 1px `rgba(0, 0, 0, .2)` border, inside its edge, is darker than its middle.
     let pixel = |x: f32, y: f32| {
         image
             .get_pixel(
@@ -547,8 +549,8 @@ fn a_kept_tables_css_images_are_asked_for_by_url() {
 
 #[test]
 fn a_tall_kept_table_is_painted_in_bands_where_it_shows() {
-    // Taller than a band (1024px) in a window that shows 1400px of it: rows past the first
-    // band draw too.
+    // A table taller than a band (1024px), in a window that shows 1400px of it, draws its rows
+    // past the first band too.
     let rows: String = (0..60)
         .map(|row| format!("<tr><td>row {row}</td></tr>"))
         .collect();

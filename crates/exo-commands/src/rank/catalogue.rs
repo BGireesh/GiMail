@@ -149,7 +149,7 @@ fn fixture() -> Vec<Command<()>> {
 
 /// `(query, rows)`. Left out: queries that list more than 64 rows (`e`, `s`, `set`), which V8
 /// merge-sorts, and `rem`, where `Label` follows `Create Empty Event` against the scores. Where
-/// `follow` contradicts the scores the comparator isn't a total order, so the result depends on
+/// `follow` contradicts the scores, the comparator isn't a total order, so the result depends on
 /// every row in the list, not only the fixture's.
 const EXPECTED: &[(&str, &[&str])] = &[
     (

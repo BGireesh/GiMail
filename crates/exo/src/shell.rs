@@ -21,12 +21,12 @@ pub struct Columns {
     pub right: Rect,
 }
 
-/// Lays out the columns' flex row in `area` (the window below the tab strip) the way Chromium does:
-/// the content pane grows into spare room, and when there is too little, every column shrinks in
-/// proportion to its basis until it hits its minimum.
+/// Lays out the columns' flex row in `area` (the window below the tab strip) the way Chromium
+/// does. The content pane grows into spare room, and when there is too little, every column
+/// shrinks in proportion to its basis until it hits its minimum.
 ///
-/// Beside a popped-out draft the content pane's basis
-/// makes room for two columns and the back gutter, and it shrinks no narrower than 720px.
+/// Beside a popped-out draft the content pane's basis makes room for two columns and the back
+/// gutter, and it shrinks no narrower than 720px.
 pub fn columns(area: Rect, rem: f32, popped_out: bool) -> Columns {
     let width = area.width();
     let right_basis = exo_ui::right_pane_width(width);
@@ -99,9 +99,9 @@ pub enum RailAction {
     Calendar,
 }
 
-/// The left rail: the Mail/Calendar switcher, its knob under Calendar while `calendar` (the
-/// week view is up). At Inbox Zero (`zero`) it's see-through over the photo, at once: Carbon's
-/// border goes (`border-right: 1px solid transparent`), Snow's stays, black at .09.
+/// The left rail, with the Mail/Calendar switcher and its knob under Calendar while `calendar`
+/// (the week view is up). At Inbox Zero (`zero`) it's see-through over the photo, at once.
+/// Carbon's border goes (`border-right: 1px solid transparent`), and Snow's stays, black at .09.
 pub fn rail(ui: &Ui, rect: Rect, zero: bool, calendar: bool) -> Option<RailAction> {
     let palette = exo_ui::palette(ui.ctx());
     let painter = ui.painter();
@@ -168,9 +168,9 @@ pub fn rail(ui: &Ui, rect: Rect, zero: bool, calendar: bool) -> Option<RailActio
             Vec2::splat(24.0),
         )
     };
-    // The 14×12 legacy glyphs, centered (a `top: -0.5px` nudge doesn't move them at 2×:
-    // Chromium paints them on the pixel): `#919295`, `#797a7c` hovered, the active app's
-    // `#4c4c4c`; in Carbon `#5d5e5f`, the active one `#c3c4c6`.
+    // The 14×12 legacy glyphs, centered. A `top: -0.5px` nudge doesn't move them at 2×, because
+    // Chromium paints them on the pixel. They're `#919295`, `#797a7c` hovered and `#4c4c4c` for
+    // the active app, and in Carbon `#5d5e5f`, with the active one `#c3c4c6`.
     let mut action = None;
     let rows = [
         (
@@ -255,9 +255,9 @@ pub fn footer(
     composing: bool,
     zero: bool,
 ) -> Option<FooterAction> {
-    // `padding: 22px 2rem 12px`; the actions `margin-right: -5px`; clickables padded 5px: the
-    // gear's (14px; 24px tall) 6px on its left, the calendar's (12px; 22px tall, centred) 7px
-    // either side.
+    // `padding: 22px 2rem 12px`, with the actions at `margin-right: -5px` and clickables padded
+    // 5px. The gear's clickable (14px, 24px tall) has 6px on its left, and the calendar's (12px,
+    // 22px tall, centred) has 7px either side.
     let top = pane.bottom() - 12.0 - 24.0;
     let right = pane.right() - 2.0 * rem + 5.0;
     let mut action = None;
@@ -302,8 +302,8 @@ pub fn footer(
             icon_button = icon_button.colors(on, on);
         }
         let response = icon_button.show(ui, ui.id().with(("footer", i)), button, icon_rect);
-        // Above, 6px clear of the button, with no other vertical padding; none while the menu is
-        // open.
+        // The tooltip goes above, 6px clear of the button, with no other vertical padding.
+        // There's none while the menu is open.
         if clicked == FooterAction::Settings && !settings_open {
             KeyTooltip {
                 text: "Settings",
@@ -401,7 +401,7 @@ fn settings_dot(ui: &Ui, rect: Rect, zero: bool) {
     };
     painter.circle_filled(rect.center(), rect.width() / 2.0 + 1.0, outline);
     let angle = 287.85_f32.to_radians();
-    // CSS angles point up at 0deg and turn clockwise; the gradient line spans the box's
+    // CSS angles point up at 0deg and turn clockwise. The gradient line spans the box's
     // projection onto that direction.
     let direction = vec2(angle.sin(), -angle.cos());
     let length = rect.width() * angle.sin().abs() + rect.height() * angle.cos().abs();

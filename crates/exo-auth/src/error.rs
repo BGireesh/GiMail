@@ -48,7 +48,7 @@ pub enum Error {
     /// The code exchange returned no refresh token.
     #[error("Google returned no refresh token")]
     NoRefreshToken,
-    /// Google's grant for this account was revoked or expired: the user has to sign in again.
+    /// Google's grant for this account was revoked or expired, so the user has to sign in again.
     #[error("{email} needs to sign in again")]
     SignInAgain {
         /// The account.
@@ -57,7 +57,7 @@ pub enum Error {
     /// No account with this address has signed in.
     #[error("no account {0}")]
     UnknownAccount(String),
-    /// A sign-in asked for one account and Google signed in another: nothing was saved.
+    /// A sign-in asked for one account and Google signed in another. Nothing was saved.
     #[error("signed in another account than {expected}")]
     WrongAccount {
         /// The account asked for.

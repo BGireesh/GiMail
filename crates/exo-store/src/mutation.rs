@@ -33,31 +33,31 @@ pub enum Mutation {
     Untrash,
     /// Report spam (`!`).
     Spam,
-    /// Not spam: back to the inbox.
+    /// Not spam, which moves it back to the inbox.
     NotSpam,
     /// Add a label by id.
     AddLabel(String),
     /// Remove a label by id.
     RemoveLabel(String),
     /// Remove whichever of these labels the thread carries (`⇧Y` passes the account's visible
-    /// labels and `INBOX`); undo puts back the ones it had.
+    /// labels and `INBOX`). Undo puts back the ones the thread had.
     RemoveLabels(Vec<String>),
     /// Move out of the list keyed `from` (`INBOX`, `SH_IMPORTANT`, a label id…) to `to`
-    /// (`INBOX`, `SH_IMPORTANT`, `SH_OTHER`, `SH_ARCHIVED`, `SPAM`, `TRASH` or a label id):
-    /// the labels change as `move_change` has it.
+    /// (`INBOX`, `SH_IMPORTANT`, `SH_OTHER`, `SH_ARCHIVED`, `SPAM`, `TRASH` or a label id).
+    /// The labels change as `move_change` has it.
     Move {
         /// The list on screen, if any.
         from: Option<String>,
         /// The destination.
         to: String,
     },
-    /// Mute: out of the inbox, and replies stay out (`m`).
+    /// Mute (`m`), which takes the thread out of the inbox and keeps replies out of it.
     Mute,
-    /// Unmute: back to the inbox.
+    /// Unmute, which moves the thread back to the inbox.
     Unmute,
-    /// Remind me (`H`): the thread comes back at `at`, and is marked done meanwhile when
-    /// `snooze`. A reply cancels it unless `keep_on_reply` (the picker's `regardless`). Replaces
-    /// the reminder the thread had.
+    /// Remind me (`H`). The thread comes back at `at`, and when `snooze` is set it's marked done
+    /// until then. A reply cancels the reminder unless `keep_on_reply` (the picker's
+    /// `regardless`) is set. Replaces the reminder the thread had.
     Remind {
         /// When it comes back.
         at: Timestamp,
@@ -66,14 +66,14 @@ pub enum Mutation {
         /// Out of the inbox until then.
         snooze: bool,
     },
-    /// Remove Reminder: back to the inbox too when `to_inbox` and it isn't there
-    /// (`Remove Reminder & Move to Inbox`).
+    /// Remove Reminder, which also moves the thread back to the inbox when `to_inbox` is set and
+    /// it isn't there (`Remove Reminder & Move to Inbox`).
     CancelReminder {
         /// Move it to the inbox.
         to_inbox: bool,
     },
     /// What a due reminder does, which [`Store::return_reminders`](crate::Store::return_reminders)
-    /// applies: back to the inbox, and "reminder unread" until read.
+    /// applies. The thread goes back to the inbox, marked "reminder unread" until it's read.
     ReturnFromReminder,
 }
 
@@ -116,16 +116,16 @@ pub(crate) enum Step {
     },
     /// `messages.modify` adding one label to one message (star, mark unread).
     AddToMessage { id: String, label: String },
-    /// `threads.get` for the thread's rows, replacing the local copy's (bodies stay).
+    /// `threads.get` for the thread's rows, which replace the local copy's rows (bodies stay).
     Refresh,
 }
 
-/// Removing these is done per message, on the messages that carry them; every other change goes
+/// Removing these is done per message, on the messages that carry them. Every other change goes
 /// to `threads.modify`.
 const MESSAGE_LEVEL: [&str; 3] = [UNREAD, INBOX, CATEGORY_PERSONAL];
 
 impl Mutation {
-    /// What applying `self` to `view` does, and what undoes it; `None` when the thread is
+    /// What applying `self` to `view` does, and what undoes it, or `None` when the thread is
     /// already in the target state. The undo plan is resolved later, against the thread as it
     /// is when the user undoes.
     pub(crate) fn plan(&self, view: &ThreadView, me: &Identity) -> Result<Option<(Plan, Plan)>> {
@@ -142,8 +142,8 @@ impl Mutation {
             .reminder_unread_label
             .as_deref()
             .filter(|label| view.has(label));
-        // Mark read: no refresh, and coalesced while unsent, so reading a thread again as mail
-        // arrives rewrites the one queued change.
+        // Marking read doesn't refresh, and is coalesced while unsent, so reading a thread again
+        // as mail arrives rewrites the one queued change.
         let read = || Plan {
             intents: vec![change(
                 &[],
@@ -265,7 +265,8 @@ impl Mutation {
             Self::Move { from, to } => {
                 let (add, remove) = move_change(from.as_deref(), to);
                 // Undo puts back what was removed and was there, and takes away what was added
-                // and wasn't, keeping one of Inbox, Spam and Trash should that ever name several.
+                // and wasn't. It keeps only one of Inbox, Spam and Trash, should what it puts
+                // back ever name several.
                 let mut exclusive = false;
                 let put_back: Vec<&str> = remove
                     .iter()
@@ -283,7 +284,7 @@ impl Mutation {
                     .collect();
                 let mut forward = vec![change(&add, &remove)];
                 let mut undo = vec![change(&put_back, &take_away)];
-                // Out of Reminders, the reminder goes too, and undo puts it back.
+                // Moving out of Reminders removes the reminder too, and undo puts it back.
                 if from.as_deref() == Some(SH_SNOOZED) && view.has_reminder(me) {
                     let label = snoozed()?;
                     forward.push(change(&[], &[&label]));
@@ -308,8 +309,8 @@ impl Mutation {
             Self::Mute | Self::Unmute => None,
             Self::Remind { snooze, .. } => {
                 let label = snoozed()?;
-                // Undo: the previous reminder comes back (keeping the label), and a thread taken
-                // out of the inbox goes back to it.
+                // On undo, the previous reminder comes back (keeping the label), and a thread
+                // taken out of the inbox goes back to it.
                 let restore_inbox: &[&str] = if *snooze && !done { &[INBOX] } else { &[] };
                 let take_off = [label.as_str()];
                 let take_off: &[&str] = if view.has_reminder(me) {
@@ -350,8 +351,9 @@ impl Mutation {
         })
     }
 
-    /// The labels a bulk action adds to and removes from whole threads, `muted` being the mute
-    /// label's id. `None` for removing every label, which only runs on loaded conversations.
+    /// The labels a bulk action adds to and removes from whole threads, where `muted` is the
+    /// mute label's id. `None` for removing every label and for the reminder actions, which only
+    /// run on loaded conversations.
     pub(crate) fn label_change(&self, muted: &str) -> Option<(Vec<String>, Vec<String>)> {
         let owned = |labels: &[&str]| {
             labels
@@ -389,7 +391,7 @@ impl Mutation {
 
 /// The labels a move from list `from` to `to` adds and removes. Exo's own ids (`SH_…`), `SENT`,
 /// `DRAFT` and `STARRED` are never changed, so leaving Starred or Done doesn't unstar or
-/// unarchive. Moving from an inbox view to the Inbox takes the thread out of it.
+/// unarchive. Moving from the Inbox to the Inbox takes the thread out of it.
 fn move_change<'a>(from: Option<&'a str>, to: &'a str) -> (Vec<&'a str>, Vec<&'a str>) {
     const OTHER_CATEGORIES: [&str; 4] = [
         CATEGORY_FORUMS,
@@ -458,8 +460,8 @@ pub(crate) fn change(add: &[&str], remove: &[&str]) -> Intent {
     }
 }
 
-/// Resolves intents into Gmail calls. Every intent sees `view` as it is now: one snapshot of the
-/// thread for the whole mutation.
+/// Resolves intents into Gmail calls. Every intent sees `view` as it is now, so one snapshot of
+/// the thread serves the whole mutation.
 pub(crate) fn resolve(intents: &[Intent], view: &ThreadView, me: &Identity) -> Vec<Step> {
     let mut steps = Vec::new();
     for intent in intents {
@@ -719,7 +721,7 @@ mod tests {
 
     #[test]
     fn undo_restores_the_state_before() {
-        // Trash from the inbox comes back to the inbox; trash from Done doesn't.
+        // Trash from the inbox comes back to the inbox, and trash from Done doesn't.
         let undo = |view: &ThreadView, mutation: Mutation| {
             let (_, inverse) = mutation.plan(view, &me()).unwrap().unwrap();
             resolve(&inverse.intents, view, &me())
@@ -770,7 +772,7 @@ mod tests {
                 Step::Refresh,
             ]
         );
-        // Done, Starred and the like are views, not labels: leaving them changes nothing.
+        // Done, Starred and the like are views, not labels, so leaving them changes nothing.
         let done = thread(vec![message(
             "a",
             1,

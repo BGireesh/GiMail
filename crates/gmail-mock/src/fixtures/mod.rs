@@ -30,7 +30,7 @@ use compose::{Composed, Post, State, Thread};
 use conversations::{File, SCRIPTS, Script};
 use rng::Rng;
 
-/// Where the mailbox's history IDs start; any `startHistoryId` below it has "expired".
+/// Where the mailbox's history IDs start. Any `startHistoryId` below it has "expired".
 const HISTORY_START: u64 = 4_510_000;
 
 const GOOGLE_ID: &str = "108452913874620153827";
@@ -299,7 +299,7 @@ fn script_thread(script: &Script, now: &Zoned, rng: &mut Rng) -> Thread {
             at += rng.between(script.pace.0, script.pace.1).minutes();
         }
         at = waking_hours(at, now.time_zone(), work);
-        // Nothing arrives in the future; keep a minute between the remaining posts.
+        // Nothing arrives in the future, and the remaining posts keep a minute between them.
         let remaining = i64::try_from(count - index).unwrap_or(1);
         at = at.min(now.timestamp() - remaining.minutes());
         let sender = cast::get(key);

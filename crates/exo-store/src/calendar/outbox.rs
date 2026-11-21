@@ -2,14 +2,14 @@
 //! queued in the store, so they're made offline, outlast a quit and go when the connection is
 //! back.
 //!
-//! [`Store::queue_calendar_change`] writes a row, and [`Store::events`] shows it at once: every
-//! read lays the queued changes over Calendar's copy. A change can be held first, Undo's ten
-//! seconds, and [`Store::unqueue_calendar_change`] takes back one that hasn't gone. The caller
-//! sends the changes whose turn it is ([`Store::due_calendar_changes`],
-//! [`Store::send_calendar_change`]): one queue per event and its series, so a change waits for
-//! those before it to the same event and for no other. Being offline, signed out or rate limited
-//! postpones a change; an answer retrying won't change gives it up, and the calendar shows
-//! Calendar's copy again.
+//! [`Store::queue_calendar_change`] writes a row, and [`Store::events`] shows it at once, because
+//! every read lays the queued changes over Calendar's copy. A change can be held first, for
+//! Undo's ten seconds, and [`Store::unqueue_calendar_change`] takes back one that hasn't gone.
+//! The caller sends the changes whose turn it is ([`Store::due_calendar_changes`],
+//! [`Store::send_calendar_change`]). There's one queue per event and its series, so a change
+//! waits for the changes before it to the same event and for no other. Being offline, signed out
+//! or rate limited postpones a change. An answer from Calendar that retrying won't change gives
+//! the change up, and the calendar shows Calendar's copy again.
 
 use std::collections::{HashMap, HashSet};
 
@@ -30,8 +30,8 @@ pub enum CalendarChange {
     /// Adds `event`, whose id is chosen, to `calendar`, inviting its guests.
     Create { calendar: String, event: Event },
     /// Sets the fields `patch` has on event `id` of `calendar` (an instance, or a series),
-    /// telling the guests when `notify`. For a series, `shift` moves its start and end by the
-    /// instance's. `shown` is how the cached events it changes look meanwhile.
+    /// telling the guests when `notify`. For a series, `shift` moves its start and end as far as
+    /// the instance's moved. `shown` is how the cached events it changes look meanwhile.
     Edit {
         calendar: String,
         id: String,
@@ -53,10 +53,11 @@ pub enum CalendarChange {
         from: Cut,
         notify: bool,
     },
-    /// Edits series `series` from its instance at `from` on: the series ends before it, and a new
-    /// one (`patch`'s id) takes over with the series' rule and what `patch` sets, starting at
-    /// `patch`'s start (else the instance's, `start` and `end`). From the series' first instance,
-    /// the series is edited. `shown` is how the instances it changes look meanwhile.
+    /// Edits series `series` from its instance at `from` on. The series ends before that
+    /// instance, and a new series (with `patch`'s id) takes over with the old series' rule and
+    /// what `patch` sets. The new series starts at `patch`'s start, or else at the instance's
+    /// (`start` and `end`). From the series' first instance, the series itself is edited. `shown`
+    /// is how the instances it changes look meanwhile.
     Split {
         calendar: String,
         series: String,
@@ -68,15 +69,16 @@ pub enum CalendarChange {
         shown: Vec<Event>,
     },
     /// Sets my answer (`accepted`, `tentative`, `declined`) to `event` on `calendar`, whose id is
-    /// my address: to the instance, or to its whole series when `all`.
+    /// my address. The answer goes to the instance, or to its whole series when `all`.
     Respond {
         calendar: String,
         event: Event,
         status: String,
         all: bool,
     },
-    /// Answers an invite on `calendar` (its event as the `.ics` describes it), from conversation
-    /// `thread`: the calendar's event with its UID, imported first when there's none.
+    /// Answers an invite on `calendar` from conversation `thread`. `invite` is its event as the
+    /// `.ics` describes it. The answer goes to the calendar's event with the invite's UID, which
+    /// is imported first when there's none.
     RespondToInvite {
         calendar: String,
         invite: Event,
@@ -85,8 +87,8 @@ pub enum CalendarChange {
     },
 }
 
-/// Where "this and following" cuts a series: an all-day series at an instance's day, another
-/// at its start.
+/// Where "this and following" cuts a series: an all-day series at an instance's day, any other
+/// series at the instance's start.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Cut {
     /// The instance's day.
@@ -109,15 +111,16 @@ pub struct QueuedCalendarChange {
 pub enum CalendarOutcome {
     /// Calendar has it, and the cache has Calendar's answer.
     Sent,
-    /// Offline, signed out or rate limited: it waits, and goes again later.
+    /// Offline, signed out or rate limited, so the change waits and goes again later.
     Postponed,
-    /// Calendar refused it, with this error: it's given up and its overlay is gone. `gone` says
-    /// the event it's for has been deleted or cancelled.
+    /// Calendar refused it with this error, so it's given up and its overlay is gone. `gone`
+    /// says whether the event it's for has been deleted or cancelled.
     Refused { error: String, gone: bool },
 }
 
 impl Cut {
-    /// Whether an instance starting at `start` stays: it comes before the cut (or can't be read).
+    /// Whether an instance starting at `start` stays, which it does when it comes before the cut
+    /// (or its start can't be read).
     fn keeps(self, start: &EventDateTime) -> bool {
         match self {
             Cut::Day(day) => start
@@ -131,9 +134,9 @@ impl Cut {
         }
     }
 
-    /// The rule's `UNTIL`: the day before for an all-day series, whose `UNTIL` is a date (RFC
-    /// 5545 §3.3.10 has it take the start's type; Calendar's own all-day example ends
-    /// `UNTIL=20150628`), else the second before, in UTC.
+    /// The rule's `UNTIL`. For an all-day series it's the day before, as a date (RFC 5545
+    /// §3.3.10 has `UNTIL` take the start's type, and Calendar's own all-day example ends
+    /// `UNTIL=20150628`). For any other series it's the second before, in UTC.
     fn until(self) -> String {
         match self {
             Cut::Day(day) => day
@@ -165,7 +168,7 @@ impl CalendarChange {
         }
     }
 
-    /// Its queue: the event's, which an instance shares with its series (`{series}_{start}`).
+    /// Its queue, which is the event's. An instance (`{series}_{start}`) shares its series' queue.
     fn queue(&self) -> String {
         let id = match self {
             Self::Create { event, .. } => event.id.as_deref().unwrap_or_default(),
@@ -185,8 +188,9 @@ impl CalendarChange {
         format!("{}/{}", self.calendar(), id.split('_').next().unwrap_or(id))
     }
 
-    /// `events` as they are once this is made. A new event, or one an edit moves, joins them
-    /// when `shown` says it belongs; a new series, its instances starting in `window`.
+    /// `events` as they are once this change is made. A new event, or one an edit moves, joins
+    /// them when `shown` says it belongs. For a new series, its instances starting in `window`
+    /// do.
     pub(crate) fn apply(
         &self,
         events: &mut Vec<StoredEvent>,
@@ -269,7 +273,7 @@ impl CalendarChange {
     }
 }
 
-/// `events` without series `series`' instances of `calendar` from `from` on.
+/// `events` without the instances of series `series` on `calendar` from `from` on.
 fn truncate(events: &mut Vec<StoredEvent>, calendar: &str, series: &str, from: Cut) {
     events.retain(|stored| {
         stored.calendar_id != calendar
@@ -282,7 +286,7 @@ fn truncate(events: &mut Vec<StoredEvent>, calendar: &str, series: &str, from: C
     });
 }
 
-/// `event` in place of the copy of it in `events`, or among them when `shown` says so.
+/// `event` in place of its copy in `events`, or added to them when `shown` says so.
 fn upsert(
     events: &mut Vec<StoredEvent>,
     calendar: &str,
@@ -304,7 +308,7 @@ fn upsert(
     }
 }
 
-/// Sets my answer to `event`: the attendee that's me, or has my calendar's address.
+/// Sets my answer to `event` on the attendee that's me or has my calendar's address.
 fn answer(event: &mut Event, calendar: &str, status: &str) {
     for attendee in &mut event.attendees {
         if attendee.is_self == Some(true)
@@ -330,7 +334,7 @@ pub(crate) async fn queued(exec: &mut dyn Executor) -> Result<Vec<CalendarChange
 impl Store {
     /// Queues `change` under `token` for Calendar, shown by [`events`](Self::events) at once and
     /// sent once `hold` has passed. A deletion of a new event still queued takes it back
-    /// instead, so Calendar and its guests never hear of it. Not while
+    /// instead, so Calendar and its guests never hear of it. Don't call it while
     /// [`send_calendar_change`](Self::send_calendar_change) is sending that event's change.
     ///
     /// # Errors
@@ -357,8 +361,9 @@ impl Store {
         write.publish().await
     }
 
-    /// Takes back the change queued under `token`, unless it's gone, and for a new event what
-    /// was queued for it since (its edits). Returns whether it was there.
+    /// Takes back the change queued under `token`, unless it's gone. For a new event, it also
+    /// takes back what was queued for the event since (its edits). Returns whether the change
+    /// was there.
     ///
     /// # Errors
     /// On database failures.
@@ -389,9 +394,9 @@ impl Store {
         Ok(true)
     }
 
-    /// The queued changes whose turn it is, oldest first: each queue's first, unless it's held
-    /// or backing off (whatever it waits for when `held_too`). Also when the next that waits is
-    /// due.
+    /// The queued changes whose turn it is, oldest first. That's each queue's first change,
+    /// unless it's held or backing off. With `held_too`, it's each queue's first change, whatever
+    /// it waits for. Also returns when the next waiting change is due.
     ///
     /// # Errors
     /// On database failures.
@@ -423,7 +428,7 @@ impl Store {
         Ok((due, next))
     }
 
-    /// Queued changes Calendar doesn't have yet.
+    /// How many queued changes Calendar doesn't have yet.
     ///
     /// # Errors
     /// On database failures.
@@ -435,8 +440,8 @@ impl Store {
         )
     }
 
-    /// Sends `queued` to Calendar, caching its answer, and drops it from the queue; or postpones
-    /// it, or gives it up.
+    /// Sends `queued` to Calendar, caches Calendar's answer, and drops the change from the queue.
+    /// Otherwise it postpones the change, or gives it up.
     ///
     /// # Errors
     /// On database failures.
@@ -449,7 +454,7 @@ impl Store {
             Err(failure) => failure,
         };
         let until = match failure {
-            // Calendar's quota is its own: only its own pushback holds a change.
+            // Calendar's quota is its own, so only Calendar's own pushback holds a change.
             Error::Throttled { until } => Some(until),
             Error::Offline(_) | Error::Unauthorized(_) => None,
             Error::Gmail(error) => {
@@ -509,8 +514,8 @@ impl Store {
         Ok(outcome)
     }
 
-    /// Makes `change` at Calendar, and caches what it changed: Calendar's answer, or for a series,
-    /// its instances as they were shown until the next fetch brings Calendar's.
+    /// Makes `change` at Calendar, and caches what it changed. That's Calendar's answer, or for a
+    /// series, its instances as they were shown, until the next fetch brings Calendar's.
     async fn make(&self, change: &CalendarChange) -> Result<()> {
         match change {
             CalendarChange::Create { calendar, event } => {
@@ -737,9 +742,9 @@ fn ended(recurrence: &[String], from: Cut) -> Vec<String> {
         .collect()
 }
 
-/// The new series that takes over series `master` from `from`: the master's fields with
-/// `patch`'s, a new id (`patch`'s) and Calendar's own fields left to it, starting at `start`, its
-/// rule counting only what's left.
+/// The new series that takes over series `master` from `from`. It has the master's fields with
+/// `patch`'s laid over them, a new id (`patch`'s), and Calendar's own fields left to Calendar.
+/// It starts at `start`, and its rule counts only what's left.
 fn remainder(
     master: &Event,
     patch: &Event,

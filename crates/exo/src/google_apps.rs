@@ -95,8 +95,8 @@ fn as_account(url: &str, email: &str) -> String {
     out
 }
 
-/// What `open in Gmail` opens in `thread`: its focused message, else the conversation; nothing
-/// for a draft, which Gmail can't open in All Mail.
+/// What `open in Gmail` opens in `thread`, which is its focused message or else the
+/// conversation. Nothing for a draft, which Gmail can't open in All Mail.
 pub fn target(thread: &ThreadView) -> Option<&str> {
     let id = thread.focused().unwrap_or(thread.id());
     let draft = thread
@@ -106,7 +106,7 @@ pub fn target(thread: &ThreadView) -> Option<&str> {
     (!draft).then_some(id)
 }
 
-/// Registers the rows. `open` is what an open thread opens in Gmail ([`target`]); without one
+/// Registers the rows. `open` is what an open thread opens in Gmail ([`target`]). Without one,
 /// the first row opens Gmail.
 pub fn register(commands: &mut Commands<Action>, open: Option<&str>) {
     let first = open.map_or(App::Gmail, |id| App::Message(id.to_owned()));

@@ -182,7 +182,7 @@ fn a_body_is_checked_once_it_has_the_keyboard_and_keeps_its_marks_after() {
         checks + 2,
         "a keystroke checks only its own line"
     );
-    // Off the editor: the keyboard goes, the marks stay.
+    // A click off the editor takes the keyboard away, and the marks stay.
     click(&mut harness, pos2(390.0, 290.0), PointerButton::Primary);
     assert_eq!(marks(&harness), [(0, 2..5), (1, 4..7)]);
 }
@@ -231,7 +231,8 @@ fn a_right_click_selects_the_word_and_offers_its_corrections() {
         "one undo step"
     );
 
-    // A word spelled right: no corrections; off a word: the caret, nothing selected.
+    // A word spelled right gets no corrections. Off a word, the caret goes there and nothing is
+    // selected.
     click(
         &mut harness,
         pos2(ORIGIN.x + 68.0, 30.0),
@@ -274,8 +275,8 @@ fn a_misspelling_shows_chromiums_red_dots_under_it() {
         let pixel = image.get_pixel((x * scale) as u32, (y * scale) as u32);
         pixel[0] > 150 && pixel[0] > pixel[1] + 80
     };
-    // The 24px line box from y 20, its baseline 15px down: the dots' 2px rows 1px under it, the
-    // first dot at the text's left, the next 4px on.
+    // The 24px line box starts at y 20, with its baseline 15px down. The dots are 2px tall and
+    // start 1px under the baseline. The first dot is at the text's left and the next is 4px on.
     assert!(
         red(ORIGIN.x + 1.0, ORIGIN.y + 16.5) && red(ORIGIN.x + 1.0, ORIGIN.y + 17.5),
         "the first dot"

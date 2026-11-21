@@ -1,8 +1,8 @@
-//! The Emoji dialog: the skin tone compose's `:` picker gives emoji (`emojiSkinTone`), six raised
-//! hands in a row with a bar under the chosen one, which slides to the next. Opening it with no
-//! tone set sets `NONE`.
+//! The Emoji dialog picks the skin tone that compose's `:` picker gives emoji (`emojiSkinTone`). It
+//! shows six raised hands in a row with a bar under the chosen one, which slides to the next.
+//! Opening it with no tone set sets `NONE`.
 //!
-//! Metrics at a 1280×800 window.
+//! Metrics are at a 1280×800 window.
 
 use egui::{Color32, Context, CursorIcon, Rect, Sense, Ui, pos2, vec2};
 use exo_store::EmojiSkinTone;
@@ -11,8 +11,8 @@ use exo_ui::{Dialog, DialogResponse, Family, Font, TextStyle, motion};
 /// The subheader and footer: 12px/20px, 3px down.
 const TEXT: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 12.0, 20.0);
 const NUDGE: f32 = 3.0;
-/// From the body's top: the subheader's line, the options (a 1px padding over 24px emoji with
-/// `padding-bottom: 5px`), the bar under them, and the footer's line.
+/// Offsets from the body's top of the subheader's line, the options (a 1px padding over 24px emoji
+/// with `padding-bottom: 5px`), the bar under them, and the footer's line.
 const SUBHEADER_TOP: f32 = 24.0;
 const OPTIONS_TOP: f32 = 61.0;
 const BAR_TOP: f32 = 88.0;
@@ -24,17 +24,18 @@ const OPTION_GAP: f32 = 24.0;
 const EMOJI: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 24.0, 24.0);
 /// Chromium sets the color glyph lower in its line than egui does (measured).
 const EMOJI_DOWN: f32 = 2.0;
-/// The bar under the chosen tone: 2px `#aeb1dd`, sliding over 200ms
-/// `cubic-bezier(0.19, 1, 0.22, 1)`; the hovered option's `box-shadow: 0 2px 0 0 #aeb1dd` too.
+/// The bar under the chosen tone is 2px `#aeb1dd`, sliding over 200ms
+/// `cubic-bezier(0.19, 1, 0.22, 1)`. The hovered option gets one too
+/// (`box-shadow: 0 2px 0 0 #aeb1dd`).
 const BAR: f32 = 2.0;
 const ACCENT: Color32 = Color32::from_rgb(0xae, 0xb1, 0xdd);
 const SLIDE: f64 = 0.2;
 const SLIDE_CURVE: motion::CubicBezier = motion::CubicBezier::new(0.19, 1.0, 0.22, 1.0);
-/// The subheader's `rgba(0, 0, 0, .85)`; the footer's `.6`.
+/// The subheader's `rgba(0, 0, 0, .85)`, and the footer's `.6`.
 const INK: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 217);
 const FOOTER_INK: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 153);
-/// The footer's key: an 18px `#abb7c5` cap with 3px corners, 4px either
-/// side, 1px down; its white `:`.
+/// The footer's key, an 18px `#abb7c5` cap with 3px corners, 4px either side and 1px down, with a
+/// white `:`.
 const KEY: f32 = 18.0;
 const KEY_MARGIN: f32 = 4.0;
 const KEY_FILL: Color32 = Color32::from_rgb(0xab, 0xb7, 0xc5);
@@ -43,7 +44,7 @@ const OPTIONS: [&str; 6] = ["🙌", "🙌🏻", "🙌🏼", "🙌🏽", "🙌�
 /// Something done in the dialog.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Event {
-    /// Tab or → (1), ⇧Tab or ← (-1): the next or previous tone, wrapping.
+    /// Tab or → (1), ⇧Tab or ← (-1), which picks the next or previous tone, wrapping.
     Step(isize),
     /// A click on a tone.
     Choose(EmojiSkinTone),
@@ -158,8 +159,8 @@ fn show(ui: &Ui, body: Rect, state: &mut State, current: EmojiSkinTone) -> Optio
         ACCENT,
     );
 
-    // `To use an emoji, just type [:] then the emoji's name!` (a flex row: the spaces either side
-    // of the cap go).
+    // `To use an emoji, just type [:] then the emoji's name!` is a flex row, so the spaces either
+    // side of the cap go.
     let line = body.top() + FOOTER_TOP + NUDGE;
     let lead = TEXT.paint_line(
         &painter,

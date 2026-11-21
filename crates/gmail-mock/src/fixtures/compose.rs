@@ -13,7 +13,7 @@ pub struct Post {
     pub from: Mailbox,
     pub to: Vec<Mailbox>,
     pub cc: Vec<Mailbox>,
-    /// Plain text; the HTML part is derived from it unless `html` is set.
+    /// Plain text. The HTML part is derived from it unless `html` is set.
     pub text: String,
     pub html: Option<String>,
     pub calendar: Option<String>,
@@ -49,7 +49,7 @@ pub struct Thread {
     pub posts: Vec<Post>,
     pub state: State,
     pub list: Option<List>,
-    /// Quote the previous message in replies (person-to-person mail does; notifications don't).
+    /// Quote the previous message in replies (person-to-person mail does, but notifications don't).
     pub quote: bool,
 }
 
@@ -57,7 +57,7 @@ pub struct Thread {
 #[derive(Debug, Clone)]
 pub struct Composed {
     pub raw: Vec<u8>,
-    /// Label names; user labels are resolved to IDs on insert.
+    /// Label names. User labels are resolved to IDs on insert.
     pub labels: Vec<String>,
     pub at: Timestamp,
 }

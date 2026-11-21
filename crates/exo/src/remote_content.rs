@@ -1,9 +1,9 @@
 //! The HTTP client message bodies load remote content with (images, and the CSS they import).
-//! Senders pick those URLs, so it only reaches the public internet: never this Mac, its local
+//! Senders pick those URLs, so it only reaches the public internet, never this Mac, its local
 //! network or link-local services. Otherwise an `<img src="http://192.168.1.1/…">` has Exo ask
 //! a router or printer on your network for something each time the message shows, from inside
 //! it. Names are resolved before they're checked and the connection goes to the addresses that
-//! passed, so DNS can't sneak a private address in; addresses in URLs, redirects included, are
+//! passed, so DNS can't sneak a private address in. Addresses in URLs, redirects included, are
 //! checked the same way.
 
 use std::{
@@ -17,7 +17,7 @@ use reqwest::dns::{Addrs, Name, Resolve, Resolving};
 /// How many redirects a load follows (reqwest's default).
 const MAX_REDIRECTS: usize = 10;
 
-/// Why a load was refused: it would have reached this Mac or its network.
+/// A load refused because it would have reached this Mac or its network.
 #[derive(Debug, thiserror::Error)]
 #[error("{0} is not on the public internet")]
 pub(crate) struct Private(String);
@@ -40,7 +40,7 @@ pub(crate) enum Error {
     Unavailable,
 }
 
-/// The client: every URL is checked before it's asked for, and names as they resolve.
+/// The client. Every URL is checked before it's asked for, and names are checked as they resolve.
 #[derive(Clone, Debug)]
 pub(crate) struct Client {
     http: Option<reqwest::Client>,
@@ -66,8 +66,8 @@ impl Client {
     }
 }
 
-/// Whether Gmail is served from this Mac (gmail-mock): only then may remote content come from
-/// it too.
+/// Whether Gmail is served from this Mac (gmail-mock), the only case in which remote content may
+/// come from it too.
 pub(crate) fn serves_gmail_locally(endpoints: &gmail::Endpoints) -> bool {
     endpoints.gmail.host().is_some_and(|host| match host {
         url::Host::Domain(name) => name == "localhost",
@@ -98,8 +98,8 @@ fn http(timeout: Duration, loopback: bool) -> Option<reqwest::Client> {
         .ok()
 }
 
-/// Refuses `url` when its host is an address that isn't public, before anything connects;
-/// names are left to [`PublicResolver`].
+/// Refuses `url` when its host is an address that isn't public, before anything connects.
+/// Names are left to [`PublicResolver`].
 fn check(url: &url::Url, loopback: bool) -> Result<(), Private> {
     let ip = match url.host() {
         Some(url::Host::Ipv4(ip)) => IpAddr::V4(ip),
@@ -115,7 +115,7 @@ fn check(url: &url::Url, loopback: bool) -> Result<(), Private> {
 }
 
 /// Resolves names with the system's resolver, keeping only the addresses [`allowed`] lets
-/// through; a name with none left fails to resolve.
+/// through. A name with none left fails to resolve.
 struct PublicResolver {
     loopback: bool,
 }
@@ -137,7 +137,8 @@ impl Resolve for PublicResolver {
     }
 }
 
-/// Whether remote content may come from `ip`: a public address, or with `loopback` this Mac's.
+/// Whether remote content may come from `ip`, which it may from a public address, or with
+/// `loopback` from this Mac's.
 fn allowed(ip: IpAddr, loopback: bool) -> bool {
     (loopback && ip.is_loopback()) || is_public(ip)
 }

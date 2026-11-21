@@ -1,8 +1,9 @@
-//! The Touch Bar's tip: on a Mac whose Escape is on its Touch Bar, someone who keeps pressing
+//! The Touch Bar's tip. On a Mac whose Escape is on its Touch Bar, someone who keeps pressing
 //! Escape is offered Backtick as Escape once, while the setting has never been turned on or off.
 //! The fifth Escape of the run, 40 seconds or more after the account's first one (kept on the
 //! device), opens the alert instead of doing what it does, unless another alert is up. `Turn On`
-//! turns the setting on, `No Thanks` (Escape) off; either way the tip never comes back.
+//! turns the setting on and `No Thanks` (Escape) turns it off. Either way the tip never comes
+//! back.
 
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -25,7 +26,7 @@ const NO_THANKS: usize = 1;
 /// The space above the keycaps' line, which holds the text.
 const KEY_CODE_TOP: f32 = 6.0;
 
-/// The tip while it's up: which action is selected.
+/// The tip while it's up, with which action is selected.
 #[derive(Debug)]
 pub(crate) struct Tip {
     selected: usize,
@@ -108,15 +109,17 @@ impl crate::Mail {
         }
     }
 
-    /// `Turn On` (0) or `No Thanks`: Backtick as Escape on or off, and the tip goes.
+    /// `Turn On` (0) or `No Thanks`, which turns Backtick as Escape on or off, and the tip goes.
     fn answer_tip(&mut self, action: usize) {
         self.touch_bar_tip = None;
         self.account
             .update_settings(|settings| settings.enable_backtick_as_escape = Some(action == 0));
     }
 
-    /// The tip while it's up, over `page` dimmed: `Top tip! Instead of [esc] tap backtick [`]`
-    /// and `You can always turn this off in the settings.`, its keys as the shortcuts sheet's.
+    /// Draws the tip while it's up, over `page` dimmed, with
+    /// `Top tip! Instead of [esc] tap backtick [`]` and
+    /// `You can always turn this off in the settings.`, its keys drawn as the shortcuts sheet
+    /// draws them.
     pub(crate) fn show_touch_bar_tip(&mut self, ui: &mut egui::Ui, page: egui::Rect) {
         let Some(tip) = &self.touch_bar_tip else {
             return;
@@ -166,9 +169,9 @@ impl crate::Mail {
     }
 }
 
-/// Whether `model` (`hw.model`) is a MacBook Pro whose Escape is on its Touch Bar: the 2016–2019
-/// ones. Later Touch Bars have an Escape key of their own (the 16-inch, the 2020 13-inch and
-/// Apple's own chips), as do Macs without one.
+/// Whether `model` (`hw.model`) is a MacBook Pro whose Escape is on its Touch Bar, which the
+/// 2016–2019 ones are. Later Touch Bars have an Escape key of their own (the 16-inch, the 2020
+/// 13-inch and Apple's own chips), as do Macs without one.
 pub(crate) fn escape_on_touch_bar(model: &str) -> bool {
     const MODELS: [&str; 8] = [
         "MacBookPro13,2",

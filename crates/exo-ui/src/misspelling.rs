@@ -20,11 +20,11 @@ pub fn misspelling_top(style: &TextStyle, ctx: &egui::Context) -> f32 {
     style.baseline(ctx) + 1.0
 }
 
-/// Paints the marker under the text between `x` on screen, its top at `top`: square dots 2px
-/// across, 4px apart from `pattern` (where Chromium's tiled dots start: the word's first device
-/// pixel in compose's body, the text's start in an `<input>`), over as much of the word as holds
-/// whole dots and a space (`width -= fmodf(width + spacing, kMarkerWidth) - spacing`), cut to it;
-/// `rgba(255, 59, 48, .75)`.
+/// Paints the marker under the text between `x` on screen, with its top at `top`. The marker is
+/// square `rgba(255, 59, 48, .75)` dots 2px across, 4px apart from `pattern`, which is where
+/// Chromium's tiled dots start (the word's first device pixel in compose's body, the text's start
+/// in an `<input>`). The dots cover as much of the word as holds whole dots and a space
+/// (`width -= fmodf(width + spacing, kMarkerWidth) - spacing`), cut to the word.
 pub fn paint_misspelling(painter: &Painter, x: Range<f32>, top: f32, pattern: f32) {
     let ppp = painter.pixels_per_point();
     let snap = |at: f32| (at * ppp).floor() / ppp;

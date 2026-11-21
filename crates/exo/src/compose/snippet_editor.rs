@@ -1,6 +1,6 @@
-//! A snippet open in compose: the regular new-message form with a name, its
-//! header folded until asked for, `Done` instead of Send. It's never a Gmail draft: Done saves
-//! it to the settings (no autosave), and leaving with unsaved changes asks first.
+//! A snippet open in compose. It's the regular new-message form with a name, its header folded
+//! until asked for, and `Done` instead of Send. A snippet is never a Gmail draft. Done saves it
+//! to the settings (no autosave), and leaving with unsaved changes asks first.
 
 use exo_commands::{Hint, Toast};
 use exo_store::Snippet;
@@ -21,7 +21,7 @@ impl crate::Mail {
     pub(crate) fn create_snippet(&mut self, name: String) {
         let mut record =
             factory::compose(&self.compose_account(), Fields::default(), Timestamp::now());
-        // `"use default"`: the From of the draft it's used in.
+        // `"use default"`, which means the From of the draft the snippet is used in.
         record.from = None;
         let mut open = Open::new(factory::new_id(), None, record);
         open.snippet = Some(SnippetEdit { name, saved: None });
@@ -33,8 +33,8 @@ impl crate::Mail {
         self.open_snippet_pane(open);
     }
 
-    /// Opens saved snippet `id` for editing (`Edit Private Snippet`): its header shows when it
-    /// has recipients or a subject.
+    /// Opens saved snippet `id` for editing (`Edit Private Snippet`). Its header shows when the
+    /// snippet has recipients or a subject.
     pub(crate) fn edit_snippet(&mut self, id: &str) {
         let Some(snippet) = self
             .account
@@ -63,7 +63,8 @@ impl crate::Mail {
             cc_bcc_shown: shown,
             field: Field::SnippetName,
         };
-        // What reopening it reads back is what's unchanged.
+        // The saved copy holds the body as the editor reads it back, so an untouched snippet
+        // counts as unchanged.
         let saved = Snippet {
             body: open.editor.html(),
             ..snippet.clone()
@@ -89,8 +90,8 @@ impl crate::Mail {
         self.compose.drafts.push(open);
     }
 
-    /// Done / ⌘Enter on a snippet: the size and recipient checks, then the snippet is saved and
-    /// the folder shows again, with the `⌘ ;` hint the first three times.
+    /// Done / ⌘Enter on a snippet runs the size and recipient checks, then saves the snippet and
+    /// shows the folder again, with the `⌘ ;` hint the first three times.
     pub(super) fn save_snippet(&mut self) {
         let aliases = self.snapshot.aliases.clone();
         let Some(id) = self
@@ -235,10 +236,10 @@ impl crate::Mail {
         self.open_snippet_pane(open);
     }
 
-    /// ⌘; with no snippets: `Snippets` offers to create one.
+    /// ⌘; with no snippets opens the `Snippets` alert, which offers to create one.
     pub(crate) fn ask_create_snippet(&mut self) {
         let draft = self.compose.focus.clone().unwrap_or_default();
-        // Two `<br>`s, a blank line, not a paragraph.
+        // Two `<br>`s make a blank line, not a paragraph.
         let text = "Instantly insert phrases, paragraphs, or whole emails.\n\nType less, do more!";
         self.compose.alert = Some(Alert::new(
             Some("Snippets"),
@@ -249,7 +250,7 @@ impl crate::Mail {
         ));
     }
 
-    /// `snippet` into the focused draft.
+    /// Applies `snippet` to the focused draft.
     pub(crate) fn compose_apply_snippet(&mut self, snippet: &Snippet, at_start: bool, now: f64) {
         let aliases = self.snapshot.aliases.clone();
         let Some((open, book)) = self.compose.focused_with_book() else {
@@ -258,8 +259,8 @@ impl crate::Mail {
         super::snippets::apply(open, snippet, &aliases, book, at_start, now);
     }
 
-    /// `Use Snippet Inline`: the body gets the keyboard, its caret at
-    /// the end unless it had it, and a `;` (after a no-break space when the caret follows a
+    /// `Use Snippet Inline` gives the body the keyboard, with its caret at the end unless the
+    /// body already had the keyboard. Then a `;` (after a no-break space when the caret follows a
     /// word) opens the picker there.
     pub(crate) fn snippet_inline(&mut self, now: f64) {
         let Some(open) = self.compose.focused_mut() else {
@@ -326,7 +327,7 @@ impl crate::Mail {
         open.snippet_hint = query.is_empty() && settings.snippets.is_empty();
     }
 
-    /// Enter, Tab or a press in the `;` picker: the typed `;query` goes and the snippet goes in
+    /// Enter, Tab or a press in the `;` picker removes the typed `;query` and puts the snippet in
     /// its place.
     pub(super) fn pick_inline_snippet(&mut self, index: Option<usize>, now: f64) {
         let Some(open) = self.compose.focused_mut() else {
@@ -365,7 +366,7 @@ impl crate::Mail {
         });
     }
 
-    /// Discard on a snippet: unsaved changes ask first (`Discard changes?`).
+    /// Discard on a snippet, which asks first when there are unsaved changes (`Discard changes?`).
     pub(super) fn ask_discard_snippet(&mut self) {
         let Some(open) = self.compose.focused() else {
             return;
@@ -384,7 +385,7 @@ impl crate::Mail {
         }
     }
 
-    /// Discarding a snippet: it's gone from the folder, with `Snippet discarded.` and its Undo.
+    /// Discards a snippet, removing it from the folder, with `Snippet discarded.` and its Undo.
     pub(super) fn discard_snippet(&mut self) {
         let Some(id) = self
             .compose
@@ -398,8 +399,8 @@ impl crate::Mail {
         self.discard_saved_snippet(&id);
     }
 
-    /// Snippet `id` leaves the settings, with `Snippet discarded.` and its Undo (which a snippet
-    /// never saved has nothing to bring back).
+    /// Removes snippet `id` from the settings, with `Snippet discarded.` and its Undo. A snippet
+    /// that was never saved has nothing for Undo to bring back.
     pub(crate) fn discard_saved_snippet(&mut self, id: &str) {
         let Some(saved) = self
             .account
@@ -423,7 +424,7 @@ impl crate::Mail {
         );
     }
 
-    /// The toast's Undo: the discarded snippet is back.
+    /// The toast's Undo, which brings the discarded snippet back.
     pub(super) fn undo_discard_snippet(&mut self, tag: u64) {
         let Some((_, snippet)) = self
             .compose
@@ -439,7 +440,7 @@ impl crate::Mail {
         });
     }
 
-    /// Escape in a snippet: an empty new one goes; otherwise the form lets go of the keyboard.
+    /// Escape in a snippet closes an empty new one. Otherwise the form lets go of the keyboard.
     pub(super) fn escape_snippet(&mut self) {
         let Some(open) = self.compose.focused() else {
             return;
@@ -456,7 +457,7 @@ impl crate::Mail {
         }
     }
 
-    /// Back from the snippet in the pane: it closes, once `Save Snippet?`
+    /// Back from the snippet in the pane closes it, once `Save Snippet?`
     /// has asked about unsaved changes. Returns whether a snippet was there.
     pub(super) fn leaving_snippet_asks(&mut self) -> bool {
         if self.pane_snippet().is_none() {
@@ -470,7 +471,7 @@ impl crate::Mail {
         true
     }
 
-    /// The snippet in the pane has changes Done hasn't saved.
+    /// Whether the snippet in the pane has changes that Done hasn't saved.
     pub(crate) fn snippet_unsaved(&self) -> bool {
         self.pane_snippet().is_some_and(is_dirty)
     }
@@ -485,8 +486,9 @@ impl crate::Mail {
             .filter(|open| open.is_snippet())
     }
 
-    /// Leaving the snippet in the pane, with unsaved changes, for `then`: `Save Snippet?` asks,
-    /// and `then` goes on after Save or Don't save (Delete for one never saved), not after Cancel.
+    /// Leaving the snippet in the pane with unsaved changes, for `then`. `Save Snippet?` asks
+    /// first, and `then` runs after Save or Don't save (Delete for a snippet never saved), not
+    /// after Cancel.
     pub(crate) fn ask_leaving_snippet(&mut self, then: Leaving) {
         let Some(open) = self.pane_snippet() else {
             return;
@@ -516,7 +518,8 @@ impl crate::Mail {
     pub(super) fn answer_save_snippet(&mut self, index: usize, id: String) {
         let then = self.snippets.leaving.take();
         match index {
-            // The snippet, though a popped-out draft may have the keyboard.
+            // Save the snippet, which gets the keyboard first since a popped-out draft may have
+            // it.
             0 => {
                 self.compose.focus = Some(id.clone());
                 self.save_snippet();
@@ -527,7 +530,7 @@ impl crate::Mail {
             }
             _ => self.close_snippet(),
         }
-        // Saving stops at a check's alert, the snippet still open.
+        // Saving stops at a check's alert, with the snippet still open.
         if self.compose.pane() != Some(id.as_str())
             && let Some(then) = then
         {
@@ -535,7 +538,7 @@ impl crate::Mail {
         }
     }
 
-    /// The snippet in the pane closes, unsaved changes dropped; the folder shows.
+    /// Closes the snippet in the pane and drops unsaved changes. The folder shows.
     pub(crate) fn close_snippet(&mut self) {
         let Some((id, _)) = self.compose.pane.take_if(|(id, _)| {
             self.compose
@@ -572,7 +575,7 @@ pub(super) fn snippet_of(open: &mut Open) -> Option<Snippet> {
     })
 }
 
-/// Nothing in it at all.
+/// Whether the snippet has nothing in it at all.
 fn is_empty(open: &Open) -> bool {
     open.snippet
         .as_ref()
@@ -583,7 +586,8 @@ fn is_empty(open: &Open) -> bool {
         && open.record.attachments.is_empty()
 }
 
-/// It differs from what was last saved; a new one, once anything is in it.
+/// Whether the snippet differs from what was last saved. A new snippet differs once anything is
+/// in it.
 fn is_dirty(open: &Open) -> bool {
     let Some(edit) = &open.snippet else {
         return false;

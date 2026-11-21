@@ -1,13 +1,13 @@
-//! Calendar notifications: an event's reminder comes
-//! `notifications/calendarEvents/leadTimeInSeconds` before it starts (two minutes unless set) when
-//! it keeps its calendar's default reminders, else at each of its own pop-up reminders. Every 30 s
-//! the due ones show, never more than five minutes into the event; events are fetched again every
-//! 30 minutes. Events without a title, declined, cancelled, all day, or on a calendar whose
+//! Calendar notifications. When an event keeps its calendar's default reminders, its reminder
+//! comes `notifications/calendarEvents/leadTimeInSeconds` before it starts (two minutes unless
+//! set). Otherwise it comes at each of the event's own pop-up reminders. Every 30 s the due ones
+//! show, never more than five minutes into the event, and events are fetched again every 30
+//! minutes. Events without a title, declined, cancelled, all day, or on a calendar whose
 //! notifications are off never notify.
 //!
 //! A notification has the event's title, its call's provider (or else its location), and when it
-//! is (`in 2 mins · 10:00 – 10:30AM`); with a call, a `Join meeting` button. A click opens the
-//! week on its day with its details; the button opens the call too.
+//! is (`in 2 mins · 10:00 – 10:30AM`). With a call, it has a `Join meeting` button. A click opens
+//! the week on the event's day with its details, and the button opens the call too.
 
 use std::{
     collections::{BTreeSet, HashMap},
@@ -45,14 +45,14 @@ pub struct Reminder<'a> {
     pub end: Timestamp,
 }
 
-/// The calendars whose events notify on this device: those of the signed-in calendar accounts
-/// that sync with notifications on.
+/// The calendars whose events notify on this device. These are the calendars of the signed-in
+/// calendar accounts that sync and have notifications on.
 pub fn calendars(settings: &Settings) -> Vec<String> {
     settings.calendars_where(|calendar| calendar.sync && calendar.notifies())
 }
 
-/// When `stored` notifies, with `lead` the setting's lead time and `me` the account: none for an
-/// event without an id, a time or a title, one I declined, a cancelled one, or one all day.
+/// When `stored` notifies, with `lead` the setting's lead time and `me` the account. It never does
+/// for an event without an id, a time or a title, one I declined, a cancelled one, or one all day.
 pub fn reminders<'a>(stored: &'a StoredEvent, lead: SignedDuration, me: &str) -> Vec<Reminder<'a>> {
     let event = &stored.event;
     let (Some(start), Some(end)) = (event.start.as_ref(), event.end.as_ref()) else {
@@ -99,12 +99,13 @@ pub fn reminders<'a>(stored: &'a StoredEvent, lead: SignedDuration, me: &str) ->
     }
 }
 
-/// Whether `reminder` shows at `now`: it's due, and the event started at most five minutes ago.
+/// Whether `reminder` shows at `now`, which it does when it's due and the event started at most
+/// five minutes ago.
 pub fn due(reminder: &Reminder<'_>, now: Timestamp) -> bool {
     reminder.at < now && now <= reminder.start + LATE
 }
 
-/// The notification for `reminder` at `now` in `account`, its times in `tz`.
+/// The notification for `reminder` at `now` in `account`, with its times in `tz`.
 pub fn notice(reminder: &Reminder<'_>, account: &str, now: Timestamp, tz: &TimeZone) -> Notice {
     let event = &reminder.event.event;
     // A start minutes or seconds away reads 30 s later, unless the notification is late.
@@ -149,8 +150,9 @@ pub fn notice(reminder: &Reminder<'_>, account: &str, now: Timestamp, tz: &TimeZ
     }
 }
 
-/// The call's provider as the notification names it, and its link: Calendar's preferred entry
-/// point (video, else phone, else SIP, else the first), a Meet link as this account.
+/// The call's provider as the notification names it, and its link. The link is Calendar's
+/// preferred entry point (video, else phone, else SIP, else the first), and a Meet link opens as
+/// this account.
 fn conference(event: &ApiEvent, me: &str) -> (Option<&'static str>, Option<String>) {
     let Some(data) = event.conference_data.as_ref() else {
         return (None, None);
@@ -416,7 +418,7 @@ mod tests {
     fn what_a_notification_says() {
         let event = stored("2026-11-17T10:00", "2026-11-17T10:30");
         let [reminder] = reminders(&event, lead(), ME).try_into().expect("one");
-        // The poll sees it up to 30 s late; it still reads two minutes.
+        // The poll sees it up to 30 s late, and it still reads two minutes.
         for late in [1, 29] {
             let notice = notice(
                 &reminder,
@@ -546,7 +548,7 @@ mod tests {
             },
         );
         assert_eq!(calendars(&settings), ["a"]);
-        // A calendar account's notify too, unless it's signed out.
+        // A calendar account's calendars notify too, unless it's signed out.
         let other = |authed: bool| CalendarAccount {
             email: "maya.lin@example.com".into(),
             authed,

@@ -83,8 +83,8 @@ pub(crate) fn register(commands: &mut Commands<Action>, marks_done: bool) {
 
 impl Mail {
     /// Whether the palette's RSVP rows apply, and if so whether an answer marks the conversation
-    /// done: the one actionable conversation is the open one, and it has an invitation to
-    /// answer.
+    /// done. They apply when the one actionable conversation is the open one and it has an
+    /// invitation to answer.
     pub(crate) fn rsvp_rows(&self) -> Option<bool> {
         let thread = self.thread.as_ref()?;
         thread.conversation_invite()?;
@@ -94,8 +94,8 @@ impl Mail {
         Some(self.rsvp_marks_done())
     }
 
-    /// Whether answering marks the actionable conversations done: `RSVP + Mark Done` is on and
-    /// they aren't all done already.
+    /// Whether answering marks the actionable conversations done, which it does when
+    /// `RSVP + Mark Done` is on and they aren't all done already.
     pub(crate) fn rsvp_marks_done(&self) -> bool {
         let threads = actionable(self.thread.as_ref(), &self.inbox);
         self.account.settings().rsvp_and_done
@@ -103,7 +103,8 @@ impl Mail {
             && !threads.iter().all(|thread| thread.done)
     }
 
-    /// A palette row: answers the open conversation's invitation, even with the answer it has.
+    /// A palette row, which answers the open conversation's invitation, even with the answer it
+    /// already has.
     pub(crate) fn rsvp_command(&mut self, response: Response) {
         let Some(invite) = self
             .thread
@@ -126,7 +127,7 @@ impl Mail {
         }
     }
 
-    /// RSVP + Mark Done's second half: the actionable conversations are marked done, with Undo and
+    /// RSVP + Mark Done's second half. The actionable conversations are marked done, with Undo and
     /// a toast that says the answer, and leave the list the way Auto Advance says.
     pub(crate) fn rsvp_mark_done(&mut self, response: Response) {
         let text = match (self.snapshot.connection.is_online(), response) {

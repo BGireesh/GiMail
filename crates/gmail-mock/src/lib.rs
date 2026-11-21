@@ -94,7 +94,7 @@ impl MockServer {
         gmail::Endpoints::mock(&self.url())
     }
 
-    /// Goes away, as Google does when the network drops: the port closes and so does every
+    /// Goes away, as Google does when the network drops. The port closes, and so does every
     /// connection to it once its request is answered, so what's sent meanwhile gets no answer.
     /// The mailbox stays as it is.
     pub async fn disconnect(&mut self) {

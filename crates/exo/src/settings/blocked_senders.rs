@@ -1,6 +1,6 @@
-//! Blocked Senders: the addresses and domains the account blocks, each with an Unblock behind an
-//! `Unblock` alert. Unblocking takes it off the list and deletes the Gmail filter its block made;
-//! what the filter trashed stays in Trash.
+//! The Blocked Senders dialog lists the addresses and domains the account blocks, each with an
+//! Unblock behind an `Unblock` alert. Unblocking takes the sender off the list and deletes the
+//! Gmail filter its block made. What the filter trashed stays in Trash.
 
 use egui::{Color32, Context, CornerRadius, Rect, Sense, Ui, pos2};
 use exo_ui::{Alert, Dialog, Family, Font, KeycapColors, Keycaps, TextStyle, palette};
@@ -12,19 +12,21 @@ const SUBHEADER_TOP: f32 = 27.0;
 const SENDER: TextStyle = TextStyle::new(Font::new(Family::Sans, 700), 12.0, 20.0);
 const ROW: f32 = 32.0;
 const ROW_TEXT: f32 = 7.0;
-/// The list's top: 20px under a one-line subheader, 88px under a two-line one.
+/// The list's top: 21px under the subheader's last line, so 68px down under a one-line subheader
+/// and 88px under a two-line one.
 const LIST_GAP: f32 = 21.0;
 /// The focused row's fill, 16px into the dialog's padding, 4px corners.
 const HIGHLIGHT_INSET: f32 = 16.0;
-/// The footer's line, 22px under the list (or the subheader); the body ends 18px below its top.
+/// The footer's line sits 22px under the list, or 19px under the subheader when there's no list.
+/// The body ends 18px below its top.
 const FOOTER_GAP: f32 = 22.0;
 const EMPTY_FOOTER_GAP: f32 = 19.0;
 const FOOTER_BELOW: f32 = 18.0;
 /// `Unblock`: `#000` at `opacity: .5` on the focused row (`:focus`), hidden on the others.
 const UNBLOCK_FOCUSED: f32 = 0.5;
 
-/// The focused row's fill: `hsl(220, 45%, 97%)`, `#eaeaea` in Carbon; Bulk
-/// Actions' rows take it too.
+/// The focused row's fill, `hsl(220, 45%, 97%)` or `#eaeaea` in Carbon. Bulk Actions' rows take it
+/// too.
 pub(crate) fn highlight(ctx: &Context) -> Color32 {
     match exo_ui::app_theme(ctx) {
         exo_ui::Theme::Snow => exo_ui::Theme::Snow.palette().fill_hover_default,
@@ -32,11 +34,12 @@ pub(crate) fn highlight(ctx: &Context) -> Color32 {
     }
 }
 
-/// A dialog's footer line with `⌘ K` in it, the caps' tops at `top`: `rgba(0, 0, 0, .6)`, the
-/// caps 19px and in the app's theme (dark in Carbon), which drops the text 1px. The first cap sits
-/// `first_gap` after `lead` (a cap's own 4px, Bulk Actions' 2px), and `rest` `after_keys` after the
-/// last (Blocked Senders' keeps a 1px right margin, the Images dialog's none). (Blocked Senders'
-/// footer is a flex row, which trims its lead's trailing space.)
+/// A dialog's footer line with `⌘ K` in it, with the caps' tops at `top`. The text is
+/// `rgba(0, 0, 0, .6)`, and the caps are 19px and in the app's theme (dark in Carbon), which drops
+/// the text 1px. The first cap sits `first_gap` after `lead` (a cap's own 4px, or Bulk Actions'
+/// 2px), and `rest` sits `after_keys` after the last cap (Blocked Senders' keeps a 1px right
+/// margin, the Images dialog's none). Blocked Senders' footer is a flex row, which trims its
+/// lead's trailing space.
 pub(crate) fn paint_footer(
     ui: &Ui,
     left: f32,
@@ -72,11 +75,11 @@ pub struct State {
 /// Something done in the dialog.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
-    /// A row was clicked: ask about unblocking it.
+    /// A row was clicked, which asks about unblocking it.
     Row(usize),
     /// ↓/J/Tab (1) or ↑/K/⇧Tab (-1).
     Move(isize),
-    /// Enter: the focused row.
+    /// Enter, which acts on the focused row.
     Activate,
     /// The alert's action, by index (`Unblock` first).
     AlertAction(usize),
@@ -87,7 +90,7 @@ pub enum Event {
 }
 
 impl State {
-    /// An alert is up: it has the keyboard.
+    /// Whether an alert is up, in which case it has the keyboard.
     pub fn alert_open(&self) -> bool {
         self.alert.is_some()
     }
@@ -97,7 +100,7 @@ impl State {
         *self = Self::default();
     }
 
-    /// Applies `event` over `senders`; returns the sender to unblock once the alert says so.
+    /// Applies `event` over `senders`, and returns the sender to unblock once the alert says so.
     pub fn handle(&mut self, event: Event, senders: &[&str]) -> Option<String> {
         match event {
             Event::Move(delta) if !senders.is_empty() => {
@@ -132,7 +135,8 @@ impl State {
     }
 }
 
-/// The blocked senders the dialog lists: the setting's, each once whatever its case, in order.
+/// The blocked senders the dialog lists. They're the setting's, in order, each once whatever its
+/// case.
 pub fn senders(blocked: &[String]) -> Vec<&str> {
     let mut seen = std::collections::HashSet::new();
     blocked

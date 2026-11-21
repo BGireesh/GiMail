@@ -89,12 +89,12 @@ impl<'a> DialogAction<'a> {
         Self { enabled, ..self }
     }
 
-    /// Has the keyboard: filled and glowing.
+    /// Has the keyboard, which fills it and makes it glow.
     pub fn focused(self, focused: bool) -> Self {
         Self { focused, ..self }
     }
 
-    /// Never fills: hovered, pressed or focused, its label darkens to `rgba(0, 0, 0, .7)` instead
+    /// Never fills. Hovered, pressed or focused, its label darkens to `rgba(0, 0, 0, .7)` instead
     /// (it still glows), as Get Me To Zero's secondary does.
     pub fn unfilled(self) -> Self {
         Self {
@@ -112,16 +112,16 @@ impl<'a> DialogAction<'a> {
         }
     }
 
-    /// On a dark surface rather than a dialog's light card (the week view's sidebar in Carbon):
-    /// the label `hsla(0, 0%, 100%, .4)`, `.15` disabled, and `#27292d` on the accent.
+    /// On a dark surface rather than a dialog's light card (the week view's sidebar in Carbon),
+    /// with the label `hsla(0, 0%, 100%, .4)`, `.15` disabled, and `#27292d` on the accent.
     pub fn dark(self, dark: bool) -> Self {
         Self { dark, ..self }
     }
 
-    /// In a dialog forced into the other style's light theme (Out of Office Reply's): Classic's
-    /// uppercase bold label and 2px corners, in Exo Sans Alt and `#73716d`; filled with `#714cb6`
-    /// (`#533192` while hovered), with white labels; a disabled primary keeps its fill at `.4`
-    /// opacity.
+    /// In a dialog forced into the other style's light theme (Out of Office Reply's). The button
+    /// keeps Classic's uppercase bold label and 2px corners, in Exo Sans Alt and `#73716d`. It
+    /// fills with `#714cb6` (`#533192` while hovered) with white labels, and a disabled primary
+    /// keeps its fill at `.4` opacity.
     pub fn origin_light(self) -> Self {
         Self {
             origin_light: true,
@@ -289,8 +289,9 @@ fn paint_action_in(
     );
 }
 
-/// A dialog's text input: a borderless field over a 1px rule, in the active color while it has the
-/// keyboard (still 1px), both in the critical color with [`DialogInput::error`].
+/// A dialog's text input, a borderless field over a 1px rule. The rule takes the active color
+/// while the field has the keyboard (still 1px), and both take the critical color with
+/// [`DialogInput::error`].
 #[derive(Clone, Copy, Debug)]
 #[must_use]
 pub struct DialogInput<'a> {
@@ -321,8 +322,8 @@ impl<'a> DialogInput<'a> {
         self.show_with(ui, id, text, line, text_field)
     }
 
-    /// [`Self::show`] with the field drawn by `field` (as [`text_field`] takes its arguments): a
-    /// spellchecked one, say.
+    /// [`Self::show`] with the field drawn by `field` (as [`text_field`] takes its arguments), such
+    /// as a spellchecked one.
     pub fn show_with(
         &self,
         ui: &mut Ui,

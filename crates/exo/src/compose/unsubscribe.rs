@@ -1,7 +1,7 @@
-//! The email a `mailto:` unsubscribe sends: a new message from the alias the list wrote to, to
-//! the link's address with its subject, saying who asks, and sent at once with no signature, no
-//! compose and no toast of its own. It goes through the drafts like any send, so offline it
-//! waits, and it lands in Sent.
+//! The email a `mailto:` unsubscribe sends. It's a new message from the alias the list wrote to,
+//! addressed to the link's address with the link's subject, and it says who is asking. It's sent
+//! at once, with no signature, no compose and no toast of its own. It goes through the drafts
+//! like any send, so it waits while offline, and it lands in Sent.
 
 use exo_store::{Address, Draft, MessageDetail};
 use jiff::Timestamp;
@@ -9,8 +9,8 @@ use jiff::Timestamp;
 use super::{Fields, Open, factory, mailto, outgoing};
 
 impl crate::Mail {
-    /// Sends the unsubscribe request to `to` with `subject`, from the alias `message` (the one
-    /// the unsubscribe was found in) was delivered to.
+    /// Sends the unsubscribe request to `to` with `subject`. It goes from the alias that
+    /// `message` was delivered to, where `message` is the one the unsubscribe was found in.
     pub(crate) fn compose_send_unsubscribe(
         &self,
         to: &str,

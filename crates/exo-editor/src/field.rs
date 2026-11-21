@@ -2,9 +2,9 @@
 //! subject, a snippet's name, the Out of Office subject, an event's title. These are spellchecked
 //! whether or not autocorrect is on.
 //!
-//! As Chromium's idle-time checker does (its hot and cold modes): a field is checked
-//! while it has the keyboard, the whole of it once it has changed since it was last checked, or a
-//! second after typing in a word, which shows that word's mark only then; typing a space or
+//! A field is checked only while it has the keyboard, as Chromium's idle-time checker does (its
+//! hot and cold modes). The whole field is checked once it has changed since it was last checked,
+//! or a second after typing in a word, so that word's mark shows only then. Typing a space or
 //! pasting checks it at once. The marks go when the field loses the keyboard, and come back with
 //! the next edit. A right-click selects the word under it, as on a Mac ([`exo_ui::text_field`]),
 //! and the app's editable menu ([`FieldSpelling::take_menu`]) has the word's spelling.
@@ -27,13 +27,13 @@ const COLD: f64 = 1.0;
 #[derive(Default)]
 pub struct FieldSpelling {
     engine: Option<Box<dyn Spelling>>,
-    /// The text as last checked: focusing the field again checks it only once it has changed.
+    /// The text as last checked, so focusing the field again checks it only once it has changed.
     checked: Option<String>,
     /// The misspellings marked, as character ranges, while the field has the keyboard.
     marks: Vec<Range<usize>>,
     /// The text last frame, to see edits by.
     last: Option<String>,
-    /// It had the keyboard last frame.
+    /// Whether the field had the keyboard last frame.
     had_focus: bool,
     /// When the field is next checked whole, after typing in a word.
     due: Option<f64>,
@@ -80,7 +80,7 @@ impl FieldSpelling {
         self.menu.take()
     }
 
-    /// [`exo_ui::text_field`] `id` editing `text` on `line`, checked and marked.
+    /// Shows [`exo_ui::text_field`] `id` editing `text` on `line`, checked and marked.
     #[expect(
         clippy::too_many_arguments,
         reason = "the field's own arguments, as `text_field` takes them"
@@ -141,7 +141,7 @@ impl FieldSpelling {
         let in_word =
             caret.is_some_and(|at| at > 0 && chars.get(at - 1).copied().is_some_and(is_word_char));
         if edited && typed && !pasted && in_word {
-            // `CurrentWordIfTypingInPartialWord`: the word being typed isn't marked yet.
+            // As in `CurrentWordIfTypingInPartialWord`, the word being typed isn't marked yet.
             let caret = caret.unwrap_or_default();
             self.marks
                 .retain(|mark| !(mark.start <= caret && caret <= mark.end));
@@ -232,8 +232,8 @@ impl FieldSpelling {
         });
     }
 
-    /// Replaces `misspelling` in `text` with `correction`, the caret after it, checked again at
-    /// once. Does nothing if the word has changed since.
+    /// Replaces `misspelling` in `text` with `correction`, leaving the caret after it, and checks
+    /// the field again at once. Does nothing if the word has changed since.
     pub fn correct(
         &mut self,
         ctx: &egui::Context,
@@ -262,7 +262,8 @@ impl FieldSpelling {
         self.last = Some(text.clone());
     }
 
-    /// Adds `word` to the user's dictionary (`Add to Dictionary`), checked again at once.
+    /// Adds `word` to the user's dictionary (`Add to Dictionary`) and checks the field again at
+    /// once.
     pub fn learn(&mut self, word: &str, text: &str) {
         if let Some(engine) = self.engine.as_mut() {
             engine.learn(word);
@@ -270,7 +271,7 @@ impl FieldSpelling {
         }
     }
 
-    /// Stops marking `word` in this field (`Ignore Spelling`), checked again at once.
+    /// Stops marking `word` in this field (`Ignore Spelling`) and checks the field again at once.
     pub fn ignore(&mut self, word: &str, text: &str) {
         if let Some(engine) = self.engine.as_mut() {
             engine.ignore(word);

@@ -1,7 +1,7 @@
-//! The sign-in screen: the photo, a wordmark, and a white card with the tagline, "Sign in with
-//! Google" (or "Sign in as {email}" for an account Google signed out, with "Use another account→"
-//! under it), a spinner while the browser is out, and the footer's errors; and the round back
-//! button when there's an account to go back to.
+//! The sign-in screen: the photo, a wordmark, a white card, and the round back button when there's
+//! an account to go back to. The card has the tagline, "Sign in with Google", a spinner while the
+//! browser is out, and the footer's errors. For an account Google signed out, the button says
+//! "Sign in as {email}", with "Use another account→" under it.
 //!
 //! Google is the only provider, so the card's fixed heights leave out a Microsoft button. The
 //! wordmark says "EXO".
@@ -15,7 +15,7 @@ use exo_ui::{BoxShadow, Family, Font, KeyTooltip, Placement, TextStyle, motion};
 
 use crate::{chrome, photo::Photo, sign_in::SignIn};
 
-/// The column is 570px wide; the card is padded `0 37px`.
+/// The column is 570px wide, and the card is padded `0 37px`.
 const WIDTH: f32 = 570.0;
 const PADDING_X: f32 = 37.0;
 /// The wordmark: white bold caps 12.5px tall, tracked out, in a 16px box 32px above the card.
@@ -24,8 +24,8 @@ const WORDMARK: TextStyle =
 const WORDMARK_NUDGE: f32 = 2.0;
 const WORDMARK_HEIGHT: f32 = 16.0;
 const WORDMARK_GAP: f32 = 32.0;
-/// The card: `#fafafa` at 98%, 4px corners, two soft shadows, `margin-bottom: 20px`; 320px tall
-/// with the provider button, 392px with a footer too.
+/// The card: `#fafafa` at 98%, 4px corners, two soft shadows, `margin-bottom: 20px`. It's 320px
+/// tall with the provider button, and 392px with a footer too.
 const CARD: Color32 = Color32::from_rgb(0xfa, 0xfa, 0xfa);
 const CARD_OPACITY: f32 = 0.98;
 const CARD_SHADOWS: [BoxShadow; 2] = [
@@ -48,8 +48,8 @@ const PROMPT: TextStyle = TextStyle::new(Font::new(Family::Sans, 100), 24.0, 32.
 const PROMPT_INK: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 153);
 const PROMPT_NUDGE: f32 = 2.0;
 /// The button: `#8797cd`, white bold 14px on a 50px line, `padding: 2px 20px`, 315px wide,
-/// 52px tall, 4px corners, `top: 4px`; it grows 1% hovered and shrinks 5% pressed, its two
-/// shadows changing with it (`transition: all .5s`).
+/// 52px tall, 4px corners, `top: 4px`. It grows 1% hovered and shrinks 5% pressed, and its two
+/// shadows change with it (`transition: all .5s`).
 const BUTTON: TextStyle = TextStyle::new(Font::new(Family::Sans, 700), 14.0, 50.0);
 const BUTTON_FILL: Color32 = Color32::from_rgb(0x87, 0x97, 0xcd);
 const BUTTON_SIZE: egui::Vec2 = egui::Vec2::new(315.0, 52.0);
@@ -65,12 +65,12 @@ const SPINNER_INK: Color32 = Color32::from_rgba_premultiplied(12, 14, 16, 77);
 const FOOTER: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 14.0, 20.0);
 const FOOTER_INK: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 179);
 const FOOTER_NUDGE: f32 = 3.0;
-/// Links: `#54acdc`; the footer link's arrow is nudged `top: 1px; left: 3px`.
+/// Links are `#54acdc`, and the footer link's arrow is nudged `top: 1px; left: 3px`.
 const LINK_INK: Color32 = Color32::from_rgb(0x54, 0xac, 0xdc);
 const ARROW_NUDGE: egui::Vec2 = egui::Vec2::new(3.0, 1.0);
-/// The back button: a 40px white circle `top: 24px; left: 2rem`, its 14px arrow black at .3 (.5
-/// hovered); `scale(1.05)` hovered and `scale(.9)` pressed, its shadows changing with it
-/// (`transition: all .4s`).
+/// The back button is a 40px white circle at `top: 24px; left: 2rem`, with its 14px arrow black at
+/// .3 (.5 hovered). It's `scale(1.05)` hovered and `scale(.9)` pressed, and its shadows change with
+/// it (`transition: all .4s`).
 const BACK: f32 = 40.0;
 const BACK_TOP: f32 = 24.0;
 const BACK_ICON: f32 = 14.0;
@@ -114,7 +114,7 @@ const BACK_PRESS_SHADOWS: [BoxShadow; 2] = [
         Color32::from_rgba_premultiplied(0, 0, 0, 77),
     ),
 ];
-/// Its tooltip's box sits this far right of the button: a 10px offset and the tooltip's padding.
+/// Its tooltip's box sits this far right of the button, a 10px offset plus the tooltip's padding.
 const BACK_TOOLTIP_GAP: f32 = 18.36;
 /// The spinner gives way to the button after 30 s without an answer from the browser, though
 /// the attempt goes on.
@@ -132,7 +132,7 @@ mod copy {
     pub fn sign_in_as(email: &str) -> String {
         format!("Sign in as {email}")
     }
-    /// The footer's link to sign in another account, its arrow drawn on its own.
+    /// The footer's link to sign in another account, with its arrow drawn on its own.
     pub const ANOTHER_ACCOUNT: &str = "Use another account";
     pub const ARROW: &str = "→";
     /// The back button's tooltip: back to the account the screen came from,
@@ -145,7 +145,7 @@ mod copy {
     pub const MISSING_SCOPES: &str = "Please select all permissions when signing in with Google.\nExo requires these to manage your email.";
     /// The account has no Gmail mailbox.
     pub const NO_MAILBOX: &str = "This Google Account does not appear to have a Gmail mailbox.";
-    /// Exo ships no OAuth client: the user saves their own at `path`.
+    /// Exo ships no OAuth client, so the user saves their own at `path`.
     pub fn no_client(path: &str) -> String {
         format!("Please save your Google OAuth client (Desktop app) as {path}.")
     }
@@ -154,10 +154,10 @@ mod copy {
 /// Where the back button leads.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Back {
-    /// The account the screen was opened from: adding an account, or
+    /// The account the screen was opened from, when adding an account or
     /// switching to one Google signed out. Its tooltip says `Back`.
     Previous(String),
-    /// Another account still signed in: `Back to signed-in account`.
+    /// Another account still signed in. Its tooltip says `Back to signed-in account`.
     SignedIn(String),
 }
 
@@ -182,7 +182,7 @@ impl Back {
 pub enum Outcome {
     /// This account signed in.
     SignedIn(String),
-    /// The back button (or Escape): show this account.
+    /// The back button (or Escape), which shows this account.
     Back(String),
 }
 
@@ -201,8 +201,8 @@ pub struct LogIn {
 }
 
 impl LogIn {
-    /// The screen with the photo from `images`, saying `footer` (say, that there's no OAuth
-    /// client).
+    /// The screen with the photo from `images`, showing `footer` (for example, that there's no
+    /// OAuth client).
     pub(crate) fn new(ctx: &egui::Context, images: &Path, footer: Option<String>) -> Self {
         Self {
             photo: Photo::load(ctx, images.join("install-bg.jpg")),
@@ -247,7 +247,7 @@ impl LogIn {
         self.footer.as_deref()
     }
 
-    /// The spinner is showing: a sign-in is waiting for the browser.
+    /// Whether the spinner is showing, which means a sign-in is waiting for the browser.
     pub fn is_loading(&self) -> bool {
         self.loading_since.is_some()
     }
@@ -282,7 +282,7 @@ impl LogIn {
         {
             self.loading_since = None;
         }
-        // Enter signs in, Escape clicks the back button; Tab moves nothing.
+        // Enter signs in and Escape clicks the back button. Tab moves nothing.
         let (enter, escape) = ctx.input_mut(|input| {
             input.consume_key(Modifiers::NONE, Key::Tab);
             (
@@ -293,8 +293,8 @@ impl LogIn {
 
         let window = ui.max_rect();
         let painter = ui.painter();
-        // The photo centered, under the shell's two shades: 40%
-        // black fading to 4% over the top 176px (gone by 216px), 10% to 1% from the bottom.
+        // The photo is centered under the shell's two shades. One is 40% black fading to 4% over
+        // the top 176px (gone by 216px), and the other 10% to 1% from the bottom.
         self.photo.paint(painter, window, |free| free / 2.0);
         painter.add(shade(window, true, 0.4, 0.04));
         painter.add(shade(window, false, 0.1, 0.01));
@@ -359,7 +359,8 @@ impl LogIn {
             ));
             ctx.request_repaint();
         } else {
-            // `transform: perspective(1px)` gives the button a layer, which Chromium puts on whole pixels.
+            // `transform: perspective(1px)` gives the button a layer, which Chromium puts on
+            // whole pixels.
             let button = exo_ui::pixel_snap(Rect::from_min_size(
                 pos2(center - BUTTON_SIZE.x / 2.0, layout.actions + BUTTON_NUDGE),
                 BUTTON_SIZE,
@@ -385,8 +386,8 @@ impl LogIn {
             let lerp = |from: f32, to: f32, t: f32| from + (to - from) * t;
             let scale = lerp(lerp(1.0, 1.01, hover), 0.95, press);
             let scaled = Rect::from_center_size(button.center(), button.size() * scale);
-            // `0 14px 34px -10px rgba(0,0,0,.15)` twice; hovered both `40px … .25`; pressed the
-            // first `20px … .35`.
+            // `0 14px 34px -10px rgba(0,0,0,.15)` twice. Hovered, both are `40px … .25`. Pressed,
+            // the first is `20px … .35`.
             let lift = hover.max(press);
             let shadows = [
                 (
@@ -436,7 +437,7 @@ impl LogIn {
             );
         }
         if link && another_account_link(ui, center, layout.footer + FOOTER_NUDGE) {
-            // "Use another account": the default buttons, with no footer.
+            // "Use another account" brings back the default buttons, with no footer.
             self.show_hint = false;
         }
         let back = self
@@ -510,7 +511,7 @@ impl Card {
         spinner: 72.0,
         footer: 44.0,
     };
-    /// One button, `Sign in as`: the card's own height and margins.
+    /// One button, `Sign in as`, with the card's own height and margins.
     const SINGLE: Self = Self {
         height: 300.0,
         prompt: 88.0,
@@ -531,7 +532,7 @@ struct Layout {
 }
 
 impl Layout {
-    /// The column for `page`, centered in it, its card in state `card`.
+    /// The column for `page`, centered in it, with its card in state `card`.
     fn new(page: Rect, card: &Card, loading: bool) -> Self {
         let height = WORDMARK_HEIGHT + WORDMARK_GAP + card.height + CARD_MARGIN_BOTTOM;
         let top = page.center().y - height / 2.0;
@@ -564,12 +565,12 @@ impl Layout {
     }
 }
 
-/// What the footer says after `error`; nothing when the user declined, or when the browser
-/// never came back (the spinner had given up long before).
+/// What the footer says after `error`. It says nothing when the user declined, or when the
+/// browser never came back (the spinner had given up long before).
 pub(crate) fn footer(error: &exo_auth::Error) -> Option<String> {
     use exo_auth::Error;
     Some(match error {
-        // Declined consent is swallowed.
+        // Declined consent shows no error.
         Error::AccessDenied | Error::TimedOut => return None,
         Error::MissingScopes(_) => copy::MISSING_SCOPES.to_owned(),
         Error::NoMailbox => copy::NO_MAILBOX.to_owned(),
@@ -694,8 +695,8 @@ fn back_button(ui: &Ui, window: Rect, back: &Back) -> bool {
     response.clicked()
 }
 
-/// One of the shell's shades over the photo: black at `edge` opacity at the window's top (or
-/// bottom, `from_top` false), `inner` 176px in, and nothing from 216px.
+/// One of the shell's shades over the photo. It's black at `edge` opacity at the window's top (or
+/// bottom, when `from_top` is false), at `inner` 176px in, and clear from 216px.
 fn shade(window: Rect, from_top: bool, edge: f32, inner: f32) -> Shape {
     let black = |alpha: f32| Color32::from_black_alpha((alpha * 255.0).round() as u8);
     let mut mesh = egui::Mesh::default();
@@ -719,7 +720,7 @@ fn shade(window: Rect, from_top: bool, edge: f32, inner: f32) -> Shape {
     Shape::mesh(mesh)
 }
 
-/// The spinner's ring in `rect`, turned `turn` radians clockwise: a 4px border whose
+/// The spinner's ring in `rect`, turned `turn` radians clockwise. It's a 4px border whose
 /// right side (between the 45° corner joins) is transparent.
 fn spinner_ring(rect: Rect, turn: f32, color: Color32) -> Shape {
     const POINTS: usize = 91;

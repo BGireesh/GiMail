@@ -1,15 +1,15 @@
 //! Search: the local full-text index, looking a query up in it, and Gmail's search for what
-//! isn't stored or isn't matched locally, the two merged.
+//! isn't stored or isn't matched locally, with the two merged.
 //!
 //! Every value a user types reaches SQLite as a bound parameter, and reaches FTS5 only as a
-//! bare alphanumeric term or a quoted string (`crate::query`); the SQL text is built from fixed
+//! bare alphanumeric term or a quoted string (`crate::query`). The SQL text is built from fixed
 //! fragments alone.
 //!
-//! The index, `search_fts` (made by the migrations, `migrations/0001_baseline.sql`), has one row
-//! per thread, its rowid derived from the thread id (`row_id`). `sort` is the thread's latest
-//! message's date; `messages` lists the messages whose text `content` holds (those with a body
-//! stored) and the revisions of Exo's drafts it holds, so a label change doesn't re-read bodies
-//! and a body arriving or a draft's save does.
+//! The index is `search_fts`, made by the migrations (`migrations/0001_baseline.sql`). It has
+//! one row per thread, with a rowid derived from the thread id (`row_id`). `sort` is the date of
+//! the thread's latest message. `messages` lists the messages whose text `content` holds (those
+//! with a body stored) and the revisions of Exo's drafts it holds. So a label change doesn't
+//! re-read bodies, but a body arriving or a draft being saved does.
 
 use std::collections::{BTreeSet, HashMap};
 use std::ops::Range;
@@ -36,7 +36,7 @@ use crate::view::{Router, ThreadView};
 /// `snippet()`'s column numbers.
 const SUBJECT_COLUMN: i64 = 3;
 const CONTENT_COLUMN: i64 = 4;
-/// The index's highlight markers and ellipsis: private-use characters no mail contains.
+/// The index's highlight markers and ellipsis, which are private-use characters no mail contains.
 const MARK_START: char = '\u{e550}';
 const MARK_END: char = '\u{e551}';
 const ELLIPSIS: char = '\u{e553}';
@@ -48,12 +48,12 @@ const DRAFT_JOINER: &str = " \u{f8f5} ";
 const MAX_MESSAGE_TEXT: usize = 100_000;
 /// A subject snippet's length, in tokens.
 const SUBJECT_TOKENS: i64 = 64;
-/// Gmail's first page of matches, then every page after it.
+/// The size of Gmail's first page of matches, then of every page after it.
 const FIRST_GMAIL_PAGE: u32 = 10;
 const GMAIL_PAGE: u32 = 100;
 
-/// A thread's row id: a stable 64-bit hash of its id (FNV-1a), so updating a thread's row is a
-/// lookup by rowid.
+/// A thread's row id, which is a stable 64-bit hash of its id (FNV-1a), so updating a thread's
+/// row is a lookup by rowid.
 fn row_id(thread: &str) -> i64 {
     let hash = thread
         .bytes()
@@ -74,7 +74,7 @@ pub(crate) async fn unindex(exec: &mut dyn Executor, thread: &str) -> Result<()>
 
 /// Writes `view`'s row: its subject, every message's text, its people, its attachments' names,
 /// its labels and lists (`list_ids`), mailing lists and Message-IDs. A thread that is only a
-/// draft written elsewhere isn't searchable: such drafts only show in Drafts.
+/// draft written elsewhere isn't searchable, because such drafts only show in Drafts.
 pub(crate) async fn index(
     exec: &mut dyn Executor,
     view: &ThreadView,
@@ -86,7 +86,8 @@ pub(crate) async fn index(
     }
     let row = row_id(&view.id);
     let ids: Vec<&str> = view.messages.iter().map(|m| m.row.id.as_str()).collect();
-    // A draft being written is compose's: its record's text stands for its message's.
+    // A draft being written belongs to compose, so its draft record's text stands in for its
+    // message's text.
     let drafts = crate::drafts::editable(exec, &view.id).await?;
     let others: Vec<&str> = ids
         .iter()
@@ -222,8 +223,9 @@ fn fields(row: &Value) -> &[Value] {
     }
 }
 
-/// The text of every message (`content`): received mail first, then drafts' text. Messages
-/// `ids` have their bodies stored; `drafts`, being written, are as compose last saved them.
+/// The text of every message (`content`), received mail first, then drafts' text. The messages
+/// in `ids` have their bodies stored. `drafts` are being written, and their text is as compose
+/// last saved it.
 async fn content(
     exec: &mut dyn Executor,
     view: &ThreadView,
@@ -266,8 +268,8 @@ async fn content(
     ))
 }
 
-/// What the index holds of a stored body: the text a reader sees, without the quoted reply and
-/// the signature (`crate::text`), or its whole text until that's worked out.
+/// What the index holds of a stored body. That's the text a reader sees, without the quoted
+/// reply and the signature (`crate::text`), or the body's whole text until that's worked out.
 fn body_text(body: &BodyRow) -> String {
     match &body.visible {
         Some(visible) => truncated(collapse(visible)),
@@ -275,7 +277,8 @@ fn body_text(body: &BodyRow) -> String {
     }
 }
 
-/// A body's whole text: the HTML's without its styles and scripts, or the plain-text part.
+/// A body's whole text, which is the HTML's text without its styles and scripts, or else the
+/// plain-text part.
 pub(crate) fn whole_text(html: Option<&str>, text: Option<&str>) -> String {
     static HIDDEN: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(
@@ -301,7 +304,7 @@ fn truncated(text: String) -> String {
     }
 }
 
-/// Whitespace runs to one space, trimmed.
+/// `text` with each whitespace run collapsed to one space, trimmed.
 fn collapse(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
@@ -317,7 +320,7 @@ pub struct Highlighted {
 }
 
 impl Highlighted {
-    /// Text between [`MARK_START`] and [`MARK_END`] in bold.
+    /// `marked` with the text between [`MARK_START`] and [`MARK_END`] in bold.
     fn from_marked(marked: &str) -> Self {
         let mut highlighted = Self::default();
         let mut start = None;
@@ -343,8 +346,8 @@ impl Highlighted {
         Self::bold_matches(text, patterns)
     }
 
-    /// `text` with what `rechecks` match in bold, and nothing else: the index's highlights
-    /// redone.
+    /// `text` with what `rechecks` match in bold, and nothing else, which redoes the index's
+    /// highlights.
     fn matching(text: &str, rechecks: &[Recheck]) -> Self {
         Self::bold_matches(text, rechecks.iter().map(|recheck| recheck.regex.clone()))
     }
@@ -383,8 +386,8 @@ impl Highlighted {
 pub struct SearchResult {
     /// Its row, dated by the result's sort time.
     pub thread: ThreadSummary,
-    /// Its subject with the matched words in bold, when the query has words to match; the
-    /// row's subject otherwise.
+    /// Its subject with the matched words in bold, when the query has words to match. Otherwise
+    /// the row's subject shows.
     pub subject: Option<Highlighted>,
     /// The excerpt that matched, in place of the row's snippet.
     pub snippet: Option<Highlighted>,
@@ -395,11 +398,11 @@ pub struct SearchResult {
 pub struct SearchPage {
     /// The conversations, newest first.
     pub results: Vec<SearchResult>,
-    /// The local index has more past the limit.
+    /// Whether the local index has more past the limit.
     pub more_local: bool,
-    /// The label ids the query asks for, which results' chips leave out.
+    /// The label ids the query asks for, which the label chips on results leave out.
     pub labels: Vec<String>,
-    /// The words results' names show highlighted where a name or address matches.
+    /// The words to highlight in results' names, where a name or address matches.
     pub names: Vec<String>,
 }
 
@@ -420,8 +423,8 @@ pub struct GmailPage {
 }
 
 /// A search in progress: the query, when it started, Gmail's matches so far, and each result's
-/// sort time, subject and excerpt, which are whatever it was first found with (finding it again
-/// with the same sort time changes nothing).
+/// sort time, subject and excerpt. Those three are whatever the result was first found with, so
+/// finding it again keeps its sort time and changes nothing.
 #[derive(Debug, Clone)]
 pub struct Search {
     query: SearchQuery,
@@ -430,8 +433,8 @@ pub struct Search {
     next_page: Option<String>,
     gmail_done: bool,
     found: HashMap<String, Found>,
-    /// Run ahead of being asked for (instant search): Gmail's first page waits behind what's
-    /// on screen.
+    /// Whether the search runs ahead of being asked for (instant search), so Gmail's first page
+    /// waits behind what's on screen.
     preloaded: bool,
 }
 
@@ -457,7 +460,7 @@ impl Search {
         }
     }
 
-    /// A search for `raw` run ahead of being asked for: its first page of Gmail's matches goes in
+    /// A search for `raw` run ahead of being asked for. Its first page of Gmail's matches goes in
     /// [`Lane::Show`], after what the user is waiting on.
     pub fn preload(raw: &str) -> Self {
         Self {
@@ -466,8 +469,8 @@ impl Search {
         }
     }
 
-    /// The preloaded search was asked for: a first page it hasn't asked Gmail for yet goes as
-    /// a search's does.
+    /// Marks the preloaded search as asked for. A first page it hasn't asked Gmail for yet then
+    /// goes in the same lane as any other search's.
     pub fn ask(&mut self) {
         self.preloaded = false;
     }
@@ -477,7 +480,7 @@ impl Search {
         &self.query
     }
 
-    /// Gmail has no more matches to give.
+    /// Whether Gmail has no more matches to give.
     pub fn gmail_done(&self) -> bool {
         self.gmail_done
     }
@@ -505,10 +508,11 @@ impl Search {
 }
 
 impl Store {
-    /// The conversations `search` has found, newest first: up to `limit` from the local index
-    /// (only back as far as All Mail is stored when `online`, since Gmail finds the older ones),
-    /// then Gmail's matches it didn't find. `snippet_tokens` is how long an excerpt is, in
-    /// words (10, 15, 26 or 35 with the window's width).
+    /// The conversations `search` has found, newest first. That's up to `limit` from the local
+    /// index, then the matches from Gmail that the index didn't find. When `online`, the local
+    /// results only go back as far as All Mail is stored, since Gmail finds the older ones.
+    /// `snippet_tokens` is how long an excerpt is, in words (10, 15, 26 or 35, depending on the
+    /// window's width).
     ///
     /// # Errors
     /// On database failures.
@@ -628,8 +632,9 @@ impl Store {
         let mut results = Vec::new();
         let mut seen = BTreeSet::new();
         for (id, subject, snippet) in found {
-            // A thread new to the index since the search started that Gmail found too was
-            // stored by that Gmail search, so it shows as Gmail found it, not as an index hit.
+            // A thread that Gmail found too, and that is new to the index since the search
+            // started, was stored by that Gmail search. It shows as Gmail found it, not as an
+            // index hit.
             if !search.found.contains_key(&id) && search.gmail.iter().any(|hit| hit.thread == id) {
                 continue;
             }
@@ -733,11 +738,11 @@ impl Store {
         })
     }
 
-    /// The next page of Gmail's matches for `search`: `messages.list` with the query's Gmail
-    /// form, ten at first and a hundred after; conversations not stored yet are fetched for their
+    /// The next page of Gmail's matches for `search`, from `messages.list` with the query's Gmail
+    /// form, ten at first and a hundred after. Conversations not stored yet are fetched for their
     /// rows and stored (and so indexed) on the way. Storing them doesn't tick
-    /// [`changes`](Self::changes): read the search again once the page is added to it, so they
-    /// show as Gmail found them rather than as index hits.
+    /// [`changes`](Self::changes). Read the search again once the page is added to it, so that
+    /// they show as Gmail found them rather than as index hits.
     ///
     /// # Errors
     /// [`Error::Offline`](crate::Error::Offline) and the like when Gmail can't be reached.
@@ -764,8 +769,8 @@ impl Store {
             page_token: search.next_page.clone(),
             ..ListQuery::default()
         };
-        // The first page is what the user just asked for; later ones fill in as they scroll,
-        // and one run ahead may never be asked for.
+        // The first page is what the user just asked for. Later ones fill in as they scroll,
+        // and a search run ahead may never be asked for.
         let lane = if search.next_page.is_some() || search.preloaded {
             Lane::Show
         } else {
@@ -818,10 +823,10 @@ pub(crate) async fn label_index(exec: &mut dyn Executor) -> Result<LabelIndex> {
     ))
 }
 
-/// Whether a local result passes the check of its phrases and stemmed words: any of them in its
-/// excerpt, its subject as the index highlighted it (`searched`) or its subject, or (unless it's
-/// a `subject:`) a message's body as the index has it (its visible text, once worked out); a
-/// negated one when it's in none.
+/// Whether a local result passes the check of its phrases and stemmed words. It passes when any
+/// of them is in its subject as the index highlighted it (`searched`), its subject, or (unless
+/// it's a `subject:`) its excerpt or a message's body as the index has it (its visible text,
+/// once worked out). A negated one counts when it's in none of them.
 async fn recheck(
     exec: &mut dyn Executor,
     view: &ThreadView,
@@ -872,7 +877,8 @@ fn pick_snippet(marked: &str) -> Option<Highlighted> {
     best
 }
 
-/// A result's sort time: the latest message at or before the search started, drafts included.
+/// A result's sort time, which is the date of the latest message at or before the search
+/// started, drafts included.
 fn sort_for_search(view: &ThreadView, started: i64) -> i64 {
     let dates = view.messages.iter().map(|m| m.row.internal_date);
     dates
@@ -891,8 +897,8 @@ fn latest_snippet(view: &ThreadView) -> String {
         .unwrap_or_default()
 }
 
-/// A result's row. It leaves the results when a triage takes away a label the query asks for, or
-/// trashes it unless the query asks for Trash.
+/// A result's row. It leaves the results when a triage takes away a label the query asks for,
+/// or trashes the thread when the query doesn't ask for Trash.
 fn summary(
     view: &mut ThreadView,
     list: &ListId,

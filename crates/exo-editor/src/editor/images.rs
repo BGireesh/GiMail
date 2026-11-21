@@ -10,11 +10,11 @@ use crate::{
     model::{Block, Content, Document, Element, Piece, Pos, Run, Selection},
 };
 
-/// A `data:` image pasted in HTML, which becomes one of the draft's inline attachments: its
-/// bytes, shown in the body by Content-ID `cid`.
+/// A `data:` image pasted in HTML, which becomes one of the draft's inline attachments. It holds
+/// the image's bytes, which the body shows by Content-ID `cid`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Upload {
-    /// The Content-ID the body now shows it by; also its file name.
+    /// The Content-ID the body now shows it by, which is also its file name.
     pub cid: String,
     /// The `data:` URL's type.
     pub mime_type: String,
@@ -25,17 +25,17 @@ pub struct Upload {
 /// The resizer's buttons.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Fit {
-    /// `Small`: half of Best Fit, or Best Fit if that's under 32px.
+    /// `Small`, which is half of Best Fit, or Best Fit itself when Best Fit is under 32px.
     Small,
     /// `Best Fit`.
     BestFit,
 }
 
 impl Editor {
-    /// The images the body shows that the editor has no pixels for yet, each once, those in the
-    /// tables it keeps whole too (once they're laid out): the app loads them and answers each
-    /// with [`Self::set_image`]. Each comes with its `<img>`, for what the app decides by its
-    /// attributes (a read receipt's size).
+    /// The images the body shows that the editor has no pixels for yet, each once, including those
+    /// in the tables it keeps whole (once they're laid out). The app loads them and answers each
+    /// with [`Self::set_image`]. Each comes with its `<img>`, for what the app decides by the
+    /// image's attributes (a read receipt's size).
     pub fn image_requests(&mut self) -> Vec<(ImageSource, Element)> {
         let scanned = (
             self.revision,
@@ -64,9 +64,9 @@ impl Editor {
         out
     }
 
-    /// What became of loading the image [`ImageSource::key`] `key` names. An image just put in
-    /// gets its resolution and Best Fit's width once its pixels come (`_onImageLoaded`), without
-    /// an undo step of its own.
+    /// Takes what became of loading the image that `key` names ([`ImageSource::key`]). An image
+    /// just put in gets its resolution and Best Fit's width once its pixels come, without an undo
+    /// step of its own.
     pub fn set_image(&mut self, key: &str, load: ImageLoad) {
         let fit = match &load {
             ImageLoad::Loaded(picture) => key
@@ -98,8 +98,8 @@ impl Editor {
         }
     }
 
-    /// Forgets what the remote images loaded to, so they're asked for again: the Images setting
-    /// changed, or Show Images was asked for.
+    /// Forgets what the remote images loaded to, so they're asked for again. This is for when the
+    /// Images setting changes or Show Images is asked for.
     pub fn reload_remote_images(&mut self) {
         self.view
             .pictures
@@ -107,7 +107,8 @@ impl Editor {
     }
 
     /// Puts the picture the draft keeps as inline attachment `cid` at the caret, over the
-    /// selection, one undo step: an `<img>` shown by Content-ID, Best Fit wide once it loads.
+    /// selection, in one undo step. It goes in as an `<img>` shown by Content-ID, and is made Best
+    /// Fit wide once it loads.
     pub fn insert_image(&mut self, cid: &str) {
         self.fit_on_load.insert(cid.to_owned());
         let image = Run {
@@ -120,14 +121,14 @@ impl Editor {
         );
     }
 
-    /// The `data:` images pasted since the last call, now shown by Content-ID: the app keeps
-    /// each as an inline attachment of the draft.
+    /// The `data:` images pasted since the last call, now shown by Content-ID. The app keeps each
+    /// as an inline attachment of the draft.
     pub fn take_uploads(&mut self) -> Vec<Upload> {
         std::mem::take(&mut self.uploads)
     }
 
-    /// While pasting, each `data:` image in `fragment` is shown by a new Content-ID instead, its
-    /// bytes kept for [`Self::take_uploads`]; one that doesn't decode is left empty.
+    /// While pasting, shows each `data:` image in `fragment` by a new Content-ID instead, keeping
+    /// its bytes for [`Self::take_uploads`]. An image that doesn't decode is left empty.
     pub(super) fn take_pasted_images(&mut self, fragment: &mut Document) {
         for block in &mut fragment.blocks {
             let Content::Inline(runs) = &mut block.content else {
@@ -176,7 +177,7 @@ impl Editor {
         }
     }
 
-    /// The image the resizer is on: one clicked or arrowed into, selected whole.
+    /// The image the resizer is on, which is one clicked or arrowed into and selected whole.
     pub fn focused_image(&self) -> Option<Pos> {
         let at = self.image_focus?;
         let selected = self.selection.start() == at
@@ -184,8 +185,8 @@ impl Editor {
         (selected && self.image_element(at).is_some()).then_some(at)
     }
 
-    /// Focuses the image at `at` (selecting it whole) when it can take the resizer: it has
-    /// loaded, and the Images setting doesn't block it.
+    /// Focuses the image at `at` (selecting it whole) when it can take the resizer, which is when
+    /// it has loaded and the Images setting doesn't block it.
     pub fn focus_image(&mut self, at: Pos) -> bool {
         if !self.can_focus(at) {
             return false;
@@ -254,7 +255,7 @@ impl Editor {
         self.view.pictures.natural(&source.key())
     }
 
-    /// Sets the focused image's width as Small or Best Fit do, one undo step after it.
+    /// Sets the focused image's width as Small or Best Fit do, then records an undo step.
     pub fn fit_image(&mut self, fit: Fit) {
         let Some(at) = self.focused_image() else {
             return;
@@ -273,12 +274,12 @@ impl Editor {
         self.undo.record(&self.doc, self.selection, false);
     }
 
-    /// A drag of a resize handle starts: the state before it is an undo step.
+    /// A drag of a resize handle starts, so the state before it is an undo step.
     pub(crate) fn begin_resize(&mut self) {
         self.undo.record(&self.doc, self.selection, false);
     }
 
-    /// A drag of a resize handle ends: the state it left is one too.
+    /// A drag of a resize handle ends, so the state it left is an undo step too.
     pub(crate) fn end_resize(&mut self) {
         self.undo.record(&self.doc, self.selection, false);
     }
@@ -307,10 +308,10 @@ impl Editor {
         self.changed();
     }
 
-    /// The keys around images: ← or → beside an image focuses it; on a focused one, ←/↑/Home/Page
-    /// Up put the caret before it and →/↓/End/Page Down after it, and anything else acts on it,
-    /// selected (Backspace deletes it, a letter replaces it, ⌘C copies it). Returns whether the key
-    /// is spent.
+    /// Handles the keys around images. ← or → beside an image focuses it. On a focused image,
+    /// ←/↑/Home/Page Up put the caret before it and →/↓/End/Page Down after it, and any other key
+    /// acts on the selected image (Backspace deletes it, a letter replaces it, ⌘C copies it).
+    /// Returns whether the key is spent.
     pub(crate) fn image_key(&mut self, key: Key, modifiers: Modifiers) -> bool {
         if let Some(at) = self.focused_image() {
             let before = matches!(key, Key::ArrowLeft | Key::ArrowUp | Key::Home | Key::PageUp);

@@ -1,6 +1,7 @@
-//! One Exo at a time: a later launch hands the running Exo what it was asked for, its `mailto:`
-//! link or else the window, and exits. A launch of the bundle while Exo runs doesn't get this far:
-//! macOS hands the running Exo a Dock click (the reopen event) or the link (`kAEGetURL`) instead.
+//! One Exo at a time. A later launch hands the running Exo what it was asked for (its `mailto:`
+//! link, or else the window) and exits. A launch of the bundle while Exo runs doesn't get this far,
+//! because macOS hands the running Exo a Dock click (the reopen event) or the link (`kAEGetURL`)
+//! instead.
 
 use fastframe_instance::{Claim, Guard, Slot};
 
@@ -34,13 +35,13 @@ pub enum Unclaimed {
     Unanswered,
 }
 
-/// Makes this process the running Exo, which opens `url` once its window is up; or hands `url`, or
-/// else a request for the window, to the Exo already running. `scope`, when given, is a slot of its
-/// own beside the real one's, for an Exo that should run alongside it (on gmail-mock). Keep the
-/// guard until the process exits; an error means this launch is done.
+/// Makes this process the running Exo, which opens `url` once its window is up. If an Exo is
+/// already running, hands it `url`, or else a request for the window, instead. `scope`, when given,
+/// names a slot of its own beside the real one, for an Exo that should run alongside the real Exo
+/// (on gmail-mock). Keep the guard until the process exits. An error means this launch is done.
 ///
 /// # Errors
-/// When another Exo is running: it took the request, turned it down or didn't answer.
+/// When another Exo is running and took the request, turned it down or didn't answer.
 pub fn claim(
     scope: Option<&str>,
     url: Option<String>,

@@ -1,8 +1,8 @@
 //! Split Inbox: the split definitions as the account's settings store them, the rules for
 //! naming and changing one, and the routing that puts inbox threads into the enabled ones.
 //!
-//! Splits are stored (`splitInboxesV2`, [`order`]) by external id, in one order that places
-//! Important, Other and Inbox among them.
+//! The settings store splits by external id in `splitInboxesV2` ([`order`]), in one order that
+//! places Important, Other and Inbox among them.
 
 mod library;
 mod order;
@@ -34,8 +34,8 @@ pub const CALENDAR_QUERY: &str = "from:{notifications@calendly.com, calendar-not
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SplitInbox {
-    /// `SH_SPLIT_INBOX_<ms><n>`: its list id. A new one is minted whenever the query, whether
-    /// it's off, or whether it leaves threads in Important and Other changes.
+    /// Its list id, `SH_SPLIT_INBOX_<ms><n>`. A new one is minted whenever any of these change:
+    /// the query, whether it's off, and whether it leaves threads in Important and Other.
     pub id: String,
     /// A stable id (`splitInbox_1…`), kept across edits.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -47,7 +47,7 @@ pub struct SplitInbox {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hide_split_when_empty: Option<bool>,
     /// A built-in kind: `vip`, `team`, `news`, `calendar`, `shared` (or `starred`,
-    /// `reminders`); none for the user's own.
+    /// `reminders`). None for the user's own splits.
     #[serde(rename = "type", default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
     /// Turned off.
@@ -58,7 +58,7 @@ pub struct SplitInbox {
     /// The labels its definition names, as they were when it was defined.
     #[serde(default)]
     pub labels: Vec<LabelRef>,
-    /// iOS notifications for it: Exo has no iOS app, and keeps it as stored.
+    /// iOS notifications for it. Exo has no iOS app, so it keeps the value as stored.
     #[serde(rename = "notifyIOS", default)]
     pub notify_ios: bool,
     /// The library template it came from.
@@ -119,8 +119,8 @@ impl Definitions<'_> {
 }
 
 impl SplitInbox {
-    /// A new split: a fresh id and external id, the definition compiled to Gmail and its labels
-    /// recorded.
+    /// A new split with a fresh id and external id, its definition compiled to Gmail and its
+    /// labels recorded.
     pub fn new(
         name: &str,
         query: &str,
@@ -147,9 +147,9 @@ impl SplitInbox {
         split
     }
 
-    /// The default splits, off: Starred, VIP, Team, Calendar and News. Team takes the account's
-    /// `team_domain`, or none for a webmail address; Calendar takes [`CALENDAR_QUERY`] and its
-    /// template.
+    /// The default splits, all off: Starred, VIP, Team, Calendar and News. Team takes the
+    /// account's `team_domain`, or none for a webmail address. Calendar takes [`CALENDAR_QUERY`]
+    /// and its template.
     pub fn defaults(team_domain: Option<&str>, definitions: Definitions<'_>) -> Vec<Self> {
         let team = team_domain
             .map(|domain| format!("from:{domain} to:me"))
@@ -176,8 +176,8 @@ impl SplitInbox {
         .collect()
     }
 
-    /// The split with `changes` made (`update`): a new id when the definition, whether it's
-    /// off or where its threads show changes.
+    /// The split with `changes` made (`update`). It gets a new id when its definition changes,
+    /// when it's turned on or off, or when where its threads show changes.
     #[must_use]
     pub fn update(&self, changes: &SplitChanges, definitions: Definitions<'_>) -> Self {
         let mut next = self.clone();
@@ -273,7 +273,7 @@ impl SplitInbox {
 }
 
 /// Whether `name` is one only the built-in splits have, which no split of the user's can take.
-/// Calendar isn't one: a split with its definition may.
+/// Calendar isn't one, because a split with Calendar's definition may take it.
 pub fn is_reserved_name(name: &str) -> bool {
     RESERVED_SLUGS[..RESERVED_SLUGS.len() - 1].contains(&slugify_name(name).as_str())
 }
@@ -283,8 +283,8 @@ pub fn is_calendar_name(name: &str) -> bool {
     slugify_name(name) == "calendar"
 }
 
-/// `text` trimmed, each run of whitespace one space (an ideographic space ending the run is
-/// kept).
+/// `text` trimmed, with each run of whitespace collapsed to one space, or to an ideographic space
+/// when one ends the run.
 pub fn clean_whitespace(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut run: Option<char> = None;
@@ -317,7 +317,8 @@ pub fn slugify_name(name: &str) -> String {
         .collect()
 }
 
-/// The names kept for the built-in splits, Calendar's last ([`is_reserved_name`] leaves it out).
+/// The names kept for the built-in splits, with Calendar's last because [`is_reserved_name`]
+/// leaves it out.
 const RESERVED_SLUGS: [&str; 9] = [
     "inbox",
     "important",
@@ -348,11 +349,11 @@ pub fn name_error(name: &str, others: &[SplitInbox]) -> Option<&'static str> {
     None
 }
 
-/// The length of a split's search, URL-encoded, past which Gmail refuses it.
+/// The URL-encoded length past which Gmail refuses a split's search.
 const MAX_GMAIL_QUERY: usize = 7800;
 
-/// Whether saving `splits` (the account's, as they'd be) makes a Gmail search too long: the one
-/// for `changed`, or Other's, which subtracts every split.
+/// Whether saving `splits` (the account's splits, as they'd be saved) makes a Gmail search too
+/// long. That's either the search for `changed` or Other's, which subtracts every split.
 pub fn query_too_long(splits: &[SplitInbox], changed: &SplitInbox, me: &Me<'_>) -> bool {
     let encoded = |query: &str| {
         query
@@ -415,7 +416,7 @@ pub(crate) fn important_definition(me: &Me<'_>) -> String {
     format!("((category:personal){from} OR from:\"via Google\")")
 }
 
-/// What Inbox, Important and Other leave out: what splits take.
+/// What Inbox, Important and Other leave out, which is what the splits take.
 fn remove_splits(enabled: &[&SplitInbox], me: &[String]) -> String {
     let taken: Vec<String> = enabled
         .iter()
@@ -436,8 +437,8 @@ fn remove_splits(enabled: &[&SplitInbox], me: &[String]) -> String {
     }
 }
 
-/// The split's stored Gmail search, recompiled when the account has several addresses for `me`;
-/// negated, without the draft and inbox parts.
+/// The split's stored Gmail search, recompiled when the account has several addresses for `me`.
+/// When `negated`, the search leaves out its draft and inbox parts.
 fn split_search(split: &SplitInbox, me: &[String], negated: bool) -> String {
     let mut search = split.matcher.gmail_query.clone();
     if me.len() > 1 {
@@ -492,13 +493,13 @@ impl Splits {
         }
     }
 
-    /// The enabled splits' ids: when these change, every inbox thread routes again.
+    /// The enabled splits' ids. When these change, every inbox thread routes again.
     pub fn routed_ids(&self) -> Vec<&str> {
         self.routed.iter().map(|split| split.id.as_str()).collect()
     }
 }
 
-/// An enabled split as the router uses it: its definition parsed, with the labels it can name.
+/// An enabled split as the router uses it, with its definition parsed and the labels it can name.
 #[derive(Debug, Clone)]
 pub(crate) struct RoutedSplit {
     pub id: String,

@@ -1,6 +1,6 @@
-//! The switch: a 30×16 pill whose 12px white knob sits 2px in from the left and bottom,
-//! `translateX(14px)` on. Classic greys the track out by a filter while off,
-//! `grayscale(93%) brightness(125%)`; the track's colour and filter change over `.4s`, the knob
+//! The switch, a 30×16 pill whose 12px white knob sits 2px in from the left and bottom and moves
+//! `translateX(14px)` when on. Classic greys the track out with a filter while off,
+//! `grayscale(93%) brightness(125%)`. The track's colour and filter change over `.4s` and the knob
 //! slides over `.1s`, both `ease`.
 
 use egui::{Color32, CornerRadius, Id, Painter, Rect, pos2, vec2};
@@ -31,8 +31,7 @@ impl SliderColors {
     };
 }
 
-/// Paints a switch in `rect`, on or off, in `colors`; at half opacity when `disabled`
-/// (`.slider.disabled`).
+/// Paints a switch in `rect`, on or off, in `colors`, at half opacity when `disabled`.
 pub fn paint_slider(
     painter: &Painter,
     rect: Rect,
@@ -50,7 +49,7 @@ pub fn paint_slider(
         CornerRadius::same(8),
         track_color(track, colors).gamma_multiply(opacity),
     );
-    // `.slider::before { background: #fff }`, which the filter leaves white.
+    // The knob is `#fff`, which the filter leaves white.
     let center = pos2(
         rect.left() + KNOB_INSET + KNOB / 2.0 + KNOB_TRAVEL * knob,
         rect.bottom() - KNOB_INSET - KNOB / 2.0,
@@ -58,9 +57,9 @@ pub fn paint_slider(
     painter.circle_filled(center, KNOB / 2.0, Color32::WHITE.gamma_multiply(opacity));
 }
 
-/// The track `on` of the way from off to on: the background between `colors`, under
-/// `grayscale(93%) brightness(125%)` off and none on, each filter's amount interpolated as CSS
-/// transitions it, applied in sRGB as Chromium applies CSS filters.
+/// The track `on` of the way from off to on. Its background is between `colors`, under
+/// `grayscale(93%) brightness(125%)` when off and no filter when on, with each filter's amount
+/// interpolated as CSS transitions it and applied in sRGB as Chromium applies CSS filters.
 fn track_color(on: f32, colors: SliderColors) -> Color32 {
     let background = motion::mix(colors.off, colors.on, on);
     let (grayscale, brightness) = (0.93 * (1.0 - on), 1.25 - 0.25 * on);

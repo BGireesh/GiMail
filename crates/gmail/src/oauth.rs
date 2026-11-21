@@ -13,8 +13,8 @@ use url::Url;
 use crate::endpoints::OAuthEndpoints;
 use crate::error::Error;
 
-/// How long an OAuth request may take. Google answers in well under a second; one that hangs
-/// (say, on a pooled connection that died while the Mac slept) mustn't hold up every request
+/// How long an OAuth request may take. Google answers in well under a second. A request that
+/// hangs, say on a pooled connection that died while the Mac slept, mustn't hold up every request
 /// waiting on its refresh.
 const TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -264,7 +264,8 @@ impl OAuthClient {
         let status = response.status();
         let body = response.bytes().await?;
         if status.is_success() {
-            // Unlike `decode`'s, this error doesn't quote the body: it holds the tokens.
+            // Unlike the error from `decode`, this one doesn't quote the body, because the body
+            // holds the tokens.
             return crate::client::parse(&body).map_err(|error| Error::Decode {
                 status: status.as_u16(),
                 reason: error.to_string(),

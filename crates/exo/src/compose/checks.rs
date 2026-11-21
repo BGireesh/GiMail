@@ -20,7 +20,7 @@ pub(crate) struct Problem {
 /// How an alert can be answered.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Kind {
-    /// `OK` only; for From problems it then expands the header to From.
+    /// `OK` only. For From problems, `OK` then expands the header to From.
     Ok { focus_from: bool },
     /// `Send anyway` (skipping this check) or `Cancel`.
     SendAnyway(Bypass),
@@ -34,8 +34,8 @@ pub(crate) struct Bypass {
     pub variables: bool,
 }
 
-/// The first problem with sending `open` as `html` at `now`, given the account's aliases
-/// (`from_ok`: its From is one of them) and what's already been waved through.
+/// The first problem with sending `open` as `html` at `now`. `from_ok` says whether its From is
+/// one of the account's aliases, and `bypass` what's already been waved through.
 pub(crate) fn check(
     open: &Open,
     html: &str,

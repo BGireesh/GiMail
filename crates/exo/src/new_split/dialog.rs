@@ -1,5 +1,5 @@
-//! The New Split dialog: a name, and optionally words the subject must contain, for a split of a
-//! mailing list's or a service's mail (`New Split Inbox: {list}`).
+//! The New Split dialog asks for a name, and optionally for words the subject must contain, to make
+//! a split of a mailing list's or a service's mail (`New Split Inbox: {list}`).
 //!
 //! Its metrics are the other dialogs'.
 
@@ -21,8 +21,8 @@ const NUDGE: f32 = 3.0;
 const CONTENT_WIDTH: f32 = DIALOG_WIDTH - 64.0;
 /// A subheader and its field: `24 + 20 + 16` px, then the 20px input.
 const FIELD: f32 = 80.0;
-/// The buttons: `margin-top: 44px`, 28px tall; the card ends 20px under them, 4px short of their
-/// `margin-bottom: 7px` and the dialog's padding.
+/// The buttons have `margin-top: 44px` and are 28px tall. The card ends 20px under them, 4px short
+/// of their `margin-bottom: 7px` and the dialog's padding.
 const ACTIONS_TOP: f32 = 44.0;
 const BODY_HEIGHT: f32 = 2.0 * FIELD + ACTIONS_TOP + DIALOG_ACTION_HEIGHT + 3.0;
 
@@ -44,7 +44,7 @@ pub(crate) struct State {
     subject: String,
     /// The name was refused since it last changed.
     name_error: bool,
-    /// Still open; it fades out after.
+    /// Whether it's still open. It fades out after.
     open: bool,
     /// The name field takes the keyboard on the next frame.
     focus: bool,
@@ -63,8 +63,9 @@ impl State {
         }
     }
 
-    /// The split to create: its name and definition, with ` subject:"…"` for a subject (its first
-    /// `"` dropped); `None` when the name is empty, a built-in split's or taken, which marks it.
+    /// The split to create, as its name and its definition with ` subject:"…"` for a subject (the
+    /// subject's first `"` dropped). `None` when the name is empty, a built-in split's or taken,
+    /// which marks the name as refused.
     fn save(&mut self, splits: &[SplitInbox]) -> Option<(String, String)> {
         let name = clean_whitespace(&self.name);
         if name_error(&name, splits).is_some() {
@@ -85,7 +86,7 @@ impl State {
         Some((name, query))
     }
 
-    /// Draws the dialog over `area`; returns what was done in it.
+    /// Draws the dialog over `area` and returns what was done in it.
     fn show(&mut self, ctx: &Context, area: Rect) -> DialogResponse<Option<Event>> {
         let header = format!("New Split: {}", self.query);
         let open = self.open;
@@ -137,8 +138,8 @@ impl State {
             false,
         );
 
-        // `Cancel` (8px left of the other) and `Create Split`, right-aligned: the one with the
-        // keyboard is filled, `Create Split` while a field has it.
+        // `Cancel` (8px left of the other) and `Create Split`, right-aligned. The one with the
+        // keyboard is filled, which is `Create Split` while a field has it.
         let top = body.top() + 2.0 * FIELD + ACTIONS_TOP + NUDGE;
         let cancel_id = exo_ui::id(&ctx, ("create-split-action", "cancel"));
         let cancel_focused = ctx.memory(|memory| memory.has_focus(cancel_id));

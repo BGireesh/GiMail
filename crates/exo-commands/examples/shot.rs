@@ -4,11 +4,11 @@
 //!
 //! Scenes: `palette`, `palette-query` (`mark` typed), `palette-nomatch`, `label` (the Label
 //! sub-palette), `sheet`, `sheet-mark`, `toast`, `toast-hover`, `hint`. The window is 1280×800
-//! with the 41px tab bar inset; `backdrop` (a 2× screenshot of the same mailbox without the
-//! overlay) is drawn underneath so shadows and the dimmed backdrop compare too.
+//! with the 41px tab bar inset. `backdrop`, a 2× screenshot of the same mailbox without the
+//! overlay, is drawn underneath so shadows and the dimmed backdrop compare too.
 //!
 //! The rows are fixtures for the mock mailbox's first conversation, so every render lists the same
-//! commands; they're not what Exo registers.
+//! commands. They're not what Exo registers.
 
 use anyhow::Context as _;
 use egui::{
@@ -54,7 +54,7 @@ fn main() -> anyhow::Result<()> {
             },
         );
     exo_ui::install(&harness.ctx)?;
-    // Screenshots hide the caret: blink it with no "on" phase.
+    // Screenshots hide the caret, so blink it with no "on" phase.
     harness.ctx.all_styles_mut(|style| {
         style.visuals.text_cursor.blink = true;
         style.visuals.text_cursor.on_duration = 0.0;

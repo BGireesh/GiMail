@@ -5,7 +5,7 @@
 //! the odd pixel of leading to the bottom. [`TextStyle::baseline`] computes the CSS position and
 //! [`paint_text`] moves egui's galley onto it, and paints its colour emoji. egui also hangs each
 //! fallback font's glyphs from that font's own ascent, where CSS puts every glyph on the line's
-//! baseline: [`align_baselines`] moves them there.
+//! baseline, so [`align_baselines`] moves them there.
 
 use std::sync::Arc;
 
@@ -161,8 +161,8 @@ impl TextStyle {
     /// Breaks `text` into lines no wider than `width` the way Chromium breaks plain text: at
     /// spaces, at each [`WBR`] (a `<wbr>`, which stays at the end of the line it ends) and at
     /// each `\n` (a `<br>`). Paint each with [`TextStyle::paint_line`], one `line_height` below
-    /// the last: egui's own wrapping puts continuation rows off the sub-pixel position Chromium
-    /// gives them.
+    /// the last, because egui's own wrapping puts continuation rows off the sub-pixel position
+    /// Chromium gives them.
     pub fn wrap(&self, ctx: &egui::Context, text: &str, width: f32) -> Vec<String> {
         let mut lines = Vec::new();
         for paragraph in text.split('\n') {
@@ -191,9 +191,9 @@ impl TextStyle {
         lines
     }
 
-    /// [`TextStyle::wrap`] with `text-wrap: pretty`'s rule against a last line of one word: the
-    /// line above gives up its last word when the two fit. A line broken at a `<wbr>` isn't a
-    /// word on its own.
+    /// [`TextStyle::wrap`] with `text-wrap: pretty`'s rule against a last line of one word, under
+    /// which the line above gives up its last word when the two fit. A line broken at a `<wbr>`
+    /// isn't a word on its own.
     pub fn wrap_pretty(&self, ctx: &egui::Context, text: &str, width: f32) -> Vec<String> {
         let mut wrapped = self.wrap(ctx, text, width);
         if let [.., before, last] = wrapped.as_mut_slice()
@@ -217,7 +217,7 @@ impl TextStyle {
     }
 }
 
-/// `job` as `font-kerning: none` lays it out: each character a section of its own, since egui
+/// `job` as `font-kerning: none` lays it out, with each character a section of its own, since egui
 /// shapes each section apart and kerns only within one.
 pub(crate) fn unkerned(mut job: LayoutJob) -> LayoutJob {
     for section in std::mem::take(&mut job.sections) {
@@ -303,8 +303,8 @@ pub fn paint_text(
     crate::emoji::paint(painter, origin, &galley);
 }
 
-/// Where egui put the baseline of `galley`'s text, below its rows' tops: on the first glyph of
-/// the first row in its own font, or where that font's would go.
+/// Where egui put the baseline of `galley`'s text, below its rows' tops. That's the baseline of
+/// the first glyph of the first row in its own font, or where that font's would go.
 fn own_baseline(galley: &Galley, pixels_per_point: f32) -> Option<f32> {
     let glyphs = &galley.rows.first()?.glyphs;
     let own = glyphs.iter().find(|glyph| {
@@ -354,7 +354,7 @@ pub(crate) fn shift_glyph(row: &mut Row, index: usize, delta: Vec2) {
     }
     let glyph = &mut row.glyphs[index];
     glyph.pos += delta;
-    // A glyph egui draws nothing for has no quad: its `first_vertex` is the next glyph's.
+    // A glyph egui draws nothing for has no quad, and its `first_vertex` is the next glyph's.
     let first = glyph.first_vertex as usize;
     if glyph.uv_rect.is_nothing()
         || glyph.uv_rect.size.x <= 0.0
@@ -378,7 +378,7 @@ pub(crate) fn update_bounds(galley: &mut Galley) {
     });
 }
 
-/// A run of text in one style: wraps to the available width (`white-space: normal`), or with
+/// A run of text in one style. It wraps to the available width (`white-space: normal`), or with
 /// [`Text::truncate`] stays on one line and ends in an ellipsis (`text-overflow: ellipsis`).
 #[must_use]
 pub struct Text<'a> {

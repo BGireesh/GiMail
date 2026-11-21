@@ -22,7 +22,8 @@ const MOCK_CLIENT_ID: &str = "exo-dev.apps.googleusercontent.com";
 const MOCK_CLIENT_SECRET: &str = "GOCSPX-gmail-mock";
 
 fn main() -> anyhow::Result<()> {
-    // First: an update's helper runs here and exits, and a relaunch's update flags come off.
+    // This goes first. An update's helper runs here and exits, and a relaunch's update flags
+    // come off.
     let launch = fastframe_update::intercept(&exo::update::CONFIG);
     let arguments: Vec<String> = launch
         .arguments
@@ -51,15 +52,15 @@ fn main() -> anyhow::Result<()> {
         .map(|origin| origin.parse::<url::Url>())
         .transpose()
         .context("EXO_GMAIL_MOCK isn't a URL")?;
-    // One Exo at a time; one on gmail-mock runs beside the real one.
+    // One Exo at a time. One on gmail-mock runs beside the real one.
     let launcher = Launcher::default();
     let claimed = desktop::claim(
         mock.as_ref().map(url::Url::as_str),
         desktop::launch_url(arguments.iter().cloned()),
         &launcher,
     );
-    // The log file starts afresh each run, so only the running Exo on real mail keeps one: a
-    // later launch, or one on gmail-mock, would start the running Exo's over.
+    // The log file starts afresh each run, so only the running Exo on real mail keeps one. A
+    // later launch, or one on gmail-mock, would start the running Exo's file over.
     exo::logging::init(
         exo::logging::folder()
             .filter(|_| claimed.is_ok() && mock.is_none())
@@ -84,7 +85,7 @@ fn main() -> anyhow::Result<()> {
         return Ok(());
     }
     // Exo updates itself, but not on gmail-mock. An update an earlier run downloaded installs now,
-    // before anything opens: the updated Exo opens in this launch's place, with its arguments.
+    // before anything opens, and the updated Exo opens in this launch's place, with its arguments.
     let updater = mock.is_none().then(exo::update::updater).flatten();
     if let Some(updater) = &updater
         && exo::update::install_kept(updater, arguments.iter().skip(1).cloned().collect())
@@ -101,7 +102,7 @@ fn main() -> anyhow::Result<()> {
     let state = mock_state.clone().unwrap_or_else(|| dirs.state.clone());
     exo::mail_client::listen(launcher.clone());
     desktop::menu::install(launcher.clone());
-    // Only an app bundle's notifications show (Exo.app); a bare binary posts none.
+    // Only an app bundle's notifications show (Exo.app). A bare binary posts none.
     let notifier = notifications::bundle_id().and_then(|id| {
         Notifier::new(&id, launcher.clone())
             .inspect_err(|error| log::warn!("notifications: {error}"))
@@ -115,14 +116,14 @@ fn main() -> anyhow::Result<()> {
         }
         updates
     });
-    // Restarted to install an update, Exo leaves the app in front there; the update waits for
+    // Restarted to install an update, Exo leaves the app in front there. The update waits for
     // word that its window is up.
     let updated = arguments
         .iter()
         .any(|argument| argument == exo::update::UPDATED);
     let receipt = std::rc::Rc::new(std::cell::Cell::new(launch.receipt));
-    // The window opens where it was left, minimized when macOS opened Exo at login: known only
-    // as the window is made, while macOS hands Exo the event it launched it with.
+    // The window opens where it was left, minimized when macOS opened Exo at login. That's known
+    // only as the window is made, while macOS hands Exo the event it launched it with.
     let placement = Placement::load(&state);
     let options = || {
         let mut options = exo::native_options();

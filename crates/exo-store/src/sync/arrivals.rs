@@ -1,5 +1,6 @@
-//! New mail: the messages a round of history brought that the store didn't have, as a
-//! notification needs them (who sent it, its subject and snippet, and where the thread is).
+//! New mail, meaning the messages that a round of history brought and the store didn't have, in
+//! the form a notification needs (who sent each one, its subject and snippet, and where the
+//! thread is).
 
 use std::collections::BTreeSet;
 
@@ -12,9 +13,9 @@ use crate::parse::unescape_html;
 use crate::store::{Inner, Store, load_view, load_views};
 use crate::view::{Identity, ThreadView, ViewMessage};
 
-/// A message new to the store: Gmail's history added it, the store didn't have it before (it
+/// A message new to the store. Gmail's history added it, the store didn't have it before (it
 /// wasn't backfilled or written by Exo first), and it's still there once the round is applied.
-/// Drafts never are.
+/// A draft is never an arrival.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Arrival {
     /// Its thread.
@@ -23,7 +24,7 @@ pub struct Arrival {
     pub message: String,
     /// When Gmail got it (`internalDate`).
     pub date: Timestamp,
-    /// Who sent it; `is_me` for one of the account's own addresses.
+    /// Who sent it, with `is_me` set for one of the account's own addresses.
     pub from: Option<Contact>,
     /// Its subject.
     pub subject: String,
@@ -31,11 +32,11 @@ pub struct Arrival {
     pub snippet: String,
     /// It's unread.
     pub unread: bool,
-    /// It's in the inbox: it has Gmail's `INBOX` label, and its thread is routed there (not
-    /// muted, not spam).
+    /// It's in the inbox, meaning it has Gmail's `INBOX` label and its thread is routed there
+    /// (not muted, not spam).
     pub inbox: bool,
-    /// Its thread is Important by the importance rule, or was moved there, whatever splits take
-    /// it out of Important's tab.
+    /// Its thread is Important by the importance rule, or was moved there, even when splits take
+    /// it out of the Important tab.
     pub important: bool,
     /// Its thread is muted.
     pub muted: bool,
@@ -90,9 +91,9 @@ impl Inner {
 }
 
 impl Store {
-    /// Thread `thread`'s newest message (drafts aside) as an [`Arrival`], for a notification
-    /// about the thread as it stands (a reminder bringing it back). `None` when the store doesn't
-    /// have it.
+    /// The newest message of thread `thread` (drafts aside) as an [`Arrival`], for a notification
+    /// about the thread as it stands, such as a reminder bringing it back. `None` when the store
+    /// doesn't have the thread.
     ///
     /// # Errors
     /// On database failures.

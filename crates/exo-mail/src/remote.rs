@@ -31,7 +31,7 @@ pub(crate) fn srcset_is_remote(srcset: &str) -> bool {
 }
 
 /// Whether anything under `root` loads from the network: an image, video poster or table
-/// background, or a CSS image, font or stylesheet: the CSS ones are blocked too, so Show Images
+/// background, or a CSS image, font or stylesheet. The CSS ones are blocked too, so Show Images
 /// is offered for them as well.
 pub(crate) fn has_remote_content(root: &NodeRef) -> bool {
     !dom::select(root, |node| {
@@ -47,7 +47,7 @@ pub(crate) fn has_remote_content(root: &NodeRef) -> bool {
 }
 
 /// Loads `render`'s read receipts, as `Show all images` does each time a message is shown
-/// expanded; what they answer is dropped.
+/// expanded. What they answer is dropped.
 pub fn load_read_receipts(render: &Render, fetch: &dyn Fetch) {
     let base = url::Url::parse(BASE_URL).expect("the base URL parses");
     for url in &render.read_status_urls {

@@ -27,7 +27,7 @@ static EMOJI: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"[\p{Extended_Pictographic}\p{gcb=RI}\x{20E3}\x{FE0F}]").expect("valid regex")
 });
 
-/// The clusters of `text`: `(start, end)` in characters.
+/// The clusters of `text`, as `(start, end)` in characters.
 pub(crate) fn clusters(text: &str) -> Vec<(usize, usize)> {
     let mut at = 0;
     CLUSTER
@@ -59,8 +59,8 @@ pub(crate) fn previous(text: &str, offset: usize) -> usize {
         .unwrap_or(0)
 }
 
-/// Where Backspace at `offset` deletes from: an emoji cluster's start, else one character
-/// back, so a letter keeps its base when its accent goes (Chromium's backward deletion).
+/// Where Backspace at `offset` deletes from. That's the start of an emoji cluster, or else one
+/// character back, so a letter keeps its base when its accent goes (Chromium's backward deletion).
 pub(crate) fn backspace(text: &str, offset: usize) -> usize {
     let start = previous(text, offset);
     let cluster: String = text.chars().skip(start).take(offset - start).collect();
@@ -71,7 +71,7 @@ pub(crate) fn backspace(text: &str, offset: usize) -> usize {
     }
 }
 
-/// `offset` moved off the inside of a cluster: to the nearer of its ends, the start on a tie.
+/// `offset` moved off the inside of a cluster to the nearer of its ends, or to the start on a tie.
 pub(crate) fn snap(text: &str, offset: usize) -> usize {
     match clusters(text)
         .into_iter()

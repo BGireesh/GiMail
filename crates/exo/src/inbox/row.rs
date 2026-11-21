@@ -28,8 +28,8 @@ const REGULAR: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 12.0, 16
 const BOLD: TextStyle = TextStyle::new(Font::new(Family::Sans, 700), 12.0, 16.0);
 /// The date: `letter-spacing: .017em`.
 const DATE: TextStyle = REGULAR.letter_spacing(0.017 * 12.0);
-/// A failed or offline draft's note: bolder, no letter spacing, `#ef8e8e` and `#ce9ece` in Snow and
-/// Carbon.
+/// A failed or offline draft's note: bolder, with no letter spacing, `#ef8e8e` for a failed draft
+/// and `#ce9ece` for an offline one, in both Snow and Carbon.
 const FAILED: TextStyle = BOLD;
 const FAILED_INK: Color32 = Color32::from_rgb(0xef, 0x8e, 0x8e);
 const OFFLINE_INK: Color32 = Color32::from_rgb(0xce, 0x9e, 0xce);
@@ -67,7 +67,7 @@ impl Geometry {
         self.center_width
     }
 
-    /// Metrics for a list `width` px wide; `compact` is `@media (max-width: 1152px)`.
+    /// Metrics for a list `width` px wide. `compact` is `@media (max-width: 1152px)`.
     pub(super) fn new(width: f32, rem: f32, compact: bool) -> Self {
         let padding_left = if compact { 44.0 } else { 3.5 * rem };
         let padding_right = 2.0 * rem - 6.0;
@@ -101,21 +101,22 @@ impl Geometry {
 
 /// A row's state.
 pub(super) struct State<'a> {
-    /// The list cursor is on it: the hover actions replace the date.
+    /// Whether the list cursor is on it. The hover actions then replace the date.
     pub cursor: bool,
-    /// It's in the multi-selection.
+    /// Whether it's in the multi-selection.
     pub selected: bool,
     /// The rows above and below join this one into a block (selected, or the cursor), which
     /// squares the corners between them when it's selected.
     pub joined_above: bool,
     pub joined_below: bool,
-    /// The view can mark it done: its hover actions include the check (not in Spam).
+    /// Whether the view can mark it done, so its hover actions include the check (not in Spam).
     pub archivable: bool,
-    /// A bulk action waits or runs for it: this shows instead of the date and hover actions.
+    /// The status of a bulk action that waits or runs for it, shown instead of the date and hover
+    /// actions.
     pub pending: Option<&'a str>,
-    /// Gmail can't be reached: a send waiting to go says so instead of the date.
+    /// Whether Gmail can't be reached, which a send waiting to go says instead of the date.
     pub offline: bool,
-    /// A search result with files: their strip under the row, scrolled this far.
+    /// For a search result with files, how far the strip of files under the row is scrolled.
     pub strip: Option<f32>,
 }
 
@@ -131,19 +132,19 @@ pub(super) enum Hit {
     Remind,
     /// The command palette.
     Command,
-    /// The unread dot or star, over the checkmark: a click on the row.
+    /// The unread dot or star, over the checkmark, which counts as a click on the row.
     Status,
-    /// A card of the strip: the file at this index, previewed, or saved with its download
-    /// button.
+    /// A card in the strip, for the file at this index, to preview or, with its download button, to
+    /// save.
     File { index: usize, download: bool },
-    /// The strip's arrow that way (-1, 1).
+    /// The strip's arrow in that direction (-1, 1).
     Page(isize),
 }
 
 /// Paints a date separator.
 pub(super) fn separator(painter: &Painter, rect: Rect, geometry: &Geometry, label: &str) {
     let palette = exo_ui::palette(painter.ctx());
-    // `padding-top: calc(10px + 12px)`, `top: 1px`; `rgba(0, 0, 0, .35)`.
+    // `padding-top: calc(10px + 12px)`, `top: 1px`, `rgba(0, 0, 0, .35)`.
     BOLD.paint_line(
         painter,
         pos2(rect.left() + geometry.padding_left, rect.top() + 23.0),
@@ -168,13 +169,13 @@ pub(super) fn paint(
     let first_row = rect.top() + FIRST_ROW;
     let id = ui.id().with(("row", &thread.id));
     let mut hit = None;
-    // The cursor's and selected rows draw their status animated, with its tooltip while it's
-    // hovered (the rest change at once, with no tooltip).
+    // The cursor's row and selected rows animate their status, with its tooltip while the status is
+    // hovered (other rows change at once, with no tooltip).
     let lively = state.cursor || state.selected;
     let origin = pos2(left, first_row + 0.5);
 
     if state.selected {
-        // A selected row: its 2px corners square where selected rows meet.
+        // A selected row, whose 2px corners square where selected rows meet.
         let (top, bottom) = (
             if state.joined_above { 0 } else { 2 },
             if state.joined_below { 0 } else { 2 },
@@ -213,8 +214,8 @@ pub(super) fn paint(
     ) {
         hit = Some(Hit::Checkmark);
     }
-    // The status sits over the checkmark's clickable: where it shows, the checkmark isn't hovered
-    // or clicked. A failed draft's dot is red, with no star.
+    // The status sits over the checkmark's clickable, so where the status shows, the checkmark
+    // isn't hovered or clicked. A failed draft's dot is red, with no star.
     let status = thread
         .failure
         .is_none()
@@ -226,7 +227,8 @@ pub(super) fn paint(
     if lively && let Some(area) = area {
         let response = ui.interact(area, id.with("status"), Sense::click());
         if let Some(text) = status_tooltip(thread) {
-            // The tooltip's left edge on the status's 0×0 box, its middle 8px below it.
+            // The tooltip's left edge is on the status's 0×0 box, and its middle 8px below that
+            // box.
             KeyTooltip { text, keys: &[] }.show_at(
                 ui,
                 &response,
@@ -392,9 +394,9 @@ impl Geometry {
 }
 
 /// The strip of a search result's files under its first row, scrolled `scrolled` px: 184px cards
-/// 8px apart from the subject column, cut off at the content's edges, fading out where more lie
-/// beyond into the row's background; on the cursor's row (not a selected one), round buttons that
-/// page it.
+/// 8px apart from the subject column, cut off at the content's edges and fading into the row's
+/// background where more lie beyond. On the cursor's row (not a selected one), round buttons page
+/// the strip.
 fn strip(
     ui: &Ui,
     painter: &Painter,
@@ -479,12 +481,12 @@ fn strip(
             });
         }
     }
-    // The fades go to the row's background: white or `#27292d`; the cursor's, at 80% (20% for the
-    // left one); a selected row's blue.
+    // The fades go to the row's background: white or `#27292d`, the highlight of the cursor's row
+    // at 80% (20% for the left fade), or a selected row's blue.
     let background = if state.selected {
         Color32::from_rgb(84, 172, 220)
     } else if state.cursor {
-        // `hsl(220, 45%, 97%)`, `rgb(70, 75, 83)`: the highlight's.
+        // The highlight's color, `hsl(220, 45%, 97%)` or `rgb(70, 75, 83)`.
         palette.background_brand_subdued
     } else if dark {
         Color32::from_rgb(39, 41, 45)
@@ -534,9 +536,9 @@ fn strip(
         );
     }
     if state.cursor && !state.selected {
-        // `-navigation-right-clickable { top: 30px; padding: 2px calc(2rem - 7px) 8px 10px }` and
-        // the left one's `padding: 2px 10px 8px calc(3.5rem - 12px)`: 28px white circles, their
-        // chevrons 15px.
+        // The right button is 30px down with `padding: 2px calc(2rem - 7px) 8px 10px`, and the left
+        // one has `padding: 2px 10px 8px calc(3.5rem - 12px)`. Both are 28px white circles with
+        // 15px chevrons.
         let buttons = [
             (-1, has_previous, left - 12.0),
             (
@@ -645,16 +647,15 @@ fn status_tooltip(thread: &ThreadSummary) -> Option<&'static str> {
     }
 }
 
-/// A draft of its own that can still be edited (not sending, not failed): its row keeps its date
-/// under the cursor rather than the hover actions.
+/// Whether `thread` is a draft of its own that can still be edited (not sending, not failed), whose
+/// row keeps its date under the cursor rather than showing the hover actions.
 fn editable_draft(thread: &ThreadSummary) -> bool {
     thread.draft_only && !thread.sending && thread.failure.is_none()
 }
 
 /// Paints one line of `text` (cut, maybe ending in `…`) with its line box at `at`, with what a
-/// search matched (`marks`, byte ranges of `text`) highlighted as `Snippet.highlight`
-/// does: its background behind the 12px font's 15px content area, and its text color. Returns the
-/// text's width.
+/// search matched (`marks`, byte ranges of `text`) highlighted. A highlight has its own text color,
+/// and its background covers the 12px font's 15px content area. Returns the text's width.
 fn paint_marked(
     painter: &Painter,
     at: Pos2,
@@ -700,8 +701,8 @@ fn paint_marked(
     paint_job(painter, at, job, style)
 }
 
-/// Where a search result's names show highlighted: a participant whose address the query names,
-/// whole; otherwise each word of a name the query has as a word.
+/// Where a search result's names show highlighted. A participant whose address the query names is
+/// highlighted whole. Otherwise, each word of a name that the query has as a word is highlighted.
 fn name_marks(names: &str, thread: &ThreadSummary, words: &[String]) -> Vec<Range<usize>> {
     let mut marks: Vec<Range<usize>> = Vec::new();
     let format = if thread.participants.len() == 1 {
@@ -765,8 +766,8 @@ fn checkmark(
     if opacity > 0.0 {
         let palette = exo_ui::palette(ui.ctx());
         // Fading the drawing as a whole, by mixing with the background, keeps the tick's
-        // overlapping strokes from doubling up. Its strokes: black (white in Carbon), white when
-        // selected.
+        // overlapping strokes from doubling up. The strokes are black (white in Carbon), or white
+        // when selected.
         let color = if selected {
             ON_SELECTED
         } else {
@@ -785,7 +786,7 @@ fn checkmark(
 /// The 15×14 checkmark: a rounded square open at its top-right corner, with a tick when checked.
 /// The SVG strokes 2px inside a mask of its own shape, which leaves the inner pixel.
 pub(super) fn paint_checkmark(painter: &Painter, at: Pos2, checked: bool, color: Color32) {
-    // An SVG: it paints on the whole px (see `pixel_snap`).
+    // It's an SVG, so it paints on whole px (see `pixel_snap`).
     let at = exo_ui::pixel_snap(Rect::from_min_size(at, Vec2::splat(15.0))).min;
     let corner = |center: Pos2, from: f32| {
         (0..=4).map(move |i| center + 1.5 * Vec2::angled((from + i as f32 * 22.5).to_radians()))
@@ -915,9 +916,9 @@ fn metadata(
     let (right, first_row) = (top_right.x, top_right.y);
     let selected = state.selected;
     let palette = exo_ui::palette(ui.ctx());
-    // A failed draft's failure, offline a send waiting to go, or a scheduled send's time takes the
-    // date's place, white on a selected row as the date is. A scheduled one is `Schedule:` until
-    // Gmail has it, then `Scheduled:`, styled as the offline one.
+    // A failed draft's failure, a send waiting to go while offline, or a scheduled send's time
+    // takes the date's place, white on a selected row as the date is. A scheduled send says
+    // `Schedule:` until Gmail has it, then `Scheduled:`, and is styled as the offline note.
     let ink = |color| if selected { ON_SELECTED } else { color };
     let (date, style, color, date_margin) = match (thread.failure, thread.scheduled) {
         (Some(reason), _) => (
@@ -988,8 +989,8 @@ fn metadata(
         left = icon_rect.left();
         margin = 4.0;
     }
-    // `margin-left: 1rem`; the paperclip (19×8, 4px down) keeps 1px after it, the calendar (14×14,
-    // 1px down) 4px; black at 40%, white on a selected row.
+    // `margin-left: 1rem`. The paperclip (19×8, 4px down) keeps 1px after it, and the calendar
+    // (14×14, 1px down) keeps 4px. Both are black at 40%, or white on a selected row.
     let icon = match thread.attachment {
         Attachments::Files => Some((
             "legacy/DEPRECATED_paperclip",
@@ -1027,11 +1028,11 @@ fn metadata(
 }
 
 /// Mark Done (unless the view can't archive), Remind Me (not for a draft) and ⌘K, right-aligned 4px
-/// past `right`: 24px boxes 4px apart (`gap: 5px`, `margin-left: -1px`), the 14px clock and command
-/// glyphs 5px into theirs; the 16×14 check at the left of a 20px box; every glyph 10px below the
-/// row's top. A done thread's check is `#8892b9`, `#5f74aa` hovered; a thread with a reminder's
-/// clock is the bolder one in `#e0bfe0`, `#cd7acf` hovered. Returns the group's left edge and what
-/// was clicked.
+/// past `right`: 24px boxes 4px apart (`gap: 5px`, `margin-left: -1px`), with the 14px clock and
+/// command glyphs 5px into theirs, the 16×14 check at the left of a 20px box, and every glyph 10px
+/// below the row's top. A done thread's check is `#8892b9`, `#5f74aa` hovered. The clock of a
+/// thread with a reminder is the bolder one in `#e0bfe0`, `#cd7acf` hovered. Returns the group's
+/// left edge and what was clicked.
 fn actions(
     ui: &Ui,
     row: Rect,

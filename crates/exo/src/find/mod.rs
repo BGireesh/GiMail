@@ -4,7 +4,7 @@
 //! The keys work whatever has the keyboard: ⌘F opens the field with its text selected, ⌘G and
 //! ⌘⇧G open it and move to the next or previous match, and, as in other Mac apps, ⌘E puts the
 //! selected text in it ([`use_selection`]). While the field has the keyboard the page gets no
-//! keys: Enter and ⇧Enter step through the matches, Escape or ⌃[ close the field.
+//! keys. Enter and ⇧Enter step through the matches, and Escape or ⌃[ closes the field.
 
 mod bar;
 mod pasteboard;
@@ -16,29 +16,29 @@ use egui::{Context, Event, Id, Key, Modifiers, mutex::Mutex};
 pub(crate) use bar::{layout, show};
 pub use pasteboard::Pasteboard;
 
-/// Edit ▸ Find… (⌘F): opens the find field, its text selected, with the keyboard.
+/// Edit ▸ Find… (⌘F) opens the find field with the keyboard and its text selected.
 pub fn open(ctx: &Context) {
     command(ctx, Command::Open);
 }
 
-/// Edit ▸ Find Next (⌘G): opens the find field and moves to the next match.
+/// Edit ▸ Find Next (⌘G) opens the find field and moves to the next match.
 pub fn next(ctx: &Context) {
     command(ctx, Command::Step(true));
 }
 
-/// Edit ▸ Find Previous (⌘⇧G): opens the find field and moves to the previous match.
+/// Edit ▸ Find Previous (⌘⇧G) opens the find field and moves to the previous match.
 pub fn previous(ctx: &Context) {
     command(ctx, Command::Step(false));
 }
 
-/// Edit ▸ Use Selection for Find (⌘E): the selected text becomes the text to find, shared with
-/// other apps; with the field open, it's searched for.
+/// Edit ▸ Use Selection for Find (⌘E) makes the selected text the text to find, shared with other
+/// apps. With the field open, Exo also searches for it.
 pub fn use_selection(ctx: &Context) {
     command(ctx, Command::UseSelection);
 }
 
 /// Shares the text to find with other apps from now on, through `pasteboard`, the macOS find
-/// pasteboard: what's typed goes there, and what's there when the window comes back to the front
+/// pasteboard. What's typed goes there, and what's there when the window comes back to the front
 /// becomes the text to find.
 pub fn share_find_text(ctx: &Context, pasteboard: Pasteboard) {
     with(ctx, |find| find.pasteboard = Some(pasteboard));
@@ -47,16 +47,16 @@ pub fn share_find_text(ctx: &Context, pasteboard: Pasteboard) {
 /// What the find field is doing.
 #[derive(Default)]
 struct Find {
-    /// The field shows (`findInPageState.active`).
+    /// Whether the field shows.
     open: bool,
-    /// The field has the keyboard.
+    /// Whether the field has the keyboard.
     focused: bool,
-    /// Its text is to be selected on the next frame.
+    /// Whether to select the field's text on the next frame.
     select: bool,
     /// The text to find, which the field shows.
     query: String,
-    /// The text is being searched for: typing, Enter or ⌘G search; adopting the find
-    /// pasteboard's text, and closing, stop.
+    /// Whether the text is being searched for. Typing, Enter or ⌘G start a search, and adopting
+    /// the find pasteboard's text or closing the field stops it.
     searching: bool,
     /// What the menu and the keys asked for, not done yet.
     commands: Vec<Command>,
@@ -96,8 +96,8 @@ fn field_id(ctx: &egui::Context) -> Id {
 
 /// Takes this frame's find keys, and every key while the field has the keyboard, before the
 /// page sees them, and does what was asked. Call at the start of every frame, before anything
-/// reads the keyboard; `available` is false on the sign-in screen, which has no find and closes
-/// the field.
+/// reads the keyboard. `available` is false on the sign-in screen, which has no find, so the field
+/// closes there.
 pub(crate) fn begin(ctx: &Context, available: bool) {
     let window_focused = ctx.input(|input| input.viewport().focused.unwrap_or(input.focused));
     let regained = with(ctx, |find| {
@@ -114,7 +114,7 @@ pub(crate) fn begin(ctx: &Context, available: bool) {
             _ if !available => {}
             Command::Open => reveal(ctx),
             Command::Step(forward) => {
-                // The query, if any, searched on from the current match.
+                // Search for the query, if any, from the current match.
                 let query = with(ctx, |find| {
                     find.searching |= !find.query.is_empty();
                     find.searching.then(|| find.query.clone())
@@ -136,12 +136,12 @@ pub(crate) fn begin(ctx: &Context, available: bool) {
     }
 }
 
-/// Whether ⌘E asked for the selected text this frame: hand it over with [`selected`].
+/// Whether ⌘E asked for the selected text this frame. Hand it over with [`selected`].
 pub(crate) fn wants_selection(ctx: &Context) -> bool {
     with(ctx, |find| find.commands.contains(&Command::UseSelection))
 }
 
-/// ⌘E's answer: `text` (the text selected on the page, if any) becomes the text to find.
+/// Answers ⌘E. `text`, the text selected on the page if any, becomes the text to find.
 pub(crate) fn selected(ctx: &Context, text: Option<String>) {
     let open = with(ctx, |find| {
         find.commands
@@ -155,7 +155,7 @@ pub(crate) fn selected(ctx: &Context, text: Option<String>) {
     share(ctx, &text);
 }
 
-/// The field opens (if it isn't) with the keyboard and its text selected; the page's link
+/// Opens the field (if it isn't open) with the keyboard and its text selected. The page's link
 /// preview goes.
 fn reveal(ctx: &Context) {
     let field = field_id(ctx);
@@ -170,8 +170,8 @@ fn reveal(ctx: &Context) {
     });
 }
 
-/// Closes the field (`findInPage({ stop: true })`): the search stops, its highlights go, and the
-/// keyboard goes back to the page. The text stays for next time.
+/// Closes the field. The search stops, its highlights go, and the keyboard goes back to the page.
+/// The text stays for next time.
 fn close(ctx: &Context) {
     let returns = with(ctx, |find| {
         let returns = find.focused.then(|| find.returns_focus_to.take()).flatten();
@@ -189,7 +189,7 @@ fn close(ctx: &Context) {
     });
 }
 
-/// The text to find is now `query`; searched for if `search`.
+/// Makes `query` the text to find, and searches for it if `search`.
 fn set_query(ctx: &Context, query: String, search: bool) {
     let searching = search && !query.is_empty();
     with(ctx, |find| {
@@ -206,8 +206,8 @@ fn share(ctx: &Context, query: &str) {
     }
 }
 
-/// The window came back to the front: a text to find another app left on the find pasteboard
-/// replaces this one, without searching for it.
+/// Called when the window comes back to the front. A text to find that another app left on the
+/// find pasteboard replaces this one, without a search for it.
 fn adopt_pasteboard(ctx: &Context) {
     let Some(pasteboard) = with(ctx, |find| find.pasteboard.clone()) else {
         return;
@@ -254,8 +254,8 @@ fn shortcut(key: Key, modifiers: Modifiers) -> Option<Command> {
     }
 }
 
-/// While the field has the keyboard: its own keys, done here, and everything else it types
-/// with, kept for it, out of the page's reach. Zooming still zooms.
+/// While the field has the keyboard, does the field's own keys here and keeps every other key it
+/// types with for the field, out of the page's reach. Zooming still zooms.
 fn take_field_keys(ctx: &Context) {
     let mut taken = Vec::new();
     ctx.input_mut(|input| {

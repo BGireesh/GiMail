@@ -1,6 +1,6 @@
 //! The parser's test vectors, then more edges, each at its now in Los Angeles, en-US. Each line is
-//! `label → local time`, best first; the calendar's add the duration in minutes, `all-day` and the
-//! typed zone's time.
+//! `label → local time`, best first. The calendar's lines add the duration in minutes, `all-day`
+//! and the typed zone's time.
 
 use jiff::Zoned;
 
@@ -13,7 +13,7 @@ fn now(at: &str) -> Zoned {
 
 const NOW: &str = "2026-11-17T10:00";
 
-/// Remind me's and Send later's options: 8:00 when no time is typed.
+/// Remind me's and Send later's options, with 8:00 when no time is typed.
 fn remind() -> Options {
     Options {
         default_time: (8, 0),

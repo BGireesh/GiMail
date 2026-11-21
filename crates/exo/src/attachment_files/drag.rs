@@ -1,6 +1,6 @@
-//! Dragging a card out of the window: a native drag of a file promise, which Finder (or any app
-//! that takes files) fulfils by asking for the file where it was dropped. Exo fetches the part (the
-//! parts cache first) when the promise is called in.
+//! Dragging a card out of the window. The card goes out as a native drag of a file promise, which
+//! Finder (or any app that takes files) fulfils by asking for the file where it was dropped. Exo
+//! fetches the part (from the parts cache first) when the promise is called in.
 
 use std::path::PathBuf;
 
@@ -55,7 +55,7 @@ define_class!(
             NSDragOperation::Copy
         }
 
-        // AppKit's drag loop took the button's release: the window hears it now.
+        // AppKit's drag loop took the button's release, so the window hears about it here.
         #[unsafe(method(draggingSession:endedAtPoint:operation:))]
         fn ended(
             &self,
@@ -77,8 +77,8 @@ define_class!(
             NSString::from_str(&super::file_name(&self.ivars().attachment.filename))
         }
 
-        // Called on the main queue (there's no `operationQueueForFilePromiseProvider:`): it
-        // only starts the fetch, and the handler hears from its thread.
+        // Called on the main queue (there's no `operationQueueForFilePromiseProvider:`), so it
+        // only starts the fetch. The completion handler is called from the fetch's thread.
         #[unsafe(method(filePromiseProvider:writePromiseToURL:completionHandler:))]
         fn write(
             &self,
@@ -125,7 +125,7 @@ fn fail(completion: &Completion) {
 }
 
 /// Starts dragging `attachment` from `at` (egui points in the window) and returns the drag's
-/// source, which must live until the drop has been written, or `None` off the main thread or
+/// source, which must live until the drop has been written. Returns `None` off the main thread or
 /// without a window.
 pub(crate) fn start(
     loader: &Loader,
@@ -167,8 +167,8 @@ pub(crate) fn start(
             Some(&icon),
         )
     };
-    // AppKit wants the mouse event the drag comes from; egui has had it already, so a dragged
-    // event at the pointer stands in for it.
+    // AppKit wants the mouse event the drag comes from. egui has had that event already, so a
+    // dragged event at the pointer stands in for it.
     let event = NSEvent::mouseEventWithType_location_modifierFlags_timestamp_windowNumber_context_eventNumber_clickCount_pressure(
         NSEventType::LeftMouseDragged,
         view.convertPoint_toView(point, None),

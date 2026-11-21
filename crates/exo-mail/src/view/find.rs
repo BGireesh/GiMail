@@ -1,7 +1,7 @@
-//! Find in page in a body: its laid-out text searched block by block, as Chromium's find-in-page
-//! searches the DOM (a match doesn't cross from one block to the next; text that isn't laid out,
-//! such as a collapsed quote, isn't found), and the matches highlighted as Chromium highlights
-//! them: yellow, the current one orange, the text in them black.
+//! Find in page in a body. The laid-out text is searched block by block, as Chromium's
+//! find-in-page searches the DOM. A match doesn't cross from one block to the next, and text that
+//! isn't laid out, such as a collapsed quote, isn't found. Matches are highlighted as Chromium
+//! highlights them: yellow, the current one orange, the text in them black.
 
 use std::ops::Range;
 
@@ -14,10 +14,10 @@ const CURRENT: Color = Color::from_rgb8(255, 150, 50);
 const MATCH_TEXT: Color = Color::from_rgb8(0, 0, 0);
 
 impl super::BodyView {
-    /// Finds what `matcher` matches (byte ranges of a block's text, which it's handed) in the
-    /// laid-out body, in document order, and highlights it. Returns each match's box (`[left,
-    /// top, width, height]` in the column's CSS px). Find again after laying out again: the
-    /// matches are of this layout.
+    /// Finds what `matcher` matches in the laid-out body, in document order, and highlights it.
+    /// `matcher` is handed each block's text and returns byte ranges of it. Returns each match's
+    /// box (`[left, top, width, height]` in the column's CSS px). Find again after laying out
+    /// again, because the matches belong to this layout.
     pub fn find(&mut self, mut matcher: impl FnMut(&str) -> Vec<Range<usize>>) -> Vec<[f32; 4]> {
         self.found.clear();
         let mut stack = vec![self.root];
@@ -29,8 +29,9 @@ impl super::BodyView {
                 .element_data()
                 .and_then(|data| data.inline_layout_data.as_deref())
             {
-                // Without what layout put in the text (a `<wbr>`'s break, an inline box), which
-                // Chromium's find doesn't see; `at` takes each searched byte back to the text's.
+                // Search the text without what layout put in it (a `<wbr>`'s break, an inline
+                // box), which Chromium's find doesn't see. `at` takes each searched byte back to
+                // the text's.
                 let mut searched = String::with_capacity(text.text.len());
                 let mut at = Vec::with_capacity(text.text.len());
                 for (index, ch) in text
@@ -209,7 +210,8 @@ mod tests {
         let plain = region(&mut view);
         let [left, top, width, _] = view.find(|text| word(text, "agenda"))[0];
         let found = region(&mut view);
-        // A pixel inside the match's box but clear of the glyphs: yellow; the current match's, orange.
+        // A pixel inside the match's box but clear of the glyphs is yellow, and the current
+        // match's is orange.
         let pixel = |image: &crate::Image, x: f32, y: f32| {
             let at = ((y * 2.0) as usize * image.width as usize + (x * 2.0) as usize) * 4;
             image.rgba[at..at + 3].to_vec()

@@ -1,29 +1,28 @@
 //! What's on screen: the sign-in screen, the signed-out alert, or an account's mail, and
 //! switching between accounts.
 //!
-//! On launch Exo opens every account still signed in: the one used last on screen (the first
-//! still signed in, when Google signed that one out), and the others off it, where they sync,
-//! send and notify all the same. Every grant is read from the
-//! Keychain first, so its prompts come together. With no account the sign-in screen shows.
-//! Switching puts another account's mail on screen, or the sign-in screen offering `Sign in as`
-//! for one Google signed out; adding an account shows the sign-in screen with a way back. The
-//! mail switched away from stays open off screen as it was left, and switching back picks it up.
+//! On launch Exo opens every account still signed in: the one used last goes on screen (or the
+//! first still signed in, when Google signed that one out), and the others open off screen, where
+//! they sync, send and notify all the same. Every grant is read from the Keychain first, so the
+//! Keychain's prompts come together. With no account, the sign-in screen shows. Switching puts
+//! another account's mail on screen, or, for an account Google signed out, the sign-in screen
+//! offering `Sign in as`. Adding an account shows the sign-in screen with a way back. The mail
+//! switched away from stays open off screen as it was left, and switching back picks it up.
 //!
-//! When Google refuses an open account's grant (at launch or later), it closes and stays listed
-//! as signed out; on screen, its mail gives way to "Almost there…", which leads back to the
+//! When Google refuses an open account's grant (at launch or later), the account closes and stays
+//! listed as signed out. On screen, its mail gives way to "Almost there…", which leads back to the
 //! sign-in screen. A grant the Keychain won't hand over leaves its account closed, and "Almost
-//! there…" shows when it would be on screen, without the listing. An account
-//! whose store can't be opened shows a teardown saying why (`Sorry!`, [`Unopened`]) in
-//! place of its mail, at launch or on switching to it, with the other accounts a ctrl+1…9 away;
-//! Clear Cache and Restart makes its store again and opens it. After a
-//! sign-in, Exo goes straight to the inbox: there's no first-run tutorial.
-//! Signing out forgets the account and deletes what Exo keeps of it, then opens the next account
-//! the way launch does.
+//! there…" shows when the account would be on screen, without the listing. An account whose store
+//! can't be opened shows a teardown saying why (`Sorry!`, [`Unopened`]) in place of its mail, at
+//! launch or on switching to it, with the other accounts a ctrl+1…9 away. Clear Cache and Restart
+//! makes its store again and opens it. After a sign-in, Exo goes straight to the inbox, because
+//! there's no first-run tutorial. Signing out forgets the account and deletes what Exo keeps of it,
+//! then opens the next account the way launch does.
 //!
-//! The window's tabs ([`tabs`]) each have a page of their own on an account: the screen is the
-//! active tab's, and showing another tab puts its page up as it was left, or a new page at its
-//! route. Switching accounts happens in the tab on screen; the page switched away from stays
-//! open off screen as it was left, at most one an account.
+//! Each of the window's tabs ([`tabs`]) has a page of its own on an account. The screen is the
+//! active tab's page, and showing another tab puts its page up as it was left, or a new page at its
+//! route. Switching accounts happens in the tab on screen. The page switched away from stays open
+//! off screen as it was left, at most one per account.
 
 use std::path::{Path, PathBuf};
 
@@ -58,9 +57,9 @@ pub enum Start {
 pub enum Screen {
     /// The sign-in screen.
     LogIn(LogIn),
-    /// "Almost there…": Google signed the account out.
+    /// "Almost there…", shown when Google signed the account out.
     SignedOut(SignedOut),
-    /// "Sorry!": the account's store couldn't be opened.
+    /// "Sorry!", shown when the account's store couldn't be opened.
     Unopened(Unopened),
     /// An account's mail.
     Mail(Box<Mail>),
@@ -87,12 +86,12 @@ pub struct App {
     sign_in: Option<SignIn>,
     /// The grants of the accounts sign-in opened, which say when Google refuses one.
     grants: Vec<(String, Tokens)>,
-    /// The accounts' pages no tab holds, at most one an account.
+    /// The accounts' pages that no tab holds, at most one per account.
     background: Vec<Away>,
     assets: PathBuf,
     /// What dates are relative to.
     clock: Clock,
-    /// The window as a Mac app's, when Exo runs as one ([`App::set_desktop`]).
+    /// The window's life as a Mac app, when Exo runs as one ([`App::set_desktop`]).
     desktop: Option<Desktop>,
     /// Where the accounts post their notifications, when Exo can ([`App::set_notifier`]).
     notifier: Option<Notifier>,
@@ -104,14 +103,14 @@ pub struct App {
     pictures: ProfilePictures,
     /// The app's zoom ([`App::set_zoom`]).
     zoom: Zoom,
-    /// The window's tabs: the screen is the active one's.
+    /// The window's tabs. The screen is the active tab's.
     tabs: Tabs,
-    /// Where the tabs are kept ([`App::keep_tabs`]); none for tabs that last the run.
+    /// Where the tabs are kept ([`App::keep_tabs`]), or `None` for tabs that last the run.
     tabs_file: Option<tabs::File>,
     /// The day See Your Week was on when it was switched away from, for the next account's mail
     /// to open on.
     kept_week: Option<jiff::civil::Date>,
-    /// The updater, for the mail on screen's alerts ([`App::set_updates`]).
+    /// The updater, for the alerts of the mail on screen ([`App::set_updates`]).
     updates: Option<crate::update::Updates>,
     /// What the update that relaunched Exo waits for: word that the window is up.
     receipt: Option<fastframe_update::Receipt>,
@@ -121,10 +120,10 @@ pub struct App {
 /// as the one on screen does, at the pace of an account no window shows
 /// ([`Presence::OffScreen`]) unless a tab shows it.
 enum Away {
-    /// Opened at launch, and not on screen since: its page is made when it first shows.
+    /// Opened at launch, and not on screen since. Its page is made when it first shows.
     Account(Box<Account>),
-    /// A page, as it was left: switched away from in its tab, or its account's last when its
-    /// tab closed.
+    /// A page, as it was left: switched away from in its tab, or the last page of its account when
+    /// its tab closed.
     Mail(Box<Mail>),
 }
 
@@ -153,7 +152,7 @@ impl Away {
         }
     }
 
-    /// The page: this one, or the first of an account opened at launch.
+    /// The page: this one, or the first page of an account opened at launch.
     fn into_page(self, ctx: &egui::Context, assets: &Path, clock: &Clock) -> Box<Mail> {
         match self {
             Self::Account(account) => Box::new(Mail::new(ctx, assets, *account, clock.clone())),
@@ -216,20 +215,20 @@ impl App {
         Ok(app)
     }
 
-    /// Runs as a Mac app ([`Desktop`]): closing the window hides it while Exo keeps syncing,
-    /// and the Dock badge counts the list on screen. Without, closing the window quits.
+    /// Runs as a Mac app ([`Desktop`]): closing the window hides it while Exo keeps syncing, and
+    /// the Dock badge counts the list on screen. Without a desktop, closing the window quits.
     pub fn set_desktop(&mut self, desktop: Desktop) {
         self.desktop = Some(desktop);
     }
 
-    /// Posts the accounts' notifications with `notifier`: the mail on screen's, and every
-    /// account's open off screen. Without, Exo shows none.
+    /// Posts the accounts' notifications with `notifier`, for the mail on screen and every account
+    /// open off screen. Without a notifier, Exo shows none.
     pub fn set_notifier(&mut self, notifier: Notifier) {
         self.notifier = Some(notifier);
         self.share_notifier();
     }
 
-    /// Shows `warning` (`Warn Before Quitting`, Exo's own) in the settings menu. Without, the
+    /// Shows `warning` (`Warn Before Quitting`, Exo's own) in the settings menu. Without it, the
     /// menu has no such row.
     pub fn set_quit_warning(&mut self, warning: QuitWarning) {
         if let Screen::Mail(mail) = &mut self.screen {
@@ -238,8 +237,8 @@ impl App {
         self.quit_warning = Some(warning);
     }
 
-    /// Checks for updates with `updates`: ⌘K's `Check for Updates` and its alerts, in the mail on
-    /// screen. Without, ⌘K has none.
+    /// Checks for updates with `updates`, which backs ⌘K's `Check for Updates` and its alerts in
+    /// the mail on screen. Without it, ⌘K has no such command.
     pub fn set_updates(&mut self, updates: crate::update::Updates) {
         if let Screen::Mail(mail) = &mut self.screen {
             mail.set_updates(Some(updates.clone()));
@@ -247,20 +246,20 @@ impl App {
         self.updates = Some(updates);
     }
 
-    /// Exo was relaunched to finish installing an update: once its window has drawn, `receipt`
+    /// Exo was relaunched to finish installing an update. Once its window has drawn, `receipt`
     /// tells the update's helper, which otherwise puts the previous Exo back.
     pub fn set_update_receipt(&mut self, receipt: fastframe_update::Receipt) {
         self.receipt = Some(receipt);
     }
 
-    /// Zooms as `zoom` has it, which keeps what it's zoomed to. Without, the zoom lasts the run.
+    /// Zooms as `zoom` has it, which keeps what it's zoomed to. Without it, the zoom lasts the run.
     pub fn set_zoom(&mut self, zoom: Zoom) {
         self.zoom = zoom;
     }
 
     /// Keeps the window's tabs in `dir`, the state folder, from now on, and puts back those kept
-    /// there, the active one on screen at its route: the page launch opened, when it's on that
-    /// tab's account. Without, the tabs last the run.
+    /// there, with the active one on screen at its route. That's the page launch opened, when it's
+    /// on that tab's account. Without this, the tabs last the run.
     pub fn keep_tabs(&mut self, ctx: &egui::Context, dir: &Path) {
         let (file, restored) = tabs::File::load(dir);
         self.tabs_file = Some(file);
@@ -311,7 +310,8 @@ impl App {
         }
     }
 
-    /// Every handle on an account open: the page on screen's, the tabs', and those off screen.
+    /// Every handle on an open account: from the page on screen, from the tabs, and from those off
+    /// screen.
     fn handles(&self) -> impl Iterator<Item = &Account> {
         self.mail()
             .map(Mail::account)
@@ -359,8 +359,8 @@ impl App {
         }
     }
 
-    /// The accounts open off screen: those of the tabs not on screen and of the pages no tab
-    /// holds, each once, but the account on screen.
+    /// The accounts open off screen: those of the tabs not on screen and of the pages no tab holds,
+    /// each once, except the account on screen.
     pub fn off_screen(&self) -> impl Iterator<Item = &Account> {
         let mut seen = self.current().into_iter().collect::<Vec<_>>();
         self.tabs
@@ -375,7 +375,7 @@ impl App {
             })
     }
 
-    /// Nothing is in flight on the screen showing, nor in the accounts open off it. For
+    /// Whether nothing is in flight on the screen showing, nor in the accounts open off it. For
     /// screenshots and tests.
     pub fn is_idle(&self) -> bool {
         let screen = match &self.screen {
@@ -396,7 +396,7 @@ impl App {
         for command in tabs::keys(&ctx, self.tabs.len() > 1) {
             self.tab_command(&ctx, command);
         }
-        // Find's keys before anything else reads the keyboard; there's none on the sign-in screen.
+        // Find's keys before anything else reads the keyboard. Find is off on the sign-in screen.
         crate::find::begin(&ctx, matches!(self.screen, Screen::Mail(_)));
         self.refresh_pills();
         chrome::set_tabs(&ctx, self.tabs.pills(), self.tabs.active());
@@ -427,8 +427,8 @@ impl App {
         if self.desktop.as_mut().is_some_and(Desktop::take_reload) {
             self.reload(&ctx);
         }
-        // Edit ▸ `Enable Autocorrect`: every account, in every tab, the other way from the one on
-        // screen.
+        // Edit ▸ `Enable Autocorrect` sets every account, in every tab, to the opposite of the
+        // account on screen.
         if self
             .desktop
             .as_mut()
@@ -451,9 +451,9 @@ impl App {
             desktop.set_autocorrect(self.mail().map(Mail::autocorrect));
         }
         self.close_refused(&ctx);
-        // Links another launch or macOS handed over: a new message to a `mailto:`
-        // one, in a new tab; one of Exo's in the tab for the account it names. They wait while no
-        // account's mail shows.
+        // Links that another launch or macOS handed over. A `mailto:` link opens a new message in a
+        // new tab, and one of Exo's own opens in the tab for the account it names. They wait while
+        // no account's mail shows.
         let links = match (&self.screen, &mut self.desktop) {
             (Screen::Mail(_), Some(desktop)) => desktop.take_links(),
             _ => Vec::new(),
@@ -461,8 +461,8 @@ impl App {
         for url in links {
             match crate::links::parse(&url) {
                 Some(link) => self.open_link(&ctx, &link, false),
-                // A `mailto:` link: a new message in a new tab, on the account used last, the
-                // active tab's.
+                // A `mailto:` link opens a new message in a new tab, on the account used last (the
+                // active tab's).
                 None => {
                     self.new_tab(&ctx);
                     if let Screen::Mail(mail) = &mut self.screen {
@@ -479,9 +479,9 @@ impl App {
         for click in clicks {
             self.clicked(&ctx, click);
         }
-        // Its store stopped working: a teardown saying why, in place of its mail. Its
-        // pages close, and the account with them (sending what's held, as quitting does); the
-        // tabs that showed it keep their routes.
+        // When the store of the account on screen stops working, a teardown saying why takes the
+        // place of its mail. The account's pages close, and the account with them (sending what's
+        // held, as quitting does). The tabs that showed it keep their routes.
         if let Screen::Mail(mail) = &self.screen
             && let Some(unusable) = mail.account().unusable()
         {
@@ -499,7 +499,7 @@ impl App {
             }
             Screen::SignedOut(alert) => {
                 if let Some(log_in) = alert.show(ui) {
-                    // The alert reloads to `/new`: nothing was on screen before, but another
+                    // The alert reloads to `/new`. Nothing was on screen before, but another
                     // account still signed in is somewhere to go back to.
                     let signed_out = alert.email().to_owned();
                     let back = self.back(None, Some(&signed_out));
@@ -549,7 +549,7 @@ impl App {
             }
             Request::Add => {
                 self.keep_week();
-                // Adding an account: the sign-in screen, with a way back to this one.
+                // Adding an account shows the sign-in screen, with a way back to this one.
                 let back = self.current().map(|email| Back::Previous(email.to_owned()));
                 let log_in = self.log_in_screen(ctx).with_back(back);
                 drop(self.show(Screen::LogIn(log_in)));
@@ -561,9 +561,9 @@ impl App {
         }
     }
 
-    /// Opens one of Exo's links on the account it names, else the account on screen's: one macOS
-    /// or another launch handed over in that account's tab, else the tab on screen; one clicked
-    /// in a message, `in_new_tab`, in a new tab.
+    /// Opens one of Exo's links on the account it names, else on the account on screen. A link that
+    /// macOS or another launch handed over opens in that account's tab, else in the tab on screen.
+    /// A link clicked in a message (`in_new_tab`) opens in a new tab.
     fn open_link(&mut self, ctx: &egui::Context, link: &crate::links::Link, in_new_tab: bool) {
         match (&link.email, in_new_tab) {
             (Some(email), true) => self.open_tab(ctx, Parked::Route(Route::home(email.clone()))),
@@ -576,9 +576,9 @@ impl App {
         }
     }
 
-    /// The strip's copy button: tab `index`'s link on the clipboard, as
-    /// `text/plain` and `text/html`, and the tab on screen saying so. A tab on the sign-in
-    /// screen or an alert has none.
+    /// The strip's copy button, which puts the link of tab `index` on the clipboard as `text/plain`
+    /// and `text/html`, and has the tab on screen say so. A tab on the sign-in screen or an alert
+    /// has no link.
     fn copy_link(&mut self, ctx: &egui::Context, index: usize) {
         let url = if index == self.tabs.active() {
             self.mail().map(Mail::link)
@@ -599,13 +599,13 @@ impl App {
         }
     }
 
-    /// Switching accounts with See Your Week up: the next account's mail opens on its week.
+    /// Switching accounts with See Your Week up opens the next account's mail on the same week.
     fn keep_week(&mut self) {
         self.kept_week = self.mail().and_then(Mail::calendar_week_to_keep);
     }
 
-    /// Google refused an open account's grant: its pages close, and it's listed as signed out,
-    /// so switching to it offers to sign it in again; on screen, its mail gives way to "Almost
+    /// Google refused an open account's grant. Its pages close, and it's listed as signed out, so
+    /// switching to it offers to sign it in again. On screen, its mail gives way to "Almost
     /// there…". What it queued stays in its store's outbox for the next sign-in.
     fn close_refused(&mut self, ctx: &egui::Context) {
         let refused: Vec<String> = self
@@ -676,11 +676,11 @@ impl App {
         }
     }
 
-    /// What showing `email` puts up: a page of its mail ([`page_for`](Self::page_for), picking
-    /// up the one off screen when `pick_up`), or the sign-in screen offering it when Google
-    /// signed it out, with a way back to the account on screen, "Almost there…" when the
-    /// Keychain won't hand its grant over, "Sorry!" when its store can't be opened. None when it
-    /// isn't on this Mac or can't be opened otherwise.
+    /// What showing `email` puts up: a page of its mail ([`page_for`](Self::page_for), picking up
+    /// the one off screen when `pick_up`); the sign-in screen offering it when Google signed it
+    /// out, with a way back to the account on screen; "Almost there…" when the Keychain won't hand
+    /// its grant over; or "Sorry!" when its store can't be opened. `None` when the account isn't on
+    /// this Mac or can't be opened otherwise.
     fn screen_for(&mut self, ctx: &egui::Context, email: &str, pick_up: bool) -> Option<Screen> {
         if self.sign_in.is_some() {
             let account = self
@@ -725,7 +725,7 @@ impl App {
         }
     }
 
-    /// `email`'s store couldn't be opened: a teardown saying why, in place of its mail.
+    /// Shows a teardown saying why `email`'s store couldn't be opened, in place of its mail.
     /// Returns the screen it replaced, as [`show`](Self::show) does.
     fn unopened(&mut self, ctx: &egui::Context, email: &str, error: &OpenError) -> Option<Screen> {
         log::error!("opening an account: {error}");
@@ -733,8 +733,8 @@ impl App {
         self.show(Screen::Unopened(alert))
     }
 
-    /// Clear Cache and Restart for `email`, whose store couldn't be opened: its store is made
-    /// again, keeping what Gmail doesn't have yet, and its attachment previews go; then its mail
+    /// Clear Cache and Restart for `email`, whose store couldn't be opened. Its store is made
+    /// again, keeping what Gmail doesn't have yet, and its attachment previews go. Then its mail
     /// opens, to fill from Gmail. Only this account's store is broken, so the others stay.
     fn clear_cache(&mut self, ctx: &egui::Context, email: &str) {
         let Some(sign_in) = &self.sign_in else { return };
@@ -746,9 +746,9 @@ impl App {
         self.switch(ctx, email);
     }
 
-    /// The Help menu's Clear Cache and Restart, once confirmed: every account's mail closes
-    /// (sending what's held for Undo, as quitting does), its store is made again, keeping what
-    /// Gmail doesn't have yet, and Exo opens what launch would.
+    /// The Help menu's Clear Cache and Restart, once confirmed. Every account's mail closes
+    /// (sending what's held for Undo, as quitting does) and its store is made again, keeping what
+    /// Gmail doesn't have yet. Then Exo opens what launch would.
     pub fn clear_cache_and_restart(&mut self, ctx: &egui::Context) {
         if self.sign_in.is_none() {
             return log::warn!(
@@ -762,7 +762,7 @@ impl App {
         drop(std::mem::replace(&mut self.screen, placeholder));
         self.background.clear();
         self.grants.clear();
-        // It starts over as a relaunch would, with one tab; the others' pages close.
+        // It starts over as a relaunch would, with one tab. The other tabs' pages close.
         self.tabs = Tabs::default();
         let listed = self.listed();
         let Some(sign_in) = &mut self.sign_in else {
@@ -785,11 +785,11 @@ impl App {
         self.settle_on_screen();
     }
 
-    /// View ▸ `Reload`: what's on screen starts over where it is. The page on screen closes,
+    /// View ▸ `Reload`, which starts what's on screen over where it is. The page on screen closes,
     /// saving its drafts, and a new one opens at the list and conversation it showed (the page's
-    /// URL); its account closes, sending what it holds as quitting does, and opens again from
-    /// its store only when no other tab has it. An alert in its place tries opening the account
-    /// again; the sign-in screen stays.
+    /// URL). Its account closes, sending what it holds as quitting does, and opens again from its
+    /// store only when no other tab has it. An alert in the page's place tries opening the account
+    /// again. The sign-in screen stays.
     fn reload(&mut self, ctx: &egui::Context) {
         if self.sign_in.is_none() {
             return log::warn!("reloading needs Exo's sign-in, which this app wasn't started with");
@@ -808,8 +808,8 @@ impl App {
         drop(self.go(ctx, route));
     }
 
-    /// An account just signed in on the sign-in screen: its mail, welcoming it the first time it
-    /// opens on this Mac.
+    /// An account just signed in on the sign-in screen. Its mail opens, with a welcome the first
+    /// time it opens on this Mac.
     fn signed_in(&mut self, ctx: &egui::Context, email: &str) {
         let first_time = self
             .sign_in
@@ -867,8 +867,9 @@ impl App {
         )))
     }
 
-    /// Puts `screen` up. A page it replaces stays open off screen, as it was left; mail it shows
-    /// becomes the account used last. Returns what it replaced when that wasn't a page.
+    /// Puts `screen` up. A page it replaces stays open off screen, as it was left, and the account
+    /// whose mail it shows becomes the account used last. Returns what it replaced when that wasn't
+    /// a page.
     fn show(&mut self, screen: Screen) -> Option<Screen> {
         match self.put(screen) {
             Screen::Mail(page) => {
@@ -898,8 +899,8 @@ impl App {
         self.background.push(Away::Mail(page));
     }
 
-    /// The page of a tab that closed goes, saving its drafts, unless it's its account's last,
-    /// which stays open off screen as it was left: the account keeps syncing and notifying.
+    /// The page of a tab that closed goes, saving its drafts, unless it's its account's last page.
+    /// That page stays open off screen as it was left, so the account keeps syncing and notifying.
     fn closed(&mut self, page: Box<Mail>) {
         let email = page.account().email();
         if self.account_of(email).is_none() {
@@ -942,7 +943,7 @@ impl App {
         let Some(sign_in) = &mut self.sign_in else {
             return;
         };
-        // Nothing is touched when the grant can't be forgotten: the account stays signed in.
+        // Nothing is touched when the grant can't be forgotten, so the account stays signed in.
         if let Err(error) = sign_in.forget(email) {
             log::error!("signing an account out: {error}");
             return;
@@ -951,7 +952,7 @@ impl App {
             self.pictures.forget(auth, email);
         }
         self.grants.retain(|(open, _)| open != email);
-        // Its pages close without sending what it holds: one handle stops it for every page.
+        // Its pages close without sending what it holds, and one handle stops it for every page.
         let on_screen = self.current() == Some(email);
         let mut pages = self.close_pages(email);
         let previews = self
@@ -996,9 +997,9 @@ impl App {
     }
 
     /// Signs `email`, not the account on screen, out: at once when it has nothing unsent, else
-    /// after the mail on screen asks (`One last thing…`). Its store says what it hasn't sent,
-    /// the calendar's changes included. A store that can't be opened holds nothing Exo can
-    /// send, and goes without asking; otherwise nothing happens when that can't be counted.
+    /// after the mail on screen asks (`One last thing…`). Its store says what it hasn't sent, the
+    /// calendar's changes included. A store that can't be opened holds nothing Exo can send, so it
+    /// goes without asking. Otherwise, nothing happens when what's unsent can't be counted.
     fn check_sign_out(&mut self, ctx: &egui::Context, email: &str) {
         let Some(sign_in) = &mut self.sign_in else {
             return;
@@ -1046,8 +1047,8 @@ impl App {
             .unwrap_or_default()
     }
 
-    /// Where the sign-in screen's back button leads: to `previous`, the
-    /// account it was opened from, else to another account still signed in than `except`.
+    /// Where the sign-in screen's back button leads: to `previous`, the account it was opened from,
+    /// else to an account still signed in other than `except`.
     fn back(&mut self, previous: Option<&str>, except: Option<&str>) -> Option<Back> {
         if let Some(previous) = previous {
             return Some(Back::Previous(previous.to_owned()));
@@ -1102,8 +1103,8 @@ impl App {
         }
     }
 
-    /// Shows tab `to`, if it's another: the screen on screen goes with the tab
-    /// leaving, as it was, and `to` comes up as it was left.
+    /// Shows tab `to`, if it's another tab. The screen showing goes with the tab that's leaving, as
+    /// it was, and `to` comes up as it was left.
     fn activate(&mut self, ctx: &egui::Context, to: usize) {
         let Some((from, target)) = self.tabs.select(to) else {
             return;
@@ -1130,10 +1131,10 @@ impl App {
         }
     }
 
-    /// Puts up a page of `route`'s account at the route, a new one unless it's an account
-    /// opened at launch and not shown yet, and returns the screen it replaced. An account no
-    /// longer signed in on this Mac gives way to the account used last's home, or to the
-    /// sign-in screen with none; one that can't be shown gives way to what switching to it
+    /// Puts up a page of `route`'s account at the route, and returns the screen it replaced. The
+    /// page is a new one unless the account was opened at launch and not shown yet. An account no
+    /// longer signed in on this Mac gives way to the home of the account used last, or to the
+    /// sign-in screen when there's none. One that can't be shown gives way to what switching to it
     /// shows.
     fn go(&mut self, ctx: &egui::Context, mut route: Route) -> Screen {
         if let Some(auth) = self
@@ -1160,8 +1161,8 @@ impl App {
         left
     }
 
-    /// A new tab (⌘T, `+`): the active tab's account at its home, else the account
-    /// used last's, else the sign-in screen; last in the strip, and on screen.
+    /// Opens a new tab (⌘T, `+`), last in the strip and on screen. It shows the active tab's
+    /// account at its home, else the home of the account used last, else the sign-in screen.
     fn new_tab(&mut self, ctx: &egui::Context) {
         let email = match self.current() {
             Some(email) => Some(email.to_owned()),
@@ -1178,10 +1179,10 @@ impl App {
         );
     }
 
-    /// Opens a tab at `parked`, last, and shows it; at the limit the active tab's neighbour closes
+    /// Opens a tab at `parked`, last, and shows it. At the limit, the active tab's neighbour closes
     /// first.
     fn open_tab(&mut self, ctx: &egui::Context, parked: Parked) {
-        // Until it shows, the active tab's title after its `-`.
+        // Until the tab shows, its title is the active tab's title after its `-`.
         let active = &self.tabs.active_pill().title;
         let title = active.split('-').nth(1).unwrap_or(active).to_owned();
         let pill = chrome::Pill {
@@ -1193,9 +1194,9 @@ impl App {
         self.activate(ctx, index);
     }
 
-    /// Closes tab `index`: the one on screen gives way to its right neighbour, else its left one;
-    /// the last one closes the window, which hides and keeps it.
-    /// What closed is what ⌘⇧T opens again.
+    /// Closes tab `index`. The tab on screen gives way to its right neighbour, else its left one.
+    /// The last tab closes the window, which hides and keeps the tab. What closed is what ⌘⇧T opens
+    /// again.
     fn close_tab(&mut self, ctx: &egui::Context, index: usize) {
         if index != self.tabs.active() {
             if let Some(Parked::Page(page)) = self.tabs.close(index) {
@@ -1216,7 +1217,7 @@ impl App {
         };
         let left = self.bring(ctx, target);
         self.tabs.close_shown(from, closed);
-        // The closed tab's own screen goes; its page too, unless its account has no other.
+        // The closed tab's own screen goes, and its page too, unless its account has no other page.
         if let Screen::Mail(page) = left {
             self.closed(page);
         }
@@ -1297,7 +1298,7 @@ impl eframe::App for App {
     /// What goes on whatever state the window is in, hidden or minimized too: the window's
     /// closing and coming back, how often each account syncs, and the Dock badge.
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Something kept panicking (`recovery`): the crash dialog, then Exo quits.
+        // Something kept panicking (`recovery`), so the crash dialog shows, then Exo quits.
         if let Some(gave_up) = recovery::gave_up() {
             match &self.desktop {
                 Some(desktop) => desktop.crashed_repeatedly(gave_up),
@@ -1319,8 +1320,8 @@ impl eframe::App for App {
                     .and_then(|mail| mail.badge())
                     .unwrap_or_default(),
             );
-            // Drafts save a second after their last change, on a frame, and a hidden window has
-            // none: what was typed just before closing is saved now.
+            // Drafts save a second after their last change, on a frame, and a hidden window has no
+            // frames, so what was typed just before closing is saved now.
             if let Some(mail) = mail.as_mut().filter(|_| hid) {
                 mail.save_drafts();
             }
@@ -1342,7 +1343,7 @@ impl eframe::App for App {
         if let Some(updates) = &self.updates {
             updates.set_alerts_shown(matches!(self.screen, Screen::Mail(_)) && !hidden);
         }
-        // The first frame has drawn: the update that relaunched Exo stays.
+        // The first frame has drawn, so the update that relaunched Exo stays.
         if ctx.cumulative_frame_nr() > 0
             && let Some(receipt) = self.receipt.take()
         {
@@ -1352,9 +1353,9 @@ impl eframe::App for App {
                 }
             });
         }
-        // An account another tab shows syncs as a hidden window's does, its tab's page connected
-        // to its background; the others at the pace of an account no tab shows, whatever the
-        // window does.
+        // An account that another tab shows syncs as a hidden window's account does, with its tab's
+        // page connected to its background. The others sync at the pace of an account no tab shows,
+        // whatever the window does.
         for account in self.off_screen() {
             account.set_presence(if self.tabs.shows(account.email()) {
                 Presence::Background
@@ -1402,14 +1403,13 @@ impl Launch {
     }
 }
 
-/// What sign-in opens with: every
-/// account still signed in, the default account's mail on screen and the others open off it.
-/// Every grant is read before any store opens, the default's first, so the Keychain's prompts
-/// (one an account while Exo is signed ad hoc) come together. On screen: "Almost there…" when
-/// the Keychain withholds the default's grant, "Sorry!" when its store can't be opened, or the
-/// sign-in screen when there's no account signed in or no OAuth client to sign in with. Another
-/// account whose grant or store can't be had stays closed, to show the same when it's switched
-/// to.
+/// What sign-in opens with: every account still signed in, with the default account's mail on
+/// screen and the others open off it. Every grant is read before any store opens, the default's
+/// first, so the Keychain's prompts (one per account while Exo is signed ad hoc) come together. On
+/// screen instead: "Almost there…" when the Keychain withholds the default's grant, "Sorry!" when
+/// its store can't be opened, or the sign-in screen when there's no account signed in or no OAuth
+/// client to sign in with. Another account whose grant or store can't be had stays closed, to show
+/// the same when it's switched to.
 fn launch(
     sign_in: &mut SignIn,
     ctx: &egui::Context,
@@ -1458,7 +1458,7 @@ fn launch(
             grants.push((first.email, tokens));
             Screen::Mail(Box::new(Mail::new(ctx, assets, account, clock.clone())))
         }
-        // The Keychain won't hand over the grant (say, the user clicked Deny): as with a grant
+        // The Keychain won't hand over the grant (say, the user clicked Deny). As with a grant
         // Google refused, the account signs in again, which writes the Keychain item afresh.
         Err(MailError::Auth(error @ exo_auth::Error::Secrets(_))) => {
             log::warn!("reading an account's grant: {error}");
@@ -1469,7 +1469,7 @@ fn launch(
                 first.email,
             ))
         }
-        // Its store can't be opened: why, in place of its mail.
+        // Its store can't be opened, so a teardown says why in place of its mail.
         Err(MailError::Open(error)) => {
             log::error!("opening an account: {error}");
             let reason = Reason::of(&error);
@@ -1494,7 +1494,8 @@ fn launch(
     })
 }
 
-/// Deletes `email`'s attachment previews and kept parts, caches like its store's mail.
+/// Deletes `email`'s attachment previews and kept parts, which are caches like the mail in its
+/// store.
 fn remove_previews(email: &str) {
     let previews = crate::attachment_files::default_cache(email);
     for cache in std::iter::once(previews).chain(crate::account::parts_cache(email)) {

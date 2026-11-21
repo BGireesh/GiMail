@@ -2,7 +2,7 @@
 //! sliding cursor, date separators, hover actions, selection, the archive animation and the empty
 //! states.
 //!
-//! Keyboard shortcuts aren't bound here; the operations they trigger are methods
+//! Keyboard shortcuts aren't bound here. The operations they trigger are methods
 //! ([`Inbox::move_cursor`], [`Inbox::dismiss`], …) for the app's commands to call.
 
 mod header;
@@ -46,8 +46,7 @@ const LEAVE_HIDDEN: f64 = 0.4;
 const LEAVE_REMOVED: f64 = 0.55;
 /// A row brought back mid-slide (undo) slides back in over 400ms on the same curve.
 const RETURN_SLIDE: f32 = 0.4;
-/// The list asks for more rows when its end is this close below the visible area (react-list's
-/// `threshold`).
+/// The list asks for more rows when its end is this close below the visible area.
 const LOAD_AHEAD: f32 = 2000.0;
 /// The status line: 12px/16px, 10px above and below, nudged down 1px.
 const STATUS: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 12.0, 16.0);
@@ -69,8 +68,8 @@ const HINT_ROOM: f32 = 60.0;
 /// The select-all hint's text: 12px/15px.
 const HINT_TEXT: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 12.0, 15.0);
 
-/// The middle column of a list `width` px wide, which other lists' rows (the Snippets folder's) cut
-/// their text to as the thread list's do.
+/// The middle column of a list `width` px wide. Other lists' rows (the Snippets folder's) cut their
+/// text to it as the thread list's rows do.
 pub(crate) fn center_width(width: f32, rem: f32, compact: bool) -> f64 {
     row::Geometry::new(width, rem, compact).center_width()
 }
@@ -80,9 +79,9 @@ pub(crate) fn center_width(width: f32, rem: f32, compact: bool) -> f64 {
 pub enum Action {
     /// Open this thread.
     Open(String),
-    /// A Done button: mark the actionable threads done, or not done when they all are.
+    /// A Done button, which marks the actionable threads done, or not done when they all are.
     ToggleDone,
-    /// A clock button: Remind me for the actionable threads.
+    /// A clock button, for Remind me on the actionable threads.
     Remind,
     /// Open the command palette.
     CommandPalette,
@@ -92,19 +91,19 @@ pub enum Action {
     Header(HeaderAction),
     /// The list scrolled close to the end of its loaded rows.
     More,
-    /// A row was right-clicked at this point: the menu for the actionable conversations, which
-    /// the right-click made the clicked row, or the selection it's in.
+    /// A row was right-clicked at this point, which opens the menu for the actionable
+    /// conversations. The right-click made those the clicked row, or the selection it's in.
     RowMenu(Pos2),
     /// The hide-empty nudge's close button or `Try it out`.
     Nudge(NudgeAction),
-    /// A search result's file card: preview the file, or save it when `download`.
+    /// A search result's file card, to preview the file, or to save it when `download`.
     File {
         file: exo_store::Attachment,
         download: bool,
     },
-    /// A row's checkmark was clicked: suggest X (`SELECT`, or `DESELECT` for a selected row).
+    /// A row's checkmark was clicked, so suggest X (`SELECT`, or `DESELECT` for a selected row).
     SelectHint { deselect: bool },
-    /// Inbox Zero's button: the Inbox Zero achievements.
+    /// Inbox Zero's button, which opens the Inbox Zero achievements.
     Achievements,
 }
 
@@ -142,40 +141,42 @@ pub(crate) fn show_header(
 pub struct View {
     /// The header's title: `Inbox`, `Done`, a label's name.
     pub title: String,
-    /// An inbox view: split tabs, Add Split and the split gear in the header, Inbox Zero when
-    /// empty.
+    /// Whether it's an inbox view, with split tabs, Add Split and the split gear in the header, and
+    /// Inbox Zero when empty.
     pub inbox: bool,
     /// An inbox view's tabs.
     pub tabs: Vec<crate::splits::Tab>,
     /// The tab on screen, an index into [`View::tabs`].
     pub selected: usize,
-    /// The header offers Add Split.
+    /// Whether the header offers Add Split.
     pub add_split: bool,
-    /// More rows exist past the loaded ones.
+    /// Whether more rows exist past the loaded ones.
     pub more: bool,
-    /// The list is still being fetched, so empty doesn't mean empty yet.
+    /// Whether the list is still being fetched, so empty doesn't mean empty yet.
     pub loading: bool,
-    /// Every thread of the list is stored: offline, what isn't can't load.
+    /// Whether every thread of the list is stored. Offline, threads that aren't stored can't load.
     pub complete: bool,
-    /// Its threads can be marked done (not in Spam).
+    /// Whether its threads can be marked done (not in Spam).
     pub archivable: bool,
-    /// The filter narrowing it, by the name its tab shows (`Unread`): never Inbox Zero.
+    /// The filter narrowing it, by the name its tab shows (`Unread`). A filtered list never shows
+    /// Inbox Zero.
     pub filter: Option<&'static str>,
     /// How many threads it has locally, all of them when exact (a select-all's total).
     pub count: Option<exo_store::ListCount>,
-    /// Search results: the search header (the app's) over the top, and no date separators.
+    /// Set for search results, which have the search header (the app's) over the top and no date
+    /// separators.
     pub search: Option<SearchView>,
-    /// No date separators either: Scheduled.
+    /// Whether there are no date separators either, as in Scheduled.
     pub unsegmented: bool,
-    /// At Inbox Zero, the card offering to hide empty splits shows.
+    /// Whether the card offering to hide empty splits shows at Inbox Zero.
     pub nudge: bool,
     /// Weeks in a row the inbox has been emptied (`inboxZeroStreakWeekCurrent`), which Inbox
     /// Zero's button counts.
     pub streak: u32,
-    /// The streak animation has the window: the header and Inbox Zero's button are hidden.
+    /// Whether the streak animation has the window, which hides the header and Inbox Zero's button.
     pub hide_chrome: bool,
-    /// The settings menu is open: at Inbox Zero, the header's search and compose are hidden to give
-    /// it the room.
+    /// Whether the settings menu is open. At Inbox Zero, the header's search and compose are hidden
+    /// to give the menu room.
     pub settings_open: bool,
 }
 
@@ -191,9 +192,9 @@ pub struct SearchView {
 /// What the list shows under its rows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Bottom {
-    /// More may load: the spinner.
+    /// The spinner, when more may load.
     Spinner,
-    /// It's all loaded that can be, and this says why the list ends where it does.
+    /// Everything that can load has loaded, and this says why the list ends where it does.
     Status(&'static str),
     /// Nothing.
     None,
@@ -218,18 +219,19 @@ enum Item {
 /// A hint tooltip the selection asks for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SelectionHint {
-    /// Four or more rows picked one by one: ⌘A selects everything below (`SELECT_ALL`).
+    /// Four or more rows were picked one by one, so hint that ⌘A selects everything below
+    /// (`SELECT_ALL`).
     SelectAll,
-    /// ⌘A again on the row a select-all started from: Escape undoes it.
+    /// ⌘A again on the row a select-all started from, so hint that Escape undoes it.
     ChangedYourMind,
 }
 
 /// How the cursor got where it is, which decides how the rest of the screen follows it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CursorSource {
-    /// The keyboard or the app moved it: scroll it into view, update the contact pane now.
+    /// The keyboard or the app moved it, so scroll it into view and update the contact pane now.
     Command,
-    /// The pointer moved onto a row: the contact pane follows once the mouse settles.
+    /// The pointer moved onto a row, so the contact pane follows once the mouse settles.
     Pointer,
 }
 
@@ -249,16 +251,16 @@ pub struct Inbox {
     anchor: Option<String>,
     /// A hint the selection asks for, until the app takes it.
     hint: Option<SelectionHint>,
-    /// What rows a bulk action waits or runs for show instead of their date (`Pending: Mark
-    /// Done`).
+    /// What the rows that a bulk action waits or runs for show instead of their date (`Pending:
+    /// Mark Done`).
     pending: HashMap<String, String>,
-    /// Gmail can be reached (`network.online`): offline, rows with a send waiting say so.
+    /// Whether Gmail can be reached. Offline, rows with a send waiting say so.
     online: bool,
-    /// A draft is popped out: the status line goes over the rows.
+    /// Whether a draft is popped out, which puts the status line over the rows.
     popped_out: bool,
-    /// The popped-out draft has the keyboard: the highlight goes.
+    /// Whether the popped-out draft has the keyboard, which hides the highlight.
     popout_focused: bool,
-    /// The popped-out draft's card, over the rows: the pointer on it isn't on them.
+    /// The popped-out draft's card, over the rows. The pointer on the card isn't on the rows.
     covered: Option<Rect>,
     /// Dismissed threads and when they started leaving (egui time).
     leaving: Vec<(ThreadSummary, f64)>,
@@ -269,20 +271,22 @@ pub struct Inbox {
     viewport: f32,
     /// Which row the pointer gives the cursor.
     hover: RowHover,
-    /// The list has the keyboard: not while the folder drawer is open.
+    /// Whether the list has the keyboard, which it doesn't while the folder drawer is open.
     focused: bool,
-    /// The focus bar shows on the cursor's row: not while the search bar has the keyboard.
+    /// Whether the focus bar shows on the cursor's row, which it doesn't while the search bar has
+    /// the keyboard.
     bar: bool,
-    /// The cursor's conversation is open in the thread pane, outside search.
+    /// Whether the cursor's conversation is open in the thread pane, outside search.
     reading: bool,
-    /// The highlight moves to the cursor without sliding next frame.
+    /// Whether the highlight moves to the cursor without sliding next frame.
     jump: bool,
-    /// Search results' file strips paged along: the first card shown and how far it's scrolled.
+    /// How far each search result's file strip has paged: the first card shown and how far the
+    /// strip is scrolled.
     file_pages: HashMap<String, (usize, f32)>,
     /// What in the header has the keyboard, when it has it.
     header_focus: Option<HeaderFocus>,
-    /// Where Auto Advance goes from the open conversation once it has moved up the list while open:
-    /// the conversations that were around it.
+    /// Where Auto Advance goes from the open conversation once that conversation has moved up the
+    /// list while open, which is to the conversations that were around it.
     advance_anchor: Option<AdvanceAnchor>,
 }
 
@@ -303,7 +307,8 @@ struct Heading {
     angle: Option<f32>,
 }
 
-/// Moves this close together are smoothed: a third of the new angle, two of the old.
+/// Moves this close together are smoothed, taking a third of the new angle and two thirds of the
+/// old.
 const HEADING_SMOOTHING: f64 = 0.035;
 /// A row crossed towards the right edge gets the cursor if the pointer stays on it this long.
 const SELECT_AFTER: f64 = 0.1;
@@ -344,23 +349,24 @@ impl Heading {
     }
 }
 
-/// Which row a hover gives the cursor: the row under a pointer that really moved (not a list
-/// scrolled under it), at once, unless the pointer is heading for the list's right edge, when only
-/// once it has stayed on the row for [`SELECT_AFTER`]. The Snippets folder's rows follow it too.
+/// Which row a hover gives the cursor. The row under a pointer that really moved (not a list
+/// scrolled under it) gets it at once, unless the pointer is heading for the list's right edge.
+/// Then the row gets it only once the pointer has stayed on it for [`SELECT_AFTER`]. The Snippets
+/// folder's rows follow this too.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct RowHover {
     last_pointer: Option<Pos2>,
     /// Where the pointer is heading, to tell hovering a row from crossing the list on the way
     /// to the right pane.
     heading: Heading,
-    /// A row crossed on the way to the right edge: it gets the cursor if the pointer is still
-    /// on it at this time.
+    /// A row crossed on the way to the right edge, which gets the cursor if the pointer is still on
+    /// it at this time.
     deferred: Option<(String, f64)>,
 }
 
 impl RowHover {
-    /// With the pointer over row `row` this frame (`None`: over none) of a list `area`, whose
-    /// cursor is on `cursor`: the row that takes the cursor now, if any.
+    /// The row that takes the cursor now, if any, with the pointer over row `row` this frame
+    /// (`None` for over none) of a list `area` whose cursor is on `cursor`.
     pub(crate) fn update(
         &mut self,
         ui: &Ui,
@@ -462,9 +468,9 @@ impl Inbox {
         self.reading = reading;
     }
 
-    /// The conversation Auto Advance goes to `direction` from the open one, if it moved up the
-    /// list while open: the one that was there before it moved, while it's still listed and
-    /// not among `leaving`. It's used once.
+    /// The conversation that Auto Advance goes to in `direction` from the open one, if the open one
+    /// moved up the list while open. That's the conversation that was next to it before it moved,
+    /// while that one is still listed and not among `leaving`. It's used once.
     pub fn take_advance_anchor(&mut self, direction: isize, leaving: &[String]) -> Option<String> {
         let anchor = self
             .advance_anchor
@@ -511,7 +517,7 @@ impl Inbox {
             .collect();
     }
 
-    /// Dates the rows relative to `now`; the date separators move when the day does.
+    /// Dates the rows relative to `now`. The date separators move when the day does.
     pub fn set_now(&mut self, now: Zoned) {
         let moved = now.date() != self.now.date() || now.time_zone() != self.now.time_zone();
         self.now = now;
@@ -547,7 +553,7 @@ impl Inbox {
         });
     }
 
-    /// The header has the keyboard.
+    /// Whether the header has the keyboard.
     pub fn header_focused(&self) -> bool {
         self.header_focus.is_some()
     }
@@ -567,7 +573,7 @@ impl Inbox {
         self.header_focus = None;
     }
 
-    /// Moves the header's focus `step` items along, no further than either end; ← on the first item
+    /// Moves the header's focus `step` items along, no further than either end. ← on the first item
     /// opens the folder drawer.
     pub fn move_header_focus(&mut self, step: isize) -> Option<HeaderAction> {
         let items = header::focusables(&self.view);
@@ -585,8 +591,8 @@ impl Inbox {
         None
     }
 
-    /// What Enter (a click on it) or Backspace (on the filter tab: it goes) does to what has the
-    /// header's keyboard.
+    /// What Enter (a click on it) or Backspace (which removes the filter tab) does to whatever in
+    /// the header has the keyboard.
     pub fn header_key(&mut self, backspace: bool) -> Option<HeaderAction> {
         let focus = self.header_focus?;
         if backspace {
@@ -620,7 +626,7 @@ impl Inbox {
         }
     }
 
-    /// The cursor is on the first row the cursor can land on (or there's none).
+    /// Whether the cursor is on the first row it can land on (or there's no cursor).
     pub fn cursor_is_first(&self) -> bool {
         self.landable().first().copied() == self.cursor.as_deref() || self.cursor.is_none()
     }
@@ -636,8 +642,8 @@ impl Inbox {
         self.returning.clear();
         self.clear_selection();
         self.scroll = 0.0;
-        // Another list: the highlight doesn't slide from the last one's row, and its file strips
-        // start at their first card.
+        // On another list, the highlight doesn't slide from the last list's row, and the file
+        // strips start at their first card.
         self.jump = true;
         self.file_pages.clear();
     }
@@ -674,7 +680,7 @@ impl Inbox {
         self.cursor_source
     }
 
-    /// Threads the cursor can land on, in order: not leaving.
+    /// Threads the cursor can land on (those not leaving), in order.
     fn landable(&self) -> Vec<&str> {
         self.threads
             .iter()
@@ -739,8 +745,8 @@ impl Inbox {
         self.reveal = Some(Reveal::Bottom);
     }
 
-    /// Page down (Space) or up (⇧Space): the first row past the visible area's bottom (or top)
-    /// edge becomes the cursor and is scrolled to the other edge.
+    /// Pages down (Space) or up (⇧Space). The first row past the bottom (or top) edge of the
+    /// visible area becomes the cursor and is scrolled to the other edge.
     pub fn page(&mut self, direction: isize) {
         let (top, bottom) = (self.scroll, self.scroll + self.viewport);
         let rows: Vec<(&str, f32, f32)> = self
@@ -901,7 +907,7 @@ impl Inbox {
             .is_some_and(|thread| self.selected.contains(thread))
     }
 
-    /// The loaded rows selected, in list order: not rows on their way out.
+    /// The selected loaded rows, in list order, leaving out rows on their way out.
     fn selected_rows(&self) -> Vec<&ThreadSummary> {
         self.threads
             .iter()
@@ -940,19 +946,19 @@ impl Inbox {
         self.selected.cutoff()
     }
 
-    /// The selection is exactly the loaded rows selected: no select-all, or the list has no more
-    /// rows to load.
+    /// Whether the selection is exactly the selected loaded rows, which is when there's no
+    /// select-all or the list has no more rows to load.
     pub fn is_exact(&self) -> bool {
         self.selected.cutoff().is_none() || !self.view.more
     }
 
-    /// Too much is selected to act on row by row: over 50 rows, or a select-all that reaches rows
-    /// not loaded. The shortcuts panel leaves out what only works on loaded rows.
+    /// Whether too much is selected to act on row by row: over 50 rows, or a select-all that
+    /// reaches rows not loaded. The shortcuts panel leaves out what only works on loaded rows.
     pub fn is_select_all_mode(&self) -> bool {
         self.selected_rows().len() > 50 || !self.is_exact()
     }
 
-    /// Selects everything (⌘⇧A), or clears the selection when it already is.
+    /// Selects everything (⌘⇧A), or clears the selection when everything is already selected.
     pub fn select_all(&mut self) {
         let (count, total) = self.selection_count();
         if count > 0 && count == total {
@@ -961,7 +967,7 @@ impl Inbox {
         self.select_from(0);
     }
 
-    /// Selects the cursor's thread and every one dated at or before it, loaded or not (⌘A); doing
+    /// Selects the cursor's thread and every one dated at or before it, loaded or not (⌘A). Doing
     /// it again from the same row hints that Escape undoes it.
     pub fn select_all_from_here(&mut self) {
         let rows = self.landable_rows();
@@ -992,8 +998,9 @@ impl Inbox {
             .collect()
     }
 
-    /// The list's total for a select-all, and whether it's every thread there is: the local
-    /// count, or the loaded rows when that's all of them or there's no count (filtered, search).
+    /// The list's total for a select-all, and whether it's every thread there is. The total is the
+    /// local count, or the number of loaded rows when they're all there is or there's no count
+    /// (filtered, search).
     fn total(&self) -> (usize, bool) {
         let loaded = self.landable_rows().len();
         match self.view.count {
@@ -1011,8 +1018,8 @@ impl Inbox {
         (count, total)
     }
 
-    /// The select-all hint's copy, while it shows: a select-all of more than one conversation, with
-    /// `view` being where (`Important`, `this search`).
+    /// The select-all hint's copy while the hint shows, which is for a select-all of more than one
+    /// conversation. `view` says where (`Important`, `this search`).
     pub fn select_all_hint(&self, view: &str) -> Option<String> {
         self.selected.cutoff()?;
         let rows = self.landable_rows();
@@ -1037,12 +1044,13 @@ impl Inbox {
         self.hint.take()
     }
 
-    /// Whether the select-all hint shows: a select-all of more than one conversation.
+    /// Whether the select-all hint shows, which it does for a select-all of more than one
+    /// conversation.
     pub fn shows_select_all_hint(&self) -> bool {
         self.selected.cutoff().is_some() && self.selection_count().0 > 1
     }
 
-    /// Sets what rows a bulk action waits or runs for show instead of their date.
+    /// Sets what the rows that a bulk action waits or runs for show instead of their date.
     pub fn set_pending(&mut self, pending: HashMap<String, String>) {
         self.pending = pending;
     }
@@ -1067,9 +1075,10 @@ impl Inbox {
         self.covered = card;
     }
 
-    /// The status line over the rows: a search's, or any list's while a draft is popped out, which
-    /// then says `No conversations found.` once it's all here and empty, or offline, with more than
-    /// is stored, `Search results may be partial when offline.`, whatever the list.
+    /// The status line over the rows: a search's, or any list's while a draft is popped out. A
+    /// list's line then says `No conversations found.` once everything is here and the list is
+    /// empty. Offline, with more than is stored, it says `Search results may be partial when
+    /// offline.`, whatever the list.
     fn top_status(&self) -> Option<&'static str> {
         match &self.view.search {
             Some(search) => search.status,
@@ -1080,7 +1089,8 @@ impl Inbox {
         }
     }
 
-    /// Whether every conversation is selected (the header's checkmark: the count is the total).
+    /// Whether every conversation is selected, meaning the count is the total (the header's
+    /// checkmark).
     fn all_selected(&self) -> bool {
         let (count, total) = self.selection_count();
         count > 0 && count == total
@@ -1093,8 +1103,8 @@ impl Inbox {
         self.dismiss_towards(ids, 1, now);
     }
 
-    /// [`Self::dismiss`], the cursor going up first when `direction` is negative. Returns
-    /// whether the cursor moved `direction`, not the other way for want of a row.
+    /// [`Self::dismiss`], with the cursor going up first when `direction` is negative. Returns
+    /// whether the cursor moved in `direction`, rather than the other way for want of a row.
     pub fn dismiss_towards(&mut self, ids: &[String], direction: isize, now: f64) -> bool {
         let landable = self.landable();
         let cursor_at = self
@@ -1180,8 +1190,9 @@ impl Inbox {
             self.set_cursor(Some(id), CursorSource::Command);
         }
         if !self.cursor.as_deref().is_some_and(has) {
-            // Gone from the list: the row that was below it, else the one above, so J and K go on
-            // from where it was; the first row on a list that's new.
+            // The cursor's thread is gone from the list, so the cursor goes to the row that was
+            // below it, else the one above, and J and K go on from where it was. On a new list, it
+            // goes to the first row.
             let at = self
                 .cursor
                 .as_deref()
@@ -1205,9 +1216,9 @@ impl Inbox {
         self.segment();
     }
 
-    /// Remembers the rows around the open conversation when `threads`, the list's next rows,
-    /// move it up past them: the row above it now below it, or the row below it no longer next to
-    /// it. Once per open conversation.
+    /// Remembers the rows around the open conversation when `threads`, the list's next rows, move
+    /// it up past them, which is when the row above it is now below it, or the row below it is no
+    /// longer next to it. Done once per open conversation.
     fn capture_advance_anchor(&mut self, threads: &[ThreadSummary]) {
         if self
             .advance_anchor
@@ -1278,14 +1289,14 @@ impl Inbox {
         self.threads.is_empty() && !self.view.loading && !self.view.more
     }
 
-    /// Inbox Zero: an inbox view that is empty for good. The header and list give way to the
-    /// backdrop, and the app hides the right pane.
+    /// Whether the list is at Inbox Zero, meaning an inbox view that is empty for good. The header
+    /// and list give way to the backdrop, and the app hides the right pane.
     pub fn at_inbox_zero(&self) -> bool {
         self.view.inbox && self.view.filter.is_none() && self.is_empty()
     }
 
-    /// Under the rows: the spinner until the list has loaded all it can (which offline is what's
-    /// stored), then the status line (search results have theirs at the top).
+    /// What goes under the rows: the spinner until the list has loaded all it can (offline, that's
+    /// what's stored), then the status line (search results have theirs at the top).
     fn bottom(&self) -> Bottom {
         let offline_end = !self.online && !self.view.complete;
         if self.view.loading || (self.view.more && !offline_end) {
@@ -1355,7 +1366,7 @@ impl Inbox {
             select_all_hint(ui, rect, rem, &text);
         }
         if search.is_some() {
-            // The search header is the app's; the scroll shadow under it is the list's.
+            // The search header is the app's, but the scroll shadow under it is the list's.
             exo_ui::scroll_shadow(
                 ui.painter(),
                 ui.id().with("thread-list-header").with("shadow"),
@@ -1381,8 +1392,9 @@ impl Inbox {
                 .iter()
                 .filter(|thread| self.selected.contains(thread))
                 .collect();
-            // Remind me unless every selected conversation is drafts only: set when they all have a
-            // reminder, with the reminder's status for one conversation only.
+            // Remind me shows unless every selected conversation is drafts only. It's set when they
+            // all have a reminder, and shows the reminder's status only when one conversation is
+            // selected.
             let remind = selected
                 .iter()
                 .any(|thread| !thread.draft_only)
@@ -1556,8 +1568,9 @@ impl Inbox {
             self.jump |= !self.cursor_in_view();
             self.reveal_cursor(reveal);
         }
-        // Find scrolls to a match in a row out of view, and searches the rows react-list renders
-        // (`threshold: 2000`), which paint for it out of view and out of the pointer's reach.
+        // Find scrolls to a match in a row out of view. It searches the rows within `LOAD_AHEAD`
+        // (2000px) of the visible area, which paint for it out of view and out of the pointer's
+        // reach.
         let find = ui.id().with("thread-list-find");
         if let Some(delta) = exo_ui::find::reveal(ui.ctx(), find) {
             self.scroll += delta.y;
@@ -1589,8 +1602,8 @@ impl Inbox {
             .as_deref()
             .is_some_and(|id| self.is_selected(id));
         // With the folder drawer open, the highlight fades out over 100ms and the cursor's row
-        // shows its date. So with the header's keyboard; with the pop-out's, only the highlight
-        // goes.
+        // shows its date. The same happens while the header has the keyboard. While the pop-out has
+        // it, only the highlight goes.
         let keyboard = self.focused && self.header_focus.is_none();
         let away = motion::transition_in(
             ui.ctx(),
@@ -1696,9 +1709,9 @@ impl Inbox {
                         &self.now,
                     );
                     if elapsed.is_none() {
-                        // Anywhere on the row, as CSS `:hover` reaches it through its children:
-                        // the row's own response isn't hovered while a chip, the checkmark or a
-                        // hover action on top of it is.
+                        // Anywhere on the row, as CSS `:hover` reaches it through its children,
+                        // because the row's own response isn't hovered while a chip, the checkmark
+                        // or a hover action on top of it is.
                         if on_rows && ui.rect_contains_pointer(item_rect.intersect(rect)) {
                             hovered_row = Some(thread.id.clone());
                         }
@@ -1725,8 +1738,8 @@ impl Inbox {
         let modifiers = ui.input(|input| input.modifiers);
         let mut actions = Vec::new();
         if let Some((id, at)) = menu {
-            // The menu acts on the selection when the row is in it, else on the row alone, the
-            // selection let go; the row takes the cursor as a hover does.
+            // The menu acts on the selection when the row is in it. Otherwise it acts on the row
+            // alone and lets the selection go. The row takes the cursor as a hover does.
             if !self.is_selected(&id) {
                 self.clear_selection();
             }
@@ -1778,7 +1791,7 @@ impl Inbox {
         actions
     }
 
-    /// Pages a search result's file strip `direction`: by as many cards as fit (less the subject
+    /// Pages a search result's file strip in `direction` by as many cards as fit (less the subject
     /// column's lead on the first page), no further than its end.
     fn page_files(&mut self, id: &str, direction: isize, geometry: &row::Geometry) {
         let Some(files) = self.thread(id).map(|thread| thread.files.len()) else {
@@ -1814,8 +1827,8 @@ impl Inbox {
             .is_some_and(|thread| self.selected.contains(thread))
     }
 
-    /// Whether a selected row and the item `offset` away from it join into one block: it is
-    /// selected too, or it's the cursor.
+    /// Whether a selected row and the item `offset` away from it join into one block, which they do
+    /// when that item is selected too or is the cursor.
     fn neighbour_joins(&self, i: usize, offset: isize) -> bool {
         self.neighbour(i, offset).is_some_and(|thread| {
             self.selected.contains(thread) || self.cursor.as_deref() == Some(thread.id.as_str())
@@ -2239,7 +2252,7 @@ mod tests {
         inbox.toggle_selected();
         assert_eq!(inbox.selection(), ["t1", "t3"]);
         assert_eq!(inbox.unselected(), ["t0", "t2"]);
-        // More rows load: they're older than the cutoff, so selected.
+        // More rows load. They're older than the cutoff, so they're selected.
         inbox.set_threads((0..6).map(|i| thread(i, &now())).collect());
         assert_eq!(inbox.selection(), ["t1", "t3", "t4", "t5"]);
         inbox.set_view(View {

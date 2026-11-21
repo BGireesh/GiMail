@@ -2,15 +2,16 @@
 //! with a 429, and what the user is waiting on goes first.
 //!
 //! Every Gmail call spends its method's units ([`gmail::quota::units`]) before it goes out,
-//! under two limits: no rolling minute may see more than 90 % of the quota (Gmail counts per
-//! minute), and no burst more than 45 % of it, a token bucket refilling at that 90 % a minute
-//! (a screenful of threads at once, but not a minute's quota in a second). Calls wait in
-//! [`Lane`] order, the cheapest first within a lane: a call of an earlier lane always goes
-//! first, a star doesn't queue behind thread fetches, and the later lanes keep part of both the
-//! minute and the bucket for the earlier ones, so a click finds budget at once even while sync
-//! spends all it may. When Gmail pushes back anyway (another client of the same project, a
-//! limit it doesn't document), nothing goes out until the time it asked for, and the minute's
-//! limit and the refill halve, then recover over two minutes.
+//! under two limits. No rolling minute may see more than 90 % of the quota, because Gmail
+//! counts per minute. No burst may spend more than 45 % of it, which a token bucket refilling at
+//! that 90 % a minute enforces, so a screenful of threads can go at once but a minute's quota
+//! can't go in a second. Calls wait in [`Lane`] order, so a call of an earlier lane always goes
+//! first. Within a lane the cheapest call goes first, so a star doesn't queue behind thread
+//! fetches. The later lanes keep part of both the minute and the bucket for the earlier ones, so
+//! a click finds budget at once even while sync spends all it may. When Gmail pushes back anyway
+//! (because of another client of the same project, or a limit it doesn't document), nothing
+//! goes out until the time it asked for. The minute's limit and the refill then halve, and
+//! recover over two minutes.
 
 use std::collections::{BTreeSet, VecDeque};
 use std::sync::{Mutex, MutexGuard};
@@ -20,15 +21,15 @@ use jiff::{SignedDuration, Timestamp};
 use tokio::sync::Notify;
 use tokio::time::Instant;
 
-/// The longest a call waits for Gmail to stop rate limiting; asked to wait longer, it fails.
+/// The longest a call waits for Gmail to stop rate limiting. A call asked to wait longer fails.
 pub(crate) const MAX_WAIT: Duration = Duration::from_secs(32);
 /// The most of a minute's quota any rolling minute spends.
 const MINUTE: f64 = 0.9;
 /// How much of a minute's quota the bucket holds.
 const BURST: f64 = 0.45;
-/// What [`Lane::Show`] and [`Lane::Sync`] keep for earlier lanes, of the minute and of the
-/// bucket, as shares of a minute's quota: a few attachments' worth for a click, and a page of
-/// search results more for what's on screen.
+/// What [`Lane::Show`] and [`Lane::Sync`] keep for earlier lanes, of both the minute and the
+/// bucket, as shares of a minute's quota. Show keeps a few attachments' worth for a click, and
+/// Sync keeps a page of search results more for what's on screen.
 const SHOW_KEEPS: f64 = 0.05;
 const SYNC_KEEPS: f64 = 0.2;
 /// Gmail's quota window.
@@ -71,7 +72,8 @@ pub(crate) enum Lane {
 pub(crate) struct Budget {
     pace: Option<Pace>,
     state: Mutex<State>,
-    /// Ticks whenever a waiting call may now go: another one went or gave up, or Gmail paused.
+    /// Ticks whenever a waiting call may now go, because another one went or gave up, or Gmail
+    /// paused.
     changed: Notify,
 }
 
@@ -114,7 +116,8 @@ struct State {
     at: Instant,
     /// What went out in the last minute: when, and how many units.
     spent: VecDeque<(Instant, f64)>,
-    /// The share of the minute's limit and the refill in use: below 1 after Gmail pushed back.
+    /// The share of the minute's limit and the refill in use, which is below 1 after Gmail
+    /// pushed back.
     share: f64,
     /// Calls waiting to spend, in the order they go: by lane, then cost, then arrival.
     waiting: BTreeSet<Ticket>,
@@ -124,8 +127,8 @@ struct State {
     episode: Option<Episode>,
 }
 
-/// Gmail rate limiting the account, from its first pushback until calls flow again: what the
-/// log's summary reports.
+/// Gmail rate limiting the account, from its first pushback until calls flow again. The log's
+/// summary reports on it.
 #[derive(Debug, Clone, PartialEq)]
 struct Episode {
     started: Timestamp,
@@ -134,7 +137,7 @@ struct Episode {
     pushbacks: u32,
     /// Calls that waited for a pause.
     waited: u32,
-    /// Calls that gave up, the pause being longer than [`MAX_WAIT`].
+    /// Calls that gave up because the pause was longer than [`MAX_WAIT`].
     failed: u32,
 }
 
@@ -142,14 +145,14 @@ struct Episode {
 #[derive(Debug, PartialEq)]
 enum Turn {
     Go,
-    /// Check again after this long, or when another call goes (`None`: only then).
+    /// Check again after this long, or when another call goes (`None` means only then).
     Wait(Option<Duration>),
-    /// Gmail is paused until then, longer than a call waits.
+    /// Gmail is paused until then, which is longer than a call waits.
     GiveUp(Timestamp),
 }
 
 impl Budget {
-    /// A budget for `quota`; `None` paces nothing but still waits out Gmail's pauses.
+    /// A budget for `quota`. `None` paces nothing but still waits out Gmail's pauses.
     pub fn new(quota: Option<Quota>) -> Self {
         Self {
             pace: quota.map(Pace::new),
@@ -167,8 +170,8 @@ impl Budget {
         }
     }
 
-    /// Waits until a call of `units` may go out for `lane`, and spends them. Fails with when
-    /// Gmail will take calls again if it has paused them for longer than [`MAX_WAIT`].
+    /// Waits until a call of `units` may go out for `lane`, and spends them. If Gmail has paused
+    /// calls for longer than [`MAX_WAIT`], fails with the time it will take calls again.
     pub async fn spend(&self, lane: Lane, units: u32) -> Result<(), Timestamp> {
         let key = {
             let mut state = self.lock();
@@ -198,7 +201,7 @@ impl Budget {
         }
     }
 
-    /// Gmail rate limited a call and asked for `wait`: nothing goes out until then, and the
+    /// Gmail rate limited a call and asked for `wait`. Nothing goes out until then, and the
     /// refill slows. Returns when calls resume.
     pub fn pushback(&self, wait: Duration) -> Timestamp {
         let until = self.lock().pushback(Instant::now(), Timestamp::now(), wait);
@@ -206,7 +209,7 @@ impl Budget {
         until
     }
 
-    /// A call succeeded: once Gmail has been quiet for a while, the throttling is over.
+    /// A call succeeded. Once Gmail has been quiet for a while, the throttling is over.
     pub fn settled(&self) {
         if let Some(episode) = self.lock().settle(Instant::now()) {
             let lasted = episode.resumes.1.duration_since(episode.started);
@@ -243,8 +246,8 @@ impl Drop for Leave<'_> {
 }
 
 impl State {
-    /// Whether the waiting call `key` may spend `units` at `now`; `counted` records that it
-    /// was counted as waiting for a pause.
+    /// Whether the waiting call `key` may spend `units` at `now`. `counted` records that the
+    /// call was counted as waiting for a pause.
     fn turn(
         &mut self,
         pace: Option<Pace>,
@@ -292,8 +295,9 @@ impl State {
         Turn::Wait(Some(Duration::from_secs_f64(bucket).max(minute)))
     }
 
-    /// How long until `units` more fit in the last minute's spending under `limit`: once
-    /// enough of it is a minute old. A call dearer than the limit goes into an empty minute.
+    /// How long until `units` more fit in the last minute's spending under `limit`, which is
+    /// once enough of that spending is a minute old. A call dearer than the limit goes into an
+    /// empty minute.
     fn minute_wait(&self, units: f64, limit: f64, now: Instant) -> Duration {
         let used: f64 = self.spent.iter().map(|(_, units)| units).sum();
         let mut over = used + units - limit.max(units);
@@ -326,7 +330,7 @@ impl State {
                 .unwrap_or(Timestamp::MAX),
         );
         let paused = self.pause.is_some_and(|(resumes, _)| resumes > now);
-        // Calls sent together are refused together: one slowdown per pause.
+        // Calls sent together are refused together, so there's one slowdown per pause.
         if !paused {
             self.share = (self.share / 2.0).max(MIN_SHARE);
         }
@@ -408,7 +412,7 @@ mod tests {
         let mut bucket = state(pace.burst(), start);
         let (mut now, mut click, mut spent, mut slowest_click) =
             (start, start, Vec::new(), Duration::ZERO);
-        // Sync fetches full threads back to back for five minutes; the user clicks every 7 s.
+        // Sync fetches full threads back to back for five minutes, and the user clicks every 7 s.
         while now < start + Duration::from_secs(300) {
             let (lane, units) = if now >= click {
                 (Lane::Act, 20)
@@ -446,7 +450,7 @@ mod tests {
             );
         }
         assert_eq!(slowest_click, Duration::ZERO, "a click never waits");
-        // Sync gets what it may: 70 % of every minute, after the first.
+        // Sync gets what it may, which is 70 % of every minute after the first.
         let sync: u32 = spent
             .iter()
             .filter(|(at, lane, _)| *lane == Lane::Sync && *at >= start + WINDOW)
@@ -462,7 +466,7 @@ mod tests {
     fn earlier_lanes_go_first_and_later_ones_leave_some_behind() {
         let now = Instant::now();
         let mut bucket = state(1_000.0, now);
-        // Sync must leave 1,200 units: a full thread (120) doesn't fit in 1,000.
+        // Sync must leave 1,200 units, so a full thread (120) doesn't fit in 1,000.
         let (_, turn) = wait(Lane::Sync, &mut bucket, 120, now);
         assert_eq!(
             turn,
@@ -505,7 +509,7 @@ mod tests {
         let at = Timestamp::now();
         let mut bucket = state(2_700.0, now);
         let until = bucket.pushback(now, at, Duration::from_secs(2));
-        // Calls sent together all come back refused: one slowdown.
+        // Calls sent together all come back refused, which counts as one slowdown.
         assert_eq!(
             bucket.pushback(now, at, Duration::from_secs(1)),
             until,

@@ -1,5 +1,5 @@
-//! The hide-empty-splits nudge: at Inbox Zero in a split that shows while empty, a card offering to
-//! hide empty splits. It's the same dark card in both themes.
+//! The hide-empty-splits nudge: a card offering to hide empty splits, shown at Inbox Zero in a
+//! split that stays visible while empty. It's the same dark card in both themes.
 
 use egui::{Color32, CornerRadius, CursorIcon, Rect, Sense, Ui, pos2, vec2};
 use exo_ui::{BoxShadow, Family, Font, TextStyle, motion::CubicBezier};
@@ -7,7 +7,7 @@ use exo_ui::{BoxShadow, Family, Font, TextStyle, motion::CubicBezier};
 /// The nudge's id in `nudges` (`HIDE_EMPTY_SPLIT`).
 pub const HIDE_EMPTY_SPLIT: &str = "hideEmptySplit";
 
-/// What the card was asked to do; either way it's done with.
+/// What the card was asked to do. Either way, the card is done with.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NudgeAction {
     /// Its close button.
@@ -22,7 +22,7 @@ const TITLE: TextStyle = TextStyle::new(Font::new(Family::Sans, 600), 12.0, 24.0
 const BODY: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 12.0, 20.0);
 /// `max-width: 262px`, which the copy fills.
 const WIDTH: f32 = 262.0;
-/// The header's and body's side padding.
+/// The side padding of the header and the body.
 const PADDING: f32 = 12.0;
 /// The header's 12px top padding and the title's line.
 const HEADER: f32 = 12.0 + 24.0;
@@ -50,7 +50,7 @@ struct Shown {
     frame: u64,
 }
 
-/// Draws the card at the list's top left (`left: 62px; top: 0`): each time it appears, it rises
+/// Draws the card at the list's top left (`left: 62px; top: 0`). Each time it appears, it rises
 /// 20px into place as it fades in over 250ms (`ease`).
 pub(super) fn show(ui: &Ui, list: Rect) -> Option<NudgeAction> {
     let ctx = ui.ctx();
@@ -124,8 +124,8 @@ pub(super) fn show(ui: &Ui, list: Rect) -> Option<NudgeAction> {
         }
     }
 
-    // The close button: a 12px cross 12px in from the top right, white at 35%, 60% hovered (over
-    // 150ms).
+    // The close button: a 12px cross 12px in from the top right, white at 35%, or 60% when hovered
+    // (over 150ms).
     let cross = Rect::from_min_size(
         pos2(card.right() - 12.0 - 12.0, card.top() + 12.0),
         vec2(12.0, 12.0),

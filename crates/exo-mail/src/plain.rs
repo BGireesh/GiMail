@@ -54,7 +54,7 @@ fn continues(line: &str) -> bool {
     }
 }
 
-/// lodash's `escape`.
+/// Escapes `&`, `<`, `>`, `"` and `'` as HTML entities.
 fn escape(text: &str) -> String {
     text.replace('&', "&amp;")
         .replace('<', "&lt;")

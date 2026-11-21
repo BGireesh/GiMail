@@ -1,7 +1,7 @@
-//! Exo's links: where a tab is, as `exo://{email}/…`, for the strip's copy button and ⌃/; and
-//! back, for the links macOS, another launch or a message hands Exo, which open in the tab for
-//! the account they name. Deep links (`deeplink/{name}`, [`crate::deep_links`]) share the
-//! scheme.
+//! Exo's links. A link says where a tab is, as `exo://{email}/…`, for the strip's copy button and
+//! ⌃/. Parsing goes the other way, for the links that macOS, another launch or a message hands
+//! Exo, which open in the tab for the account they name. Deep links (`deeplink/{name}`,
+//! [`crate::deep_links`]) share the scheme.
 //!
 //! A path is the account (`/{email}`, its home), then a split (`/inbox/{slug}`, Other's
 //! `/inbox/other`), a label or folder (`/label/{slug}`), search (`/search/{query}`) or See Your
@@ -45,7 +45,8 @@ pub enum To {
         thread: Option<String>,
         filter: Option<Filter>,
     },
-    /// Search for `query` (empty: the search bar alone), with a conversation open if it says so.
+    /// Search for `query` (empty for the search bar alone), with a conversation open if it says
+    /// so.
     Search {
         query: String,
         thread: Option<String>,
@@ -75,8 +76,8 @@ impl To {
     }
 }
 
-/// `url` as one of Exo's links, if it's on Exo's scheme: `exo:`, then `//` and the path,
-/// percent-decoded, and its query.
+/// `url` as one of Exo's links, if it's on Exo's scheme, which is `exo:` followed by `//`, the
+/// path (percent-decoded) and its query.
 pub fn parse(url: &str) -> Option<Link> {
     let rest = url
         .get(..SCHEME.len())
@@ -115,8 +116,8 @@ static EMAIL: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"[^\s<@]+@[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)+").expect("valid regex")
 });
 
-/// What `segments` (after the address) and `params`, the query, name, if Exo reads all of the
-/// path.
+/// What `segments` (the path after the address) and `params` (the query) name, if Exo reads all
+/// of the path.
 fn place(segments: &[String], params: &str) -> Option<To> {
     let list = |list: Slug, rest: &[String]| {
         let filter = query_param(params, "filters").and_then(|name| {
@@ -185,8 +186,8 @@ fn query_param(query: &str, name: &str) -> Option<String> {
     })
 }
 
-/// A week link's day: `{year}-{month}-{day}`, a month or day past its end running into the next
-/// as JavaScript's `Date` has it.
+/// A week link's day, `{year}-{month}-{day}`, where a month or day past its end runs into the
+/// next, as JavaScript's `Date` has it.
 fn week_day(text: &str) -> Option<Date> {
     static DATE: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"^(\d{4})-(\d{1,2})-(\d{1,2})$").expect("valid regex"));
@@ -201,7 +202,7 @@ fn week_day(text: &str) -> Option<Date> {
         .ok()
 }
 
-/// `segment` with its `%XX` escapes decoded; a malformed one stays.
+/// `segment` with its `%XX` escapes decoded. A malformed one stays.
 fn decode(segment: &str) -> String {
     let bytes = segment.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
@@ -223,8 +224,8 @@ fn decode(segment: &str) -> String {
 }
 
 /// Where `route` is, as a link: the account, its list, search or week, the conversation open and
-/// a list's filter. `labels` and `settings` are the account's, which name its labels and splits;
-/// one that's gone is the account's home.
+/// a list's filter. `labels` and `settings` are the account's, and name its labels and splits. A
+/// label or split that's gone is the account's home.
 pub(crate) fn url(route: &Route, labels: &[Label], settings: &Settings) -> String {
     let mut url = format!("{SCHEME}//{}", route.email);
     let mut filter = None;
@@ -247,8 +248,8 @@ pub(crate) fn url(route: &Route, labels: &[Label], settings: &Settings) -> Strin
             filter = route.filter;
         }
     }
-    // An empty search's path ends in `/` (`search/` joined with the empty query), so a
-    // conversation after it would read as the query: it's left off.
+    // An empty search's path ends in `/` (`search/` joined with the empty query), and a
+    // conversation after it would read as the query, so it's left off.
     if let Some(thread) = route.thread.as_ref().filter(|_| !url.ends_with('/')) {
         url.push_str("/thread/");
         url.push_str(&encode_component(thread));
@@ -282,7 +283,8 @@ fn segment(list: &ListId, labels: &[Label], settings: &Settings) -> Option<Strin
     }
 }
 
-/// Exo's own lists and Gmail's system ones, with their slugs, which the `go to` rows' ids are.
+/// Exo's own lists and Gmail's system ones, with their slugs, which are the ids of the `go to`
+/// rows.
 fn system_lists() -> impl Iterator<Item = (ListId, &'static str)> {
     lists::system_go_tos(false)
         .into_iter()
@@ -290,10 +292,10 @@ fn system_lists() -> impl Iterator<Item = (ListId, &'static str)> {
         .map(|go| (go.list, go.id))
 }
 
-/// What a label's slug names in an account with `labels` and `settings`: one of the slugs Exo
-/// keeps for its own lists, which no label takes, or else a Gmail label, by its name's slug and
-/// then by its id; none for a slug nothing has, which goes home. With
-/// Important and Other off, `important` and `other` are home, and with them on, `inbox` is.
+/// What a label's slug names in an account with `labels` and `settings`. It's one of the slugs
+/// Exo keeps for its own lists, which no label takes, or else a Gmail label, by its name's slug
+/// and then by its id. A slug that names nothing gives `None`, which goes home. With Important
+/// and Other off, `important` and `other` are home, and with them on, `inbox` is.
 fn label_slug(slug: &str, labels: &[Label], settings: &Settings) -> Option<(ListId, View)> {
     let home = crate::splits::home(settings);
     let builtin = match slug {
@@ -331,12 +333,12 @@ impl crate::Mail {
         )
     }
 
-    /// Opens `link` in this account: what a deep link names, or the place its path
-    /// does, as going there in a tab would.
+    /// Opens `link` in this account, as going there in a tab would. That's what a deep link
+    /// names, or else the place its path names.
     pub fn open_link(&mut self, link: &Link) {
         match &link.to {
             To::DeepLink(name) => self.open_deep_link(name),
-            // Over whatever is up: a week link opens the week and does nothing else.
+            // Over whatever is up, a week link opens the week and does nothing else.
             To::Week(day) => self.calendar_open_week(day.unwrap_or_else(|| self.now.date())),
             To::Search { query, thread } => {
                 let view = View::Search(Some(query.clone()).filter(|query| !query.is_empty()));
@@ -380,8 +382,8 @@ impl crate::Mail {
         }
     }
 
-    /// Carries out a link command: the link on the clipboard (`text/plain` and `text/html`),
-    /// and `"{link}" copied to clipboard.`
+    /// Carries out a link command, which puts the link on the clipboard (`text/plain` and
+    /// `text/html`) and shows `"{link}" copied to clipboard.`
     pub(crate) fn links_run(&mut self, action: Action) {
         let url = match action {
             Action::CopyLocation => self.link(),
@@ -404,8 +406,8 @@ impl crate::Mail {
             .hint(Hint::new().text(format!("\"{url}\" copied to clipboard.")));
     }
 
-    /// The strip's copy button put a tab's link on the clipboard: this page, the tab on screen,
-    /// says so.
+    /// The strip's copy button put a tab's link on the clipboard. This page, which is the tab on
+    /// screen, says so.
     pub(crate) fn link_copied(&mut self) {
         self.commands.hint(
             Hint::new()
@@ -425,9 +427,9 @@ pub enum Action {
     CopyConversation,
 }
 
-/// Registers the link commands, everywhere and with the palette open
-/// too; `thread_view` is whether a conversation is open, which ranks them higher, and
-/// `one_conversation` whether actions apply to exactly one.
+/// Registers the link commands, everywhere and with the palette open too. `thread_view` is
+/// whether a conversation is open, which ranks them higher, and `one_conversation` whether
+/// actions apply to exactly one.
 pub(crate) fn register(
     commands: &mut Commands<commands::Action>,
     thread_view: bool,

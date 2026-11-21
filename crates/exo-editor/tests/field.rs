@@ -1,5 +1,6 @@
-//! A spellchecked one-line field, as Chromium checks an `<input>`: when marks show while typing,
-//! idle, unfocused and focused again, and what a right-click selects and offers.
+//! A spellchecked one-line field, checked the way Chromium checks an `<input>`. The tests cover
+//! when marks show while typing, idle, unfocused and focused again, and what a right-click selects
+//! and offers.
 
 use std::ops::Range;
 

@@ -1,8 +1,8 @@
-//! Bulk actions: triage on 50 or more selected conversations, or on a select-all that reaches
+//! Bulk actions. Triage on 50 or more selected conversations, or on a select-all that reaches
 //! conversations not loaded yet, asks first (`This might take a while…`) and then runs in the
-//! background ([`Jobs`]) instead of row by row. Its rows say `Pending:` until it's done, the footer
-//! counts it, and the toast's Undo puts it all back. Get Me To Zero is one too, with its own
-//! dialog, and the Bulk Actions dialog lists those.
+//! background ([`Jobs`]) instead of row by row. A bulk action's rows say `Pending:` until it's
+//! done, the footer counts it, and the toast's Undo puts it all back. Get Me To Zero is one too,
+//! with its own dialog, and the Bulk Actions dialog lists those.
 
 mod actions_dialog;
 mod get_me_to_zero;
@@ -49,7 +49,7 @@ pub enum Action {
 #[derive(Debug, Default)]
 pub(crate) struct Dialogs {
     shown: Option<Shown>,
-    /// It hasn't been closed.
+    /// Whether it hasn't been closed.
     open: bool,
 }
 
@@ -60,7 +60,7 @@ enum Shown {
 }
 
 impl Dialogs {
-    /// A bulk dialog has the keyboard.
+    /// Whether a bulk dialog has the keyboard.
     pub(crate) fn is_open(&self) -> bool {
         self.open
     }
@@ -141,10 +141,10 @@ pub(crate) fn register(commands: &mut Commands<commands::Action>, dialogs: &Dial
 }
 
 impl Mail {
-    /// Takes triage of `ids` with `mutation` when it's a bulk action: the list's selection with 50
-    /// rows or more, or reaching rows not loaded. It asks first, or says why it can't be done where
-    /// the list can't be acted on in bulk; where it can't but every row is loaded, it's left to act
-    /// row by row. Returns whether it took it.
+    /// Takes over triage of `ids` with `mutation` when it's a bulk action, which is when the
+    /// list's selection has 50 rows or more or reaches rows not loaded. It asks first or, where the
+    /// list can't be acted on in bulk, says why it can't be done. Where the list can't but every
+    /// row is loaded, the triage is left to act row by row. Returns whether it took the triage.
     pub(crate) fn bulk_instead(&mut self, ids: &[String], mutation: &Mutation) -> bool {
         let Some(name) = name(mutation) else {
             return false;
@@ -235,7 +235,8 @@ impl Mail {
         }.into())
     }
 
-    /// Runs `plan`, once the user said OK: the selection clears, and the toast's Undo puts it back.
+    /// Runs `plan` once the user said OK. The selection clears, and the toast's Undo puts back
+    /// what it did.
     pub(crate) fn start_bulk(&mut self, plan: Plan) {
         // No Get Me To Zero opens by itself after an interrupted first run.
         if plan.request.name == GET_ME_TO_ZERO {
@@ -250,7 +251,7 @@ impl Mail {
             .toast(Toast::new(plan.toast).undo(commands::Action::Undo(token)));
     }
 
-    /// The toast's Undo ran on `token`: Get Me To Zero says so (`Undoing Get Me To Zero.`).
+    /// The toast's Undo ran on `token`. Get Me To Zero says so (`Undoing Get Me To Zero.`).
     pub(crate) fn bulk_undone(&mut self, token: UndoToken) {
         if self
             .account
@@ -335,9 +336,9 @@ impl Mail {
         }
     }
 
-    /// Get Me To Zero's `Let's go!`: the dialog closes and an alert says it may take a while; its
-    /// `Got it` (or Escape) starts it: every inbox conversation older than the age, but those kept,
-    /// marked Done.
+    /// Get Me To Zero's `Let's go!`. The dialog closes and an alert says it may take a while. The
+    /// alert's `Got it` (or Escape) starts it, which marks Done every inbox conversation older
+    /// than the age, except those kept.
     fn confirm_get_me_to_zero(&mut self, state: &get_me_to_zero::State) {
         let before = get_me_to_zero::RANGES[state.range].before(&self.now);
         let keep: Vec<Filter> = [
@@ -350,7 +351,7 @@ impl Mail {
         // Gmail's inbox label, which every inbox view and split is drawn from (`in:inbox`).
         let inbox = ListId::Label("INBOX".into());
         let target = BulkTarget {
-            // `before` is exclusive here: a message dated at the cutoff isn't older than it.
+            // `before` is exclusive here, since a message dated at the cutoff isn't older than it.
             list: Some(ListCutoff {
                 scope: Scope::List(inbox),
                 filter: None,
@@ -401,7 +402,8 @@ impl Mail {
         );
     }
 
-    /// The session's Get Me To Zero actions, newest first: the Bulk Actions dialog's rows.
+    /// The session's Get Me To Zero actions, newest first, which are the Bulk Actions dialog's
+    /// rows.
     fn get_me_to_zero_actions(&self) -> Vec<Summary> {
         self.account
             .bulk_actions()
@@ -445,7 +447,7 @@ impl Mail {
         }
     }
 
-    /// The toast for a bulk action: what it's doing.
+    /// The toast for a bulk action, saying what it's doing.
     fn bulk_toast(&self, mutation: &Mutation) -> String {
         let label = |id: &str| crate::pickers::label_name(id, &self.snapshot.labels).to_owned();
         match mutation {
@@ -483,7 +485,7 @@ impl Mail {
             Mutation::Move { from, to } => {
                 crate::pickers::move_text(from.as_deref(), to, &self.snapshot.labels, true)
             }
-            // Never bulk: these need loaded conversations.
+            // Never bulk, because these need loaded conversations.
             Mutation::RemoveLabels(_)
             | Mutation::Remind { .. }
             | Mutation::CancelReminder { .. }
@@ -507,8 +509,8 @@ impl Mail {
         self.commands.hint(hint);
     }
 
-    /// `⇧Y` on a select-all that reaches rows not loaded: removing every label needs each
-    /// row's labels, so it's refused. Returns whether it was.
+    /// Refuses `⇧Y` on a select-all that reaches rows not loaded, because removing every label
+    /// needs each row's labels. Returns whether it refused.
     pub(crate) fn refuse_unloaded(&mut self, what: &str) -> bool {
         if self.thread.is_some() || self.inbox.is_exact() {
             return false;
@@ -517,8 +519,8 @@ impl Mail {
         true
     }
 
-    /// What each loaded row a bulk action waits or runs for shows instead of its date:
-    /// `Pending: Mark Done`.
+    /// What each loaded row shows instead of its date while a bulk action waits or runs for it,
+    /// such as `Pending: Mark Done`.
     pub(crate) fn pending_rows(&self, actions: &[Summary]) -> HashMap<String, String> {
         let mut rows = HashMap::new();
         for action in actions
@@ -534,8 +536,8 @@ impl Mail {
     }
 }
 
-/// The footer's status while a bulk action works: `Updating: 120 of 4,000`, `of many` until its
-/// threads are all found.
+/// The footer's status while a bulk action works, such as `Updating: 120 of 4,000`, with
+/// `of many` until its threads are all found.
 pub(crate) fn status(actions: &[Summary]) -> Option<String> {
     let action = actions.iter().find(|action| action.active)?;
     let done = crate::format::thousands(action.done.max(1));
@@ -549,7 +551,7 @@ pub(crate) fn status(actions: &[Summary]) -> Option<String> {
     })
 }
 
-/// What a bulk action of `mutation` is called; `None` for one that only runs on loaded
+/// What a bulk action of `mutation` is called. `None` for one that only runs on loaded
 /// conversations.
 fn name(mutation: &Mutation) -> Option<&'static str> {
     Some(match mutation {

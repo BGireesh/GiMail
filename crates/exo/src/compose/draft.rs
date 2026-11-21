@@ -40,7 +40,7 @@ pub(crate) enum Field {
 }
 
 impl Field {
-    /// The recipient list it is, if it's one.
+    /// The field's recipient list, if it's a recipient field.
     pub fn list(self) -> Option<List> {
         match self {
             Self::To => Some(List::To),
@@ -92,8 +92,9 @@ pub(crate) struct State {
 }
 
 impl State {
-    /// The state a draft opens in: a reply with recipients collapsed at its body, a subject-line
-    /// edit at its subject, anything else at To; Cc and Bcc shown when expanded and not empty.
+    /// The state a draft opens in. A reply that has recipients opens collapsed at its body, a
+    /// subject-line edit at its subject, and anything else at To. Cc and Bcc show when the header
+    /// is expanded and they aren't empty.
     pub fn default_for(record: &DraftRecord) -> Self {
         let has_recipients =
             !record.to.is_empty() || !record.cc.is_empty() || !record.bcc.is_empty();
@@ -125,7 +126,7 @@ impl State {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Input {
     pub text: String,
-    /// Selected chips' indices, sorted; empty when the caret is in the input.
+    /// The selected chips' indices, sorted, or empty when the caret is in the input.
     pub selected: Vec<usize>,
     /// The chip a shift-selection extends from.
     pub anchor: Option<usize>,
@@ -133,24 +134,24 @@ pub(crate) struct Input {
     pub query: String,
     /// Suggested contacts for the text, best first.
     pub suggestions: Vec<Address>,
-    /// Which of them are the thread's own participants, which can't be removed.
+    /// Which suggestions are the thread's own participants, which can't be removed.
     pub from_thread: Vec<bool>,
     /// The suggestion just removed, which ⌘Z brings back until
     /// something's typed.
     pub just_excluded: Option<Address>,
     /// The highlighted suggestion.
     pub highlight: usize,
-    /// Escape closed the suggestions; typing opens them again.
+    /// Escape closed the suggestions, and typing opens them again.
     pub closed: bool,
-    /// The suggestion list's width since it opened: it only grows while it shows.
+    /// The suggestion list's width since it opened, which only grows while the list shows.
     pub list_width: f32,
-    /// The chip being edited where it stands rather than at the end: the input stands in for it,
-    /// with its text.
+    /// The chip being edited where it stands rather than at the end. The input stands in for the
+    /// chip, holding the chip's text.
     pub editing: Option<usize>,
     /// The input's text is to be selected whole as it next gets the keyboard.
     pub select_text: bool,
-    /// Where the caret was in the text as last drawn, in characters, when nothing in it was
-    /// selected: at either end, ← or → finishes the edit.
+    /// Where the caret was in the text as last drawn, in characters, when nothing in the text was
+    /// selected. At either end, ← or → finishes the edit.
     pub caret: Option<usize>,
 }
 
@@ -167,7 +168,7 @@ pub(crate) struct Open {
     pub id: String,
     /// Its Gmail thread, once it has one.
     pub thread: Option<String>,
-    /// A draft written elsewhere that Exo hasn't saved yet: its Gmail message.
+    /// For a draft written elsewhere that Exo hasn't saved yet, its Gmail message.
     pub adopt: Option<String>,
     /// Everything but the body, which is the editor's.
     pub record: DraftRecord,
@@ -178,9 +179,9 @@ pub(crate) struct Open {
     pub changed: Option<f64>,
     /// When it was last saved.
     pub saved_at: f64,
-    /// The record as the store has it, once it does: what it was last saved as, or opened from.
-    /// A save that wouldn't change it isn't made: a draft is saved only when a field is set to a
-    /// different value.
+    /// The record as the store has it, once the store has one: what it was last saved as, or
+    /// opened from. A save that wouldn't change this record isn't made, so a draft is saved only
+    /// when a field is set to a different value.
     pub saved: Option<DraftRecord>,
     /// The editor's last height, for the layout above it.
     pub body_height: f32,
@@ -190,24 +191,24 @@ pub(crate) struct Open {
     pub select_subject: bool,
     /// The subject's last Unicode replacement, which Backspace right after it undoes.
     pub subject_replacement: Option<SubjectReplacement>,
-    /// The snippets used in it, whose sends it counts once it's sent.
+    /// The snippets used in the draft, whose sends are counted once the draft is sent.
     pub applied_snippets: Vec<String>,
-    /// The snippet this edits, when it's one: never a Gmail draft.
+    /// The snippet this edits, when the draft is a snippet. A snippet is never a Gmail draft.
     pub snippet: Option<SnippetEdit>,
     /// The `;` being typed in the body, as the editor last reported it.
     pub snippet_trigger: Option<exo_editor::Trigger>,
-    /// The snippets it finds, best first.
+    /// The snippets the `;` finds, best first.
     pub snippet_rows: Vec<SnippetRow>,
-    /// There are no snippets at all: `To create a Snippet, hit ⌘ K → "Snippets"` shows instead.
+    /// There are no snippets at all, so `To create a Snippet, hit ⌘ K → "Snippets"` shows instead.
     pub snippet_hint: bool,
     /// The highlighted row of the `;` picker.
     pub snippet_pick: usize,
     /// Share Availability's menu, open at the caret.
     pub availability_menu: Option<super::availability::Menu>,
-    /// Who replied and so called off its scheduled send, as the Send
-    /// later button names them: `Unscheduled: {name} replied`.
+    /// Who replied and so called off the draft's scheduled send, as the Send later button names
+    /// them in `Unscheduled: {name} replied`.
     pub unscheduled_by: Option<String>,
-    /// Automatic Reminders' view of it.
+    /// Automatic Reminders' view of the draft.
     pub automatic: super::reminder::Automatic,
     /// `includeSignatureOnReplies`, as the account's settings last said
     /// ([`super::signature::includes_content`]).
@@ -228,21 +229,22 @@ pub(crate) struct Open {
     pub subject_spelling: exo_editor::FieldSpelling,
     /// The subject's `:` and `;` pickers.
     pub subject_assistant: super::subject::State,
-    /// A snippet's name's spelling.
+    /// The spelling of a snippet's name.
     pub name_spelling: exo_editor::FieldSpelling,
-    /// The address book the body's names were last taken from (its `Arc`'s address, `None`
-    /// before it's read), which autocorrect leaves alone; `None` until they're taken.
+    /// The address book the body's names were last taken from (the address of the book's `Arc`,
+    /// or `None` before the book is read). Autocorrect leaves those names alone. `None` until the
+    /// names are taken.
     pub names_from: Option<Option<usize>>,
     /// Where the body's caret was last drawn.
     pub caret: egui::Rect,
     /// The body's scroll while the form is at its max height.
     pub body_scroll: super::form::BodyScroll,
-    /// The header's scroll while its recipients pass its max height.
+    /// The header's scroll while the recipients pass the header's max height.
     pub header_scroll: super::form::BodyScroll,
     /// Chips being dragged, while the button is down.
     pub chip_drag: Option<chips::Drag>,
-    /// How its files stand with Gmail, as the store last said, and whether Gmail is in reach:
-    /// its cards' upload bars and tooltips.
+    /// How the draft's files stand with Gmail, as the store last said, and whether Gmail is in
+    /// reach, for the file cards' upload bars and tooltips.
     pub upload: exo_store::Upload,
     pub online: bool,
 }
@@ -256,7 +258,7 @@ pub(crate) struct SnippetRow {
 }
 
 /// A snippet open in compose: its name, and the snippet as last saved (`None` until it's
-/// first saved), to tell unsaved changes from it.
+/// first saved), to compare unsaved changes against.
 #[derive(Clone, Debug)]
 pub(crate) struct SnippetEdit {
     pub name: String,
@@ -266,9 +268,9 @@ pub(crate) struct SnippetEdit {
 /// A Unicode replacement just made in the subject.
 #[derive(Clone, Debug)]
 pub(crate) struct SubjectReplacement {
-    /// Where it left the caret.
+    /// Where the replacement left the caret.
     pub caret: usize,
-    /// The subject as typed, before it.
+    /// The subject as typed, before the replacement.
     pub typed: String,
     /// The caret in that text.
     pub typed_caret: usize,

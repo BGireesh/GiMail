@@ -11,9 +11,9 @@ type Text = Cow<'static, str>;
 
 /// Something the user can do: bound to keys, listed in the ⌘K palette, or both.
 ///
-/// A command with a title is a palette row; one with keys is a shortcut. They share one
+/// A command with a title is a palette row, and one with keys is a shortcut. They share one
 /// definition (title, keys, scope, action), so a shortcut and its row can't disagree. `A` is the
-/// app's action type: running the command hands back a clone of `action`.
+/// app's action type, and running the command hands back a clone of `action`.
 #[derive(Clone, Debug)]
 #[must_use]
 pub struct Command<A> {
@@ -46,7 +46,8 @@ pub struct Command<A> {
     pub(crate) side_title: Option<Text>,
     pub(crate) in_use: bool,
     pub(crate) query_only: bool,
-    /// Run from the palette with ⌘ held (Ctrl elsewhere), the row leaves it open.
+    /// When the row runs from the palette with ⌘ held (Ctrl elsewhere), it leaves the palette
+    /// open.
     pub(crate) stays_open_on_command: bool,
 }
 
@@ -60,8 +61,8 @@ pub(crate) struct Avatar {
 }
 
 impl<A> Command<A> {
-    /// A palette command: `id` identifies it (`MARK_DONE`; deduplication, `follow`), `title` is
-    /// what its row reads. Live everywhere until scoped with [`Self::regions`].
+    /// A palette command. `id` identifies it (`MARK_DONE`) for deduplication and `follow`, and
+    /// `title` is what its row reads. It's live everywhere until scoped with [`Self::regions`].
     pub fn new(id: impl Into<Text>, title: impl Into<Text>, action: A) -> Self {
         Self {
             title: Some(title.into()),
@@ -102,9 +103,9 @@ impl<A> Command<A> {
         }
     }
 
-    /// Binds `binding`, in Mousetrap's notation: `e`, `shift+e`, `mod+k` (`mod` is ⌘ on a Mac, Ctrl
-    /// elsewhere; `ctralt` is Ctrl on a Mac, Alt elsewhere), `#` (shifted symbols are Shift plus
-    /// their US-layout key) or `g i` (a sequence). Call again for alternatives (`j` and `down`).
+    /// Binds `binding`, such as `e`, `shift+e`, `mod+k` (`mod` is ⌘ on a Mac, Ctrl elsewhere;
+    /// `ctralt` is Ctrl on a Mac, Alt elsewhere), `#` (shifted symbols are Shift plus their
+    /// US-layout key) or `g i` (a sequence). Call again for alternatives (`j` and `down`).
     /// The first binding is what the palette row shows, unless [`Self::key_code`] says otherwise.
     pub fn key(mut self, binding: impl Into<Text>) -> Self {
         self.keys.push(binding.into());
@@ -131,7 +132,7 @@ impl<A> Command<A> {
     }
 
     /// Whether a backtick presses this command's `esc` binding, as it does by default. Compose's
-    /// own Escape answers to it only with Backtick as Escape on; in the body, the editor keeps a
+    /// own Escape answers to it only with Backtick as Escape on. In the body, the editor keeps a
     /// backtick to type it.
     pub fn backtick_escape(mut self, on: bool) -> Self {
         self.backtick_escape = on;
@@ -171,7 +172,7 @@ impl<A> Command<A> {
         self
     }
 
-    /// Search synonyms; when one wins, the row reads `Title (Alias)`.
+    /// Search synonyms. When one wins, the row reads `Title (Alias)`.
     pub fn aliases<I: IntoIterator<Item = S>, S: Into<Text>>(mut self, aliases: I) -> Self {
         self.aliases.extend(aliases.into_iter().map(Into::into));
         self
@@ -204,8 +205,8 @@ impl<A> Command<A> {
         self
     }
 
-    /// Rank with an empty query (higher first); rows without one are hidden until something is
-    /// typed. Also breaks ties.
+    /// Rank with an empty query (higher first). Rows without one are hidden until something is
+    /// typed. It also breaks ties.
     pub fn default_score(mut self, score: f64) -> Self {
         self.default_score = score;
         self

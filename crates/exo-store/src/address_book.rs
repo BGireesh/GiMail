@@ -1,6 +1,6 @@
-//! The address book compose suggests recipients from: everyone in stored mail, scored so people
-//! you write to outrank people who only write to you, and frequent, recent correspondents
-//! outrank the rest.
+//! The address book that compose suggests recipients from. It holds everyone in stored mail,
+//! scored so people you write to outrank people who only write to you, and frequent, recent
+//! correspondents outrank the rest.
 
 use std::collections::HashMap;
 
@@ -16,7 +16,7 @@ pub struct ScoredContact {
     pub email: String,
     /// The latest name seen with it.
     pub name: Option<String>,
-    /// The contact's score: above 1 for anyone you've sent to.
+    /// The contact's score, which is above 1 for anyone you've sent to.
     pub score: f64,
 }
 
@@ -43,8 +43,9 @@ impl Direction {
         }
     }
 
-    /// The contact's score from the messages counted: their weights by recency, scaled by how
-    /// many there were and how recent the latest is, plus 1 when you've `sent` to them.
+    /// The contact's score from the messages counted. It sums their weights by recency, scales
+    /// the sum by how many there were and how recent the latest is, and adds 1 when you've
+    /// `sent` to them.
     fn score(&self, sent: bool) -> f64 {
         let Some(&latest) = self.latest.iter().max() else {
             return 0.0;
@@ -52,7 +53,7 @@ impl Direction {
         let kept = self.count.min(KEPT) as f64;
         let weights: f64 = self.latest.iter().map(|&at| weight(at, latest)).sum();
         let mut score = self.count as f64 * weights / kept;
-        // Recency: the cube of how far into 2010–2028 the latest message is.
+        // The recency factor is the cube of how far into 2010–2028 the latest message is.
         let (start, end) = (1_262_304_000_000_f64, 1_830_297_600_000_f64);
         score *= (((latest as f64 - start).powi(3)) / (end - start).powi(3)).max(1e-6);
         score = score.min(4_294_967_296.0) / 4_294_967_296.0;
@@ -89,8 +90,8 @@ struct Person {
 }
 
 impl Store {
-    /// Everyone in stored mail, scored: a message you sent credits its To, Cc, Bcc and From; one
-    /// you received credits its From. Drafts and Spam don't count.
+    /// Everyone in stored mail, scored. A message you sent credits its To, Cc, Bcc and From, and
+    /// one you received credits its From. Drafts and Spam don't count.
     ///
     /// # Errors
     /// On database failures.

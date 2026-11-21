@@ -70,8 +70,8 @@ pub fn paint_contact_list_box(painter: &Painter, rect: Rect, background: Color32
     snapped
 }
 
-/// Paints `text` on the line at `at`, cut at `width`: its first case-insensitive match of `query`
-/// in `matched`, the rest in `rest`, unkerned (`font-kerning: none`). Returns its width.
+/// Paints `text` on the line at `at`, cut at `width`, with its first case-insensitive match of
+/// `query` in `matched` and the rest in `rest`, unkerned (`font-kerning: none`). Returns its width.
 #[expect(
     clippy::too_many_arguments,
     reason = "one cell's text and its two colors"
@@ -123,9 +123,9 @@ pub struct RowAvatar {
 pub struct ContactRow<'a> {
     /// What the name cell shows: the name, or the address when there's none.
     pub name: &'a str,
-    /// The address cell; empty for a row without one.
+    /// The address cell, empty for a row without one.
     pub email: &'a str,
-    /// Already added: subdued, and the pointer can't pick it.
+    /// Whether it's already added, which subdues it and keeps the pointer from picking it.
     pub disabled: bool,
     /// For a list with avatars: the avatar, or `None` for an empty cell.
     pub avatar: Option<RowAvatar>,
@@ -179,7 +179,7 @@ pub struct ContactSelectorList<'a> {
 }
 
 impl<'a> ContactSelectorList<'a> {
-    /// The list; `highlight` is the row filled, if any.
+    /// The list, with `highlight` the row filled, if any.
     pub fn new(
         rows: &'a [ContactRow<'a>],
         query: &'a str,

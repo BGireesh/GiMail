@@ -1,4 +1,4 @@
-//! The rich clipboard: copies carry `text/html` and `text/plain`; pastes prefer the HTML.
+//! The rich clipboard. Copies carry `text/html` and `text/plain`, and pastes prefer the HTML.
 //! egui's own clipboard is plain text only, so the editor talks to the system's directly.
 
 /// Where copies go and pastes come from.

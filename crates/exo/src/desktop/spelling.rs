@@ -1,13 +1,13 @@
-//! macOS's spellchecker (`NSSpellChecker`), which checks compose's body: in the language System
-//! Settings › Keyboard › Spelling sets, each paragraph's detected when that's `Automatic by
-//! Language`; with the user's dictionary, which `Add to Dictionary` adds to (`learnWord:`); and a
-//! spell document per body, which `Ignore Spelling` ignores a word in. Autocorrect and
-//! autocomplete are macOS's too: its corrections (`correctionForWordRange:`), the user's text
-//! replacements (System Settings › Keyboard › Text Replacements) while macOS makes them, and its
-//! completions.
+//! macOS's spellchecker (`NSSpellChecker`), which checks compose's body. It checks in the language
+//! set in System Settings › Keyboard › Spelling, or detects each paragraph's language when that's
+//! `Automatic by Language`. It uses the user's dictionary, which `Add to Dictionary` adds to
+//! (`learnWord:`), and a spell document per body, which `Ignore Spelling` ignores a word in.
+//! Autocorrect and autocomplete are macOS's too: its corrections (`correctionForWordRange:`), the
+//! user's text replacements (System Settings › Keyboard › Text Replacements) while macOS makes
+//! them, and its completions.
 
-/// A spellchecker for one body: macOS's on the main thread (the app's), none elsewhere (tests,
-/// which give their own) or off macOS.
+/// A spellchecker for one body: macOS's on the main thread (the app's), or none elsewhere (in
+/// tests, which give their own) and off macOS.
 pub(crate) fn engine() -> Option<Box<dyn exo_editor::Spelling>> {
     #[cfg(target_os = "macos")]
     return objc2::MainThreadMarker::new()
@@ -17,7 +17,8 @@ pub(crate) fn engine() -> Option<Box<dyn exo_editor::Spelling>> {
 }
 
 /// Whether macOS corrects spelling automatically (System Settings › Keyboard › Text Input ›
-/// `Correct spelling automatically`): autocorrect's default until it's turned on or off in Exo.
+/// `Correct spelling automatically`), which is autocorrect's default until it's turned on or off in
+/// Exo.
 pub(crate) fn corrects_automatically() -> bool {
     #[cfg(target_os = "macos")]
     return objc2_app_kit::NSSpellChecker::isAutomaticSpellingCorrectionEnabled();
@@ -223,7 +224,7 @@ mod macos {
         use super::*;
 
         // Reaches macOS's spell server (outside the sandbox, as the suite runs). Never learns a
-        // word: that would change the user's dictionary.
+        // word, because that would change the user's dictionary.
         #[test]
         fn macos_marks_a_misspelling_and_guesses_its_correction() {
             let mut document = Document::new();

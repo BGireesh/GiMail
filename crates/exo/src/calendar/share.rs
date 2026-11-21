@@ -1,7 +1,7 @@
 //! Share Availability: the week view in a mode where clicks and drags on the grid pick free
 //! times, beside a sidebar with the meeting's length, who it's with, the zone the times are
-//! written in and the text; Insert writes it into a draft. Only `Insert free times`: the booking
-//! link needs a server Exo doesn't have.
+//! written in and the text. Insert writes the text into a draft. There's only `Insert free times`,
+//! because the booking link needs a server Exo doesn't have.
 
 use std::collections::BTreeMap;
 
@@ -22,22 +22,23 @@ const DURATIONS: [i64; 4] = [15, 30, 45, 60];
 /// What the slots' keys start with.
 pub const SLOT: &str = "SHARE_AVAILABILITY_";
 
-/// The sidebar's content: `padding: 32px 18px`; the heading 16px/24px with `margin-bottom:
-/// 36px`; the form's rows 24px apart (`gap: 24px`).
+/// The sidebar's content has `padding: 32px 18px`. The heading is 16px/24px with
+/// `margin-bottom: 36px`, and the form's rows are 24px apart (`gap: 24px`).
 const PADDING_TOP: f32 = 32.0;
 const PADDING_X: f32 = 18.0;
 const HEADING: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 16.0, 24.0);
 const HEADING_GAP: f32 = 36.0;
 const ROW_GAP: f32 = 24.0;
-/// Labels: 10px/12px bold (`top: -.5px`, which Chromium's text doesn't show), `padding-bottom:
-/// 8px` as blocks.
+/// Labels are 10px/12px bold (`top: -.5px`, which Chromium's text doesn't show), with
+/// `padding-bottom: 8px` as blocks.
 const LABEL: TextStyle = TextStyle::new(Font::new(Family::Sans, 700), 10.0, 12.0);
 const LABEL_HEIGHT: f32 = 20.0;
-/// Fields: 12px/16px nudged `top: 1px`, over a 2px rule 18px down, 20px tall; an input's text
+/// Fields are 12px/16px nudged `top: 1px`, 20px tall, over a 2px rule 18px down. An input's text
 /// sits 1px lower.
 const FIELD: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 12.0, 16.0);
 const FIELD_HEIGHT: f32 = 20.0;
-/// Who's list `margin-top: 16px`, `top: 1px`; its title and rows 24px apart; a name 16px in.
+/// Who's list has `margin-top: 16px` and `top: 1px`, with its title and rows 24px apart and a name
+/// 16px in.
 const LIST_GAP: f32 = 16.0;
 const LIST_ROW: f32 = 24.0;
 const NAME_LEFT: f32 = 16.0;
@@ -63,7 +64,7 @@ pub enum Target {
 pub struct Attendee {
     pub address: Address,
     pub person: Person,
-    /// Listed under Who; recipients outside the team aren't, but count for the wording.
+    /// Listed under Who. Recipients outside the team aren't listed, but count for the wording.
     pub visible: bool,
     /// Came with the draft.
     pub default: bool,
@@ -95,12 +96,12 @@ pub struct Share {
     /// The zone the times are written in.
     pub tz: TimeZone,
     pub attendees: Vec<Attendee>,
-    /// The guests' calendars' colours, and the column a hover expanded.
+    /// The colours of the guests' calendars, and the column a hover expanded.
     pub colors: super::guests::Colors,
     who: String,
     who_pick: usize,
     who_error: bool,
-    /// The durations' list, open, with this row highlighted.
+    /// The durations' list while it's open, with this row highlighted.
     durations: Option<usize>,
     /// The Timezone input's text, whether it's been typed in since a zone was picked, its list
     /// and the highlighted row.
@@ -116,8 +117,8 @@ pub struct Share {
 }
 
 impl Share {
-    /// The page for `target` and `attendees` (me first), writing times in `tz`; Who has the
-    /// keyboard.
+    /// The page for `target` and `attendees` (me first), writing times in `tz`, with the keyboard
+    /// on Who.
     pub fn new(target: Target, attendees: Vec<Attendee>, tz: TimeZone) -> Self {
         Self {
             target,
@@ -141,14 +142,14 @@ impl Share {
         }
     }
 
-    /// Whether my calendar shows: I'm listed.
+    /// Whether my calendar shows, which it does while I'm listed.
     pub fn shows_mine(&self) -> bool {
         self.attendees
             .iter()
             .any(|attendee| attendee.person.organizer && attendee.visible)
     }
 
-    /// Escape in a field: its text goes, or with none, the field lets go of the keyboard and
+    /// Escape in a field clears its text, or with none, the field lets go of the keyboard and
     /// the page closes.
     pub fn escape(&mut self) -> bool {
         match self.typing {
@@ -177,7 +178,7 @@ impl Share {
         self.merge();
     }
 
-    /// Slot `key` moved or resized to `start`–`end`: kept within its day, and not before now (the
+    /// Slot `key` moved or resized to `start`–`end`, kept within its day and not before now (the
     /// next quarter hour, if it fits that day).
     pub fn change(&mut self, key: &str, start: Zoned, end: Zoned, now: &Zoned) {
         let Some(id) = slot_id(key) else { return };
@@ -254,12 +255,12 @@ impl Share {
         self.slots = merged.into_iter().collect();
     }
 
-    /// Whether a slot can be shared: as long as the meeting, and not over.
+    /// Whether a slot can be shared, which takes it being as long as the meeting and not over.
     fn valid(&self, slot: &(Zoned, Zoned), now: &Zoned) -> bool {
         self.invalid_reason(slot, now).is_none()
     }
 
-    /// Why a slot can't be shared, as its block's tooltip says: too short before over.
+    /// Why a slot can't be shared, as its block's tooltip says, checking too short before over.
     fn invalid_reason(&self, (start, end): &(Zoned, Zoned), now: &Zoned) -> Option<&'static str> {
         if end.timestamp().duration_since(start.timestamp())
             < SignedDuration::from_mins(self.minutes)
@@ -318,7 +319,7 @@ impl Share {
         availability::text(&self.valid_slots(now), self.minutes, &people, &self.tz, now)
     }
 
-    /// Insert can go: a slot can be shared.
+    /// Whether Insert can go, which needs a slot that can be shared.
     pub fn can_insert(&self, now: &Zoned) -> bool {
         self.slots.values().any(|slot| self.valid(slot, now))
     }
@@ -333,7 +334,7 @@ impl Share {
     }
 
     /// Paints the sidebar over `sidebar` (its left border included). `me` is the account, whose
-    /// colour is `color`; `contacts` suggests who to add.
+    /// colour is `color`, and `contacts` suggests who to add.
     pub fn show(
         &mut self,
         ui: &mut Ui,
@@ -383,8 +384,8 @@ impl Share {
                 None,
             );
         };
-        // A field's rule: `rgba(0,0,0,.085)`, Carbon `hsla(0,0%,100%,.5)`; `#aeb1dd` with the
-        // keyboard, `#f67b7b` in error.
+        // A field's rule is `rgba(0,0,0,.085)` (Carbon `hsla(0,0%,100%,.5)`), `#aeb1dd` with the
+        // keyboard, and `#f67b7b` in error.
         let rule = |box_top: f32, focused: bool, error: bool| {
             let color = if error {
                 Color32::from_rgb(0xf6, 0x7b, 0x7b)
@@ -503,7 +504,8 @@ impl Share {
             self.who.clear();
             self.who_pick = 0;
         }
-        // The list's box (`top: 1px` aside): under the input's, its title and each row 20px tall.
+        // The list's box (`top: 1px` aside) sits under the input's, with its title and each row
+        // 20px tall.
         let list_top = who_box.bottom() - 1.0 + LIST_GAP;
         let mut row_top = list_top + 1.0;
         FIELD.paint_line(
@@ -528,8 +530,8 @@ impl Share {
                 .filter(|name| !name.is_empty())
                 .unwrap_or_else(|| attendee.address.email.clone());
             let name_width = FIELD.width(&ctx, &name).min(width - NAME_LEFT - 16.0);
-            // Hovered, a pill: 3px up, `padding: 2px 7px 2px 23px` in a 1px border, 8px out to
-            // the left; the cross 8px after the name.
+            // Hovered, the row is a pill: 3px up, `padding: 2px 7px 2px 23px` in a 1px border,
+            // 8px out to the left, with the cross 8px after the name.
             let pill = Rect::from_min_max(
                 pos2(left - 8.0, row_top - 3.0),
                 pos2(
@@ -641,7 +643,8 @@ impl Share {
         let response = self.field(ui, zone_id, Input::Zone, zone_box);
         rule(zone_box.top(), response.has_focus(), false);
         if response.gained_focus() {
-            // Taking the keyboard: what was typed, else this zone over the common ones.
+            // Taking the keyboard lists the zones for what was typed, or else this zone over the
+            // common ones.
             self.zones = if self.zone_typed {
                 timezones::search(&self.zone_text, relevant, ZONES)
             } else {
@@ -685,7 +688,7 @@ impl Share {
         }
         if response.lost_focus() && picked_zone.is_none() {
             self.zones.clear();
-            // Leaving it: an emptied field takes the zone back.
+            // On leaving, an emptied field takes the zone back.
             if self.zone_text.trim().is_empty() {
                 self.zone_typed = false;
             }
@@ -772,7 +775,7 @@ impl Share {
         actions
     }
 
-    /// One of the text fields, on the line box at `rect`'s top; takes or lets go of the
+    /// One of the text fields, on the line box at `rect`'s top. It takes or lets go of the
     /// keyboard as asked.
     fn field(&mut self, ui: &mut Ui, id: Id, input: Input, rect: Rect) -> egui::Response {
         let palette = exo_ui::palette(ui.ctx());
@@ -823,8 +826,8 @@ impl Share {
         response
     }
 
-    /// Adds `address` under Who: listed again if they were, else added; me first, as the
-    /// organizer.
+    /// Adds `address` under Who, listing them again if they were listed or else adding them, with
+    /// me first as the organizer.
     fn add_attendee(&mut self, address: Address, team: &Option<String>) {
         if let Some(existing) = self
             .attendees
@@ -950,9 +953,9 @@ fn dropdown(
     (hovered, picked)
 }
 
-/// Who's suggestions: 24px wider than the field and centered under it, 8px down, padded 11px;
-/// each row 50px, a 13px name over a 12px address 16px in, the typed text darker. Returns the
-/// row under a moving pointer and the row pressed.
+/// Who's suggestions: 24px wider than the field and centered under it, 8px down, padded 11px.
+/// Each row is 50px, with a 13px name over a 12px address 16px in, and the typed text darker.
+/// Returns the row under a moving pointer and the row pressed.
 fn suggestion_list(
     ui: &Ui,
     field: Rect,
@@ -1035,10 +1038,10 @@ impl ZoneRows {
     };
 }
 
-/// A Timezone input's list at `rect` (Share Availability's 276px from 7px left of the field and
-/// 12px under it; Calendar Settings' 286px from 16px left and 4px under; the form's 296px):
-/// `rows` of a zone's offset (80px wide), name and, on the right, abbreviation (left out when
-/// it's an offset). Returns the row under a moving pointer and the row pressed.
+/// A Timezone input's list at `rect`: `rows` of a zone's offset (80px wide), name and, on the
+/// right, abbreviation (left out when it's an offset). Share Availability's list is 276px from
+/// 7px left of the field and 12px under it, Calendar Settings' is 286px from 16px left and 4px
+/// under, and the form's is 296px. Returns the row under a moving pointer and the row pressed.
 pub(super) fn zone_list(
     ui: &Ui,
     id: Id,
@@ -1126,7 +1129,7 @@ fn duration_list(
 
 impl crate::Mail {
     /// Share Availability: the week view on today, picking free times for `target`. Who lists me
-    /// and the draft's (or the reply's) teammates; outside recipients aren't listed but count
+    /// and the draft's (or the reply's) teammates. Outside recipients aren't listed but count
     /// for the wording.
     pub(crate) fn calendar_share(&mut self, target: Target, now: &Zoned) {
         let me = self.account.email().to_owned();
@@ -1187,8 +1190,8 @@ impl crate::Mail {
         }
     }
 
-    /// What `Share Availability` from the mail views is for: the open or highlighted
-    /// conversation's draft open in compose, else a Reply All in it; from the week, a new
+    /// What `Share Availability` is for. From the mail views, it's the open or highlighted
+    /// conversation's draft open in compose, else a Reply All in it. From the week, it's a new
     /// message.
     pub(super) fn calendar_share_target(&self) -> Target {
         if self.calendar.week.is_some() {
@@ -1218,7 +1221,7 @@ impl crate::Mail {
         }
     }
 
-    /// Insert: the text, its lines as `<br>`s, into the draft, and the week view gone.
+    /// Insert puts the text, its lines as `<br>`s, into the draft and closes the week view.
     pub(super) fn calendar_share_insert(&mut self, now: &Zoned) {
         let Some(share) = self
             .calendar

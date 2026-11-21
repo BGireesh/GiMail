@@ -16,7 +16,7 @@ use egui::{Event, Key, Modifiers, PointerButton, Pos2, vec2};
 use exo::desktop::context_menu::MenuItem;
 use support::{Fixture, start};
 
-/// Knows a few words; anything else made of letters is misspelled.
+/// Knows a few words, and anything else made of letters is misspelled.
 #[derive(Clone, Default)]
 struct Words {
     learned: Rc<RefCell<HashSet<String>>>,
@@ -59,8 +59,8 @@ impl exo_editor::Spelling for Words {
 /// The menus shown, by their items' titles.
 type Menus = Arc<Mutex<Vec<Vec<String>>>>;
 
-/// A reply to the first conversation with `text` typed in its body, spelling checked by `words`,
-/// its menus choosing the item titled `choose`.
+/// A reply to the first conversation with `text` typed in its body, its spelling checked by
+/// `words` and its menus choosing the item titled `choose`.
 fn reply_with(name: &str, text: &str, words: &Words, choose: &'static str) -> (Fixture, Menus) {
     let mut app = start(name);
     let words = words.clone();
@@ -207,7 +207,7 @@ fn paste_in_the_menu_pastes_a_screenshot() {
         .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
         .expect("encoded");
     exo::clipboard::capture_image(&app.harness.ctx, png);
-    // Past the end of the line: no word, the caret there.
+    // Past the end of the line, where the caret is and there's no word.
     app.right_click(caret(&app) + vec2(40.0, 0.0));
     app.settle();
     assert!(
@@ -261,7 +261,7 @@ fn a_misspelled_subject_is_marked_once_typing_stops_and_its_menu_corrects_it() {
     app.key(Key::Enter);
     app.key(Key::Tab);
     app.type_text("I saw teh");
-    // Chromium's cold mode: the word typed is checked a second after typing stops.
+    // In Chromium's cold mode, the word typed is checked a second after typing stops.
     app.wait(1.2);
     app.right_click(field_caret(&app) - vec2(4.0, 0.0));
     app.settle();
@@ -305,7 +305,7 @@ fn a_field_without_spelling_has_the_editable_menu_and_cut_works() {
     app.key(Key::Slash);
     app.settle();
     app.type_text("hello world");
-    // On the "d" just before the caret: it selects "world".
+    // On the "d" just before the caret, which selects "world".
     app.right_click(field_caret(&app) - vec2(4.0, 0.0));
     app.settle();
     assert_eq!(
@@ -358,7 +358,8 @@ fn the_out_of_office_subject_is_checked_and_corrected() {
             .map(|form| form.subject.as_str()),
         Some("I saw teh")
     );
-    // The dialog at 1280×800: the subject's line from (397, 312), past its end.
+    // In the dialog at 1280×800, the subject's line starts at (397, 312). This clicks past its
+    // end.
     app.click(Pos2::new(800.0, 322.0));
     app.right_click(field_caret(&app) - vec2(4.0, 0.0));
     app.settle();

@@ -1,8 +1,8 @@
-//! The colour picker: rows of 26px discs, each centred in a 32px circle 3px apart, rows 2px apart,
-//! inside a tooltip box padded `6px 7px` (measured; a tooltip's `3px` at the bottom in a calendar's
-//! picker); the chosen colour on a white circle (Carbon `rgba(0,0,0,.3)`), a hovered one ringed.
-//! The Accounts dialog, a calendar's `…` and the Notifications dialog's swatches open one;
-//! [`picker_key`] is its keyboard.
+//! The colour picker: rows of 26px discs, each centred in a 32px circle 3px apart, with rows 2px
+//! apart, inside a tooltip box padded `6px 7px` (measured, with a tooltip's `3px` at the bottom in
+//! a calendar's picker). The chosen colour sits on a white circle (Carbon `rgba(0,0,0,.3)`), and a
+//! hovered one is ringed. The Accounts dialog, a calendar's `…` and the Notifications dialog's
+//! swatches open one, and [`picker_key`] handles its keyboard.
 
 use egui::{Color32, Context, Id, Pos2, Rect, Sense, Vec2, pos2, vec2};
 
@@ -43,14 +43,14 @@ pub enum PickerKey {
 pub enum PickerMove {
     /// Colour `index` becomes the chosen one (it's applied at once, as a preview).
     Preview(usize),
-    /// Colour `index` is applied and the picker closes: Enter on a new colour, or Escape (and
-    /// Enter on the colour it opened with) putting back the one it opened with.
+    /// Colour `index` is applied and the picker closes. That's Enter on a new colour, or Escape
+    /// (and Enter on the colour it opened with) putting back the one it opened with.
     Close(usize),
 }
 
 /// The picker's answer to `key` on `len` colours `per_row` to a row, on colour `current`, opened
-/// on colour `start`: every move wraps around, rows into each other; ↑ and ↓ are the picker's only
-/// with more than one row.
+/// on colour `start`. Every move wraps around, rows into each other, and ↑ and ↓ are the picker's
+/// only with more than one row.
 pub fn picker_key(
     key: PickerKey,
     current: usize,
@@ -92,7 +92,7 @@ impl ColorPicker<'_> {
         ) + vec2(2.0 * PADDING.x, PADDING.y + self.padding_bottom)
     }
 
-    /// Paints it as a tooltip with its top left at `at` (on a whole pixel); a click outside it and
+    /// Paints it as a tooltip with its top left at `at` (on a whole pixel). A click outside it and
     /// `keep` (the control that opened it) is [`Picked::Outside`].
     pub fn show(&self, ctx: &Context, id: Id, at: Pos2, keep: Rect) -> Picked {
         let rect = Rect::from_min_size(at.round(), self.size());

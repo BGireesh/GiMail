@@ -1,4 +1,4 @@
-//! Incremental sync from Gmail history: every page is collected first, changes are grouped per
+//! Incremental sync from Gmail history. Every page is collected first, changes are grouped per
 //! thread and applied idempotently, and the cursor moves only once everything is stored.
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
@@ -16,7 +16,8 @@ use crate::quota::Lane;
 use crate::store::{Inner, reindex};
 
 const PAGE_SIZE: u32 = 500;
-/// More than this many pages or changes means the cache is too far behind to patch: start over.
+/// More than this many pages or changes means the cache is too far behind to patch, so sync
+/// starts over.
 const MAX_PAGES: usize = 100;
 const MAX_CHANGES: usize = 10_000;
 /// Threads applied at once, and messages fetched at once per thread.
@@ -70,7 +71,7 @@ impl Inner {
             {
                 Ok(page) => page,
                 Err(failure) if failure.is_not_found() => {
-                    // Expired, unless the cursor already is the mailbox's current id.
+                    // The cursor expired, unless it already is the mailbox's current id.
                     let profile = self
                         .api
                         .call(Lane::Sync, ATTEMPTS, |gmail| gmail.profile())
@@ -108,8 +109,8 @@ impl Inner {
             return Ok(Some(Applied::default()));
         };
 
-        // A label created elsewhere: pick up its name and color first, so that if this fails
-        // the next sync replays the same history and tries again.
+        // When history mentions a label created elsewhere, pick up its name and color first, so
+        // that if this fails the next sync replays the same history and tries again.
         let known: HashSet<String> = LabelRow::all()
             .select(LabelRow::fields().id())
             .exec(&mut db)
@@ -136,7 +137,8 @@ impl Inner {
         let progress = &self.progress;
         progress.send_modify(|progress| progress.changes = Some((total, 0)));
         let touched: HashSet<String> = threads.keys().cloned().collect();
-        // Messages no longer drafts: deleted, or (should Gmail keep the id) sent.
+        // Messages that are no longer drafts, because they were deleted or (should Gmail keep
+        // the id) sent.
         let undrafted: HashSet<String> = threads
             .values()
             .flat_map(|changes| {
@@ -166,7 +168,7 @@ impl Inner {
             .collect::<Result<Vec<Vec<(String, String)>>>>()?
             .concat();
         self.forget_drafts_gone(&undrafted).await?;
-        // A reply in has called off an `if no reply` send.
+        // A reply that came in has called off an `if no reply` send.
         self.unschedule_replied(&touched).await?;
         let mut write = self.begin(&mut db).await?;
         db::kv_set(write.exec(), HISTORY_ID, &cursor).await?;
@@ -189,9 +191,9 @@ impl Inner {
             .into_iter()
             .collect();
         if stored.is_empty() {
-            // A thread we don't have: fetch its rows if it gained mail or labels that are still
-            // there (it may now belong in a list), ignore deletions. A message added and deleted
-            // since (a draft's earlier version, say) leaves nothing to fetch.
+            // For a thread we don't have, fetch its rows if it gained mail or labels that are
+            // still there (it may now belong in a list), and ignore deletions. A message added
+            // and deleted since (an earlier version of a draft, say) leaves nothing to fetch.
             if changes
                 .added
                 .iter()
@@ -273,7 +275,7 @@ impl Inner {
     }
 }
 
-/// Groups history records by thread. Chat messages are skipped; drafts are kept, since Exo
+/// Groups history records by thread. Chat messages are skipped. Drafts are kept, since Exo
 /// shows Gmail drafts.
 fn group(records: Vec<History>) -> BTreeMap<String, ThreadChanges> {
     let mut threads: BTreeMap<String, ThreadChanges> = BTreeMap::new();
@@ -322,7 +324,8 @@ fn touch<'a>(
     Some((thread, message.id.clone()?))
 }
 
-/// Marks a round of history over when dropped: none running, and the session caught up.
+/// Marks a round of history over when dropped, meaning none is running and the session has
+/// caught up.
 struct CaughtUp<'a>(&'a tokio::sync::watch::Sender<crate::SyncProgress>);
 
 impl Drop for CaughtUp<'_> {

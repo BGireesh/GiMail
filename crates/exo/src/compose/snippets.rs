@@ -7,9 +7,9 @@ use exo_store::{Address, Alias, Snippet};
 use super::{contacts, draft::Open, form, recipients};
 use crate::format::names;
 
-/// Applies `snippet`: its recipients join the draft's, its alias becomes the From, its
-/// subject fills an empty one (variables replaced), its body goes in at the caret (at the
-/// start when `at_start`: ⌘; from a recipient field) and its files are added.
+/// Applies `snippet`. Its recipients join the draft's, its alias becomes the From, and its
+/// subject fills an empty one (variables replaced). Its body goes in at the caret, or at the start
+/// when `at_start` (⌘; from a recipient field), and its files are added.
 pub(crate) fn apply(
     open: &mut Open,
     snippet: &Snippet,
@@ -70,9 +70,9 @@ pub(crate) fn apply(
     open.touch(now);
 }
 
-/// The built-in variables and what they read for this draft: the recipient is the first of To
-/// (and Cc, for a reply), the sender the From. A value that's empty, or only the address, isn't
-/// replaced.
+/// The built-in variables and what they read for this draft. The recipient is the first of To
+/// (and Cc, for a reply), and the sender is the From. A value that's empty, or only the address,
+/// isn't replaced.
 fn values(
     open: &Open,
     snippet: &Snippet,
@@ -105,7 +105,7 @@ fn values(
         } else {
             names::first_name(&known, "")
         };
-        // The last name: what follows the first name, else the whole.
+        // The last name is what follows the first name, or else the whole name.
         let full = names::reverse_by_comma(
             person
                 .name
@@ -155,9 +155,9 @@ fn replace_in_text(text: &str, values: &[(&str, String)]) -> String {
         })
 }
 
-/// `html` with the variables replaced in its text, never in its tags; one cut by a tag (half of
-/// it bold) stays as it is: only a variable in a single text node is replaced. Values are
-/// escaped.
+/// `html` with the variables replaced in its text, never in its tags. A variable cut by a tag
+/// (half of it bold) stays as it is, because only a variable in a single text node is replaced.
+/// Values are escaped.
 fn replace_in_html(html: &str, values: &[(&str, String)]) -> String {
     let escaped: Vec<(&str, String)> = values
         .iter()
@@ -188,7 +188,7 @@ fn replace_in_html(html: &str, values: &[(&str, String)]) -> String {
 fn replace_all(text: &str, from: &str, to: &str) -> String {
     let lower = text.to_lowercase();
     if lower.len() != text.len() {
-        // Lowercasing moved byte offsets (rare scripts): match exactly instead.
+        // Lowercasing moved byte offsets (rare scripts), so match exactly instead.
         return text.replace(from, to);
     }
     let mut out = String::with_capacity(text.len());
@@ -202,9 +202,9 @@ fn replace_all(text: &str, from: &str, to: &str) -> String {
     out
 }
 
-/// What a snippet's body inserts: a body that's one `<div>` of inline text (`span a b i u s tt
-/// sup sub`, optionally ending in a `<br>`) joins the line at the caret instead of making its
-/// own.
+/// What a snippet's body inserts. A body that's one `<div>` of inline text joins the line at the
+/// caret instead of making its own. Inline text is `span a b i u s tt sup sub`, optionally ending
+/// in a `<br>`.
 fn body_to_insert(body: &str) -> String {
     const INLINE: [&str; 9] = ["span", "a", "b", "i", "u", "s", "tt", "sup", "sub"];
     let inner = body
@@ -237,7 +237,7 @@ pub(crate) fn name(snippet: &Snippet) -> &str {
     }
 }
 
-/// Its body as text, for the pickers' previews.
+/// The snippet's body as text, for the pickers' previews.
 pub(crate) fn preview(snippet: &Snippet) -> String {
     super::plain::from_html(&snippet.body)
         .split_whitespace()
@@ -245,9 +245,9 @@ pub(crate) fn preview(snippet: &Snippet) -> String {
         .join(" ")
 }
 
-/// The inline picker's rows for `query`: with nothing typed, by when each was last used (10 for
-/// one never used); otherwise by `command-score` on the name. Five at most; ties go by name,
-/// later first.
+/// The inline picker's rows for `query`. With nothing typed, they're ranked by when each was last
+/// used (10 for one never used), and otherwise by `command-score` on the name. Five at most, with
+/// ties going by name, later first.
 pub(crate) fn rank<'a>(
     snippets: &'a [Snippet],
     last_used: &std::collections::BTreeMap<String, String>,

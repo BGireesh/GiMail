@@ -1,13 +1,14 @@
-//! Dragging the selection to move it, as Chromium drags and drops in a `contenteditable` on a Mac:
-//! a press on the selection doesn't move the caret; moved more than 4px with the button down, it
-//! drags the selected text, its picture following the pointer and a caret where it would land; let
-//! go there, it moves (⌥: a copy); let go on the selection itself, or Escape, nothing happens. A
-//! press let go without dragging puts the caret there.
+//! Dragging the selection to move it, as Chromium drags and drops in a `contenteditable` on a Mac.
+//! A press on the selection doesn't move the caret. Once the pointer moves more than 4px with the
+//! button down, the press drags the selected text, with its picture following the pointer and a
+//! caret where it would land. Let go there, and the text moves (or, with ⌥, is copied). Let go on
+//! the selection itself, or press Escape, and nothing happens. A press let go without dragging
+//! puts the caret there.
 //!
-//! Out of the editor, the Mac's own drag carries it on ([`exo_ui::text_drag`]), with the same
-//! picture: into a field or another editor of the window (a move), another app (a copy), or
-//! back. Text dragged over the editor from there shows the caret where it would go, and let go,
-//! goes in there.
+//! Out of the editor, the Mac's own drag carries the text on ([`exo_ui::text_drag`]) with the same
+//! picture, into a field or another editor of the window (a move), another app (a copy), or back.
+//! Text dragged over the editor from elsewhere shows the caret where it would go, and goes in
+//! there when let go.
 
 use egui::{
     Color32, ColorImage, CornerRadius, CursorIcon, Id, Key, LayerId, Modifiers, Order, Painter,
@@ -32,11 +33,13 @@ const IMAGE_ALPHA: f32 = 0.75;
 pub(crate) struct TextDrag {
     /// Where the button went down.
     press: Pos2,
-    /// The pointer has gone past the threshold: the text is being dragged.
+    /// Whether the pointer has gone past the threshold, so the text is being dragged.
     dragging: bool,
-    /// Where it would land now: off the editor and over the selection, nowhere.
+    /// Where the text would land now, or nowhere when the pointer is off the editor or over the
+    /// selection.
     drop: Option<Pos>,
-    /// Out of the editor: the Mac's drag has it, until the app says it's over.
+    /// Whether the drag has left the editor, so the Mac's drag has it until the app says it's
+    /// over.
     native: bool,
 }
 
@@ -65,7 +68,7 @@ impl Editor {
         let ctx = ui.ctx();
         if drag.native {
             match exo_ui::text_drag::ended(ctx, id) {
-                // Moved to a field or another editor of the window: it goes from here.
+                // Moved to a field or another editor of the window, so the text goes from here.
                 Some(true) => self.delete_dragged(),
                 Some(false) => {}
                 None => self.view.text_drag = Some(drag),
@@ -91,7 +94,7 @@ impl Editor {
                 ui.ctx().request_repaint();
                 return;
             }
-            // Out of the editor, the Mac's drag carries it on.
+            // Out of the editor, the Mac's drag carries the text on.
             let visible = rect.intersect(ui.clip_rect());
             if exo_ui::text_drag::native(ctx)
                 && let Some(at) = point.filter(|at| !visible.contains(*at))
@@ -142,8 +145,9 @@ impl Editor {
         }
     }
 
-    /// Text another drag has over the editor (`id`, at `rect`): the caret where it would go (none
-    /// over the selection it is, when it's this editor's), and let go there, it goes in.
+    /// Follows text another drag has over the editor (`id`, at `rect`). Shows the caret where the
+    /// text would go, or none over the selection when the text is this editor's, and puts the text
+    /// in there when it's let go. Returns whether it was.
     pub(super) fn drag_over(&mut self, ui: &Ui, rect: Rect, id: Id) -> bool {
         let ctx = ui.ctx();
         let visible = rect.intersect(ui.clip_rect());
@@ -176,9 +180,9 @@ impl Editor {
         true
     }
 
-    /// The dragged text's picture under the pointer (the selected text without its highlight,
-    /// moved with the pointer, at 75%) and the caret where it would land, for an editor at
-    /// `origin`; the Mac's drag draws the picture once it's out of the editor.
+    /// Paints the dragged text's picture under the pointer (the selected text without its
+    /// highlight, moved with the pointer, at 75%) and the caret where it would land, for an editor
+    /// at `origin`. The Mac's drag draws the picture once it's out of the editor.
     pub(super) fn paint_text_drag(&self, ui: &Ui, origin: Pos2, text: Color32) {
         let drag = self.view.text_drag.filter(|drag| drag.dragging);
         if let Some(at) = drag.and_then(|drag| drag.drop).or(self.view.drag_over) {
@@ -239,9 +243,9 @@ impl Editor {
         covered.filter(|covered| covered.is_positive())
     }
 
-    /// The picture [`Self::paint_text_drag`] draws, of what shows of the selection (as Chromium's
-    /// `DragImageForSelection` is), for the Mac's drag: painted, then drawn into an image as the
-    /// GPU would draw it, with where it is in the window.
+    /// The picture [`Self::paint_text_drag`] draws of what shows of the selection (as Chromium's
+    /// `DragImageForSelection` is), for the Mac's drag. It's painted, then drawn into an image as
+    /// the GPU would draw it, and comes with where it is in the window.
     fn drag_image(&self, ui: &Ui, origin: Pos2, delta: Vec2) -> Option<(ColorImage, Rect)> {
         let ctx = ui.ctx();
         let layer = LayerId::new(Order::Debug, exo_ui::id(ctx, "exo_editor_drag_image"));
@@ -250,7 +254,7 @@ impl Editor {
             .with_clip_rect(ui.clip_rect().translate(delta));
         painter.multiply_opacity(IMAGE_ALPHA);
         let covered = self.paint_dragged(&painter, origin, delta);
-        // Taken out again: it's only for the picture.
+        // Taken out again, because it's only for the picture.
         let shapes = ctx
             .graphics_mut(|graphics| graphics.get_mut(layer).map(std::mem::take))
             .map(|list| list.all_entries().cloned().collect())
@@ -264,10 +268,10 @@ impl Editor {
 }
 
 /// Draws the font texture's triangles of `primitives` into a transparent picture of `bounds`, at
-/// `pixels_per_point`, as egui's renderer would: premultiplied vertex colours times the texel
-/// nearest each pixel's centre, blended over what's there, each pixel drawn by one triangle of a
-/// quad. Emoji and images, drawn from other
-/// textures, are left out. Returns the picture and the rect it covers, on whole pixels.
+/// `pixels_per_point`, as egui's renderer would. Each pixel gets the premultiplied vertex colour
+/// times the texel nearest its centre, blended over what's there, and is drawn by one triangle of
+/// a quad. Emoji and images, drawn from other textures, are left out. Returns the picture and the
+/// rect it covers, on whole pixels.
 fn rasterize(
     primitives: &[ClippedPrimitive],
     atlas: &ColorImage,

@@ -70,7 +70,7 @@ pub struct Player {
     bytes: Arc<[u8]>,
     format: Format,
     frames: Frames<'static>,
-    /// How many more times it plays after this time through; `None` forever.
+    /// How many more times it plays after this time through, or `None` for forever.
     plays_left: Option<u32>,
     /// The frame on show and how long it shows.
     shown: (RgbaImage, Duration),
@@ -160,7 +160,7 @@ impl Player {
     }
 }
 
-/// `bytes`' frames and how many times they play (`None`: forever).
+/// `bytes`' frames and how many times they play (`None` for forever).
 fn decode(bytes: &Arc<[u8]>, format: Format) -> Option<(Frames<'static>, Option<u32>)> {
     let reader = || Cursor::new(ArcBytes(bytes.clone()));
     let plays = |count: LoopCount| match count {

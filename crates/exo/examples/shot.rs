@@ -9,46 +9,47 @@
 //!
 //! The account is an in-process gmail-mock with its defaults (seed 1, now 2026-11-17 09:00 New
 //! York) synced into a fresh store in a temporary directory, so every run shows the same mail.
-//! `--keys` presses keys: names separated by spaces (`e`, `Shift+M`, `Meta+k`, `!`, `Enter`,
-//! `wait:800`, `mouse:X,Y`,
-//! `click:X,Y` and `drag:X1,Y1,X2,Y2` for the pointer, `hold-drag:…` without letting go,
-//! `double-drag:…`/`triple-drag:…` from the press that ends a double or triple click,
-//! `scroll:X,Y,DY` for the wheel there,
-//! `type:Hi%20there` for text, `reply` for a reply arriving in the open conversation,
-//! `trash:N` for its message N going to Trash, `link:URL` for one of Exo's links macOS handed over, `paste-image:FILE` to paste that PNG as a
-//! screenshot on the clipboard, `drop:FILE` to drop that file on the window, `download:N:P` for the open conversation's last message's card N
-//! downloading with P% there), each followed by
-//! whatever the account does about it. `--hover X,Y` puts the pointer there; `--theme` sets the
-//! account's theme (`auto` renders Snow: an offscreen render has no system appearance). `--eml
-//! FILE` delivers that message to the top of the inbox (gmail-mock's `--eml`). `--settings FILE`
-//! starts the account with those settings (a JSON document of its settings: splits,
-//! `unifiedInbox`); `--device-settings FILE` with this device's (`{"localSendsCount": 6}`).
-//! `--split-library FILE` uses that split library instead of Exo's own, or none (`--split-library
-//! none`). `--fault JSON` arms a gmail-mock fault (`/__mock/faults`) once the account has
-//! synced, before the keys: a send Gmail refuses, say.
-//! `--vacation JSON` sets the mock's vacation responder (Gmail's `VacationSettings`) and
-//! `--calendar-event JSON` adds an event to its primary calendar, before the account opens: Out
-//! of Office Reply's bar and nudge. `--places` answers Where's every ask with those places
-//! instead of Apple Maps. `--joined` is when the account first signed in to Exo
-//! (`2026-11-16T12:00:00Z`), which labels the reply buttons in its first week; without it the
-//! account has no join date. `--inbox-zero-photo` shows that photo of `assets/inbox-zero` at
-//! Inbox Zero whatever the day (the mock's day has `saad-chaudhry-G25LeMV7fAw.jpg`).
-//! `--first-run` opens the account as its first time on this Mac, under the welcome splash.
-//! `--account-setup` opens account setup at once, and `--welcome-alert` the `Welcome to Exo`
-//! alert it ends on with a small inbox.
+//! `--keys` takes steps separated by spaces, each followed by whatever the account does about it.
+//! A step is a key name (`e`, `Shift+M`, `Meta+k`, `!`, `Enter`) or one of these: `wait:800`;
+//! `mouse:X,Y`, `click:X,Y` and `drag:X1,Y1,X2,Y2` for the pointer; `hold-drag:…`, which doesn't
+//! let go; `double-drag:…` and `triple-drag:…`, which drag from the press that ends a double or
+//! triple click; `scroll:X,Y,DY` for the wheel at X,Y; `type:Hi%20there` for text; `reply` for a
+//! reply arriving in the open conversation; `trash:N` for message N of that conversation going to
+//! Trash; `link:URL` for one of Exo's links, as macOS hands it over; `paste-image:FILE` to paste
+//! that PNG as a screenshot on the clipboard; `drop:FILE` to drop that file on the window; and
+//! `download:N:P` for card N of the open conversation's last message downloading, P% done.
+//!
+//! `--hover X,Y` puts the pointer there. `--theme` sets the account's theme (`auto` renders Snow,
+//! because an offscreen render has no system appearance). `--eml FILE` delivers that message to
+//! the top of the inbox (gmail-mock's `--eml`). `--settings FILE` starts the account with the
+//! settings in that JSON document (splits, `unifiedInbox`), and `--device-settings FILE` with
+//! those settings for this device (`{"localSendsCount": 6}`). `--split-library FILE` uses that
+//! split library instead of Exo's own, or none (`--split-library none`). `--fault JSON` arms a
+//! gmail-mock fault (`/__mock/faults`) once the account has synced, before the keys, such as a
+//! send that Gmail refuses. `--vacation JSON` sets the mock's vacation responder (Gmail's
+//! `VacationSettings`) and `--calendar-event JSON` adds an event to its primary calendar, both
+//! before the account opens, for the bar and the nudge of Out of Office Reply. `--places` answers
+//! every search from Where with those places instead of Apple Maps. `--joined` sets when the
+//! account first signed in to Exo (`2026-11-16T12:00:00Z`), which decides whether the reply
+//! buttons have labels, as they do in the account's first week. Without it the account has no
+//! join date. `--inbox-zero-photo` shows that photo from `assets/inbox-zero` at Inbox Zero on
+//! any day (the mock's day has `saad-chaudhry-G25LeMV7fAw.jpg`). `--first-run` opens the account
+//! as if for the first time on this Mac, under the welcome splash. `--account-setup` opens
+//! account setup at once. `--welcome-alert` opens the `Welcome to Exo` alert, which account
+//! setup ends on when the inbox is small.
 //!
 //! `--updates` gives Exo an updater whose checks never hear back, for ⌘K's `Check for Updates`:
 //! `--keys "Meta+k type:check%20for%20updates Enter"` shows `Checking for updates…`.
 //!
-//! `--signed-out` starts on the sign-in screen, with no account on the device; its sign-in never
-//! hears back from the browser, so `--keys Enter` shows the spinner, unless `--sign-in-error`
-//! makes the browser fail to open (the generic error) or `--no-client` leaves Exo without an
+//! `--signed-out` starts on the sign-in screen, with no account on the device. Its sign-in never
+//! hears back from the browser, so `--keys Enter` shows the spinner. With `--sign-in-error` the
+//! browser fails to open instead (the generic error), and `--no-client` leaves Exo without an
 //! OAuth client. `--revoked` starts with an account whose grant is gone, on "Almost there…".
-//! `--calendar-accounts a@x.com` signs those in for the mock's account's calendars (the settings
-//! say which are signed out). `--accounts a@x.com,!b@x.com` puts more accounts on the device after
-//! the mock's (`!` marks one Google signed out); they sign in on the mock's mailbox, and the
-//! mock's account opens. `--photo` gives the mock's account a profile photo of its own
-//! (gmail-mock's `--photo`), and signs it in as `--accounts` does.
+//! `--calendar-accounts a@x.com` signs those accounts in for the calendars of the mock's account
+//! (the settings say which are signed out). `--accounts a@x.com,!b@x.com` puts more accounts on
+//! the device after the mock's account (`!` marks one that Google signed out). They sign in on the
+//! mock's mailbox, and the mock's account opens. `--photo` gives the mock's account a profile
+//! photo of its own (gmail-mock's `--photo`), and signs it in as `--accounts` does.
 //!
 //! `--teardown` shows the `Sorry!` alert for an account whose store can't be opened, for that
 //! reason (a corrupt or locked database, a full disk, another error), with nothing else on screen.
@@ -111,8 +112,8 @@ struct Options {
     updates: bool,
 }
 
-/// `--updates`' releases, whose checks never hear back, around an app that shows nothing of its
-/// own.
+/// The releases for `--updates`, whose checks never hear back, and an app around them that shows
+/// nothing of its own.
 struct Unanswered;
 
 impl exo::update::Releases for Unanswered {
@@ -147,7 +148,8 @@ impl exo::update::Shell for Unanswered {
     fn changed(&self) {}
 }
 
-/// `--places`: `name|address` pairs separated by `;`, URL-escaped as `type:` text is.
+/// Parses `--places`, which is `name|address` pairs separated by `;` and URL-escaped as `type:`
+/// text is.
 fn places(text: &str) -> Vec<exo::places::Place> {
     text.split(';')
         .filter_map(|pair| pair.split_once('|'))
@@ -168,8 +170,8 @@ enum Connection {
     Disabled,
 }
 
-/// Tokens whose refresh stops getting an answer once `gone`, from a token endpoint nothing
-/// listens on.
+/// Tokens whose refresh stops getting an answer once `gone` is set, failing as a request to a
+/// token endpoint that nothing listens on fails.
 struct Refreshing {
     gone: Arc<AtomicBool>,
     token: url::Url,
@@ -305,7 +307,7 @@ fn options() -> anyhow::Result<Options> {
     if let [width, height] = positional[..] {
         (options.width, options.height) = (width, height);
     }
-    // The photos are the device's: the account signs in.
+    // Profile photos belong to the device's accounts, so the account signs in.
     if options.photo {
         options.accounts.get_or_insert_with(String::new);
     }
@@ -315,7 +317,7 @@ fn options() -> anyhow::Result<Options> {
 /// A Playwright key name as egui events: the key with its modifiers, and the text it types.
 fn key_events(name: &str) -> anyhow::Result<(Key, Modifiers, Option<String>)> {
     let mut parts: Vec<&str> = name.split('+').collect();
-    // `Meta++` would be the plus key; nothing here presses it.
+    // `Meta++` would be the plus key, which nothing here presses.
     let key = parts.pop().context("empty key")?;
     let mut modifiers = Modifiers::NONE;
     for modifier in parts {
@@ -399,7 +401,7 @@ fn settle(harness: &mut egui_kittest::Harness<'_, exo::App>) -> usize {
     frames + 2
 }
 
-/// A client for the mock's OAuth endpoints, which take any.
+/// A client for the mock's OAuth endpoints, which accept any client.
 fn mock_client(server: &gmail_mock::MockServer) -> ClientConfig {
     ClientConfig::new(
         "exo-shot.apps.googleusercontent.com",
@@ -409,7 +411,7 @@ fn mock_client(server: &gmail_mock::MockServer) -> ClientConfig {
 }
 
 /// Signs the mock's account in once, approving in a scripted browser, so the next launch lists
-/// it. Its grant isn't kept: that launch finds it signed out.
+/// it. Its grant isn't kept, so that launch finds it signed out.
 fn sign_in_once(
     runtime: &tokio::runtime::Runtime,
     server: &gmail_mock::MockServer,
@@ -433,7 +435,6 @@ fn sign_in_as(
     Ok(())
 }
 
-/// The `Sorry!` screen alone, as the app shows it.
 /// A file `drop:` drops on the window.
 #[derive(Debug)]
 struct Dropped(std::path::PathBuf);
@@ -448,6 +449,7 @@ impl egui::DroppedFile for Dropped {
     }
 }
 
+/// The `Sorry!` screen alone, as the app shows it.
 struct Teardown(exo::Unopened);
 
 impl eframe::App for Teardown {
@@ -502,7 +504,7 @@ fn main() -> anyhow::Result<()> {
         ..gmail_mock::Config::default()
     };
     let now = config.now.clone();
-    // The mock serves from this runtime; the account runs on its own.
+    // The mock serves from this runtime, and the account runs on its own.
     let runtime = tokio::runtime::Runtime::new()?;
     let mut server = runtime.block_on(gmail_mock::MockServer::start(config))?;
     let client = gmail::Client::new(
@@ -624,7 +626,7 @@ fn main() -> anyhow::Result<()> {
             }
             Auth::open(client.clone(), &state, secrets.clone())
         };
-        // A browser that never comes back, so the spinner stays; or one that can't open.
+        // A browser that never comes back, so the spinner stays, or one that can't open.
         let browser: exo::sign_in::Browser = if options.sign_in_error {
             Arc::new(|_| Err(std::io::Error::other("no browser")))
         } else {
@@ -660,12 +662,13 @@ fn main() -> anyhow::Result<()> {
             };
             let mut app =
                 exo::App::new(cc, &assets, start, exo::Clock::fixed(now)).expect("assets load");
-            // The settings menu's `Warn Before Quitting`, as in Exo itself, on.
+            // `Warn Before Quitting` from the settings menu, loaded as Exo loads it, which leaves
+            // it on.
             app.set_quit_warning(exo::desktop::QuitWarning::load(&stores));
             if options.updates {
                 app.set_updates(exo::update::Updates::with(Unanswered, Unanswered));
             }
-            // Shots have no caret: it blinks with no "on" phase.
+            // Shots have no caret, because it blinks with no "on" phase.
             cc.egui_ctx.all_styles_mut(|style| {
                 style.visuals.text_cursor.blink = true;
                 style.visuals.text_cursor.on_duration = 0.0;
@@ -771,8 +774,8 @@ fn main() -> anyhow::Result<()> {
     let mut pointer = false;
     for name in &options.keys {
         if name == "reply" {
-            // A reply from Ann into the open conversation, then the sync regaining focus starts:
-            // the Show New Messages bar.
+            // A reply from Ann arrives in the open conversation, then regaining focus starts a
+            // sync, which shows the Show New Messages bar.
             let thread = harness
                 .state()
                 .mail()
@@ -803,8 +806,8 @@ fn main() -> anyhow::Result<()> {
             continue;
         }
         if let Some(at) = name.strip_prefix("trash:") {
-            // Message `at` (from 0) of the open conversation goes to Trash, as from another
-            // device, then a sync: its marker.
+            // Message `at` (from 0) of the open conversation goes to Trash, as if from another
+            // device, then a sync shows its marker.
             let message = harness
                 .state()
                 .mail()
@@ -824,8 +827,8 @@ fn main() -> anyhow::Result<()> {
             continue;
         }
         if let Some(held) = name.strip_prefix("download:") {
-            // The open conversation's last message's card N downloading, P% there: its bar and
-            // its notification.
+            // Card N of the open conversation's last message downloading, P% done, which shows
+            // its bar and its notification.
             let (card, percent) = held.split_once(':').context("download:N:P")?;
             harness
                 .state_mut()
@@ -906,10 +909,9 @@ fn main() -> anyhow::Result<()> {
             Some((points, clicks, hold))
         });
         if let Some((points, clicks, hold)) = drag {
-            // Presses at the first point, moves to the second in ten steps and releases;
-            // `hold-drag:` keeps the button down, mid-drag, and
-            // `double-drag:`/`triple-drag:` click there first, so the press ends a double or
-            // triple click.
+            // Presses at the first point, moves to the second in ten steps and releases.
+            // `hold-drag:` keeps the button down, mid-drag, and `double-drag:`/`triple-drag:`
+            // click there first, so the press ends a double or triple click.
             let numbers = points
                 .split(',')
                 .map(str::parse::<f32>)
@@ -1037,7 +1039,7 @@ fn main() -> anyhow::Result<()> {
     // Enough frames for fonts, SVG textures and the cursor's slide to settle.
     harness.run_steps(30);
     let frames = 30 + settle(&mut harness);
-    // The sign-in spinner turns once a second: show it where it started.
+    // The sign-in spinner turns once a second, so show it where it started.
     if options.signed_out
         && let Some(since) = since_key
     {

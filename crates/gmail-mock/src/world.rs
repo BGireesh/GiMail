@@ -14,7 +14,7 @@ use crate::people::Directory;
 /// How to build the mock's world.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Config {
-    /// Seed for the fixture generator; the same seed always yields the same mailbox.
+    /// Seed for the fixture generator. The same seed always yields the same mailbox.
     pub seed: u64,
     /// The mock's "now", which also sets the account's time zone. The clock runs from here.
     pub now: Zoned,
@@ -25,17 +25,18 @@ pub struct Config {
     /// real network's round trips. Zero by default.
     pub latency: Duration,
     /// Gmail quota units the account may spend per minute, enforced as Gmail does (429 with a
-    /// retry time); `None` (the default) enforces none. Gmail's is
+    /// retry time). `None` (the default) enforces none. Gmail's is
     /// [`gmail::quota::PER_USER_PER_MINUTE`].
     pub quota: Option<u32>,
     /// Where the mock is served (`http://127.0.0.1:8787/`), which the newsletters' one-click
     /// unsubscribe links point at (`/__mock/unsubscribe/…`), so no client ever unsubscribes
-    /// from a real address. [`crate::serve`] and [`crate::MockServer::start`] set it; without
-    /// it the links go to port 80 of this machine.
+    /// from a real address. [`crate::serve`] and [`crate::MockServer::start`] set it. Without
+    /// it, the links go to port 80 of this machine.
     pub origin: Option<url::Url>,
     /// The account has a profile photo of its own, served at `/__mock/photo/…` in whatever
-    /// size Google's `=s{n}` option asks for: People's `people/me` lists it and userinfo's
-    /// `picture` points at it. Without (the default) it has Google's generated avatar.
+    /// size Google's `=s{n}` option asks for. People's `people/me` lists it, and userinfo's
+    /// `picture` points at it. Without it (the default), the account has Google's generated
+    /// avatar.
     pub photo: bool,
 }
 
@@ -117,7 +118,7 @@ impl Clock {
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Fault {
-    /// HTTP method to match; any when absent.
+    /// HTTP method to match, or any when absent.
     pub method: Option<String>,
     /// Path prefix to match, e.g. `/gmail/v1/users/me/threads/`.
     pub path: String,
@@ -127,7 +128,7 @@ pub struct Fault {
     pub message: Option<String>,
     /// Overrides the canned reason for the status.
     pub reason: Option<String>,
-    /// How many requests to fail; 1 when absent.
+    /// How many requests to fail, or 1 when absent.
     #[serde(default = "one")]
     pub times: u32,
     /// The request takes effect and only its answer is lost, as when Google did the work but
@@ -160,9 +161,9 @@ pub struct World {
     pub unsubscribes: Vec<crate::admin::Unsubscribe>,
 }
 
-/// The world locked for one Calendar request of `identity`'s: another address sees its own
-/// calendars as [`World::calendar`] and itself as [`World::account`]'s address until the guard
-/// drops, which puts back those of the mailbox's owner.
+/// The world locked for one Calendar request of `identity`'s. Until the guard drops, another
+/// address sees its own calendars as [`World::calendar`] and itself as [`World::account`]'s
+/// address. Dropping the guard puts back those of the mailbox's owner.
 pub struct CalendarWorld<'a> {
     world: MutexGuard<'a, World>,
     /// Another address's key in [`World::others`], and the address of the mailbox's owner
@@ -207,8 +208,8 @@ impl App {
         }
     }
 
-    /// Locks the world. A handler that panicked mid-mutation leaves it usable: the mock favors
-    /// staying up over strict consistency.
+    /// Locks the world. A handler that panicked mid-mutation leaves it usable, because the mock
+    /// favors staying up over strict consistency.
     pub fn lock(&self) -> MutexGuard<'_, World> {
         self.world
             .lock()

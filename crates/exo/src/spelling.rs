@@ -1,10 +1,10 @@
 //! What compose's body, the spellchecked fields (the subject, a snippet's name, the Out of Office
 //! subject, an event's title) and the other editors (About, the Out of Office message) share of
-//! spelling: the shell's editable menu for a right-click in one, and what's chosen in it done to
-//! it.
+//! spelling, which is the shell's editable menu for a right-click in one, and doing what's chosen
+//! in it.
 //!
-//! The other editors check spelling as a body does: autocorrected while autocorrect is on,
-//! spellchecked otherwise. The one-line fields are spellchecked either way
+//! The other editors check spelling as a body does, autocorrecting while autocorrect is on and
+//! spellchecking otherwise. The one-line fields are spellchecked either way
 //! ([`exo_editor::FieldSpelling`]).
 
 use exo_editor::{ContextMenu, Editor, FieldSpelling, Spelling};
@@ -47,10 +47,10 @@ impl Mail {
             .and_then(|(_, choice)| choice)
     }
 
-    /// Each frame, before anything draws: Split Inbox's sender picker gets its spellchecker, and a
-    /// right-click last frame in it, or in any field without spelling (every other input of the
-    /// app's: the shell's menu is any editable element's, `params.isEditable`), shows the shell's
-    /// editable menu and does what's chosen in it.
+    /// Runs each frame, before anything draws. Split Inbox's sender picker gets its spellchecker,
+    /// and a right-click last frame in it, or in any field without spelling, shows the shell's
+    /// editable menu and does what's chosen in it. The fields without spelling are every other
+    /// input of the app's, since the shell's menu is any editable element's.
     pub(crate) fn field_menus(&mut self, ctx: &egui::Context) {
         let make = &*self.spelling;
         if let Some(picker) = self.settings.sender_picker_mut() {
@@ -90,9 +90,9 @@ impl Mail {
         }
     }
 
-    /// A right-click last frame in the link input of the editor `editor` finds: the shell's
-    /// editable menu, its spelling first, and what's chosen done to the input. Returns whether
-    /// there was one.
+    /// Handles a right-click last frame in the link input of the editor that `editor` finds. It
+    /// shows the shell's editable menu, its spelling first, and does what's chosen to the input.
+    /// Returns whether there was one.
     pub(crate) fn link_input_menu(
         &mut self,
         ctx: &egui::Context,
@@ -116,7 +116,8 @@ impl Mail {
         true
     }
 
-    /// Opens what a menu chose to: a `mailto:` in a new draft, anything else in the browser.
+    /// Opens what a menu chose to open, a `mailto:` in a new draft and anything else in the
+    /// browser.
     pub(crate) fn open_chosen(&mut self, url: &str) {
         if url.starts_with("mailto:") {
             self.compose_mailto(url, false);
@@ -211,7 +212,7 @@ fn shared_choice(ctx: &egui::Context, menu: &ContextMenu, choice: Choice) -> Don
         Choice::Copy => ctx.input_mut(|input| input.events.push(egui::Event::Copy)),
         Choice::Paste => {
             let modifiers = egui::Modifiers::MAC_CMD.plus(egui::Modifiers::COMMAND);
-            // A paste of the clipboard's text; with none, the ⌘V key, which pastes an image.
+            // A paste of the clipboard's text. With none, the ⌘V key, which pastes an image.
             let event = crate::clipboard::read_text(ctx)
                 .map(|text| egui::Event::Paste(text.replace("\r\n", "\n")))
                 .unwrap_or(egui::Event::Key {
@@ -225,7 +226,7 @@ fn shared_choice(ctx: &egui::Context, menu: &ContextMenu, choice: Choice) -> Don
         }
         Choice::CopyText(text) => ctx.copy_text(text),
         Choice::OpenLink(url) | Choice::Search(url) => return Done::Open(url),
-        // Editable menus offer no image's items; the spelling ones are each widget's.
+        // Editable menus offer no image's items. The spelling ones are each widget's.
         Choice::CopyImage
         | Choice::Correct(_)
         | Choice::AddToDictionary(_)

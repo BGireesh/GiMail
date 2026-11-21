@@ -21,8 +21,8 @@ pub(crate) const FILE_NAME: &str = "google-oauth-client.json";
 #[derive(Clone)]
 pub struct ClientConfig {
     client_id: String,
-    /// Google issues Desktop clients a secret and expects it, though it isn't confidential.
-    /// Still never printed.
+    /// Google issues Desktop clients a secret and expects it, though it isn't confidential. It's
+    /// still never printed.
     client_secret: String,
     endpoints: Endpoints,
 }
@@ -44,7 +44,7 @@ struct File {
     web: Option<serde::de::IgnoredAny>,
 }
 
-/// Not its `auth_uri` and `token_uri`: those are always Google's, so a client file someone
+/// Leaves out its `auth_uri` and `token_uri`, which are always Google's, so a client file someone
 /// shares can't send the browser or the code exchange elsewhere.
 #[derive(Deserialize)]
 struct Installed {
@@ -237,8 +237,9 @@ mod tests {
         );
     }
 
-    /// Parses the real client file `EXO_GOOGLE_OAUTH_CLIENT` names (or the config folder's), without
-    /// printing it: `EXO_GOOGLE_OAUTH_CLIENT=… cargo test -p exo-auth -- --ignored real_client`.
+    /// Parses the real client file without printing it. That's the file `EXO_GOOGLE_OAUTH_CLIENT`
+    /// names, or the config folder's. Run it with
+    /// `EXO_GOOGLE_OAUTH_CLIENT=… cargo test -p exo-auth -- --ignored real_client`.
     #[test]
     #[ignore = "reads a real client file"]
     fn real_client_file_parses() {

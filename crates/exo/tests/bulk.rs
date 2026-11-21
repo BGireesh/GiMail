@@ -23,7 +23,7 @@ fn count(app: &Fixture, q: &str) -> usize {
         .len()
 }
 
-/// Done, with everything selected: more conversations than are loaded.
+/// Done, with everything selected, which is more conversations than are loaded.
 fn select_all_of_done(name: &str) -> Fixture {
     let mut app = start(name);
     app.key(Key::G);
@@ -143,7 +143,7 @@ fn bulk_actions_undoes_get_me_to_zero() {
     app.key(Key::Enter);
     assert!(count(&app, "in:inbox") < inbox);
     palette(&mut app, "bulk actions");
-    // The row's Undo, then `Undo action`'s Undo.
+    // The row's Undo, then Undo in `Undo action`.
     app.key(Key::Enter);
     app.key(Key::Enter);
     assert_eq!(count(&app, "in:inbox"), inbox);

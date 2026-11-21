@@ -1,6 +1,6 @@
-//! One-click unsubscribes (RFC 8058) waiting to be posted. The app posts them itself, and keeps
-//! them here (a JSON list in `kv`, so no schema change) until it has, so one asked for offline,
-//! or just before a quit, still goes.
+//! One-click unsubscribes (RFC 8058) waiting to be posted. The app posts them itself and keeps
+//! them here until it has, so an unsubscribe asked for offline, or just before a quit, still
+//! goes. The queue is a JSON list in `kv`, so it needs no schema change.
 
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
@@ -53,7 +53,7 @@ impl Store {
         Ok(db::kv_get(&mut db, KEY).await?.unwrap_or_default())
     }
 
-    /// Takes `url` off the queue: posted, or given up on.
+    /// Takes `url` off the queue once it's posted or given up on.
     ///
     /// # Errors
     /// On database failures.

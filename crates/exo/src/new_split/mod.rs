@@ -4,9 +4,9 @@
 //! and the conversations actions apply to: their senders, the senders' domains, everyone they
 //! were sent to, a lone conversation's subject (through `Edit Subject`) and their labels. Then
 //! `New Split Inbox` asks for a name, and `Add to Split Inbox` for the split to add it to. The
-//! cursor's (or the open) conversation can also offer `New Split: Google Docs`, a known
-//! service's split or its mailing list's, the last two through the New Split dialog
-//! ([`dialog`]).
+//! conversation under the cursor (or the open one) can also offer `New Split: Google Docs`, a
+//! split for a known service, or a split for its mailing list. The last two go through the New
+//! Split dialog ([`dialog`]).
 //!
 //! Rows don't carry who a conversation was sent to, so while the palette is open the
 //! conversations it could act on are read from the store, without their bodies.
@@ -37,12 +37,12 @@ const ADD: &str = "AddToSplit";
 const NAME: &str = "SplitInbox";
 /// The most conversations a split is made from.
 const MOST: usize = 10;
-/// Google Drive's senders besides `@docs.google.com` (`ca.tip`).
+/// Google Drive's senders besides `@docs.google.com`.
 const DRIVE_SENDERS: [&str; 2] = [
     "drive-shares-dm-noreply@google.com",
     "drive-shares-noreply@google.com",
 ];
-/// `New Split: Google Docs`' definition.
+/// The definition of `New Split: Google Docs`.
 const DOCS_QUERY: &str =
     "from:docs.google.com OR drive-shares-dm-noreply@google.com OR drive-shares-noreply@google.com";
 /// The senders with splits of their own: each split's definition (`from:` the sender when `None`)
@@ -74,14 +74,14 @@ const SERVICES: [Service; 4] = [
 /// What a split command asked for.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Action {
-    /// `New Split Inbox` (`adding` false) or `Add to Split Inbox`: the definitions.
+    /// `New Split Inbox` (`adding` false) or `Add to Split Inbox`, which lists the definitions.
     Open { adding: bool },
     /// A definition was picked.
     Define {
         adding: bool,
         definition: Definition,
     },
-    /// Edit Subject's `Subject: “{subject}”`.
+    /// The `Subject: “{subject}”` row in Edit Subject.
     Subject { adding: bool, subject: String },
     /// `Create Split Inbox “{name}”` (or `Go to “{name}” Split Inbox`).
     Create { name: String, query: String },
@@ -90,11 +90,11 @@ pub enum Action {
         split: String,
         definition: Definition,
     },
-    /// `New Split Inbox from scratch`: the New Split Inbox form.
+    /// `New Split Inbox from scratch`, which opens the New Split Inbox form.
     FromScratch,
     /// `New Split: Google Docs`.
     GoogleDocs,
-    /// `New Split Inbox: {list or service}`: the New Split dialog for this definition.
+    /// `New Split Inbox: {list or service}`, which opens the New Split dialog for this definition.
     OpenDialog(String),
     /// Something in the New Split dialog.
     Dialog(dialog::Event),
@@ -134,7 +134,7 @@ pub(crate) struct NewSplit {
     read: HashMap<String, Option<Arc<ThreadDetail>>>,
     reading: HashSet<String>,
     channel: (Sender<Read>, Receiver<Read>),
-    /// Definitions to offer once their conversations are read: adding or not.
+    /// Definitions to offer once their conversations are read, and whether they're for adding.
     waiting: Option<bool>,
     /// The New Split dialog, while it's open.
     pub(crate) dialog: Option<dialog::State>,
@@ -166,8 +166,8 @@ fn push_unique<'a>(into: &mut Vec<&'a Contact>, contacts: impl IntoIterator<Item
     }
 }
 
-/// `New Split Inbox with sender: …` or `Add sender to Split Inbox: …`: `what` with an `s` past one
-/// of `items`, joined by `joiner`.
+/// `New Split Inbox with sender: …` or `Add sender to Split Inbox: …`, with an `s` on `what` when
+/// `count` is more than one. `items` comes already joined.
 fn title(adding: bool, what: &str, count: usize, items: &str) -> String {
     let plural = if count > 1 { "s" } else { "" };
     if adding {
@@ -177,9 +177,10 @@ fn title(adding: bool, what: &str, count: usize, items: &str) -> String {
     }
 }
 
-/// The definitions offered for `conversations`, after the search's (`search` when it can define a
-/// split): senders (the focused message's, else each conversation's last), their domains but
-/// webmail ones, everyone on To and Cc, a lone subject, then the labels one by one and together.
+/// The definitions offered for `conversations`, after the search's (`search`, when it can define a
+/// split). They are the senders (the focused message's, else each conversation's last), their
+/// domains except webmail ones, everyone on To and Cc, a lone subject, then the labels one by one
+/// and together.
 pub(crate) fn definitions(
     adding: bool,
     search: Option<&str>,
@@ -232,7 +233,7 @@ pub(crate) fn definitions(
                 .next()
                 .map_or("", |message| message.subject.as_str()),
         );
-        // The visible labels but Auto Labels: the user's labels, Trash and Spam.
+        // The visible labels other than Auto Labels: the user's labels, Trash and Spam.
         for label in labels
             .iter()
             .filter(|label| detail.labels.contains(&label.id))
@@ -321,7 +322,8 @@ pub(crate) fn definitions(
     rows
 }
 
-/// What a label is called: its Gmail name, Trash's and Spam's as the app names them.
+/// What a label is called. That's its Gmail name, except for Trash and Spam, which take the app's
+/// names for them.
 fn label_name(label: &Label) -> String {
     crate::pickers::label_name(&label.id, std::slice::from_ref(label)).to_owned()
 }
@@ -339,7 +341,8 @@ fn is_complex(query: &str) -> bool {
     false
 }
 
-/// A template's senders can be changed (`properties.senders.isEditable`).
+/// Whether a template's senders can be changed (`properties.senders.isEditable`), or `None` for a
+/// split without a template.
 fn editable_template(split: &SplitInbox, library: Option<&SplitLibrary>) -> Option<bool> {
     let id = split.template_id.as_deref()?;
     Some(
@@ -369,8 +372,8 @@ fn takes(split: &SplitInbox, kind: Kind, library: Option<&SplitLibrary>) -> bool
     }
 }
 
-/// `split` with `definition` added: a built-in VIP, News or Team split takes the senders or domains
-/// as its own, any other `{its definition} OR {the new one}`.
+/// `split` with `definition` added. A built-in VIP, News or Team split takes the senders or domains
+/// as its own, and any other split becomes `{its definition} OR {the new one}`.
 fn with_definition(
     split: &SplitInbox,
     definition: &Definition,
@@ -401,8 +404,8 @@ fn with_definition(
     )
 }
 
-/// The mailing list `message` came through: its `X-BeenThere`s, the last first, then
-/// `Mailing-list`'s `list {address};`.
+/// The mailing list `message` came through. It comes from the `X-BeenThere` headers, the last
+/// first, then from the `list {address};` in `Mailing-list`.
 fn mailing_list(message: &MessageDetail) -> Option<String> {
     let header = |name: &'static str| {
         message
@@ -439,8 +442,8 @@ fn mailing_list(message: &MessageDetail) -> Option<String> {
     been_there.chain(listed).find(|address| !address.is_empty())
 }
 
-/// The palette's rows for `message`, the conversation's latest from someone else (or the focused
-/// one).
+/// The palette's rows for `message`, which is the conversation's latest message from someone else
+/// (or the focused one).
 fn special_rows(message: &MessageDetail, settings: &Settings) -> Vec<Command<commands::Action>> {
     let act = |action: Action| commands::Action::NewSplit(action);
     let sender = message.from.as_ref().map_or("", |from| from.email.as_str());
@@ -548,7 +551,8 @@ impl Mail {
         )
     }
 
-    /// Whether a split can be made: a search that can be a split's, or one to ten conversations.
+    /// Whether a split can be made, from a search that can define one or from one to ten
+    /// conversations.
     fn can_create_split(&self) -> bool {
         self.split_search().is_some() || !self.split_sources().is_empty()
     }
@@ -610,7 +614,7 @@ impl Mail {
     pub(crate) fn register_new_split(&mut self) {
         let act = |action: Action| commands::Action::NewSplit(action);
         if self.new_split_dialog_open() {
-            // Enter saves whatever has the keyboard; Escape closes it.
+            // Enter saves whatever has the keyboard, and Escape closes the dialog.
             const DIALOG: &[Region] = &[Region::Dialog];
             self.commands.add(
                 Command::shortcut(
@@ -674,8 +678,8 @@ impl Mail {
         }
     }
 
-    /// The message the palette's special rows are for: in a thread, the focused one when it's
-    /// someone else's; else the conversation's latest from someone else.
+    /// The message the palette's special rows are for. In a thread it's the focused message when
+    /// it's someone else's, and otherwise the conversation's latest message from someone else.
     fn special_message(&self) -> Option<MessageDetail> {
         let id = self
             .thread
@@ -763,7 +767,7 @@ impl Mail {
         }
     }
 
-    /// Opens the definitions for the conversations read; creating ends in
+    /// Opens the definitions for the conversations read. When creating, the list ends in
     /// `New Split Inbox from scratch`.
     fn open_definitions(&mut self, adding: bool) {
         let sources = self.split_sources();
@@ -805,8 +809,8 @@ impl Mail {
         self.commands.open_sub_palette(palette);
     }
 
-    /// A definition picked: once it's valid (senders and domains always are), the name to
-    /// create it under, or the split to add it to.
+    /// A definition was picked. Once it's valid (senders and domains always are), this asks for
+    /// the name to create it under, or for the split to add it to.
     fn defined(&mut self, adding: bool, definition: Definition) {
         if !matches!(definition.kind, Kind::Sender | Kind::Domain)
             && !self.valid_definition(&definition.query)
@@ -820,7 +824,7 @@ impl Mail {
         }
     }
 
-    /// Whether `query` can define a split; one that can't says why.
+    /// Whether `query` can define a split. When it can't, a message says why.
     fn valid_definition(&mut self, query: &str) -> bool {
         match SplitQuery::parse(query).invalidity(&self.label_index()) {
             Some(invalid) => {
@@ -831,8 +835,8 @@ impl Mail {
         }
     }
 
-    /// The naming step: the name typed so far is `name`; its footer creates the split, goes to one
-    /// just like it, or refuses a built-in split's name.
+    /// The naming step, with `name` typed so far. Its footer creates the split, goes to one just
+    /// like it, or refuses a built-in split's name.
     fn open_naming(&mut self, query: String, name: String) {
         let splits: Vec<SplitInbox> = self.account.settings().splits().cloned().collect();
         let palette = SubPalette::new(NAME, "Split Inbox", ICON, Vec::new())
@@ -871,7 +875,7 @@ impl Mail {
         self.commands.open_sub_palette(palette);
     }
 
-    /// Picks the split to add `definition` to: the enabled splits that can take it.
+    /// Picks the split to add `definition` to, from the enabled splits that can take it.
     fn open_add_to(&mut self, definition: Definition) {
         let library = self.settings.split_library();
         let rows: Vec<Command<commands::Action>> = self
@@ -894,9 +898,9 @@ impl Mail {
             .open_sub_palette(SubPalette::new(ADD, "Add to Split Inbox", ICON, rows));
     }
 
-    /// Creates a split from the palette or the New Split dialog: a new split, shown; for a split of
-    /// the same name, it again (turned on if it was off) when its definition is the same, else the
-    /// question whether to update it.
+    /// Creates a split from the palette or the New Split dialog, and shows it. When a split of the
+    /// same name exists, this shows that split (turned on if it was off) if its definition is the
+    /// same, and otherwise asks whether to update it.
     pub(crate) fn create_split(&mut self, name: &str, query: &str, now: f64) {
         let query = query.trim();
         let existing = self
@@ -945,7 +949,7 @@ impl Mail {
         }
     }
 
-    /// `Update existing Split Inbox?`'s Yes: split `id` takes definition `query`, and shows.
+    /// Yes in `Update existing Split Inbox?`. Split `id` takes definition `query` and shows.
     pub(crate) fn update_existing_split(&mut self, id: &str, query: &str, now: f64) {
         let Some(old) = self.account.settings().split(id).cloned() else {
             return;
@@ -975,7 +979,7 @@ impl Mail {
         }
     }
 
-    /// `Update existing Split Inbox?`'s No (or Escape): back to naming the split.
+    /// No (or Escape) in `Update existing Split Inbox?`, which goes back to naming the split.
     pub(crate) fn rename_split(&mut self, name: String, query: String) {
         self.open_naming(query, name);
     }

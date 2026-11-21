@@ -73,7 +73,7 @@ fn build_request(
     let mut words = line.split_whitespace();
     let method = Method::from_bytes(words.next()?.as_bytes()).ok()?;
     let target = words.next()?;
-    // Some clients send absolute URLs; only the path and query matter.
+    // Some clients send absolute URLs, but only the path and query matter.
     let target = target
         .find("://")
         .and_then(|scheme| {
@@ -146,7 +146,7 @@ fn title_case(name: &str) -> String {
         .join("-")
 }
 
-/// Google's boundaries look like `batch_pK7JBAk73-E=_AA5eFwv4m2Q=`; ours only need to be
+/// Google's boundaries look like `batch_pK7JBAk73-E=_AA5eFwv4m2Q=`. Ours only need to be
 /// unique and absent from the content.
 fn next_boundary() -> String {
     static COUNTER: AtomicU64 = AtomicU64::new(1);

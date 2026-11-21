@@ -1,19 +1,20 @@
 //! Dragging the selection within the body, as Chromium's `MoveSelectionCommand` moves it, after
 //! an undo step. As on a Mac, a move deletes smartly (a space beside the text goes with it)
 //! and a selection made by words inserts smartly (spaces put between it and the words it lands
-//! next to); ⌥ copies instead.
+//! next to). ⌥ copies instead.
 //!
 //! Text dropped from outside the editor (another app, another editor) goes in as a paste of it
-//! would, selected; a selection moved out to a field or another editor of the window goes from
-//! here as a move's would.
+//! would, and ends up selected. A selection moved out to a field or another editor in the window
+//! leaves this editor as a move's would.
 
 use super::Editor;
 use crate::model::{Document, Pos, Selection};
 
 impl Editor {
-    /// Drops the selection at `at` (in the document as it is now): moved there, or a copy when
-    /// `copy`, in one undo step, the dropped text selected after (`kSelectReplacement`). `smart`
-    /// is whether the selection was made by words. A drop on the selection itself does nothing.
+    /// Drops the selection at `at` (in the document as it is now) in one undo step, moving it
+    /// there, or copying it when `copy`. The dropped text is selected after
+    /// (`kSelectReplacement`). `smart` is whether the selection was made by words. A drop on the
+    /// selection itself does nothing.
     pub(crate) fn drop_selection(&mut self, at: Pos, copy: bool, smart: bool) {
         let (start, end) = (self.selection.start(), self.selection.end());
         if self.selection.is_collapsed() || (start <= at && at <= end) {
@@ -49,9 +50,9 @@ impl Editor {
         self.changed();
     }
 
-    /// Puts text dropped from outside the editor in at `at`: its `html` cleaned as a paste's is,
-    /// else its plain `text` as plain text is pasted, in one undo step, and selected. The
-    /// source's styles don't come along.
+    /// Puts text dropped from outside the editor in at `at`, in one undo step, and selects it. The
+    /// `html` goes in cleaned as a paste's is, or else the plain `text` goes in as plain text is
+    /// pasted. The source's styles don't come along.
     pub(crate) fn drop_text(&mut self, at: Pos, html: Option<&str>, text: &str) {
         self.collapse_to(self.doc.clamp(at));
         let start = self.caret();
@@ -81,8 +82,8 @@ impl Editor {
     }
 
     /// `start..end` with the space Chromium's smart delete takes with it (`DeleteSelectionCommand`
-    /// with `smart_delete_`): none if it starts or ends with whitespace itself, else the space
-    /// before it, else the one after.
+    /// with `smart_delete_`): none if the range starts or ends with whitespace itself, else the
+    /// space before the range, else the one after.
     fn smart_delete_range(&self, start: Pos, end: Pos) -> (Pos, Pos) {
         let char_at = |pos: Pos| self.doc.blocks[pos.block].text().chars().nth(pos.offset);
         let space = |ch: Option<char>| ch.is_some_and(|ch| ch == ' ' || ch == '\u{A0}');
@@ -106,8 +107,8 @@ impl Editor {
     }
 
     /// Puts `fragment` at `at`, with smart insertion's spaces when `smart`
-    /// (`ReplaceSelectionCommand::kSmartReplace`): where the text starts and ends (its spaces
-    /// not), and the position after all it put in.
+    /// (`ReplaceSelectionCommand::kSmartReplace`). Returns where the text starts and ends (not
+    /// counting its spaces), and the position after everything it put in.
     fn place_dropped(&mut self, at: Pos, mut fragment: Document, smart: bool) -> ((Pos, Pos), Pos) {
         let mut dropped = at;
         let mut trailing = false;
@@ -144,7 +145,7 @@ impl Editor {
         }
         self.collapse_to(dropped);
         self.place_fragment(fragment);
-        // The space put after it isn't the dropped text's.
+        // The space put after the dropped text isn't part of it.
         let end = self.caret();
         (
             (
@@ -160,7 +161,8 @@ impl Editor {
     }
 }
 
-/// `pos` after `start..end` (before `blocks` blocks, `after` now) was deleted, `pos` not in it.
+/// Where `pos`, which isn't in `start..end`, ends up once that range is deleted. The document had
+/// `blocks` blocks before the deletion and has `after` now.
 fn follow_deletion(pos: Pos, start: Pos, end: Pos, blocks: usize, after: usize) -> Pos {
     if pos <= start {
         pos
@@ -171,8 +173,8 @@ fn follow_deletion(pos: Pos, start: Pos, end: Pos, blocks: usize, after: usize) 
     }
 }
 
-/// `pos`, after `at`, once text put in at `at` ends at `end`: the rest of `at`'s line follows
-/// the text, and the lines after move down by the lines it added.
+/// Where `pos`, which is after `at`, ends up once text put in at `at` ends at `end`. The rest of
+/// `at`'s line follows the text, and the lines after move down by the lines the text added.
 fn follow_insertion(pos: Pos, at: Pos, end: Pos) -> Pos {
     if pos.block == at.block {
         Pos::new(end.block, end.offset + (pos.offset - at.offset))

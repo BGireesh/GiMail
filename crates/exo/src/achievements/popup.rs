@@ -1,6 +1,6 @@
-//! The popup a level reached raises: a card in the toasts' stack with a title and emoji, a line or
-//! two, and `View Achievements`. It goes after 8 s unless hovered, fading over 2 s; a click opens
-//! the matching view.
+//! The popup that reaching a level raises. It's a card in the toasts' stack with a title and
+//! emoji, a line or two, and `View Achievements`. It goes after 8 s unless hovered, fading over
+//! 2 s, and a click opens the matching view.
 
 use egui::{
     Area, Color32, Context, CornerRadius, CursorIcon, Order, Painter, Pos2, Rect, Sense, Vec2,
@@ -23,7 +23,8 @@ const EMOJI: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 13.0, 16.0
 
 /// 8 s on screen.
 const SHOWN_FOR: f64 = 8.0;
-/// The fade: opacity over 2 s `ease-in`, and the removal 2 s after it starts.
+/// The fade, which takes the opacity down over 2 s `ease-in` and removes the popup 2 s after it
+/// starts.
 const FADE: f64 = 2.0;
 /// The gap between cards.
 const GAP: f32 = 12.0;
@@ -39,7 +40,7 @@ pub struct Popup {
     serial: u64,
 }
 
-/// The popups, oldest first (the last 3).
+/// The last 3 popups, oldest first.
 #[derive(Default)]
 pub struct Popups {
     shown: Vec<Popup>,
@@ -47,7 +48,8 @@ pub struct Popups {
 }
 
 impl Popups {
-    /// Raises the popup for `reached` at `now` (`time`, seconds), its body picked from its pool.
+    /// Raises the popup for `reached` at `now` (`time`, in seconds), with its body picked from its
+    /// pool.
     pub fn push(&mut self, reached: Reached, now: f64) {
         // Any fair pick from the pool does.
         let body = super::body(reached, |len| (now.to_bits() as usize) % len);
@@ -63,7 +65,7 @@ impl Popups {
         self.shown.drain(..excess);
     }
 
-    /// Any popup is up (for the dim layer behind them at Inbox Zero).
+    /// Whether any popup is up, for the dim layer behind them at Inbox Zero.
     pub fn any(&self) -> bool {
         !self.shown.is_empty()
     }
@@ -76,9 +78,9 @@ impl Popups {
             .collect()
     }
 
-    /// Paints the popups at the stack's bottom left in `area` (the page below the tab strip),
-    /// their bottom `bottom` px up, over whatever the stack has under them; `photo`, over Inbox
-    /// Zero's. Returns the dialog's view a click on one opens.
+    /// Paints the popups at the bottom left of the stack in `area` (the page below the tab strip),
+    /// with their bottom `bottom` px up, over whatever the stack has under them. `photo` means
+    /// they're over Inbox Zero's photo. Returns the dialog's view that a click on one opens.
     pub fn show(
         &mut self,
         ctx: &Context,
@@ -129,7 +131,7 @@ enum Action {
 }
 
 impl Popup {
-    /// The card's width: 350px, 375px from a million.
+    /// The card's width, 350px, or 375px once the count reaches a million.
     fn width(&self) -> f32 {
         if self.reached.completed >= 1_000_000 {
             375.0
@@ -171,7 +173,7 @@ impl Popup {
         now: f64,
     ) -> Option<Action> {
         let rem = exo_ui::rem(area.width(), false);
-        // `left: calc(3.5rem + 40px - 1.75rem + 6px)`, 44px for 3.5rem at ≤1152px.
+        // `left: calc(3.5rem + 40px - 1.75rem + 6px)`, with 44px in place of 3.5rem at ≤1152px.
         let inset = if area.width() <= 1152.0 {
             44.0
         } else {
@@ -189,7 +191,7 @@ impl Popup {
                 let response = ui
                     .interact(card, id.with("card"), Sense::click())
                     .on_hover_cursor(CursorIcon::PointingHand);
-                // Hovering keeps it, fading or not; leaving starts the 8 s again.
+                // Hovering keeps it, fading or not. Leaving starts the 8 s again.
                 let hovered = response.contains_pointer();
                 if hovered {
                     self.hide_at = None;
@@ -223,14 +225,15 @@ impl Popup {
             .inner
     }
 
-    /// Paints the card; returns whether its × was clicked.
+    /// Paints the card and returns whether its × was clicked.
     fn paint(&self, ui: &egui::Ui, painter: &Painter, card: Rect, photo: bool, hover: f32) -> bool {
         let ctx = ui.ctx();
         let palette = exo_ui::palette(ctx);
         let card = exo_ui::pixel_snap(card);
-        // `0 6px 30px 2px rgba(0,0,0,.2)` and the `inset 3px 0 0` bar,
-        // `0 8px 30px 2px rgba(0,0,0,.1), 0 10px 30px 2px rgba(0,0,0,.3)` hovered (Classic's for
-        // the send, Mark Done and Get Me To Zero cards; the default for Inbox Zero's).
+        // `0 6px 30px 2px rgba(0,0,0,.2)` and the `inset 3px 0 0` bar, or
+        // `0 8px 30px 2px rgba(0,0,0,.1), 0 10px 30px 2px rgba(0,0,0,.3)` when hovered. These are
+        // Classic's for the send, Mark Done and Get Me To Zero cards, and the default for Inbox
+        // Zero's.
         let black = |alpha: f32| Color32::from_black_alpha((alpha * 255.0).round() as u8);
         BoxShadow::new([0.0, 6.0], 30.0, 2.0, black(0.2 * (1.0 - hover))).paint(
             painter,
@@ -247,8 +250,8 @@ impl Popup {
             card,
             CornerRadius::ZERO,
         );
-        // `#fff`, `#464b53` in Carbon; over the photo `hsla(0,0%,100%,.2)` (and a 12.5px blur of
-        // it, which Exo leaves out).
+        // `#fff`, `#464b53` in Carbon. Over the photo it's `hsla(0,0%,100%,.2)` with a 12.5px blur
+        // of the photo, which Exo leaves out.
         let background = match (photo, palette.theme) {
             (true, _) => Color32::from_white_alpha(51),
             (false, exo_ui::Theme::Snow) => Color32::WHITE,
@@ -266,7 +269,8 @@ impl Popup {
             accent,
         );
 
-        // `rgba(0,0,0,.9)` / `.6` (white in Carbon); over the photo both `hsla(0,0%,100%,.75)`.
+        // The title is `rgba(0,0,0,.9)` and the body `.6` (white in Carbon). Over the photo both
+        // are `hsla(0,0%,100%,.75)`.
         let (title_color, body_color, action_color) = if photo {
             (
                 Color32::from_white_alpha(191),
@@ -292,7 +296,7 @@ impl Popup {
             title_color,
             Some(500.0),
         );
-        // The emoji (`margin-left: 8px; margin-top: 3px`, 16px; Inbox Zero's 13px wide).
+        // The emoji is 16px at `margin-left: 8px; margin-top: 3px`. Inbox Zero's is 13px wide.
         let emoji = match self.reached.kind {
             Kind::InboxZero | Kind::InboxZeroDays => "🔥",
             Kind::MarkDone | Kind::Gmtz => "✅",
@@ -305,7 +309,7 @@ impl Popup {
             Color32::WHITE,
             None,
         );
-        // The ×: 10px, 10px in from the status' right padding, on the title row's middle.
+        // The × is 10px, 10px in from the status' right padding, and centered on the title row.
         let icon = Rect::from_min_size(
             pos2(card.right() - 16.0 - 10.0, row + 7.0),
             Vec2::splat(10.0),
@@ -315,7 +319,7 @@ impl Popup {
             ui.id().with(("achievement-close", self.serial)),
             Sense::click(),
         );
-        // `opacity: .3`, `.5` hovered; over the photo, white at .5 either way.
+        // `opacity: .3`, or `.5` hovered. Over the photo it's white at .5 either way.
         let close_color = match (photo, close.hovered()) {
             (true, _) => Color32::from_white_alpha(128),
             (false, hovered) => palette.ink(

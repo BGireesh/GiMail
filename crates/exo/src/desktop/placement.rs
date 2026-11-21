@@ -1,6 +1,6 @@
-//! Where the window opens: where it was left, at the size it had, maximized or in full screen if it
-//! was, kept in `window.json` beside the account list. A place on a display that's gone is dropped
-//! for the default.
+//! Where the window opens: where it was left, at the size it had, and maximized or in full screen
+//! if it was. The place is kept in `window.json` beside the account list. A place on a display
+//! that's gone is dropped for the default.
 
 use std::path::{Path, PathBuf};
 
@@ -69,7 +69,8 @@ impl Placement {
         }
     }
 
-    /// Takes in the window's place as it is now. Whether it changed, to save it.
+    /// Takes in the window's place as it is now. Returns whether it changed, so the caller saves
+    /// it.
     pub(super) fn remember(&mut self, ctx: &egui::Context) -> bool {
         // A full-screen or minimized window keeps the normal place behind it.
         let moved = self.geometry.remember(ctx);

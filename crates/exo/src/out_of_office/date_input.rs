@@ -27,13 +27,13 @@ const RULE_ERROR: Color32 = Color32::from_rgb(0xf6, 0x7b, 0x7b);
 /// What happened in a date field this frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DateEvent {
-    /// It was clicked or focused: it has the keyboard, and its popup opens.
+    /// It was clicked or focused, so it has the keyboard and its popup opens.
     Focused,
     /// A day was picked in the popup.
     Picked(Date),
-    /// What's typed changed; an empty field that may be empty clears the date.
+    /// What's typed changed. An empty field that may be empty clears the date.
     Cleared,
-    /// A popup chevron was clicked: the field keeps the keyboard.
+    /// A popup chevron was clicked, and the field keeps the keyboard.
     MonthChanged,
 }
 
@@ -58,8 +58,8 @@ pub struct Field<'a> {
 }
 
 impl Field<'_> {
-    /// The input's width: its text's, or its placeholder's while empty (`field-sizing:
-    /// content`).
+    /// The input's width: its text's, or its placeholder's while empty
+    /// (`field-sizing: content`).
     pub fn width(&self, ctx: &egui::Context) -> f32 {
         let width = if self.input.text.is_empty() {
             PLACEHOLDER.width(ctx, self.placeholder)
@@ -113,7 +113,7 @@ impl Field<'_> {
                 event = Some(DateEvent::Focused);
             }
         }
-        // The rule: 1px, 3px under the text; 2px, 2px under it while focused.
+        // The rule is 1px, 3px under the text, or 2px, 2px under it while focused.
         let (gap, thickness) = if self.focused {
             (RULE_GAP - 1.0, 2.0)
         } else {

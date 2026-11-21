@@ -1,5 +1,5 @@
-//! The hovered link's URL at the window's bottom-left: elided to fit, the full URL after 1.5s,
-//! fading out over 1.5s once the pointer leaves the link.
+//! The hovered link's URL at the window's bottom-left. It's elided to fit, shows the full URL
+//! after 1.5s, and fades out over 1.5s once the pointer leaves the link.
 
 use egui::{Color32, CornerRadius, Painter, Rect, pos2, vec2};
 use exo_ui::{BoxShadow, Family, Font, TextStyle, motion::CubicBezier};

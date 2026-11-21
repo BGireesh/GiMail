@@ -1,14 +1,15 @@
-//! The From alias's signature in a draft: Gmail's `sendAs` signature for the alias, behind the
-//! draft's `…` until it's revealed into the body and appended at send otherwise. A reply or
-//! forward carries its content only while `Include signature on replies and forwards` is on.
+//! The From alias's signature in a draft, which is Gmail's `sendAs` signature for the alias. It
+//! sits behind the draft's `…` until it's revealed into the body, and is appended at send if it
+//! never was. A reply or forward carries the signature's content only while
+//! `Include signature on replies and forwards` is on.
 
 use exo_store::{Address, Alias};
 
 use super::draft::Open;
 
-/// The Gmail signature of the alias `from` is, sanitized and without the
-/// `<div dir="ltr"><br><div>` shell Gmail wraps signatures in. `None` when the alias has none, or
-/// isn't one.
+/// The Gmail signature of the alias that `from` is, sanitized and without the
+/// `<div dir="ltr"><br><div>` shell Gmail wraps signatures in. `None` when the alias has no
+/// signature, or `from` isn't an alias.
 pub(crate) fn of(from: Option<&Address>, aliases: &[Alias]) -> Option<String> {
     let from = from?;
     let alias = aliases
@@ -23,15 +24,15 @@ pub(crate) fn of(from: Option<&Address>, aliases: &[Alias]) -> Option<String> {
     (!signature.is_empty()).then_some(signature)
 }
 
-/// Whether `open` carries its signature's content: new mail always, a reply or forward while the
-/// setting is on.
+/// Whether `open` carries its signature's content. New mail always does, and a reply or forward
+/// does while the setting is on.
 pub(crate) fn includes_content(open: &Open) -> bool {
     open.is_new_email() || open.signature_on_replies
 }
 
-/// The block `…` reveals into the body under what's written: the alias's signature, its content
-/// as [`includes_content`] says, or an empty block for an alias without one, which choosing
-/// another From fills ([`switch`]).
+/// The block that `…` reveals into the body under what's written. It holds the alias's
+/// signature, with its content as [`includes_content`] says, or is an empty block for an alias
+/// without one, which choosing another From fills ([`switch`]).
 pub(crate) fn revealed(open: &Open, aliases: &[Alias]) -> String {
     exo_editor::outgoing::signature(
         of(open.record.from.as_ref(), aliases).as_deref(),
@@ -40,10 +41,11 @@ pub(crate) fn revealed(open: &Open, aliases: &[Alias]) -> String {
     )
 }
 
-/// Once From changed from `old` with the signature already in the body: the block is replaced
-/// with the new alias's, unless its text is no longer the old alias's signature (it was edited,
-/// or the quote was deleted). Both are rendered with their content whatever the setting, so a
-/// block revealed empty takes the new alias's whole signature.
+/// Once From changed from `old` with the signature already in the body, replaces the block with
+/// the new alias's signature. The block stays when its text is no longer the old alias's
+/// signature, because it was edited or the quote was deleted. Both signatures are rendered with
+/// their content whatever the setting, so a block revealed empty takes the new alias's whole
+/// signature.
 pub(crate) fn switch(open: &mut Open, aliases: &[Alias], old: Option<&Address>) {
     let block = |from: Option<&Address>| {
         exo_editor::outgoing::signature(of(from, aliases).as_deref(), true, Some(&open.id))

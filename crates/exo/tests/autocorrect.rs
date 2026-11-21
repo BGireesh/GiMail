@@ -11,7 +11,7 @@ use support::{Fixture, start, start_with_settings};
 
 const CMD: Modifiers = Modifiers::MAC_CMD.plus(Modifiers::COMMAND);
 
-/// Knows a few words; anything else made of letters is misspelled. `teh` corrects to `the`, and
+/// Knows a few words, and anything else made of letters is misspelled. `teh` corrects to `the`, and
 /// `yest` completes to `yesterday`.
 #[derive(Clone, Default)]
 struct Words {
@@ -198,7 +198,8 @@ fn the_out_of_office_message_is_corrected_and_completed_as_a_body_is() {
     app.mail_mut()
         .set_spelling(move || Box::new(Words::default()));
     palette(&mut app, "out of office");
-    // The dialog at 1280×800: the subject's line from (397, 312); Tab goes on to the message.
+    // In the dialog at 1280×800, the subject's line starts at (397, 312). Tab goes on to the
+    // message.
     app.click(egui::Pos2::new(800.0, 322.0));
     app.key(Key::Tab);
     app.key(Key::End);

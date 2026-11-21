@@ -1,7 +1,7 @@
-//! The hint under a message: under the only message of a conversation that introduces you to
-//! someone, `Is this an intro? Hit ⌘ shift I to instantly move {first name} to BCC!`; under a new
-//! message started in a conversation, `Referring to the last conversation? Hit ⌘ shift P to pop
-//! out this draft!`. Its keys are inline blue caps.
+//! The hint under a message. Under the only message of a conversation that introduces you to
+//! someone, it says `Is this an intro? Hit ⌘ shift I to instantly move {first name} to BCC!`.
+//! Under a new message started in a conversation, it says `Referring to the last conversation? Hit
+//! ⌘ shift P to pop out this draft!`. Its keys are inline blue caps.
 
 use std::sync::LazyLock;
 
@@ -16,17 +16,18 @@ use crate::format::names;
 /// The hint: 12px bold on a 24px line, `top: 1px`, `padding-bottom: 28px`.
 const HINT: TextStyle = TextStyle::new(Font::new(Family::Sans, 700), 12.0, 24.0);
 pub(super) const HEIGHT: f32 = 24.0 + 28.0;
-/// `margin-top: -16px` under the card's 28px margin; -12px under a draft's.
+/// `margin-top: -16px` under the card's 28px margin, and -12px under a draft's.
 pub(super) const MARGIN_TOP: f32 = -16.0;
 pub(super) const MARGIN_TOP_UNDER_DRAFT: f32 = -12.0;
-/// The caps' `margin-right: 4px` after them, their 4px before each, and their `top: 3px` on the
-/// line (the labels back up 3px).
+/// The caps' `margin-right: 4px` after them (each cap also has 4px before it), and their
+/// `top: 3px` on the line. Their labels move down with them.
 const KEYS_GAP: f32 = 4.0;
 const KEYS_DROP: f32 = 3.0;
 
-/// The first name the intro hint moves to Bcc, for `message`: to you, not from you,
-/// with two people or more on it besides its sender, and no invitation; and its subject says
-/// it's an intro (`<>`, `->`, `meet `, `intro`) or names both of two.
+/// The first name the intro hint moves to Bcc, for `message`. The hint shows when the message is
+/// to you and not from you, has two people or more on it besides its sender, and has no
+/// invitation, and when its subject says it's an intro (`<>`, `->`, `meet `, `intro`) or, with
+/// two others on it, names both.
 pub(super) fn intro(message: &MessageDetail) -> Option<String> {
     static SAYS_INTRO: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(r"(?i)<[ \-–—]*>|[-–—]+\s*>|\bmeet |\bintro").expect("valid regex")

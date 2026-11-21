@@ -7,8 +7,8 @@ use exo_ui::{CalendarColor, Dialog, DialogResponse, Family, Font, Menu, TextStyl
 
 use crate::calendar::ListedCalendar;
 
-/// The `h1`s: 12px/20px semibold; the `h2`s, the calendars' names and `Notify me:` regular. All
-/// sit 3px down their line (`top: 3px`).
+/// The `h1`s are 12px/20px semibold, and the `h2`s, the calendars' names and `Notify me:` regular.
+/// All sit 3px down their line (`top: 3px`).
 const HEADING: TextStyle = TextStyle::new(Font::new(Family::Sans, 600), 12.0, 20.0);
 const TEXT: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 12.0, 20.0);
 const NUDGE: f32 = 3.0;
@@ -24,12 +24,12 @@ const LINK_INK: Color32 = Color32::from_rgb(0x54, 0xac, 0xdc);
 const EMAIL_TOP: f32 = 24.0;
 const EVENTS_TOP: f32 = 88.0;
 const LIST_TOP: f32 = 116.0;
-/// A calendar's row: `padding: 4px 0 8px` around the name's line; its swatch and
-/// checkbox `margin-top: 3px`.
+/// A calendar's row has `padding: 4px 0 8px` around the name's line, and its swatch and checkbox
+/// have `margin-top: 3px`.
 const ROW: f32 = 32.0;
 /// With more than one calendar account, each account's calendars come under its address
-/// (12px/20px bold, black at `.9`, `top: 3px`): 24px for the first, 40px for the others, whose
-/// address sits 16px further down.
+/// (12px/20px bold, black at `.9`, `top: 3px`). Its header is 24px for the first account and 40px
+/// for the others, whose address sits 16px further down.
 const ACCOUNT_HEADER: TextStyle = TextStyle::new(Font::new(Family::Sans, 700), 12.0, 20.0);
 const ACCOUNT_HEADER_INK: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 230);
 const FIRST_HEADER: f32 = 24.0;
@@ -45,8 +45,8 @@ const SWATCH: f32 = 14.0;
 const SWATCH_RIGHT: f32 = CHECKBOX + 18.0 + 4.0;
 /// The delimiter's margin either side.
 const DELIMITER_MARGIN: f32 = 6.0;
-/// The `Notify me:` row's `margin: 16px 0 20px`; the label's `margin-right: 4px`, and the
-/// dropdown's value 1px further, 2px down.
+/// The `Notify me:` row's `margin: 16px 0 20px`. The label has `margin-right: 4px`, and the
+/// dropdown's value sits 1px further and 2px down.
 const NOTIFY_GAP: f32 = 16.0;
 const NOTIFY_BELOW: f32 = 20.0;
 const VALUE_LEFT: f32 = 5.0;
@@ -68,7 +68,7 @@ pub enum Event {
     ToggleEmail,
     /// A calendar's checkbox.
     ToggleCalendar(String),
-    /// `Enable a calendar`: the dialog closes and the week view opens.
+    /// `Enable a calendar`, which closes the dialog and opens the week view.
     EnableCalendar,
     /// Open or close `Notify me:`'s list.
     ToggleMenu,
@@ -76,13 +76,13 @@ pub enum Event {
     Highlight(usize),
     /// A lead time, in seconds.
     Lead(i64),
-    /// A calendar's swatch, and its colour: its colour picker opens or closes.
+    /// A calendar's swatch, and its colour, which opens or closes its colour picker.
     Swatch(String, CalendarColor),
     /// A colour picked for a calendar. The picker stays open.
     Recolor(String, CalendarColor),
     /// A key in the colour picker.
     PickerKey(exo_ui::PickerKey),
-    /// Escape: the colour picker closes, its colour put back, else the list.
+    /// Escape, which closes the colour picker and puts its colour back, or else closes the list.
     Escape,
 }
 
@@ -110,17 +110,18 @@ impl State {
         self.picker = None;
     }
 
-    /// Whether the list or the colour picker is open: Escape closes it, not the dialog.
+    /// Whether the list or the colour picker is open, so that Escape closes it rather than the
+    /// dialog.
     pub fn menu_open(&self) -> bool {
         self.menu.is_some() || self.picker.is_some()
     }
 
-    /// Whether the colour picker is open: it has the keyboard.
+    /// Whether the colour picker is open, in which case it has the keyboard.
     pub fn picker_open(&self) -> bool {
         self.picker.is_some()
     }
 
-    /// Applies `event` to the list; returns what's left for the account.
+    /// Applies `event` to the list, and returns what's left for the account.
     pub fn handle(&mut self, event: Event, lead: i64) -> Option<Event> {
         match event {
             Event::ToggleMenu => {
@@ -184,7 +185,7 @@ impl State {
 }
 
 /// The colour picker under `swatch` (its top centre on the swatch's bottom centre, 10px up less
-/// the tooltip's 8px padding): five rows of the 25 colours, `calendar`'s chosen.
+/// the tooltip's 8px padding). It has five rows of the 25 colours, with `calendar`'s chosen.
 fn picker(ctx: &Context, swatch: Rect, calendar: &ListedCalendar) -> Option<Event> {
     let colors: Vec<CalendarColor> = CalendarColor::picker().collect();
     let bases: Vec<egui::Color32> = colors.iter().map(|color| color.base()).collect();
@@ -214,7 +215,7 @@ fn picker_index(color: CalendarColor) -> usize {
         .unwrap_or(0)
 }
 
-/// The row of [`LEAD_TIMES`] `lead` is, or the default's (2 minutes) when it's none of them.
+/// The row of [`LEAD_TIMES`] that `lead` is, or the default's (2 minutes) when it's none of them.
 fn lead_index(lead: i64) -> usize {
     LEAD_TIMES
         .iter()
@@ -261,7 +262,7 @@ fn lines<'a>(calendars: &'a [ListedCalendar]) -> Vec<(Line<'a>, f32)> {
     lines
 }
 
-/// Draws the dialog over `area` while `open` (and as it fades); returns what was clicked.
+/// Draws the dialog over `area` while `open` (and as it fades), and returns what was clicked.
 pub fn dialog(
     ctx: &Context,
     area: Rect,
@@ -283,7 +284,7 @@ pub fn dialog(
         open,
         |ui, body| draw(ui, body, state, shown, &lines, &mut swatch),
     );
-    // The picker is a tooltip of the page's, outside the dialog's Snow-drawn card.
+    // The picker is a tooltip on the page, outside the dialog's card, which draws in Snow.
     if let (Some((swatch, calendar)), Some(inner)) = (swatch, response.inner.as_mut())
         && let Some(picked) = picker(ctx, swatch, calendar)
     {
@@ -529,7 +530,7 @@ mod tests {
         let mut state = State::default();
         state.handle(Event::Swatch("work".into(), color("blue")), 120);
         assert!(state.picker_open());
-        // A click keeps it open; → previews the next colour.
+        // A click keeps it open, and → previews the next colour.
         assert_eq!(
             state.handle(Event::Recolor("work".into(), color("red")), 120),
             Some(Event::Recolor("work".into(), color("red")))

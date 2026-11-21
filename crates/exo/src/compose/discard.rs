@@ -1,6 +1,6 @@
-//! Discard Draft(s) from the list or a thread: `⌘⇧,` discards every draft of the conversations
-//! actions apply to, with a toast; Undo brings them all back, and one draft reopens where it was
-//! written.
+//! Discard Draft(s) from the list or a thread. `⌘⇧,` discards every draft in the conversations
+//! that actions apply to and shows a toast. Undo brings them all back, and a single draft reopens
+//! where it was written.
 
 use exo_commands::{Command, Commands, Region, Toast};
 use exo_store::{DraftAction, StoredDraft};
@@ -8,7 +8,7 @@ use exo_store::{DraftAction, StoredDraft};
 use super::{Action, Discarded, Open, Surface, save};
 use crate::{Mail, commands};
 
-/// The list's and the thread's regions: in a draft, compose's own `Discard Draft` has the keys.
+/// The regions of the list and the thread. In a draft, compose's own `Discard Draft` has the keys.
 const REGIONS: &[Region] = &[
     Region::ThreadList,
     Region::ThreadMessagesHeader,
@@ -18,9 +18,9 @@ const REGIONS: &[Region] = &[
     Region::ReadOnlySnippet,
 ];
 
-/// Registers `Discard Draft(s)` while the conversations actions apply to have `drafts` drafts in
-/// `threads` of them (`DISCARD_DRAFT`); for a selection that reaches rows not loaded (`exact`
-/// false) only its keys, which say why it can't.
+/// Registers `Discard Draft(s)` (`DISCARD_DRAFT`) while `threads` of the conversations that
+/// actions apply to have drafts, in the plural when more than one does. For a selection that
+/// reaches rows not loaded (`exact` false), registers only its keys, which say why it can't.
 pub(crate) fn register(commands: &mut Commands<commands::Action>, threads: usize, exact: bool) {
     if threads == 0 {
         return;
@@ -60,8 +60,8 @@ pub(crate) fn register(commands: &mut Commands<commands::Action>, threads: usize
 }
 
 impl Mail {
-    /// Exo's drafts in the conversations actions apply to, sends being held aside, and how many
-    /// conversations have one.
+    /// Exo's drafts in the conversations that actions apply to, leaving out sends being held, and
+    /// how many conversations have one.
     pub(crate) fn actionable_drafts(&self) -> (Vec<StoredDraft>, usize) {
         let ids: Vec<String> = crate::actionable(self.thread.as_ref(), &self.inbox)
             .iter()
@@ -88,8 +88,8 @@ impl Mail {
         (drafts, threads)
     }
 
-    /// `⌘⇧,` in the list or a thread: discards the actionable conversations' drafts, or, for a selection
-    /// that reaches rows not loaded, says it can't.
+    /// `⌘⇧,` in the list or a thread. Discards the drafts of the actionable conversations or, for
+    /// a selection that reaches rows not loaded, says it can't.
     pub(crate) fn discard_listed(&mut self) {
         if self.refuse_unloaded("discard drafts") {
             return;
@@ -100,7 +100,7 @@ impl Mail {
         }
         let mut discarded: Vec<Open> = Vec::new();
         for draft in &drafts {
-            // One open in compose closes there.
+            // A draft open in compose closes there.
             let open = match self
                 .compose
                 .drafts
@@ -127,8 +127,8 @@ impl Mail {
         let toast = match discarded.len() {
             1 => {
                 let open = discarded.remove(0);
-                // Undo reopens it where drafts open: a new message in its pane, a reply under its
-                // message.
+                // Undo reopens the draft where drafts open: a new message in its pane, a reply
+                // under its message.
                 let surface = if open.record.action == DraftAction::Compose {
                     Surface::Pane
                 } else {
@@ -147,7 +147,7 @@ impl Mail {
         self.commands.toast(toast.tag(tag));
     }
 
-    /// The toast's Undo on several discarded drafts: each is saved again.
+    /// The toast's Undo on several discarded drafts saves each one again.
     pub(crate) fn undo_discards(&mut self, tag: u64) {
         let Some((_, drafts)) = self
             .compose

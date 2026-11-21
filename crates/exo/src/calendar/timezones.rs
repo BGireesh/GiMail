@@ -15,9 +15,9 @@ pub struct Found {
     pub iana: String,
     /// `New York`.
     pub name: String,
-    /// `GMT+00:00`: the zone's own offset, not the one Exo is in.
+    /// `GMT+00:00`, the zone's own offset rather than the one Exo is in.
     pub offset: String,
-    /// `EST`, or a bare offset written as one (`GMT+05:30`).
+    /// `EST`, or a bare offset written as a GMT offset (`GMT+05:30`).
     pub abbreviation: String,
 }
 
@@ -170,7 +170,8 @@ impl ZoneInput {
             );
         }
         if response.gained_focus() {
-            // Its text selected, and the list: what was typed, else this zone over the common ones.
+            // With its text selected, the list shows what was typed, or else this zone over the
+            // common ones.
             exo_ui::focus_field(
                 ui.ctx(),
                 id,
@@ -267,8 +268,8 @@ fn search_key(text: &str) -> String {
 type Entry = (&'static str, String);
 
 /// The search keys in their order and what each finds: places, then abbreviations (named by
-/// their zone), places' short names (as the place), then every zone by its last segment; a later
-/// key replaces an earlier.
+/// their zone), places' short names (as the place), then every zone by its last segment. A later
+/// key replaces an earlier one.
 fn index() -> &'static (Vec<String>, HashMap<String, Entry>) {
     static INDEX: OnceLock<(Vec<String>, HashMap<String, Entry>)> = OnceLock::new();
     INDEX.get_or_init(|| {

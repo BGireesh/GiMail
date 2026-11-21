@@ -49,23 +49,23 @@ pub(super) struct Context<'a> {
     pub book: Option<&'a contacts::Index>,
     /// The open thread's participants, for a reply.
     pub thread_people: Option<&'a contacts::Index>,
-    /// The thread's scroll area's horizontal extent, which the tooltips under the form's
+    /// The horizontal extent of the thread's scroll area, which the tooltips under the form's
     /// controls stay inside.
     pub pin: Rangef,
     /// What the drop zone covers while files are dragged over the window: the message card the
-    /// form is in, or the pop-out's column; the form itself when `None`.
+    /// form is in, or the pop-out's column. `None` covers the form itself.
     pub drop: Option<Rect>,
     /// Now, for `Send: {date}`.
     pub now: &'a jiff::Zoned,
-    /// The reminder set on the draft's thread, if any: when, and whether it's `regardless`,
-    /// which the Remind button shows when the draft has none of its own.
+    /// The reminder set on the draft's thread, if any, as its time and whether it's `regardless`.
+    /// The Remind button shows it when the draft has none of its own.
     pub thread_reminder: Option<(jiff::Timestamp, bool)>,
     /// The account's `Send + Mark Done` (`sendAndDone`).
     pub send_and_done: bool,
-    /// The form's `max-height`: past it, the body scrolls between the header and the footer.
+    /// The form's `max-height`, past which the body scrolls between the header and the footer.
     /// `f32::INFINITY` for none.
     pub max_height: f32,
-    /// Share Availability's `You can now hit ⌘ shift A…` may show, on a reply.
+    /// The Share Availability tip, `You can now hit ⌘ shift A…`, may show on a reply.
     pub availability_tip: bool,
 }
 
@@ -98,8 +98,8 @@ pub(super) struct Response {
 
 /// The rule over a reply's form: a 1px top border and 17px under it.
 pub(super) const SEPARATOR: f32 = 18.0;
-/// The form's `max-height: calc(100vh - 120px)`, a reply's `100vh - 116px`, of the page under
-/// the tab strip and over a status bar.
+/// The form's `max-height: calc(100vh - 120px)`, or `100vh - 116px` for a reply, where `100vh`
+/// is the page under the tab strip and over a status bar.
 pub(super) const MAX_BELOW_PAGE: f32 = 120.0;
 pub(super) const REPLY_MAX_BELOW_PAGE: f32 = 116.0;
 
@@ -108,20 +108,20 @@ const FIELD: TextStyle = TextStyle::new(Font::new(Family::Sans, 700), 14.0, 20.0
 const COLLAPSED: TextStyle = TextStyle::new(Font::new(Family::Sans, 700), 14.0, 24.0);
 /// The action pane's labels: 12px bold, 16px line.
 const SUBMIT: TextStyle = TextStyle::new(Font::new(Family::Sans, 700), 12.0, 16.0);
-/// Send's done mark (Classic): ` +` at 10px (its inline block drops the leading space), 3px
-/// after the label, then `padding-right: 17px` holding the check, a 14×11 background 1px down
-/// at the right; `#8892b9` in both themes.
+/// Send's done mark (Classic) is ` +` at 10px (its inline block drops the leading space), 3px
+/// after the label, then `padding-right: 17px` that holds the check, a 14×11 background 1px
+/// down at the right. It's `#8892b9` in both themes.
 const DONE_PLUS: TextStyle = TextStyle::new(Font::new(Family::Sans, 700), 10.0, 16.0);
 const DONE_GAP: f32 = 3.0;
 const DONE_PADDING: f32 = 17.0;
 const DONE_CHECK: Vec2 = Vec2::new(14.0, 11.0);
 const DONE_INK: Color32 = Color32::from_rgb(0x88, 0x92, 0xb9);
-/// The `…` toggle: 14px in a 16px line, in `sans-serif` (`span::before`), whose taller line box
-/// puts it 2px lower than Exo Sans's would.
+/// The `…` toggle: 14px in a 16px line, in `sans-serif` (`span::before`). That font's taller
+/// line box puts the toggle 2px lower than Exo Sans's would.
 const QUOTING: TextStyle = TextStyle::new(Font::new(Family::SansSerif, 400), 14.0, 16.0);
 
 /// The header: `margin: -12px -8px -4px; padding: 4px 8px; min-height: 40px; max-height:
-/// 300px; overflow-y: auto` (border-box): past 300px its rows scroll.
+/// 300px; overflow-y: auto` (border-box), so its rows scroll past 300px.
 const HEADER_PULL_UP: f32 = 12.0;
 const HEADER_PULL_DOWN: f32 = 4.0;
 const HEADER_PADDING: f32 = 4.0;
@@ -135,30 +135,33 @@ const COLLAPSED_BLOCK: f32 = 2.0 + 24.0 + 8.0;
 const LINE: f32 = 28.0;
 const ROW_GAP: f32 = 4.0;
 const LABEL_WIDTH: f32 = 50.0;
-/// A chip's border box: `padding: 4px 16px 1px 6px`, a 1px border; `margin: 0 1px 1px 0`.
+/// A chip's border box (`padding: 4px 16px 1px 6px` and a 1px border) and its
+/// `margin: 0 1px 1px 0`.
 const CHIP_HEIGHT: f32 = 27.0;
 const CHIP_EXTRA: f32 = 6.0 + 16.0 + 2.0;
 const CHIP_TEXT_X: f32 = 7.0;
 const CHIP_TEXT_Y: f32 = 5.0;
-/// The input after the chips: the autosize field is its text's width (whole px) and 2px, in
-/// `padding-left: 6px` and a 1px border; it wraps as a box 26px wider than the field.
+/// The input after the chips. The autosize field is as wide as its text (in whole px) plus 2px,
+/// inside `padding-left: 6px` and a 1px border. The input wraps as a box 26px wider than the
+/// field.
 const INPUT_BORDER_BOX: f32 = 2.0 + 6.0 + 2.0;
 const INPUT_SCROLL: f32 = 2.0 + 26.0;
-/// The subject: `padding-top: 14px`, a 20px line, `top: 2px`; in a reply, `margin-bottom: 8px`.
+/// The subject: `padding-top: 14px`, a 20px line and `top: 2px`, plus `margin-bottom: 8px` in a
+/// reply.
 const SUBJECT_HEIGHT: f32 = 34.0;
 const SUBJECT_REPLY_MARGIN: f32 = 8.0;
-/// The scroll area: `margin-top: 4px; margin-left: -12px`, its scrollbar's track at
+/// The scroll area: `margin-top: 4px; margin-left: -12px`, with its scrollbar's track at
 /// `right: -14px`.
 const SCROLL_TOP: f32 = 4.0;
 const SCROLL_LEFT: f32 = 12.0;
 const SCROLLBAR_RIGHT: f32 = 14.0;
-/// The box that pushes the footer down: its `margin-bottom`.
+/// The `margin-bottom` of the box that pushes the footer down.
 const PUSH_DOWN_GAP: f32 = 8.0;
 /// The `…` toggle's box: 16px tall.
 const QUOTING_HEIGHT: f32 = 16.0;
-/// The attachment strip: `margin: 4px 0 4px 4px` in the scroll area (`margin-left: -12px`): 8px
-/// wider than the form, its cards from 4px left of it. Its top margin collapses into the
-/// push-down's 8px.
+/// The attachment strip: `margin: 4px 0 4px 4px` in the scroll area (`margin-left: -12px`),
+/// which makes it 8px wider than the form, with its cards starting 4px left of the form. Its top
+/// margin collapses into the push-down box's 8px.
 const STRIP_WIDER: f32 = 8.0;
 /// The footer icons: Classic's `gap: 30px`.
 const ICON_GAP: f32 = 30.0;
@@ -167,7 +170,7 @@ const ICON_GAP: f32 = 30.0;
 const FOOTER_REPLY: f32 = 52.0;
 const FOOTER_PANE: f32 = 68.0;
 /// The header buttons: Classic's `padding: 4px 8px 7px` around the 12px action, 28×23 boxes
-/// floated right and moved 8px into the padding (`right: -8px`), `top: 1px`, `3px` with the
+/// floated right and moved 8px into the padding (`right: -8px`), `top: 1px`, or `3px` with the
 /// header expanded.
 const BUTTON: f32 = 28.0;
 const BUTTON_HEIGHT: f32 = 23.0;
@@ -210,7 +213,7 @@ impl Metrics {
                 push_min: 196.0,
                 footer: FOOTER_PANE,
             },
-            // Not the new-message pane: a reply keeps the reply's tighter body.
+            // A popped-out reply isn't the new-message pane, so it keeps a reply's tighter body.
             Surface::Popout if !open.is_new_email() => Self {
                 padding_top: 0.0,
                 min_height: 162.0,
@@ -231,7 +234,7 @@ impl Metrics {
                 push_min: 196.0,
                 footer: FOOTER_PANE,
             },
-            // A reply with Cc, Bcc and From showing: the body wrapper's `margin-top: 12px`.
+            // A reply with Cc, Bcc and From showing gets the body wrapper's `margin-top: 12px`.
             Surface::Inline => Self {
                 padding_top: 0.0,
                 min_height: 162.0,
@@ -272,7 +275,8 @@ struct Layout {
     body_top: f32,
     body_height: f32,
     quote_top: Option<f32>,
-    /// The attachment strip's top and its cards' size, when there are cards.
+    /// The attachment strip's top, its cards' size and how many cards fit in a row, when there
+    /// are cards.
     attachments: Option<(f32, Vec2, usize)>,
     footer_top: f32,
     height: f32,
@@ -280,9 +284,9 @@ struct Layout {
     scrolled: Option<Scrolled>,
 }
 
-/// The scroll area with less room than its content: its top and bottom, relative to the
-/// form, and how tall the body, `…` and files in it are. The body, `…` and files are laid out
-/// unscrolled.
+/// The scroll area, when it has less room than its content. It holds its top and bottom,
+/// relative to the form, and how tall the body, `…` and files in it are. The body, `…` and files
+/// are laid out unscrolled.
 #[derive(Clone, Copy)]
 struct Scrolled {
     top: f32,
@@ -290,8 +294,9 @@ struct Scrolled {
     content: f32,
 }
 
-/// One of the form's scroll areas, the body's while the form is at its max height or the header's
-/// past 300px: how far it has scrolled, where the body's caret last was, and its scrollbar.
+/// One of the form's scroll areas: the body's while the form is at its max height, or the
+/// header's past 300px. It keeps how far it has scrolled, where the body's caret last was, and
+/// its scrollbar.
 #[derive(Default)]
 pub(crate) struct BodyScroll {
     offset: f32,
@@ -299,8 +304,8 @@ pub(crate) struct BodyScroll {
     area: Option<(Rect, f32)>,
     /// Relative to the editor's top left (the body's).
     caret: Option<Rect>,
-    /// The caret moved, or the body changed (the header's: its input took the keyboard or was
-    /// typed into): it comes into view.
+    /// The caret moved or the body changed, so the caret comes into view. For the header, this
+    /// means its input took the keyboard or was typed into.
     reveal: bool,
     bar: exo_ui::Scrollbar,
 }
@@ -317,7 +322,7 @@ enum Button {
 }
 
 impl Button {
-    /// Its box: Close's `padding-left: 7px` makes it a pixel narrower.
+    /// Its box's width. Close's `padding-left: 7px` makes Close a pixel narrower.
     fn width(self) -> f32 {
         if self == Self::Close {
             BUTTON - 1.0
@@ -336,7 +341,7 @@ impl Button {
     }
 }
 
-/// The header buttons the form shows, in order; a snippet doesn't pop out.
+/// The header buttons the form shows, in order. A snippet doesn't pop out.
 fn buttons(open: &Open, surface: Surface) -> Vec<Button> {
     let mut buttons = if open.state.header_expanded && !open.state.cc_bcc_shown {
         vec![Button::Expand]
@@ -353,12 +358,12 @@ fn buttons(open: &Open, surface: Surface) -> Vec<Button> {
     buttons
 }
 
-/// A control's tooltip box starts this far under its 32px box (measured: Send, Attach,
-/// Discard), and a header button's this far under its own.
+/// A control's tooltip box starts this far under its 32px box (measured: Send, Attach, Discard).
 const CONTROL_TOOLTIP_GAP: f32 = 9.0;
-/// Above it, in the pop-out, the box's bottom is this far below its 32px box's top (measured:
-/// Send, `{ }`, Discard).
+/// In the pop-out the tooltip goes above the control, its bottom this far below the top of the
+/// control's 32px box (measured: Send, `{ }`, Discard).
 const CONTROL_TOOLTIP_ABOVE: f32 = -7.0;
+/// A header button's tooltip box starts this far under the button's box.
 const HEADER_TOOLTIP_GAP: f32 = 8.0;
 
 fn layout(ui: &Ui, open: &mut Open, width: f32, left: f32, cx: &Context<'_>) -> Layout {
@@ -372,9 +377,9 @@ fn layout(ui: &Ui, open: &mut Open, width: f32, left: f32, cx: &Context<'_>) -> 
     };
     let content_top = header_top + HEADER_PADDING + snippet_pad;
     let buttons = buttons(open, cx.surface);
-    // The buttons float right (`top: 3px` expanded and `right: -8px` are relative: they leave
-    // its place). A list is a flex container, so the float narrows all of the one beside it,
-    // not just its lines beside it.
+    // The buttons float right. `top: 3px` (expanded) and `right: -8px` are relative, so the
+    // buttons leave the float's place where it was. A list is a flex container, so the float
+    // narrows the whole list beside it, not just that list's lines beside it.
     let float_bottom = content_top + BUTTON_HEIGHT;
     let float_width: f32 = buttons.iter().map(|button| button.width()).sum();
     let mut rows = Vec::new();
@@ -409,7 +414,7 @@ fn layout(ui: &Ui, open: &mut Open, width: f32, left: f32, cx: &Context<'_>) -> 
     } else {
         COLLAPSED_BLOCK
     };
-    // A snippet's header has no `min-height`; expanded, `padding-top: 8px`.
+    // A snippet's header has no `min-height`, and expanded it has `padding-top: 8px`.
     let header_content = if open.is_snippet() {
         content_height + 2.0 * HEADER_PADDING + snippet_pad
     } else {
@@ -456,8 +461,8 @@ fn layout(ui: &Ui, open: &mut Open, width: f32, left: f32, cx: &Context<'_>) -> 
         (top, card, per_row)
     });
     let natural = (y + metrics.footer).max(metrics.min_height);
-    // Taller than its `max-height` (a `min-height` wins over it), the scroll area takes what's
-    // left between the header and the footer.
+    // When the form is taller than its `max-height` (a `min-height` wins over it), the scroll
+    // area takes what's left between the header and the footer.
     let height = natural.min(cx.max_height).max(metrics.min_height);
     let scrolled = (height < natural).then_some(Scrolled {
         top: scroll_top,
@@ -539,7 +544,7 @@ fn lay_out_row(
             line += 1;
             x = LABEL_WIDTH;
         }
-        // An empty list's input, nothing typed, sits 1px higher (`top: -1px`).
+        // An empty list's input sits 1px higher (`top: -1px`) while nothing is typed.
         let nudge = if addresses.is_empty() && text.is_empty() {
             -1.0
         } else {
@@ -635,7 +640,7 @@ pub(super) fn show(ui: &mut Ui, open: &mut Open, rect: Rect, cx: &Context<'_>) -
         pressed_at.is_some_and(|at| form.contains(at) && ui.clip_rect().contains(at));
     let base = exo_ui::id(&ctx, ("compose", open.id.clone()));
     // On a field nothing is typed into (a button, From, a reply's subject, the `…`), no text
-    // widget keeps the keyboard: keys are the field's commands.
+    // widget keeps the keyboard, so keys go to the field's commands.
     if cx.focused && !open.takes_text() {
         ctx.memory_mut(|memory| {
             if let Some(focused) = memory.focused() {
@@ -679,13 +684,13 @@ pub(super) fn show(ui: &mut Ui, open: &mut Open, rect: Rect, cx: &Context<'_>) -
         }
     }
 
-    // Header: past its max height its rows (and buttons) scroll within its box.
+    // The header. Past its max height, its rows (and buttons) scroll within its box.
     let header_box = Rect::from_min_size(
         pos2(origin.x - HEADER_SIDE, origin.y + layout.header_top),
         vec2(width + 2.0 * HEADER_SIDE, layout.header_height),
     );
-    // What comes into view is the input's caret: its text's line, down to its content area's
-    // bottom (measured: 23px into the input).
+    // What comes into view is the input's caret, which spans the line of its text down to the
+    // bottom of its content area (measured: 23px into the input).
     let caret_bottom = CHIP_TEXT_Y + FIELD.content_bottom(&ctx);
     let input = layout
         .rows
@@ -726,7 +731,7 @@ pub(super) fn show(ui: &mut Ui, open: &mut Open, rect: Rect, cx: &Context<'_>) -
                 now,
             );
         }
-        // A drag lasts while the button's down; let go off a list, nothing moves.
+        // A drag lasts while the button's down. Let go off a list and nothing moves.
         if ctx.input(|input| input.pointer.primary_down()) {
             if let Some(drag) = &open.chip_drag {
                 paint_drag_image(ui, drag, &ink);
@@ -736,7 +741,7 @@ pub(super) fn show(ui: &mut Ui, open: &mut Open, rect: Rect, cx: &Context<'_>) -
         }
     } else if !open.is_snippet() {
         let line_top = content_top + 2.0;
-        // Clicking it (or Enter on it) expands the header, To focused.
+        // Clicking the collapsed header (or Enter on it) expands it with To focused.
         let header = collapsed_header(
             ui,
             open,
@@ -844,8 +849,8 @@ pub(super) fn show(ui: &mut Ui, open: &mut Open, rect: Rect, cx: &Context<'_>) -
                 exo_ui::focus_field(ui.ctx(), id, all);
             }
         } else {
-            // A reply's subject reads only: clicking it, or Enter on it, starts a new thread.
-            // Focused, it's underlined (`box-shadow: 0 2px`).
+            // A reply's subject is read-only, and clicking it, or Enter on it, starts a new
+            // thread. Focused, it's underlined (`box-shadow: 0 2px`).
             FIELD.paint_line(
                 ui.painter(),
                 line.min,
@@ -876,10 +881,10 @@ pub(super) fn show(ui: &mut Ui, open: &mut Open, rect: Rect, cx: &Context<'_>) -
         }
     }
 
-    // Body, at its scroll, which the `…` and the files share.
+    // The body, at the scroll offset it shares with the `…` and the files.
     let viewport = match layout.scrolled {
         Some(scrolled) => Some(scroll_body(ui, open, &layout, scrolled, origin, width)),
-        // Room enough: nothing to scroll (`scrollTop` goes back to 0).
+        // With room enough there's nothing to scroll (`scrollTop` goes back to 0).
         None => {
             open.body_scroll = BodyScroll::default();
             None
@@ -941,7 +946,7 @@ pub(super) fn show(ui: &mut Ui, open: &mut Open, rect: Rect, cx: &Context<'_>) -
     response
         .actions
         .extend(edited.open_link.map(Action::OpenLink));
-    // A date the caret comes onto, or whose text changes under it, shows its day.
+    // A date the caret comes onto, or whose text changes under the caret, shows its day.
     if edited.date != open.date {
         response.actions.extend(
             edited
@@ -962,13 +967,14 @@ pub(super) fn show(ui: &mut Ui, open: &mut Open, rect: Rect, cx: &Context<'_>) -
         );
     }
     if let Some(menu) = edited.context_menu {
-        // Next frame, once the word it selected is on screen: the menu waits for the user.
+        // The menu shows next frame, once the word it selected is on screen, then waits for the
+        // user.
         open.context_menu = Some(menu);
         response.actions.push(Action::Focus(Field::Body));
         ctx.request_repaint();
     }
     focus_if(ui, cx, open.state.field == Field::Body, edited.response.id);
-    // The assistant is the subject's while it has the keyboard, else the body's.
+    // The assistant belongs to the subject while the subject has the keyboard, else to the body.
     let in_subject = open.state.field == Field::Subject;
     let assistant_trigger = if in_subject {
         open.subject_assistant.trigger.clone()
@@ -984,7 +990,7 @@ pub(super) fn show(ui: &mut Ui, open: &mut Open, rect: Rect, cx: &Context<'_>) -
         ctx.request_repaint();
     }
     open.snippet_trigger = trigger;
-    // The `:` emoji and `+`/`@`/`-` contact dropdowns; a mention's recipients follow its undo.
+    // The `:` emoji and `+`/`@`/`-` contact dropdowns. A mention's recipients follow its undo.
     super::assistant::note_trigger(open, assistant_trigger.as_ref());
     super::assistant::undo_marks(open, &edited.undone, &edited.redone);
     if cx.focused
@@ -1009,8 +1015,8 @@ pub(super) fn show(ui: &mut Ui, open: &mut Open, rect: Rect, cx: &Context<'_>) -
     {
         response.actions.push(Action::SnippetPick(Some(picked)));
     }
-    // Share Availability's menu where the caret was when it opened, its row while what's typed
-    // since matches it; a press elsewhere closes it.
+    // Share Availability's menu shows where the caret was when the menu opened, and shows its
+    // row while what's typed since still matches that row. A press elsewhere closes the menu.
     if cx.focused
         && let Some(menu) = &mut open.availability_menu
     {
@@ -1032,7 +1038,7 @@ pub(super) fn show(ui: &mut Ui, open: &mut Open, rect: Rect, cx: &Context<'_>) -
         }
     }
 
-    // The `…`: reveals the quote and signature.
+    // The `…`, which reveals the quote and signature.
     if let Some(top) = layout.quote_top.map(|top| top - scroll) {
         let ui = &scrolled_ui;
         let id = base.with("quoting");
@@ -1146,8 +1152,8 @@ pub(super) fn show(ui: &mut Ui, open: &mut Open, rect: Rect, cx: &Context<'_>) -
         pane_top += 16.0;
     }
     let focused_on = |field: Field| cx.focused && open.state.field == field;
-    // A snippet's is `Done`; a draft with a Send later time (not one a reply called off)
-    // `Schedule`.
+    // A snippet's label is `Done`, and a draft with a Send later time (not one a reply called
+    // off) says `Schedule`.
     let scheduled = open
         .record
         .send_later
@@ -1161,8 +1167,8 @@ pub(super) fn show(ui: &mut Ui, open: &mut Open, rect: Rect, cx: &Context<'_>) -
     } else {
         "Send"
     };
-    // Outside the new-message pane, `Send +✓` while a send would mark done: with the setting on,
-    // or while ⌘⇧ are held.
+    // Outside the new-message pane, Send shows `Send +✓` while a send would mark done, which is
+    // with the setting on or while ⌘⇧ are held.
     let held = cx.focused && ctx.input(|input| input.modifiers.mac_cmd && input.modifiers.shift);
     let done_icon = (cx.send_and_done || held) && cx.surface != Surface::Pane;
     let label_width = SUBMIT.width(&ctx, label);
@@ -1201,7 +1207,7 @@ pub(super) fn show(ui: &mut Ui, open: &mut Open, rect: Rect, cx: &Context<'_>) -
         paint_done_check(ui.painter(), pos2(left, pane_top + 2.0 + 0.5));
     }
     if focused_on(Field::Send) {
-        // Focused, the label's `border-bottom: 2px solid …` under its 16px line.
+        // Focused, the label gets its `border-bottom: 2px solid …` under its 16px line.
         underline(
             ui,
             origin.x,
@@ -1210,8 +1216,8 @@ pub(super) fn show(ui: &mut Ui, open: &mut Open, rect: Rect, cx: &Context<'_>) -
             palette.border_base_active,
         );
     }
-    // `Send ⌘ enter`, and for a reply `Send + Mark Done ⌘ shift enter`, or with Send + Mark
-    // Done on only `Send + Mark Done ⌘ enter`; a snippet's `Done ⌘ enter`.
+    // The tooltip says `Send ⌘ enter`. A reply adds `Send + Mark Done ⌘ shift enter`, or with
+    // Send + Mark Done on shows only `Send + Mark Done ⌘ enter`. A snippet's says `Done ⌘ enter`.
     let reply = matches!(
         open.record.action,
         exo_store::DraftAction::Reply | exo_store::DraftAction::ReplyAll
@@ -1237,8 +1243,8 @@ pub(super) fn show(ui: &mut Ui, open: &mut Open, rect: Rect, cx: &Context<'_>) -
         }],
     };
     match (scheduled, cx.place()) {
-        // `Hit ⌘ enter to Schedule`, open while the form has the keyboard, its keys breathing
-        // from .3 to 1 (`ease-in-out .4s infinite alternate`).
+        // `Hit ⌘ enter to Schedule` stays open while the form has the keyboard, its keys
+        // breathing from .3 to 1 (`ease-in-out .4s infinite alternate`).
         (Some(_), Place::Below(within)) if cx.focused => {
             let phase = (ctx.input(|input| input.time) / 0.4) % 2.0;
             let t = if phase < 1.0 { phase } else { 2.0 - phase } as f32;
@@ -1297,8 +1303,8 @@ pub(super) fn show(ui: &mut Ui, open: &mut Open, rect: Rect, cx: &Context<'_>) -
             base,
         );
     }
-    // A collapsed snippet's `Add To, Cc, Bcc, Subject…` (`ect` only above 1150px), in Remind me's
-    // place: it shows the recipients and subject.
+    // A collapsed snippet shows `Add To, Cc, Bcc, Subject…` (`ect` only above 1150px) in Remind
+    // me's place. Clicking it shows the recipients and subject.
     if open.is_snippet() && !open.state.header_expanded {
         let text = if ctx.content_rect().width() > 1150.0 {
             "Add To, Cc, Bcc, Subject…"
@@ -1327,8 +1333,8 @@ pub(super) fn show(ui: &mut Ui, open: &mut Open, rect: Rect, cx: &Context<'_>) -
             response.actions.push(Action::Focus(Field::To));
         }
     }
-    // The footer icons, at their own sizes from the right, centered on a 16px line 2.5px above
-    // the pane's, their clickable boxes pulled in around them.
+    // The footer icons go at their own sizes from the right, centered on a 16px line 2.5px above
+    // the pane's line, with their clickable boxes pulled in around them.
     let line = pane_top - 2.5;
     let mut right = origin.x + width;
     let size_of = |name: &str| exo_ui::icon_size(&ctx, name).unwrap_or(vec2(16.0, 16.0));
@@ -1339,7 +1345,7 @@ pub(super) fn show(ui: &mut Ui, open: &mut Open, rect: Rect, cx: &Context<'_>) -
     };
     let discard = place(size_of("legacy/DEPRECATED_discard"));
     let attach = place(size_of("legacy/DEPRECATED_paperclip"));
-    // Then, not on a snippet, `{ }` and Share Availability's calendar
+    // Then, except on a snippet, come `{ }` and Share Availability's calendar
     // (`DEPRECATED_roundedCalendar`).
     if !open.is_snippet() {
         let name = "legacy/DEPRECATED_snippet";
@@ -1370,12 +1376,12 @@ pub(super) fn show(ui: &mut Ui, open: &mut Open, rect: Rect, cx: &Context<'_>) -
             response.actions.push(Action::SnippetInline);
         }
         let name = "legacy/DEPRECATED_roundedCalendar";
-        // Its 14px square drawn 12px tall (`height: 12px`).
+        // Its 14px square is drawn 12px tall (`height: 12px`).
         let calendar = place(vec2(14.0, 12.0));
         let hit = icon_hit(calendar);
         if open.online {
             // On a reply, `You can now hit ⌘ shift A…` stays up in place of its tooltip while no
-            // other icon is hovered, the icon lit and underlined.
+            // other icon is hovered, with the icon lit and underlined.
             let other_hovered = [icon_hit(snippet), attach_hit(attach), icon_hit(discard)]
                 .into_iter()
                 .any(|hit| ui.rect_contains_pointer(hit));
@@ -1422,7 +1428,7 @@ pub(super) fn show(ui: &mut Ui, open: &mut Open, rect: Rect, cx: &Context<'_>) -
                 response.actions.push(Action::AvailabilityMenu(true));
             }
         } else {
-            // Offline it's `disabled`: its clickable takes no pointer (`pointer-events: none`), so
+            // Offline it's `disabled`. Its clickable takes no pointer (`pointer-events: none`), so
             // it neither lights nor clicks, and its tooltip says why.
             let anchor = ui.interact(hit, base.with(name), Sense::hover());
             exo_ui::paint_icon(
@@ -1492,7 +1498,7 @@ pub(super) fn show(ui: &mut Ui, open: &mut Open, rect: Rect, cx: &Context<'_>) -
                 exo_ui::icon_rect(ui.ctx(), name, icon),
             );
         if focused {
-            // Focused: `padding-bottom: 2px` and a `box-shadow: 0 2px …` under it.
+            // Focused, it gets `padding-bottom: 2px` and a `box-shadow: 0 2px …` under it.
             underline(
                 ui,
                 icon.left(),
@@ -1520,20 +1526,22 @@ pub(super) fn show(ui: &mut Ui, open: &mut Open, rect: Rect, cx: &Context<'_>) -
     response
 }
 
-/// A footer icon's clickable, which its tooltip hangs under: its 16px line and 8px around.
+/// A footer icon's clickable, which its tooltip hangs under. It covers the icon's 16px line and
+/// 8px around.
 fn icon_hit(icon: Rect) -> Rect {
     Rect::from_center_size(icon.center(), vec2(icon.width(), 16.0)).expand(8.0)
 }
 
-/// Attach's: Classic's inline `padding: 10px`, 10px either side of the icon and 28px tall on its
-/// line (measured), so its tooltip sits 2px higher than its neighbours'.
+/// Attach's clickable: Classic's inline `padding: 10px`, 10px either side of the icon and 28px
+/// tall on its line (measured), so its tooltip sits 2px higher than its neighbours' tooltips.
 fn attach_hit(icon: Rect) -> Rect {
     Rect::from_center_size(icon.center(), vec2(icon.width() + 20.0, 28.0))
 }
 
-/// The scroll area on screen, the form's top left at `origin`: the wheel over it (or its track,
-/// right of it) scrolls it, and a caret that moved last frame comes into view (now that the
-/// layout has what moved it), within its range and to device pixels, as Chromium scrolls.
+/// The scroll area on screen, with the form's top left at `origin`. The wheel over the area (or
+/// over its track, right of it) scrolls it, and a caret that moved last frame comes into view now
+/// that the layout has what moved it. The scroll stays within its range and snaps to device
+/// pixels, as Chromium scrolls.
 fn scroll_body(
     ui: &Ui,
     open: &mut Open,
@@ -1569,11 +1577,12 @@ fn scroll_body(
     viewport
 }
 
-/// The header's rows past its max height, its box `area` on screen: the wheel over it scrolls
-/// them, and the focused recipient input's caret line (`input`, relative to the form) comes into
-/// view at its nearest edge as the input takes the keyboard and as it's typed into, as Chromium
-/// reveals a field's caret; a comma or Enter making a chip (no text typed) moves it unrevealed.
-/// Returns how far they've scrolled, when they can.
+/// The header's rows past its max height, with its box `area` on screen. The wheel over the box
+/// scrolls the rows. The focused recipient input's caret line (`input`, relative to the form)
+/// comes into view at its nearest edge as the input takes the keyboard and as it's typed into,
+/// as Chromium reveals a field's caret. A comma or Enter that makes a chip (no text typed) moves
+/// the input without bringing it into view. Returns how far the rows have scrolled, when they
+/// can.
 fn scroll_header(
     ui: &Ui,
     open: &mut Open,
@@ -1609,8 +1618,9 @@ fn scroll_header(
 
 impl BodyScroll {
     /// Whether the wheel at `pointer`, moving the content `delta` down, scrolls this area
-    /// rather than what it's in: it's over the area as last drawn, which can still scroll that
-    /// way (Chromium's scroll chaining: at its end, the wheel goes on to the thread).
+    /// rather than what it's in. It does when the pointer is over the area as last drawn and the
+    /// area can still scroll that way. This is Chromium's scroll chaining, where at the area's
+    /// end the wheel goes on to the thread.
     pub(crate) fn takes_wheel(&self, pointer: egui::Pos2, delta: f32) -> bool {
         self.area.is_some_and(|(area, most)| {
             area.contains(pointer)
@@ -1624,10 +1634,10 @@ impl BodyScroll {
 }
 
 /// How far to scroll to show `caret` (relative to the form, unscrolled) in the scroll area
-/// scrolled to `offset`: Chromium's `CenterIfNeeded` (`RevealSelection`), a caret partly out
-/// of view coming in at its nearest edge, one out of view to the middle. On the body's last
-/// line what's after it (the `…`, the files) comes into view with it, so typing at the end
-/// keeps the area scrolled to its bottom.
+/// scrolled to `offset`. Chromium's `CenterIfNeeded` (`RevealSelection`) brings a caret partly
+/// out of view in at its nearest edge, and one wholly out of view to the middle. On the body's
+/// last line, what's after the caret (the `…`, the files) comes into view with it, so typing at
+/// the end keeps the area scrolled to its bottom.
 fn reveal(caret: Rect, editor_bottom: f32, scrolled: Scrolled, offset: f32) -> f32 {
     let last_line = caret.bottom() + caret.height() > editor_bottom;
     let shown = if last_line {
@@ -1652,9 +1662,9 @@ fn reveal(caret: Rect, editor_bottom: f32, scrolled: Scrolled, offset: f32) -> f
     }
 }
 
-/// Notes where the caret is in the body (`body` is the editor's top left on screen), while
-/// the editor has the keyboard: one that moved, or an edit, comes into view next frame
-/// ([`reveal`]). The wheel leaves it out of view.
+/// Notes where the caret is in the body (`body` is the editor's top left on screen) while the
+/// editor has the keyboard. A caret that moved, or an edit, brings the caret into view next
+/// frame ([`reveal`]). Scrolling with the wheel leaves the caret out of view.
 fn follow_caret(ui: &Ui, open: &mut Open, caret: Option<Rect>, changed: bool, body: egui::Pos2) {
     let caret = caret.map(|caret| caret.translate(-body.to_vec2()));
     let scroll = &mut open.body_scroll;
@@ -1665,11 +1675,12 @@ fn follow_caret(ui: &Ui, open: &mut Open, caret: Option<Rect>, changed: bool, bo
     scroll.caret = caret;
 }
 
-/// From one action's text to the next (Send, Send later, Remind me): the clickable's `padding:
-/// 10px; margin: -10px` and its `margin-right`, then the next one's padding. The margin is
-/// 22px, 12px in an action pane up to 480px wide, or a tighter spacing's (`!important`): popped
-/// out, 3px with a reminder and no send time while a send marks done, else 5px; elsewhere 5px
-/// while a send marks done with either date set. `marks_done` is the done icon's condition.
+/// The gap from one action's text to the next (Send, Send later, Remind me). It's the
+/// clickable's `padding: 10px; margin: -10px` and its `margin-right`, then the next one's
+/// padding. The margin is 22px, or 12px in an action pane up to 480px wide, or a tighter
+/// spacing's (`!important`). Popped out, that's 3px with a reminder and no send time while a
+/// send marks done, else 5px. Elsewhere it's 5px while a send marks done with either date set.
+/// `marks_done` is the done icon's condition.
 fn action_gap(open: &Open, width: f32, cx: &Context<'_>, marks_done: bool) -> f32 {
     let reminder = shown_reminder(open, cx).is_some();
     let send_at = open.record.send_later.is_some();
@@ -1688,7 +1699,7 @@ fn action_gap(open: &Open, width: f32, cx: &Context<'_>, marks_done: bool) -> f3
     };
     10.0 + margin - 10.0 + 10.0
 }
-/// `Unscheduled: {name} replied`'s `#ce9ece`, Snow and Carbon alike.
+/// The `#ce9ece` of `Unscheduled: {name} replied`, Snow and Carbon alike.
 const UNSCHEDULED_INK: Color32 = Color32::from_rgb(0xce, 0x9e, 0xce);
 
 /// The reminder the Remind button shows: the draft's, else its thread's.
@@ -1699,8 +1710,8 @@ fn shown_reminder(open: &Open, cx: &Context<'_>) -> Option<(jiff::Timestamp, boo
         .or(cx.thread_reminder)
 }
 
-/// The format of the action pane's dates, `Send:` and `Remind:` alike, for a pane `width` wide:
-/// narrower with both a send time and a reminder, or popped out.
+/// The format of the action pane's dates, `Send:` and `Remind:` alike, for a pane `width` wide.
+/// It's narrower with both a send time and a reminder, or popped out.
 fn date_format(open: &Open, width: f32, cx: &Context<'_>) -> ComposeFormat {
     use ComposeFormat::{Compact, ExtraCompact, Friendly, MostCompact};
     let reminder = shown_reminder(open, cx).map(|(at, _)| at);
@@ -1717,7 +1728,8 @@ fn date_format(open: &Open, width: f32, cx: &Context<'_>) -> ComposeFormat {
     let day = |at: jiff::Timestamp| at.to_zoned(now.time_zone().clone()).date();
     let tomorrow = now.date().tomorrow().unwrap_or(now.date());
     let after_tomorrow = |at: Option<jiff::Timestamp>| at.is_some_and(|at| day(at) > tomorrow);
-    // The draft's own reminder 2 to 6 days out: before `1 week from now`'s midnight.
+    // The draft's own reminder 2 to 6 days out, so before midnight on the day of
+    // `1 week from now`.
     let week = now
         .date()
         .checked_add(jiff::ToSpan::days(7))
@@ -1820,10 +1832,11 @@ const REMIND_ME_MIN_WIDTH: f32 = 430.0;
 /// Below this window width a single date's tooltip says the reminder's date.
 const REMIND_TOOLTIP_COMPACT: f32 = 1150.0;
 
-/// The action pane's Remind button at `at`: `Remind me` (` me` only in a wide enough pane) in
-/// the lighter ink, or with a reminder (the draft's, else its thread's) `Remind: {date}`, and
-/// for one a reply cancels ` if no reply` (or `…`) as the pane's `width` allows.
-/// Only the draft's own takes the darker `rgba(0,0,0,.6)`. A click opens the picker.
+/// The action pane's Remind button at `at`. It says `Remind me` (` me` only in a wide enough
+/// pane) in the lighter ink, or with a reminder (the draft's, else its thread's)
+/// `Remind: {date}`. For a reminder that a reply cancels, it adds ` if no reply` (or `…`) as
+/// the pane's `width` allows. Only the draft's own reminder takes the darker `rgba(0,0,0,.6)`.
+/// A click opens the picker.
 #[expect(
     clippy::too_many_arguments,
     reason = "one control of the form, drawn from its state"
@@ -1899,7 +1912,8 @@ fn remind_me(
             exo_ui::palette(ctx).border_base_active,
         );
     }
-    // `Remind me ⌘ shift H`, then what it's for, or in a compact layout the draft's reminder.
+    // The tooltip says `Remind me ⌘ shift H`, then what the button is for, or in a compact
+    // layout the draft's reminder.
     let note = match open.record.reminder {
         Some(reminder)
             if both
@@ -1961,16 +1975,16 @@ struct Uploading {
 
 /// What a click on a draft's card asks for.
 enum CardClick {
-    /// The cross: the file comes off the draft.
+    /// The cross, which takes the file off the draft.
     Remove,
-    /// The card: the file opens, previewed unless ⌘ or ⇧ was held.
+    /// The card, which opens the file, previewed unless ⌘ or ⇧ was held.
     Open { preview: bool },
 }
 
-/// One of a draft's cards: on hover, a 50% black overlay and the remove cross (12px, 9px from
-/// the top and 8px from the right); while its file goes up, its progress bar (online) and,
-/// hovered, `Processing…` or `Will upload when online` under it. Returns what a click on it
-/// asks for.
+/// One of a draft's cards. On hover it shows a 50% black overlay and the remove cross (12px, 9px
+/// from the top and 8px from the right). While its file goes up, it shows its progress bar
+/// (online) and, hovered, `Processing…` or `Will upload when online` under the card. Returns
+/// what a click on the card asks for.
 fn attachment_card(
     ui: &Ui,
     card: Rect,
@@ -2007,7 +2021,7 @@ fn attachment_card(
         );
     }
     if let Some(Uploading { progress, online }) = upload {
-        // The progress bar, over the overlay, while online: from 10%, in whole percents.
+        // The progress bar goes over the overlay while online, from 10% in whole percents.
         if online {
             exo_ui::paint_attachment_progress(ui, card, name, progress.floor().max(10.0));
         }
@@ -2081,7 +2095,7 @@ fn drop_zone(ui: &Ui, area: Rect, dark: bool) {
         Color32::from_white_alpha(250)
     };
     painter.rect_filled(rect, CornerRadius::same(2), fill.gamma_multiply(0.8));
-    // `2px dashed rgba(0,0,0,.1)`; dark `hsla(0,0%,100%,.85)`.
+    // `2px dashed rgba(0,0,0,.1)`, or `hsla(0,0%,100%,.85)` in dark.
     let stroke = egui::Stroke::new(
         2.0,
         if dark {
@@ -2122,7 +2136,7 @@ fn drop_zone(ui: &Ui, area: Rect, dark: bool) {
     );
 }
 
-/// One header button in its box, with its tooltip; returns what a click asks for.
+/// One header button in its box, with its tooltip. Returns what a click asks for.
 fn header_button(
     ui: &Ui,
     button: Button,
@@ -2189,7 +2203,7 @@ fn header_button(
             Action::ClickClosePopout,
         ),
     };
-    // The icon centered in a 12px box; its focus box is 12×17.
+    // The icon is centered in a 12px box, and its focus box is 12×17.
     // The action sits 8px from the box's right and 4px from its top.
     let action_box = Rect::from_min_size(
         pos2(hit.right() - 8.0 - 12.0, hit.top() + 4.0),
@@ -2205,7 +2219,7 @@ fn header_button(
         .colors(rest, palette.icon_base_hover)
         .show(ui, base.with(icon), hit, icon_rect);
     if focused {
-        // Focused, a `box-shadow: 0 2px …` under its 17px box.
+        // Focused, it gets a `box-shadow: 0 2px …` under its 17px box.
         underline(
             ui,
             action_box.left(),
@@ -2262,8 +2276,8 @@ fn tooltip(
     }
 }
 
-/// Share Availability's standing tip (`You can now hit ⌘ shift A…`) from the calendar icon's
-/// `hit`, where its tooltip goes, pinned: 256px wide.
+/// Share Availability's standing tip (`You can now hit ⌘ shift A…`), pinned where the tooltip
+/// of the calendar icon at `hit` goes. It's 256px wide.
 fn availability_tip(
     ui: &Ui,
     cx: &Context<'_>,
@@ -2302,8 +2316,8 @@ fn availability_tip(
 }
 
 /// `Draft to …` at `at`, at most `max_width` wide, and the tooltip listing the field shortcuts
-/// when it's hovered (without Subject on the pop-out's placeholder, `subject`). Only its text
-/// takes the pointer (`pointer-events: none` around it).
+/// when it's hovered. `subject` false leaves out Subject, on the pop-out's placeholder. Only
+/// its text takes the pointer (`pointer-events: none` around it).
 #[expect(
     clippy::too_many_arguments,
     reason = "one line of the form, with its tooltip's context"
@@ -2362,7 +2376,7 @@ fn collapsed_header(
                 && (row.text != "Subject" || subject)
         })
         .collect();
-    // Measured: the box's top 3px under the line.
+    // The tooltip box's top is 3px under the line (measured).
     tooltip(ui, cx.place(), &response, false, &rows, None, 3.0);
     response
 }
@@ -2373,7 +2387,7 @@ fn collapsed_header(
 pub(super) const PLACEHOLDER: f32 = 34.0;
 
 /// Draws the popped-out draft's placeholder from `top` (the separator's bottom) across
-/// `left..left + width`; returns what it asked for.
+/// `left..left + width`. Returns what it asked for.
 pub(super) fn placeholder_header(
     ui: &Ui,
     open: &Open,
@@ -2396,7 +2410,7 @@ pub(super) fn placeholder_header(
         false,
         id.with("header"),
     );
-    // Its icon 3px below the separator (measured).
+    // Its icon sits 3px below the separator (measured).
     let hit = Rect::from_min_size(
         pos2(left + width + 8.0 - BUTTON, top - 1.0),
         vec2(BUTTON, BUTTON_HEIGHT),
@@ -2413,8 +2427,9 @@ fn focus_if(ui: &Ui, cx: &Context<'_>, wanted: bool, id: Id) {
     }
 }
 
-/// The body's placeholder: `Say hello`, or `Write a note` for a note to self; none in an inline
-/// reply.
+/// The body's placeholder: `Enter content` for a snippet, else `Say hello`, or `Write a note`
+/// for a note to self. Under a message only a forward has one, and popped out only a new email
+/// or a forward.
 fn placeholder(open: &Open, cx: &Context<'_>) -> Option<String> {
     if open.is_snippet() {
         return Some("Enter content".into());
@@ -2433,8 +2448,9 @@ fn placeholder(open: &Open, cx: &Context<'_>) -> Option<String> {
     Some(if note { "Write a note" } else { "Say hello" }.into())
 }
 
-/// `{recipients}` of `Draft to {recipients}`: one person by full name, several by first name
-/// (you left out), joined with `, ` and ` & `, then `. Bcc: …`; at most 15.
+/// The `{recipients}` of `Draft to {recipients}`: one person by full name, or several by first
+/// name (leaving you out), joined with `, ` and ` & `, then `. Bcc: …`. At most 15 are named
+/// before the Bcc.
 fn collapsed_text(open: &Open, me: &str) -> String {
     let is_me = |address: &Address| recipients::same_address(&address.email, me);
     let person = |address: &Address| {
@@ -2505,7 +2521,7 @@ fn show_row(
     );
     let field = row.list.map_or(Field::From, List::field);
     let focused_here = cx.focused && open.state.field == field;
-    // From's label focuses it only when it hasn't the keyboard.
+    // From's label focuses From only when From hasn't the keyboard.
     if ui
         .interact(label_hit, base.with(("label", label)), Sense::click())
         .on_hover_cursor(egui::CursorIcon::PointingHand)
@@ -2598,8 +2614,8 @@ fn show_row(
             color,
             Some(chip.width() - CHIP_EXTRA + 1.0),
         );
-        // The tail: `right: -14px`, translated -6px (-14px when shown); the ✕ is 9px, the `•`
-        // 7px back over it.
+        // The tail: `right: -14px`, translated -6px (-14px when shown). The ✕ is 9px, and the
+        // `•` sits 7px back over it.
         let shown = hovered || is_selected || invalid;
         let tail_left = chip.right() - 1.0 + 14.0 - 30.0 - if shown { 14.0 } else { 6.0 };
         if shown {
@@ -2647,7 +2663,7 @@ fn show_row(
                 None,
             );
         }
-        // Mouse-down selects; a double click edits it in place.
+        // Mouse-down selects the chip, and a double click edits it in place.
         if hit.is_pointer_button_down_on()
             && ctx.input(|input| input.pointer.primary_pressed())
             && remove.is_none()
@@ -2686,8 +2702,8 @@ fn show_row(
         }
         open.touch(now);
     }
-    // The input, after the chips or in place of the one being edited; none while chips are
-    // selected, when nothing typed goes anywhere but a paste replaces them.
+    // The input goes after the chips or in place of the one being edited. There's none while
+    // chips are selected, when nothing typed goes anywhere but a paste replaces them.
     let Some(input) = row.input.map(|input| input.translate(origin.to_vec2())) else {
         if focused_here {
             super::chips::paste_over(ui, open, list, cx.book, now);
@@ -2770,7 +2786,7 @@ fn show_row(
                 _ => {}
             }
         } else {
-            // The list is gone; the next one is sized afresh.
+            // The list is gone, so the next one is sized afresh.
             open.input_mut(list).list_width = 0.0;
         }
     } else if !open.input(list).suggestions.is_empty() {
@@ -2803,8 +2819,8 @@ fn show_row(
 const DROP_CURSOR: Vec2 = Vec2::new(2.0, 21.0);
 const DROP_CURSOR_COLOR: Color32 = Color32::from_rgb(0x6f, 0xbe, 0xea);
 
-/// A recipient list as a drop target while chips are dragged: over it, the drop cursor shows
-/// where they'd go, and letting go there drops them.
+/// A recipient list as a drop target while chips are dragged. Over the list, the drop cursor
+/// shows where the chips would go, and letting go there drops them.
 fn drop_target(
     ui: &Ui,
     open: &Open,
@@ -2866,9 +2882,10 @@ fn drop_target(
 }
 
 /// For the pointer at `at` over a list at `list` with chips at `chips` (in order), the place a
-/// drop goes and the cursor's top left. The row is the lowest whose top is above the pointer;
-/// the chip is the first on it ending right of the pointer, else its last; the cursor goes a
-/// pixel before it, or after it past its middle. An empty list's is at the label's width.
+/// drop goes and the cursor's top left. The row is the lowest whose top is above the pointer.
+/// The chip is the first on that row ending right of the pointer, else the row's last. The
+/// cursor goes a pixel before the chip, or after it when the pointer is past the chip's middle.
+/// An empty list's cursor is at the label's width.
 fn drop_place(chips: &[Rect], list: Rect, at: egui::Pos2) -> (usize, egui::Pos2) {
     let row = chips
         .iter()
@@ -2907,9 +2924,9 @@ fn drop_place(chips: &[Rect], list: Rect, at: egui::Pos2) -> (usize, egui::Pos2)
     )
 }
 
-/// The image that follows the pointer while chips are dragged, at 75%: the grabbed chip,
-/// selected, kept where it was grabbed; several, a stack of three chips reading `Multiple
-/// recipients` with its top left at the pointer.
+/// The image that follows the pointer while chips are dragged, at 75% opacity. One chip shows
+/// as the grabbed chip, selected, kept where it was grabbed. Several show as a stack of three
+/// chips reading `Multiple recipients`, with its top left at the pointer.
 fn paint_drag_image(ui: &Ui, drag: &super::chips::Drag, ink: &Ink) {
     let ctx = ui.ctx();
     let Some(pointer) = ctx.input(|input| input.pointer.hover_pos()) else {
@@ -2991,10 +3008,10 @@ fn paint_drag_image(ui: &Ui, drag: &super::chips::Drag, ink: &Ink) {
     );
 }
 
-/// The suggestions under the input `input` (on screen), as `ContactSelectorList` draws them:
-/// a name column and an address column, the typed text dark in each, the highlighted row
-/// filled, with `Remove Suggestion` on it while hovered unless it's the thread's. Says which row
-/// the pointer picked (mouse-down picks) or removed.
+/// The suggestions under the input `input` (on screen), as `ContactSelectorList` draws them.
+/// There's a name column and an address column with the typed text dark in each, and the
+/// highlighted row is filled, with `Remove Suggestion` on it while hovered unless the row comes
+/// from the thread. Says which row the pointer picked (mouse-down picks) or removed.
 fn suggestions(
     ui: &Ui,
     input: Rect,
@@ -3062,11 +3079,11 @@ fn suggestions(
 }
 
 /// The suggestion list's columns for its widest name and address (`*_text`), given the width
-/// the list has had since it opened (`seen`, updated). Each cell is its text padded 16px a side;
-/// the name's `min-width: 165px` counts the padding (`box-sizing: border-box`). The list keeps
-/// the widest rows it has shown since it opened, and what's over is shared between the columns
-/// in proportion to their widths (measured: typing `pri` leaves Priya's row as wide as `p`'s
-/// list was, 386px).
+/// the list has had since it opened (`seen`, which this updates). Each cell is its text padded
+/// 16px a side, and the name's `min-width: 165px` counts the padding
+/// (`box-sizing: border-box`). The list keeps the widest rows it has shown since it opened, and
+/// the extra width is shared between the columns in proportion to their widths. (Measured:
+/// typing `pri` leaves Priya's row as wide as the list for `p` was, 386px.)
 fn suggestion_columns(name_text: f32, email_text: f32, seen: &mut f32) -> (f32, f32) {
     let name = (name_text + 2.0 * SUGGESTION_CELL_PADDING).max(SUGGESTION_NAME_MIN);
     let email = email_text + 2.0 * SUGGESTION_CELL_PADDING;
@@ -3099,8 +3116,8 @@ fn paint_list_card(painter: &egui::Painter, list: Rect) -> Rect {
 const FROM_ITEM: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 13.0, 28.0);
 const FROM_ITEM_PADDING: f32 = 18.0;
 
-/// The From row's dropdown, from the row's top left `at`: the alias's address, with a caret
-/// while hovered or focused; focused, its list of aliases under it when open.
+/// The From row's dropdown, from the row's top left `at`. It shows the alias's address, with a
+/// caret while hovered or focused, and when focused and open, its list of aliases under it.
 fn from_row(
     ui: &Ui,
     open: &mut Open,
@@ -3125,7 +3142,7 @@ fn from_row(
         None if open.is_snippet() => "use default".to_owned(),
         None => String::new(),
     };
-    // `padding-left: 6px`; the button `top: 3px` and `padding-top: 2px`.
+    // `padding-left: 6px`, and the button's `top: 3px` and `padding-top: 2px`.
     let text = pos2(at.x + LABEL_WIDTH + 6.0, at.y + CHIP_TEXT_Y);
     let text_width = FIELD.paint_line(ui.painter(), text, &email, color, None);
     // The caret (Snow/Carbon): 10px wide, 10px after the address, centred on its line, at half
@@ -3225,12 +3242,13 @@ fn from_row(
         });
 }
 
-/// The address a snippet's From list sorts `"use default"` (the draft's own From) by among the
-/// aliases. It is never sent or saved: a snippet saves its default From as `None`.
+/// The address that `"use default"` (the draft's own From) sorts by among the aliases in a
+/// snippet's From list. It is never sent or saved, because a snippet saves its default From as
+/// `None`.
 const USE_DEFAULT: &str = "default.snippet.address@exo.invalid";
 
-/// The From list's items: the active aliases, and for a snippet `"use default"` (`None`), the
-/// selected first and the rest by address.
+/// The From list's items: the active aliases, and for a snippet `"use default"` (`None`). The
+/// selected item comes first and the rest sort by address.
 pub(super) fn from_choices<'a>(open: &Open, aliases: &'a [Alias]) -> Vec<Option<&'a Alias>> {
     let selected = open
         .record
@@ -3295,7 +3313,7 @@ pub(super) fn from_menu(open: &mut Open, aliases: &[Alias], action: &Action, now
     }
 }
 
-/// The draft is from `alias` now, and a signature already in the body follows it.
+/// The draft is from `alias` now, and a signature already in the body follows the new alias.
 pub(super) fn choose_from(open: &mut Open, aliases: &[Alias], alias: &Alias, now: f64) {
     if open
         .record
@@ -3345,7 +3363,7 @@ fn undo_subject_replacement(ui: &Ui, open: &mut Open, id: Id) {
 }
 
 /// When the last edit typed one of `>-—=~<.` and the text before the caret ends in a pattern
-/// (`->`, `...`), it becomes its character (`→`, `…`), as in the body.
+/// (`->`, `...`), the pattern becomes its character (`→`, `…`), as in the body.
 fn replace_in_subject(ui: &Ui, open: &mut Open, id: Id, before: &str) {
     let Some(caret) = egui::text_edit::TextEditState::load(ui.ctx(), id)
         .and_then(|state| state.cursor.char_range())
@@ -3387,12 +3405,13 @@ fn replace_in_subject(ui: &Ui, open: &mut Open, id: Id, before: &str) {
 /// A `;` picker row's text: 13px in 28px lines.
 const SNIPPET_ROW: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 13.0, 28.0);
 
-/// The `;` picker under the `;` at `anchor`: up to five rows of a snippet's name, its text and
-/// `Me`, the highlighted one filled; or, with no snippets at all, `To create a Snippet, hit ⌘ K
-/// → "Snippets"`. At least 400px wide (`min-width`), 14px left of the `;`, padded 7px, with no
-/// border (Classic's `border: 0; margin: 0 0 0 2px`). The subject's (`in_subject`) hangs from
-/// the line's bottom 2px right of the `;` (Classic's margin wins over its `-13px`), no wider
-/// than `min(100vw - 460px, 600px)`. Returns the row pressed (mouse-down applies it).
+/// The `;` picker under the `;` at `anchor`. It shows up to five rows of a snippet's name, its
+/// text and `Me`, with the highlighted row filled, or, with no snippets at all,
+/// `To create a Snippet, hit ⌘ K → "Snippets"`. It's at least 400px wide (`min-width`), 14px
+/// left of the `;`, padded 7px, with no border (Classic's `border: 0; margin: 0 0 0 2px`). The
+/// subject's picker (`in_subject`) hangs from the line's bottom 2px right of the `;` (Classic's
+/// margin wins over its `-13px`), no wider than `min(100vw - 460px, 600px)`. Returns the row
+/// pressed (mouse-down applies it).
 fn snippet_picker(
     ui: &Ui,
     open: &mut Open,
@@ -3436,7 +3455,7 @@ fn snippet_picker(
             vec2(width - 2.0, count as f32 * ROW + 14.0),
         )
     };
-    // The highlighted row's fill, the name's colour and the muted text's: literals.
+    // The highlighted row's fill, the name's colour and the muted text's colour are literals.
     let (selected, name_color, muted) = match palette.theme {
         // `hsl(220, 45%, 97%)`.
         Theme::Snow => (
@@ -3467,7 +3486,7 @@ fn snippet_picker(
             let _ = area.allocate_rect(list, Sense::click());
             let top = list.top() + 7.0;
             if rows.is_empty() {
-                // The hint, its keys in inline caps.
+                // The hint, with its keys in inline caps.
                 let line = pos2(list.left() + PAD, top + 4.0);
                 let lead =
                     SNIPPET_ROW.paint_line(&painter, line, "To create a Snippet, hit", muted, None);
@@ -3528,8 +3547,8 @@ fn snippet_picker(
     picked
 }
 
-/// The `;` picker's keys while it has rows and isn't hidden by a date, then the `:` and contact
-/// dropdown's, in the body or the subject.
+/// Registers the `;` picker's keys while it has rows and isn't hidden by a date, then the keys
+/// of the `:` and contact dropdown, in the body or the subject.
 fn picker_keys(commands: &mut Commands<commands::Action>, open: &Open, backtick: bool) {
     const FIELDS: &[Region] = &[Region::ComposeForm];
     let act = commands::Action::Compose;
@@ -3565,12 +3584,13 @@ pub(super) fn commit_input(open: &mut Open, now: f64, book: Option<&contacts::In
     let Some(list) = open.state.field.list() else {
         return;
     };
-    // The input moves on unrevealed: committing sets its value, typing nothing.
+    // The input moves on without coming into view, because committing sets its value rather
+    // than typing.
     open.header_scroll.reveal = false;
     if super::chips::finish_in_place(open, list, book, now) {
         return;
     }
-    // The highlighted suggestion, when they show.
+    // The highlighted suggestion, when suggestions show.
     if open.input(list).suggesting() {
         let input = open.input_mut(list);
         let picked = input.suggestions[input.highlight.min(input.suggestions.len() - 1)].clone();
@@ -3631,8 +3651,8 @@ pub(super) fn commit_all(open: &mut Open, now: f64, book: Option<&contacts::Inde
     open.state.field = field;
 }
 
-/// Backspace in an empty recipient input: the chip before the caret goes, or the one being
-/// edited, and the one before that is selected.
+/// Backspace in an empty recipient input. The chip before the caret goes, or the one being
+/// edited goes and the chip before it is selected.
 pub(super) fn backspace(open: &mut Open, now: f64) {
     let Some(list) = open.state.field.list() else {
         return;
@@ -3659,10 +3679,10 @@ pub(super) fn backspace(open: &mut Open, now: f64) {
     open.touch(now);
 }
 
-/// ← / → with nothing typed, or at the edge of what's typed: moves the chip selection; past the
-/// last chip the caret returns to the input. An edit finishes instead: a chip edited in place
-/// stays selected (the one before it when it was emptied); text typed at the end becomes a
-/// chip, selected after ←, with the caret after it after →.
+/// ← / → with nothing typed, or at the edge of what's typed, moves the chip selection. Past the
+/// last chip, the caret returns to the input. An edit finishes instead. A chip edited in place
+/// stays selected (or the one before it, when the edit emptied it). Text typed at the end
+/// becomes a chip, which ← selects and → leaves the caret after.
 pub(super) fn move_selection(
     open: &mut Open,
     delta: isize,
@@ -3725,7 +3745,7 @@ pub(super) fn move_selection(
 /// Send (but not on a snippet).
 pub(super) fn next_field(open: &Open, aliases: &[Alias], surface: Surface, delta: isize) -> Field {
     let mut order = Vec::new();
-    // A snippet's name comes first; it has no collapsed header.
+    // A snippet's name comes first, and a snippet has no collapsed header.
     if open.is_snippet() {
         order.push(Field::SnippetName);
     }
@@ -3759,7 +3779,7 @@ pub(super) fn next_field(open: &Open, aliases: &[Alias], surface: Surface, delta
             .rev()
             .map(|button| button.field()),
     );
-    // The `…` isn't in the tab order: from it, Tab goes on from the body.
+    // The `…` isn't in the tab order, so from it Tab goes on as from the body.
     let current = if open.state.field == Field::QuotingStart {
         Field::Body
     } else {
@@ -3772,7 +3792,7 @@ pub(super) fn next_field(open: &Open, aliases: &[Alias], surface: Surface, delta
     order[(at as isize + delta).rem_euclid(order.len() as isize) as usize]
 }
 
-/// The `…`: puts the signature and quote into the body.
+/// Puts the signature and quote into the body, as the `…` does.
 pub(super) fn reveal_quote(open: &mut Open, aliases: &[Alias], now: f64) {
     if open.record.quoted_inlined {
         return;
@@ -3785,10 +3805,10 @@ pub(super) fn reveal_quote(open: &mut Open, aliases: &[Alias], now: f64) {
     open.touch(now);
 }
 
-/// Registers the focused draft's commands. With `Send + Mark Done` on (`send_and_done`), `Send &
-/// Mark Done` takes ⌘ Enter too and `Send` goes, except in the new-message pane (`in_pane`),
-/// which never marks done. `backtick` is Backtick as Escape: without it, compose's Escape leaves
-/// a backtick to be typed.
+/// Registers the focused draft's commands. With `Send + Mark Done` on (`send_and_done`),
+/// `Send & Mark Done` takes ⌘ Enter too and `Send` goes, except in the new-message pane
+/// (`in_pane`), which never marks done. `backtick` is Backtick as Escape. Without it, compose's
+/// Escape leaves a backtick to be typed.
 pub(super) fn register(
     commands: &mut Commands<commands::Action>,
     open: &Open,
@@ -3802,7 +3822,8 @@ pub(super) fn register(
     const LISTS: &[Region] = &[Region::RecipientList];
     const BODY_AND_FIELDS: &[Region] = &[Region::ComposeForm];
     let act = commands::Action::Compose;
-    // A snippet's `Send` is `Save Snippet`; it has no Send & Mark Done and doesn't pop out.
+    // A snippet's `Send` is `Save Snippet`. A snippet has no Send & Mark Done and doesn't pop
+    // out.
     let snippet = open.is_snippet();
     let send_title = if snippet { "Save Snippet" } else { "Send" };
     let send_keys: &[&'static str] = if send_and_done {
@@ -3981,7 +4002,8 @@ pub(super) fn register(
             .aliases(["Edit Subject"]),
         );
     } else {
-        // A reply's: the palette's row makes it a new message, ⌘⇧S only focuses its subject.
+        // On a reply, the palette's row makes the reply a new message, while ⌘⇧S only focuses
+        // its subject.
         commands.add(
             Command::new("CHANGE_SUBJECT", "Change Subject", act(Action::EditSubject))
                 .key("mod+shift+s")
@@ -4036,9 +4058,9 @@ pub(super) fn register(
             tabs(commands);
         }
         Field::Body => {
-            // Escape the editor has no use for leaves the form (egui would take it as a blur). The
-            // editor keeps a backtick to type it unless Backtick as Escape is on, and then types
-            // one for ⌥⇧`.
+            // An Escape the editor has no use for leaves the form (egui would take it as a blur).
+            // The editor keeps a backtick for typing unless Backtick as Escape is on, and then it
+            // types one for ⌥⇧`.
             if !open.editor.wants_escape() {
                 commands.add(
                     Command::shortcut("ESCAPE", act(Action::Escape))
@@ -4054,7 +4076,7 @@ pub(super) fn register(
                         .regions(BODY_AND_FIELDS),
                 );
             }
-            // Only on a date do they move it (they go through otherwise).
+            // ⌘⇧- and ⌘⇧= move a date only when the caret is on one, and go through otherwise.
             if open.date.is_some() {
                 commands.add(
                     Command::shortcut("PREVIOUS_DAY", act(Action::ShiftDate(-1)))
@@ -4067,7 +4089,8 @@ pub(super) fn register(
                         .regions(BODY_AND_FIELDS),
                 );
             }
-            // Squire's keymap; Tab and ⇧Tab outside a list move focus (to Send, or back).
+            // The editor's formatting keys that apply where the caret is. Tab and ⇧Tab outside a
+            // list move focus (to Send, or back).
             for command in FormatCommand::ALL
                 .into_iter()
                 .filter(|command| command.applies(&open.editor))
@@ -4078,7 +4101,8 @@ pub(super) fn register(
                         .regions(BODY_AND_FIELDS),
                 );
             }
-            // Nor while the editor takes it (ghost text, a suggestion chosen in autocorrect's pill).
+            // Tab doesn't move focus in a list, nor while the editor takes it (ghost text, a
+            // suggestion chosen in autocorrect's pill).
             if !open.editor.in_list() && !open.editor.wants_tab() {
                 tabs(commands);
             }
@@ -4090,7 +4114,7 @@ pub(super) fn register(
                         .keys(["up", "down"])
                         .regions(BODY_AND_FIELDS),
                 );
-                // Enter picks only while a row shows; with none it types a line.
+                // Enter picks only while a row shows. With none, it types a line.
                 if menu.shows_row() {
                     commands.add(
                         Command::shortcut("AVAILABILITY_PICK", act(Action::AvailabilityPick))
@@ -4104,7 +4128,7 @@ pub(super) fn register(
                         .backtick_escape(backtick)
                         .regions(BODY_AND_FIELDS),
                 );
-                // ← or Backspace at the query's start and → at its end close it there.
+                // ← or Backspace at the query's start, and → at its end, close the menu there.
                 let caret = open.editor.selection().focus;
                 if caret == menu.start {
                     commands.add(
@@ -4161,7 +4185,8 @@ pub(super) fn register(
             tabs(commands);
         }
         Field::Subject => {
-            // A new message's subject goes on to the body; a reply's starts a new message.
+            // Enter in a new message's subject goes on to the body, and in a reply's it starts a
+            // new message.
             let enter = if open.is_new_email() {
                 Action::Focus(Field::Body)
             } else {
@@ -4174,11 +4199,12 @@ pub(super) fn register(
             );
             escape(commands);
             tabs(commands);
-            // A new message's `:` and `;` pickers, over those.
+            // A new message's `:` and `;` pickers, whose keys go over those.
             picker_keys(commands, open, backtick);
         }
         Field::From if open.from_menu.is_some() => {
-            // The list's keys; Enter or Tab takes the highlighted alias, Escape only closes it.
+            // The list's keys. Enter or Tab takes the highlighted alias, and Escape only closes
+            // the list.
             commands.add(
                 Command::shortcut("FROM_DOWN", act(Action::FromMove(1)))
                     .keys(["down", "j", "n"])
@@ -4201,7 +4227,7 @@ pub(super) fn register(
             );
         }
         Field::From => {
-            // ↓ or ↑ opens the list; Enter clicks the button, which does too.
+            // ↓ or ↑ opens the list. Enter clicks the button, which opens it too.
             commands.add(
                 Command::shortcut("FROM_OPEN", act(Action::FromToggle))
                     .keys(["down", "j", "n", "up", "k", "p", "enter"])
@@ -4218,7 +4244,7 @@ pub(super) fn register(
         | Field::ExpandRecipients
         | Field::PopAction
         | Field::PopClose => {
-            // Enter on a focused control clicks it; a keyboard Send shows no hint.
+            // Enter on a focused control clicks it. A keyboard Send shows no hint.
             let click = match open.state.field {
                 Field::Send => Action::Send { mark_done: false },
                 Field::SendLater => Action::SendLater,
@@ -4253,8 +4279,8 @@ pub(super) fn register(
                     .regions(LISTS),
             );
             if input.suggesting() {
-                // With suggestions: ↑/↓ (and ⌃J/N, ⌃K/P) move the highlight, Tab takes it and
-                // stays, Escape closes them.
+                // With suggestions, ↑/↓ (and ⌃J/N, ⌃K/P) move the highlight, Tab takes it and
+                // stays, and Escape closes the suggestions.
                 commands.add(
                     Command::shortcut("SUGGESTION_DOWN", act(Action::MoveSuggestion(1)))
                         .keys(["down", "ctralt+j", "ctralt+n"])
@@ -4302,7 +4328,7 @@ pub(super) fn register(
                     );
                 }
             } else if input.caret == Some(0) {
-                // At the typed text's edge, ← and → finish it.
+                // At the edge of the typed text, ← and → finish it.
                 commands.add(
                     Command::shortcut("CHIP_LEFT", act(Action::MoveSelection(-1)))
                         .key("left")
@@ -4397,8 +4423,8 @@ mod tests {
         exo_ui::install(&ctx).expect("the system fonts load");
         let open = reply(&[]);
         let output = ctx.run_ui(egui::RawInput::default(), |ui| {
-            // Tom's chip and its margin, then the input's box, 26px wider than its 2px field:
-            // 28px, nothing typed.
+            // Tom's chip and its margin, then the input's box, which is 26px wider than its 2px
+            // field, so 28px with nothing typed.
             let line =
                 LABEL_WIDTH + FIELD.width(ui.ctx(), "tom@brightmoor.co") + CHIP_EXTRA + 1.0 + 28.0;
             assert_eq!(
@@ -4615,8 +4641,8 @@ mod tests {
 
     #[test]
     fn the_suggestion_list_keeps_the_widest_width_it_has_had_since_it_opened() {
-        // Text widths (px): `p` shows Paul Durand (71.9) at pdurand@westbrook-realty.com (188.6);
-        // `pri` then shows Priya Raman (73.5) at priya@brightmoor.co (122.5).
+        // Text widths (px): `p` shows Paul Durand (71.9) at pdurand@westbrook-realty.com (188.6).
+        // Then `pri` shows Priya Raman (73.5) at priya@brightmoor.co (122.5).
         let mut seen = 0.0;
         let (name, email) = suggestion_columns(71.9, 188.6, &mut seen);
         assert_eq!(

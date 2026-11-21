@@ -57,7 +57,7 @@ pub enum ListTab {
 /// Which split screen the dialog shows.
 #[derive(Debug, Default)]
 enum Screen {
-    /// Split Inbox Settings (`basic`).
+    /// Split Inbox Settings.
     #[default]
     List,
     /// New or Edit Split Inbox.
@@ -73,19 +73,19 @@ enum Screen {
 /// Where a form or a template's settings go back to.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Back {
-    /// Split Inbox Settings (`basic`).
+    /// Split Inbox Settings.
     #[default]
     List,
     /// The library, as it was.
     Library,
-    /// Nowhere: the dialog closes (`newFromCommand`).
+    /// Nowhere, so the dialog closes.
     Close,
 }
 
 /// The New/Edit Split Inbox form's state.
 #[derive(Debug, Default)]
 struct Form {
-    /// The split being edited, by id; `None` for a new one.
+    /// The split being edited, by id, or `None` for a new one.
     editing: Option<String>,
     /// Where closing goes.
     back: Back,
@@ -95,12 +95,12 @@ struct Form {
     hide: bool,
     /// The name's inline error.
     name_error: Option<&'static str>,
-    /// The query is marked wrong since its alert.
+    /// Whether the query is marked wrong since its alert.
     query_error: bool,
     /// The field to focus on the next frame.
     focus: Option<Field>,
-    /// Edit Split Inbox just opened: the name has the keyboard with nothing selected, the caret
-    /// after the name.
+    /// Whether Edit Split Inbox just opened, so the name has the keyboard with nothing selected
+    /// and the caret after the name.
     opening: bool,
 }
 
@@ -121,9 +121,9 @@ enum AlertKind {
     Delete,
     /// `This makes your Split Inbox queries too long.`
     TooLong,
-    /// `Almost there…`: turn Important and Other off.
+    /// `Almost there…`, to turn Important and Other off.
     TurnOffImportantOther,
-    /// `Almost there…`: a template's name is a split's already.
+    /// `Almost there…`, when a template's name is already a split's.
     NameTaken,
     /// `Delete Split`, from a template's settings.
     DeleteTemplateSplit,
@@ -162,9 +162,10 @@ pub enum Event {
     AddSplit,
     /// The `Active` or `Inactive` tab.
     SelectTab(ListTab),
-    /// A row of the list (or its gear): the settings of the split, or of Important and Other.
+    /// A row of the list (or its gear), which opens the settings of the split, or of Important
+    /// and Other.
     OpenRow(ListId),
-    /// A toast's `Split Inbox Settings`: edit split `id`.
+    /// A toast's `Split Inbox Settings`, which edits split `id`.
     Edit(String),
     /// An Active row dragged from one index to another.
     Reorder(usize, usize),
@@ -176,7 +177,8 @@ pub enum Event {
     Save,
     /// `Delete Split Inbox`.
     Delete,
-    /// Cancel, the back arrow, Escape or the backdrop: close, asking first if anything changed.
+    /// Cancel, the back arrow, Escape or the backdrop, which close the dialog, asking first if
+    /// anything changed.
     Close,
     /// The form's first checkbox.
     ToggleLeave,
@@ -186,9 +188,9 @@ pub enum Event {
     ToggleHideEmpty(ListId),
     /// Hide Empty's `Select all` / `Unselect all`.
     HideAll,
-    /// The hide-empty nudge's `Try it out`: asks to hide every empty split.
+    /// The hide-empty nudge's `Try it out`, which asks to hide every empty split.
     OfferHideAll,
-    /// `Split Inboxes updated.`'s Undo: these show while empty again.
+    /// The Undo on `Split Inboxes updated.`, which makes these show while empty again.
     UndoHideAll(Vec<ListId>),
     /// Something in the library.
     Library(LibraryEvent),
@@ -196,11 +198,12 @@ pub enum Event {
     Template(TemplateEvent),
     /// Enter in a template's settings.
     TemplateEnter,
-    /// Template `id`'s settings (`template:<id>`), from a toast's `Split Inbox Settings` or the
-    /// palette's `VIP Split Senders` and `News Split Senders`, going back where it says; without
-    /// the library, New Split Inbox.
+    /// The settings of template `id` (`template:<id>`), from a toast's `Split Inbox Settings` or
+    /// the palette's `VIP Split Senders` and `News Split Senders`, going back where it says.
+    /// Without the library, it opens New Split Inbox.
     OpenTemplate(String, Back),
-    /// New Split Inbox, going `back` when closed: the palette's `New Split Inbox from scratch`.
+    /// New Split Inbox, going `back` when closed, from the palette's `New Split Inbox from
+    /// scratch`.
     New(Back),
     /// The alert's action, by index.
     AlertAction(usize),
@@ -208,7 +211,7 @@ pub enum Event {
     AlertConfirm,
     /// Escape or a click outside the alert.
     AlertDismiss,
-    /// The arrows or Tab in the alert: move the selection.
+    /// The arrows or Tab in the alert, which move the selection.
     AlertCycle(isize),
 }
 
@@ -238,14 +241,14 @@ pub struct SplitDialogs {
     drag: Option<(usize, f32)>,
     /// The split library, when there is one.
     library: Option<Arc<SplitLibrary>>,
-    /// The library as a template opened from it left it.
+    /// The library as it was when a template was opened from it.
     library_state: Option<Library>,
     /// A split just made that's hidden when empty, which says so when it first empties.
     created_hidden: Option<String>,
 }
 
 impl SplitDialogs {
-    /// An alert is up: it has the keyboard.
+    /// Whether an alert is up, in which case it has the keyboard.
     pub fn alert_open(&self) -> bool {
         self.alert.is_some()
     }
@@ -279,7 +282,7 @@ impl SplitDialogs {
         self.reset();
     }
 
-    /// Opens New Split Inbox; closing it goes `back`.
+    /// Opens New Split Inbox. Closing it goes `back`.
     pub fn open_new(&mut self, back: Back) {
         self.alert = None;
         self.screen = Screen::Form(Form {
@@ -295,8 +298,8 @@ impl SplitDialogs {
         self.screen = Screen::HideEmpty;
     }
 
-    /// Opens the library, or New Split Inbox without one; either goes back
-    /// to Split Inbox Settings.
+    /// Opens the library, or New Split Inbox without one. Either goes back to Split Inbox
+    /// Settings.
     pub fn open_library(&mut self) {
         self.alert = None;
         if self.library.is_some() {
@@ -306,8 +309,8 @@ impl SplitDialogs {
         }
     }
 
-    /// Opens the settings for template `id` (or a built-in kind's), going `back`; false when
-    /// there's no such template.
+    /// Opens the settings for template `id` (or a built-in kind's), going `back`. Returns false
+    /// when there's no such template.
     fn open_template(&mut self, settings: &Settings, id: &str, back: Back) -> bool {
         let Some(template) = self
             .library
@@ -321,8 +324,8 @@ impl SplitDialogs {
         true
     }
 
-    /// The settings for `split`: its template's, else Edit Split Inbox;
-    /// both go back to the list.
+    /// Opens the settings for split `id`, which are its template's, or else Edit Split Inbox. Both
+    /// go back to the list.
     fn open_split(&mut self, settings: &Settings, id: &str) {
         let template = settings
             .split(id)
@@ -356,7 +359,7 @@ impl SplitDialogs {
         });
     }
 
-    /// Carries out `event`. `current` is the list on screen; `wrap` makes app actions of
+    /// Carries out `event`. `current` is the list on screen, and `wrap` makes app actions of
     /// settings actions, for toasts.
     pub fn run<A: Clone + 'static>(
         &mut self,
@@ -523,8 +526,8 @@ impl SplitDialogs {
             .collect();
         let name = clean_whitespace(&form.name);
         let query = clean_whitespace(&form.query);
-        // A built-in split keeps its own name (Calendar), unchecked: a template's settings don't
-        // check names either.
+        // A built-in split keeps its own name (Calendar) without the check, since a template's
+        // settings don't check names either.
         let builtin_name = form
             .editing
             .as_ref()
@@ -584,7 +587,7 @@ impl SplitDialogs {
                     return Outcome::default();
                 }
                 self.screen = Screen::List;
-                // A redefined split has a new id: keep showing it.
+                // A redefined split has a new id, so keep showing it by that.
                 let show = (*current == ListId::Split(id)).then(|| ListId::Split(new.id.clone()));
                 Outcome { show, close: false }
             }
@@ -608,9 +611,9 @@ impl SplitDialogs {
         }
     }
 
-    /// Edit Split Inbox's `Turn On Split Inbox` / `Turn Off Split Inbox`:
-    /// toggles the split with the form's changes, then closes the dialog when it turned on, or
-    /// goes back to the list.
+    /// `Turn On Split Inbox` / `Turn Off Split Inbox` in Edit Split Inbox. It toggles the split
+    /// with the form's changes, then closes the dialog when the split turned on, or else goes back
+    /// to the list.
     fn toggle_edited<A: Clone + 'static>(
         &mut self,
         account: &mut Account,
@@ -689,7 +692,7 @@ impl SplitDialogs {
             TemplateEvent::ToggleLeave => form.leave = !form.leave,
             TemplateEvent::ToggleHide => {
                 form.hide = !form.hide;
-                // Important • Other's applies at once.
+                // Important • Other's setting applies at once.
                 if form.kind == Kind::ImportantOther {
                     let hide = form.hide;
                     account.update_settings(|settings| settings.set_hide_other_when_empty(hide));
@@ -783,8 +786,8 @@ impl SplitDialogs {
         }
     }
 
-    /// Saves the template's split, turning it on or off when `toggle`; Important • Other
-    /// and Inbox turn Important and Other on or off.
+    /// Saves the template's split, turning it on or off when `toggle`. Important • Other and Inbox
+    /// turn Important and Other on or off.
     fn template_save<A: Clone + 'static>(
         &mut self,
         template: &Template,
@@ -1026,8 +1029,8 @@ impl SplitDialogs {
                 Outcome { show, ..back }
             }
             (AlertKind::HideAll, 0) => {
-                // Hide all when empty: every active split but Important (or
-                // Inbox), and Other, that doesn't hide yet; Undo shows those again.
+                // Hides every active split except Important (or Inbox), and Other, that doesn't
+                // hide when empty yet. Undo shows those again.
                 let settings = account.settings();
                 let mut changed: Vec<ListId> = hide_empty_rows(settings)
                     .iter()
@@ -1077,7 +1080,8 @@ impl SplitDialogs {
         }
     }
 
-    /// What Backspace and Delete do: remove the template's sender row with the keyboard.
+    /// What Backspace and Delete do, which is remove the template's sender row that has the
+    /// keyboard.
     pub fn row_delete(&self) -> Option<Event> {
         match &self.screen {
             Screen::Template(form, _) => form
@@ -1097,7 +1101,7 @@ impl SplitDialogs {
         }
     }
 
-    /// The keys VIP's contact picker takes while it has the keyboard, over the dialog's.
+    /// The keys VIP's contact picker takes over from the dialog's while it has the keyboard.
     pub fn picker_keys(&self) -> Vec<(&'static str, PickerKey, &'static [&'static str])> {
         match &self.screen {
             Screen::Template(form, _) if form.picker.is_focused() => form.picker.keys(),
@@ -1118,7 +1122,7 @@ impl SplitDialogs {
 
     /// Draws the dialog for the current screen over `area` while `open` (and while it fades out
     /// after), and its alert. Returns what the user did and whether the dialog's close control or
-    /// backdrop was clicked; `None` once it has faded out.
+    /// backdrop was clicked. `None` once it has faded out.
     pub fn show(
         &mut self,
         ctx: &Context,
@@ -1148,7 +1152,8 @@ impl SplitDialogs {
                 false,
                 hide_empty_height(settings),
             ),
-            // Their own headers: the library has none, a template's is over its hero.
+            // These draw their own headers. The library has none, and a template's is over its
+            // hero.
             Screen::Library(_) => ("", true, 0.0),
             Screen::Template(form, _) => (
                 "",
@@ -1270,7 +1275,8 @@ impl SplitDialogs {
     }
 }
 
-/// An enabled split (or Important and Other, or Inbox) uses `template`: its card shows a check.
+/// Whether an enabled split (or Important and Other, or Inbox) uses `template`, in which case its
+/// card shows a check.
 fn in_use(settings: &Settings, template: &Template) -> bool {
     settings
         .split_entries()
@@ -1314,9 +1320,8 @@ pub(crate) fn definitions(account: &Account) -> (Vec<exo_store::Label>, Vec<Stri
 /// paragraph indented.
 pub(crate) const TOO_LONG: &str = "This makes your Split Inbox queries too long.\n\n       Please remove some splits or reduce the number of contacts in each split.";
 
-/// Adds `split`, saying `Split '{name}'
-/// created.` with `Split Inbox Settings`; false, adding nothing, when that would make a split's
-/// Gmail search too long.
+/// Adds `split`, saying `Split '{name}' created.` with `Split Inbox Settings`. Returns false,
+/// adding nothing, when that would make a split's Gmail search too long.
 pub(crate) fn add<A: Clone + 'static>(
     account: &mut Account,
     commands: &mut Commands<A>,
@@ -1349,9 +1354,9 @@ pub(crate) fn add<A: Clone + 'static>(
     true
 }
 
-/// Replaces `old` with `new`, saying (when `notify`) `Split '{name}'
-/// updated.` (`{name} Split updated.` for a built-in one) with `Split Inbox Settings`; false,
-/// changing nothing, when that would make a split's Gmail search too long.
+/// Replaces `old` with `new`, saying (when `notify`) `Split '{name}' updated.` (`{name} Split
+/// updated.` for a built-in one) with `Split Inbox Settings`. Returns false, changing nothing,
+/// when that would make a split's Gmail search too long.
 pub(crate) fn replace<A: Clone + 'static>(
     account: &mut Account,
     commands: &mut Commands<A>,
@@ -1400,8 +1405,8 @@ fn too_long(settings: &Settings, old: Option<&SplitInbox>, new: &SplitInbox, me:
     query_too_long(&splits, new, me)
 }
 
-/// Deletes `split` and says so; a split from a template offers its
-/// settings again, back to the library.
+/// Deletes `split` and says so. For a split from a template, the toast offers the template's
+/// settings again, going back to the library.
 fn delete<A: Clone + 'static>(
     account: &mut Account,
     commands: &mut Commands<A>,
@@ -1467,7 +1472,7 @@ pub(crate) fn toggle<A: Clone + 'static>(
     }
 }
 
-/// Turns Important and Other on or off; the inbox shows its new home.
+/// Turns Important and Other on or off. The inbox shows its new home.
 fn toggle_important_other<A: Clone + 'static>(
     account: &mut Account,
     commands: &mut Commands<A>,
@@ -1509,7 +1514,7 @@ impl Form {
         }
     }
 
-    /// Whether the form differs from what's saved (a new one: whether anything's typed).
+    /// Whether the form differs from what's saved (for a new one, whether anything's typed).
     fn has_changes(&self, settings: &Settings) -> bool {
         let (name, query) = (clean_whitespace(&self.name), clean_whitespace(&self.query));
         match self.editing.as_ref().and_then(|id| settings.split(id)) {
@@ -1684,9 +1689,9 @@ impl Form {
             y += 16.0;
         }
 
-        // The buttons: `margin-top: 44px`, right-aligned, nudged down 3px; the tertiary one at the
-        // left edge, 12px out. A split that's on turns off rather than being deleted, and one
-        // that's off turns on rather than being saved.
+        // The buttons have `margin-top: 44px`, right-aligned and nudged down 3px, with the
+        // tertiary one at the left edge, 12px out. A split that's on turns off rather than being
+        // deleted, and one that's off turns on rather than being saved.
         let top = y + 44.0 + NUDGE;
         let disabled = self
             .editing
@@ -1745,7 +1750,8 @@ impl Form {
 /// The form's body height: its fields, help, checkboxes and buttons.
 fn form_height(form: &Form) -> f32 {
     let error = if form.name_error.is_some() { 36.0 } else { 0.0 };
-    // Two fields (56 + 20), the help (16 + 80), the checkboxes (16 + 48), the buttons (44 + 28 + 7).
+    // Two fields (56 + 20), the help (16 + 80), the checkboxes (16 + 48), and the buttons
+    // (44 + 28 + 7).
     2.0 * 76.0 + error + 96.0 + 64.0 + 79.0
 }
 
@@ -1801,8 +1807,8 @@ fn rows(settings: &Settings, tab: ListTab) -> Vec<Row<'_>> {
     }
 }
 
-/// The intro and Add Split Inbox (20px under the header), the
-/// tabs and their 20px gap: where the scrolling part starts, from the body's top.
+/// Where the scrolling part starts, from the body's top. It's under the intro and Add Split Inbox
+/// (20px under the header), the tabs and their 20px gap.
 fn list_head(ctx: &Context) -> f32 {
     20.0 + intro_height(ctx) + 20.0 + TABS_HEIGHT
 }
@@ -1883,7 +1889,7 @@ fn list(
         pos2(right + 13.0 - ADD_WIDTH, row_top + 4.0),
         vec2(ADD_WIDTH, DIALOG_ACTION_HEIGHT),
     );
-    // It has the keyboard when the list shows; Enter anywhere runs it.
+    // It has the keyboard when the list shows. Enter anywhere runs it.
     if DialogAction::new("Add Split Inbox", ActionKind::Primary)
         .focused(!*blurred)
         .show(ui, exo_ui::id(ui.ctx(), "split-inbox-add"), add)
@@ -1892,8 +1898,8 @@ fn list(
         event = Some(Event::AddSplit);
     }
 
-    // The tabs, 4px down in their row: labels at `rgba(0, 0, 0, .4)`, `.8` focused. Only Carbon
-    // underlines the focused tab, over the row's border.
+    // The tabs sit 4px down in their row, with labels at `rgba(0, 0, 0, .4)`, or `.8` focused.
+    // Only Carbon underlines the focused tab, over the row's border.
     let tabs_top = row_top + intro_height(&ctx) + 20.0;
     divider(
         &painter,
@@ -2178,9 +2184,8 @@ fn paint_row_text(
     );
 }
 
-/// A row: filled while hovered, its title and
-/// subheader, and while hovered its drag handle (Active only) and gear. A click anywhere opens
-/// its settings.
+/// A row with its title and subheader, filled while hovered. While hovered it also shows its drag
+/// handle (Active only) and gear. A click anywhere opens its settings.
 #[expect(
     clippy::too_many_arguments,
     reason = "one row of the list, drawn from the list's layout"

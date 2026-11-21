@@ -628,7 +628,7 @@ impl Mailbox {
         Ok(id)
     }
 
-    /// Replaces the draft's message; the draft keeps its ID, the message gets a new one.
+    /// Replaces the draft's message. The draft keeps its ID, and the message gets a new one.
     pub fn update_draft(
         &mut self,
         id: &str,
@@ -705,7 +705,7 @@ impl Mailbox {
     }
 }
 
-/// `patch` keeps the old value where the request has none; `update` takes the request as is.
+/// `patch` keeps the old value where the request has none, and `update` takes the request as is.
 fn merge<T>(patch: bool, new: Option<T>, old: Option<T>) -> Option<T> {
     if patch { new.or(old) } else { new }
 }

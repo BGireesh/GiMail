@@ -38,7 +38,7 @@ const MONTHS: [&str; 12] = [
     "November",
     "December",
 ];
-/// The unit pairs that read naturally (`2 hours 30 minutes`); any other costs confidence.
+/// The unit pairs that read naturally (`2 hours 30 minutes`). Any other pair costs confidence.
 const NATURAL: [(&str, &str); 7] = [
     ("hours", "minutes"),
     ("days", "hours"),
@@ -164,7 +164,8 @@ fn relative(engine: &Engine, tokens: Vec<Token>) -> Result<Parsed, InvalidZone> 
     }
     let target = (date.month() as f64 + months) % 12.0;
     date.set_month(date.month() as f64 + months + 12.0 * years);
-    // The fraction of a month, to one decimal: half a month is half the previous month's days.
+    // The fraction of a month, to one decimal, where half a month is half the previous month's
+    // days.
     let tenths: f64 = format!("{:.1}", months % 1.0)
         .get(2..)
         .and_then(|digits| digits.parse().ok())
@@ -356,7 +357,7 @@ fn subsequent(engine: &Engine, tokens: Vec<Token>) -> Result<Parsed, InvalidZone
     clock.apply(engine, &mut date)?;
     parts.date |= dated && !date_guessed;
     if clock.has_seen_time() && !dated {
-        // A time alone: today if it's still to come.
+        // A time alone means today, if it's still to come.
         if ((date.ms() - now.ms()).abs() as f64 / HOUR).ceil() > 24.0 {
             label.push("tomorrow".into());
             add_days(&mut date, 2);
@@ -595,7 +596,7 @@ struct Clock {
     and_unit: Option<Rc<str>>,
     hours: f64,
     minutes: f64,
-    /// Milliseconds; 0 or NaN for none.
+    /// Milliseconds, with 0 or NaN for none.
     duration: f64,
 }
 
@@ -687,8 +688,8 @@ impl Clock {
         clock
     }
 
-    /// The start's time, with the default for what wasn't typed: a one-digit hour before 8 is in
-    /// the afternoon, a daylight word alone has its hour.
+    /// The start's time, with the default for what wasn't typed. A one-digit hour before 8 is in
+    /// the afternoon, and a daylight word alone has its hour.
     fn time(&self, engine: &Engine) -> (f64, f64) {
         let start = &self.start;
         let (default_hours, default_minutes) = engine.options.default_time;
@@ -761,8 +762,8 @@ impl Clock {
         )
     }
 
-    /// `for 30 min`, `2 days`: a bare number over 5 is minutes, else hours; all-day durations round
-    /// up to whole days.
+    /// `for 30 min`, `2 days`: a bare number over 5 is minutes, else hours, and all-day durations
+    /// round up to whole days.
     fn parse_duration(&self) -> f64 {
         if self.all_day {
             let quantity = self
@@ -791,8 +792,8 @@ impl Clock {
         millis
     }
 
-    /// Sets `date`'s time: midnight is 23:59, a night before 6 is the next day's. A time zone moves
-    /// it by the zone's offset from here (the first one seen for that name).
+    /// Sets `date`'s time, where midnight is 23:59 and a night before 6 is the next day's. A time
+    /// zone moves it by the zone's offset from here (the first one seen for that name).
     fn apply(&mut self, engine: &Engine, date: &mut JsDate) -> Result<(), InvalidZone> {
         if self.seen.hours && self.hours == 24.0 {
             date.set_hours(23.0);
@@ -892,7 +893,7 @@ impl Clock {
     }
 
     /// Completes an interpreter's parse: its duration in the calendar, all day at midnight
-    /// (when `midnight`: it has a day), the time zone it was typed in, and the time's
+    /// (when `midnight` says it has a day), the time zone it was typed in, and the time's
     /// plausibility.
     fn finish(self, engine: &Engine, mut parsed: Parsed, midnight: bool) -> Parsed {
         let parts = &mut parsed.parts;
@@ -1032,7 +1033,7 @@ fn adjust_for_am_pm(hours: f64, am_pm: &str) -> f64 {
     }
 }
 
-/// `quantity` `unit`s in milliseconds; NaN for a unit it doesn't know (`wks`).
+/// `quantity` `unit`s in milliseconds, or NaN for a unit it doesn't know (`wks`).
 fn to_millis(quantity: f64, unit: &str) -> f64 {
     quantity
         * match unit {
@@ -1046,7 +1047,8 @@ fn to_millis(quantity: f64, unit: &str) -> f64 {
         }
 }
 
-/// The days one `unit` of an all-day duration counts for (an hour 24, a minute 0.4); NaN for `wks`.
+/// The days one `unit` of an all-day duration counts for (an hour 24, a minute 0.4), or NaN for
+/// `wks`.
 fn days_per(unit: &str) -> f64 {
     match unit {
         "minutes" => 24.0 / 60.0,

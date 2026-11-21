@@ -1,10 +1,10 @@
 //! The toast: the bottom-left card that reports an action, with its actions (`Undo`) and a close
 //! button.
 //!
-//! 48px tall, `left: calc(3.5rem + 40px - 1.75rem + 6px)`, square corners, a 3px accent bar inset
-//! on the left (`box-shadow: inset 3px 0 0`), 12px/16px text padded `1.75rem` either side, bold
-//! uppercase actions padded `1rem`, and a 10px × at 30% opacity. The accent's `::before` glow is on
-//! a box with no height, so it never shows.
+//! The card is 48px tall at `left: calc(3.5rem + 40px - 1.75rem + 6px)`, with square corners, a
+//! 3px accent bar inset on the left (`box-shadow: inset 3px 0 0`), 12px/16px text padded `1.75rem`
+//! either side, bold uppercase actions padded `1rem`, and a 10px × at 30% opacity. The accent's
+//! `::before` glow is on a box with no height, so it never shows.
 
 use egui::{
     Area, Color32, Context, CornerRadius, Id, Order, Painter, Pos2, Rect, Response, Sense, Ui,
@@ -27,8 +27,8 @@ const LINE_TOP: f32 = (HEIGHT - 16.0) / 2.0 + 1.0;
 /// The text's widest.
 const MAX_TEXT_WIDTH: f32 = 500.0;
 const CLOSE_SIZE: f32 = 10.0;
-/// The close button: the icon's left edge is the actions' right edge; then its 10px padding and 8px
-/// margin.
+/// The close button. The icon's left edge is the actions' right edge, followed by its 10px padding
+/// and 8px margin.
 const CLOSE_TRAILING: f32 = CLOSE_SIZE + 10.0 + 8.0;
 /// The separator between actions, shown on hover: 1px wide, 10px margins.
 const SEPARATOR: f32 = 21.0;
@@ -58,7 +58,7 @@ pub enum ToastKind {
 pub struct ToastActionView<'a> {
     /// The label (`Undo`).
     pub name: &'a str,
-    /// Its shortcut's keycaps, shown in a tooltip on hover (`["z"]`); empty for none.
+    /// Its shortcut's keycaps, shown in a tooltip on hover (`["z"]`), or empty for none.
     pub keys: &'a [&'a str],
     /// The tooltip's title instead of the name (`Send message right now`).
     pub tooltip: Option<&'a str>,
@@ -251,7 +251,7 @@ impl ToastView<'_> {
             .fixed_pos(card.min)
             .show(ctx, |ui| {
                 let response = ui.allocate_rect(card, Sense::hover());
-                // `contains_pointer`: the actions on top of the card take `hovered`.
+                // `contains_pointer`, because the actions on top of the card take `hovered`.
                 let hovered = response.contains_pointer();
                 ctx.data_mut(|data| data.insert_temp(hover_id, hovered));
                 let mut painter = ui.painter().clone();
@@ -374,7 +374,7 @@ impl ToastView<'_> {
         };
         for (i, (line, action)) in actions.into_iter().zip(self.actions).enumerate() {
             if action.hidden {
-                // The expander clips the separator and action to its animated width; the action
+                // The expander clips the separator and action to its animated width. The action
                 // fades in with it (`opacity 200ms`).
                 let width = expanded_width(line.width, expander);
                 if width <= 0.0 {
@@ -403,7 +403,7 @@ impl ToastView<'_> {
                 paint_separator(painter, x, top, separators, separator);
                 x += SEPARATOR * separators;
             }
-            // An action is padded `18px 0`: a 52px box around the 16px line.
+            // An action is padded `18px 0`, a 52px box around the 16px line.
             let hit = Rect::from_min_size(
                 Pos2::new(x, top + LINE_TOP - 18.0),
                 Vec2::new(line.width, 52.0),
@@ -441,7 +441,7 @@ impl ToastView<'_> {
                     0.15,
                     motion::CubicBezier::EASE,
                 );
-        // The × is black (white in Carbon) at 30%, 50% hovered; its 12px SVG is drawn at 10px.
+        // The × is black (white in Carbon) at 30%, 50% hovered. Its 12px SVG is drawn at 10px.
         paint_icon(
             ui,
             "legacy/close",

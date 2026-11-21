@@ -14,7 +14,7 @@ pub struct Action {
     /// `View order`, `Track Order`, `Open Document`…
     pub text: String,
     pub url: String,
-    /// Where it was declared, for schema.org actions (`source`); `None` for a recognized link.
+    /// Where it was declared, for schema.org actions (`source`), or `None` for a recognized link.
     pub source: Option<ActionSource>,
 }
 
@@ -30,7 +30,7 @@ pub enum ActionSource {
 /// What a Google Calendar notification says about its event.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct CalendarData {
-    /// The body is Google Calendar's (`source: "gcal"`): it carries
+    /// The body is Google Calendar's (`source: "gcal"`), meaning it carries
     /// `<meta itemprop="name" content="Google Calendar">`.
     pub gcal: bool,
     /// Its `eventStatus` microdata.
@@ -78,7 +78,7 @@ pub(crate) struct Found {
     pub actions: Vec<Action>,
     pub calendar: CalendarData,
     /// The walk has passed the root element. The calendar's facts are looked for under the root
-    /// alone: whatever lies under a later element also lies under it.
+    /// alone, because whatever lies under a later element also lies under it.
     looked_for_calendar: bool,
 }
 
@@ -148,7 +148,7 @@ fn ld_json(node: &NodeRef) -> Option<Action> {
     )
 }
 
-/// A JavaScript truthy value, as `a || b` picks.
+/// Whether a JSON value counts as set. Null, false, zero and the empty string don't.
 fn truthy(value: &serde_json::Value) -> bool {
     match value {
         serde_json::Value::Null => false,
@@ -189,7 +189,7 @@ fn microdata(node: &NodeRef) -> Option<Action> {
         let text = dom::attr(&name, "content")
             .filter(|content| !content.is_empty())
             .unwrap_or_else(|| dom::text_content(&name));
-        // lodash's `capitalize` on each word.
+        // Each word lower-cased with its first letter upper-cased.
         text.split(' ')
             .map(|word| upper_first(&word.to_lowercase()))
             .collect::<Vec<_>>()
@@ -327,7 +327,7 @@ fn is_issue(href: &str, text: &str) -> bool {
         && ISSUE_KEY.is_match(text)
 }
 
-/// Whether a link tracks a shipment; `href` is lowercased.
+/// Whether a link tracks a shipment. `href` is lowercased.
 fn is_tracking(href: &str, text: &str) -> bool {
     if href.contains("linear.app/") {
         return false;
@@ -398,7 +398,7 @@ fn calendar_data(root: &NodeRef) -> CalendarData {
                 .trim()
                 .to_owned()
         });
-    // Empty text counts as none (`a || b`).
+    // Empty text counts as none.
     let (response_comment, updated_fields) = (
         response_comment.filter(|text| !text.is_empty()),
         updated_fields.filter(|text| !text.is_empty()),
@@ -447,7 +447,7 @@ mod tests {
                 source: Some(ActionSource::LdJson)
             }]
         );
-        // Unnamed, it's named after the host; `https://schema.org` isn't recognized.
+        // An unnamed action is named after the host, and `https://schema.org` isn't recognized.
         let unnamed = r#"<script type="application/ld+json">[{"@context":"http://schema.org","action":{"@type":"TrackAction","url":"https://docs.google.com/x"}}]</script>"#;
         assert_eq!(
             texts(unnamed),

@@ -31,8 +31,8 @@ const RING: f32 = 2.0;
 /// Classic's lozenges: the word being typed pink, the operators typed before it blue.
 const CURRENT_LOZENGE: [u8; 3] = [249, 150, 255];
 const LOZENGE: [u8; 3] = [84, 172, 220];
-/// A lozenge's fill and ring: `rgba(…, .2)` both in Snow; in Carbon the fill solid (`#f996ff`,
-/// `#54acdc`), the ring still `.2`.
+/// A lozenge's fill and ring, both `rgba(…, .2)` in Snow. In Carbon the fill is solid
+/// (`#f996ff`, `#54acdc`) and the ring still `.2`.
 fn lozenge_colors(ctx: &egui::Context, current: bool) -> (Color32, Color32) {
     let [r, g, b] = if current { CURRENT_LOZENGE } else { LOZENGE };
     let faint = Color32::from_rgba_unmultiplied(r, g, b, 51);
@@ -115,9 +115,9 @@ fn below_bar(search: &Search, history: &[SearchHistoryItem]) -> f32 {
 pub(crate) struct BarResponse {
     /// What the bar asks of the app.
     pub effects: Vec<Effect>,
-    /// The close button was clicked.
+    /// Whether the close button was clicked.
     pub close: bool,
-    /// The bar was clicked while the results had the keyboard.
+    /// Whether the bar was clicked while the results had the keyboard.
     pub focus: bool,
 }
 
@@ -199,7 +199,7 @@ pub(crate) fn show_bar(
             CCursorRange::two(CCursor::new(0), CCursor::new(text.chars().count())),
         );
     }
-    // Where the caret is after this frame's typing: suggestions for it show only with the caret at
+    // Where the caret is after this frame's typing, since suggestions show only with the caret at
     // the end (checked once the field has taken the keystroke).
     let chars = text.chars().count();
     search.caret_at_end = egui::text_edit::TextEditState::load(ui.ctx(), field.id)
@@ -327,7 +327,8 @@ fn paint_underlay(painter: &Painter, line: Rect, search: &Search) {
         None => ("Search", ""),
     };
     let underlay = format!("{head}{current}");
-    // The underlay is set as the field is: no ligatures, so it lines up with the field's text.
+    // The underlay is set as the field is, without ligatures, so it lines up with the field's
+    // text.
     let style = INPUT.without_ligatures();
     let x = |offset: usize| line.left() + style.width(ctx, &underlay[..offset]);
     let lozenge = |from: usize, to: usize, current: bool| {
@@ -345,7 +346,7 @@ fn paint_underlay(painter: &Painter, line: Rect, search: &Search) {
             egui::StrokeKind::Outside,
         );
     };
-    // Each operator and its value in a lozenge; a quoted value runs to its closing quote.
+    // Each operator and its value in a lozenge. A quoted value runs to its closing quote.
     let mut offset = 0;
     while offset < head.len() {
         let Some(found) = LOZENGED.find(&head[offset..]) else {

@@ -1,6 +1,6 @@
 //! Words and their readings: splitting the input, and every reading each word can have by prefix.
-//! `t` reads as `tomorrow`, `today`, `tuesday`, `thursday`, `the`, `this`, …; the grammar decides
-//! which make sense.
+//! `t` reads as `tomorrow`, `today`, `tuesday`, `thursday`, `the`, `this`, …, and the grammar
+//! decides which make sense.
 
 use std::rc::Rc;
 
@@ -104,8 +104,8 @@ pub(super) enum Tag {
 #[derive(Clone, Debug)]
 pub(super) struct Token {
     pub kind: Kind,
-    /// The vocabulary's word (`monday`, `pm`, `hours`), or the typed number; `""` for a guessed
-    /// quantity, which the interpreters mostly skip.
+    /// The vocabulary's word (`monday`, `pm`, `hours`), or the typed number, with `""` for a
+    /// guessed quantity, which the interpreters mostly skip.
     pub value: Rc<str>,
     /// Its number: the typed value, a list position (Sunday 0, January 0, `qone` 0), or an
     /// hour such as `1530`.
@@ -396,7 +396,7 @@ impl Vocabulary {
     }
 
     /// Numbers under 1000 as typed, or spelled out (`two`, `thirty`; `forty` isn't one in the
-    /// calendar), which cost confidence: a lot when the word was complete and another matched.
+    /// calendar), which cost confidence, a lot when the word was complete and another matched.
     fn quantities(&self, word: &str, number: f64) -> Vec<Token> {
         if number.is_nan() && !word.is_empty() {
             let exact = NUMBERS.contains(&word);
@@ -581,7 +581,7 @@ pub(super) fn tokenize(text: &str, vocabulary: &Vocabulary) -> Vec<Vec<Token>> {
 }
 
 /// The input's words, lower-cased: numbers (with one decimal, `1.5`), letter runs, and
-/// `: / \ - @ & –`; anything else separates.
+/// `: / \ - @ & –`. Anything else separates.
 fn split(text: &str) -> Vec<String> {
     let chars: Vec<char> = text.to_lowercase().chars().collect();
     let mut words = Vec::new();

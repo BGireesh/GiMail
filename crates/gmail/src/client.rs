@@ -16,15 +16,16 @@ use crate::error::{Error, ErrorResponse};
 /// Boxed future returned by [`TokenProvider::access_token`].
 pub type TokenFuture<'a> = Pin<Box<dyn Future<Output = Result<String, Error>> + Send + 'a>>;
 
-/// Supplies OAuth access tokens. Implement it to plug in refresh and persistence; it is called
-/// once per request (once per batch), so cache the token and refresh it shortly before expiry.
+/// Supplies OAuth access tokens. Implement it to plug in refresh and persistence. The client
+/// calls it once per request (once per batch), so cache the token and refresh it shortly before
+/// expiry.
 pub trait TokenProvider: Send + Sync {
     /// A currently valid access token.
     fn access_token(&self) -> TokenFuture<'_>;
 
     /// Google rejected `token`, which this provider handed out (the client calls this on every
     /// 401). Drop it if it's still the cached one, so the next
-    /// [`access_token`](Self::access_token) call mints a fresh token; requests rejected together
+    /// [`access_token`](Self::access_token) call mints a fresh token. Requests rejected together
     /// name the same token, so they cause one refresh. Callers retry once afterwards. The
     /// default does nothing, for providers that can't refresh.
     fn invalidate(&self, _token: &str) {}
@@ -118,8 +119,8 @@ impl Client {
         self.tokens.access_token().await
     }
 
-    /// Hands `token` back to the provider when Google answered a request made with it `status`
-    /// 401.
+    /// Hands `token` back to the provider when `status` is 401, which means Google rejected the
+    /// request made with it.
     pub(crate) fn invalidate_on_401(&self, status: StatusCode, token: &str) {
         if status == StatusCode::UNAUTHORIZED {
             self.tokens.invalidate(token);
@@ -137,11 +138,11 @@ pub struct Call<'a, T> {
 }
 
 /// How far a call's transfer has come: the media an upload sends, or the body a download
-/// receives. Called as each chunk goes or arrives; a call retried starts again from 0.
+/// receives. It's called as each chunk goes or arrives. A retried call starts again from 0.
 pub type Progress = Arc<dyn Fn(Transfer) + Send + Sync>;
 
-/// Bytes moved so far, and how many there are when known (an upload always knows; a download
-/// knows when Google sends a `Content-Length`).
+/// Bytes moved so far, and how many there are when known. An upload always knows the total, and
+/// a download knows it when Google sends a `Content-Length`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Transfer {
     /// Sent or received so far.
@@ -150,7 +151,7 @@ pub struct Transfer {
     pub total: Option<u64>,
 }
 
-/// What an upload's body is streamed in, so its progress moves in steps this size.
+/// The chunk size an upload's body is streamed in, so its progress moves in steps this size.
 const UPLOAD_CHUNK: usize = 64 << 10;
 
 /// A request in transport-neutral form, so a call can run alone or inside a batch.
@@ -186,15 +187,15 @@ impl<'a, T> Call<'a, T> {
         }
     }
 
-    /// Reports the transfer as it goes to `progress`: the upload's body when the call sends
-    /// media, else the response's. Batches don't report.
+    /// Reports the transfer to `progress` as it goes. That's the upload's body when the call
+    /// sends media, and the response's body otherwise. Batches don't report.
     pub fn on_progress(mut self, progress: Progress) -> Self {
         self.progress = Some(progress);
         self
     }
 
-    /// The same request with its response read as `U`: a type of the caller's that keeps what
-    /// the API's own model would leave out (the raw source viewer shows Gmail's JSON as sent).
+    /// The same request with its response read as `U`, a caller's type that keeps what the API's
+    /// own model would leave out. For example, the raw source viewer shows Gmail's JSON as sent.
     pub fn returning<U>(self) -> Call<'a, U> {
         Call {
             client: self.client,
@@ -247,7 +248,7 @@ impl<'a, T> Call<'a, T> {
         call
     }
 
-    /// The Gmail quota units this call costs ([`crate::quota::units`]); 0 for other APIs.
+    /// The Gmail quota units this call costs ([`crate::quota::units`]), or 0 for other APIs.
     #[must_use]
     pub fn units(&self) -> u32 {
         let url = &self.request.url;
@@ -353,7 +354,7 @@ pub(crate) fn decode<T: DeserializeOwned>(status: StatusCode, body: &[u8]) -> Re
 
 /// A successful response's body as `T`.
 pub(crate) fn parse<T: DeserializeOwned>(body: &[u8]) -> serde_json::Result<T> {
-    // Deletes and batch modifies answer 204 with no body; `()` deserializes from `null`.
+    // Deletes and batch modifies answer 204 with no body, and `()` deserializes from `null`.
     let body = if body.iter().all(u8::is_ascii_whitespace) {
         b"null".as_slice()
     } else {

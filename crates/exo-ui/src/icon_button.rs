@@ -1,6 +1,6 @@
-//! Icon buttons: a bare icon that darkens while the pointer is over its (usually larger) hit
-//! area, as the header's, the footer's and rows' actions do (Classic's legacy icons go from 30% to
-//! 50% over `opacity 150ms ease`), under the pointing hand.
+//! Icon buttons, each a bare icon under the pointing hand that darkens while the pointer is over
+//! its (usually larger) hit area. The header's, the footer's and rows' actions work this way, and
+//! Classic's legacy icons go from 30% to 50% over `opacity 150ms ease`.
 
 use egui::{Color32, CursorIcon, Id, Image, Rect, Response, Sense, Ui, Vec2};
 
@@ -26,7 +26,8 @@ impl<'a> IconButton<'a> {
         }
     }
 
-    /// Shows the icon as hovered while `lit`: the keyboard is on it (`:focus-visible`).
+    /// Shows the icon as hovered while `lit`, which is when the keyboard is on it
+    /// (`:focus-visible`).
     pub fn lit(self, lit: bool) -> Self {
         Self { lit, ..self }
     }

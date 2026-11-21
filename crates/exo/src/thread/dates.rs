@@ -1,5 +1,5 @@
-//! Which day a date detected in a message means, read against the day the message was sent: what
-//! its hover shows and its click starts an event on.
+//! Which day a date detected in a message means, read against the day the message was sent. It's
+//! the day the date's hover shows and its click starts an event on.
 
 use jiff::{ToSpan as _, Zoned, civil::Date};
 
@@ -56,7 +56,7 @@ pub(crate) fn resolve(text: &str, sent: &Zoned) -> Option<Date> {
                 piece(2)?.parse().ok()?,
             ))
         } else {
-            // en-US writes the month first; a first number over 12 can only be a day.
+            // en-US writes the month first, but a first number over 12 can only be a day.
             let (mut month, mut day): (i8, i8) = (piece(0)?.parse().ok()?, piece(1)?.parse().ok()?);
             if month > 12 && day <= 12 {
                 (month, day) = (day, month);
@@ -75,8 +75,9 @@ pub(crate) fn resolve(text: &str, sent: &Zoned) -> Option<Date> {
         if has_year {
             return Date::new(year?, month, day).ok();
         }
-        // Without a year: last year's within the past two weeks, else this year's unless it's more
-        // than two weeks gone, then next year's.
+        // Without a year, it's last year's date if that's within the past two weeks. Otherwise
+        // it's this year's, unless that's more than two weeks gone, in which case it's next
+        // year's.
         let on = |year: i16| Date::new(year, month, day).ok();
         let days = |date: Date| (date - today).get_days();
         let (previous, current, next) =
@@ -91,7 +92,7 @@ pub(crate) fn resolve(text: &str, sent: &Zoned) -> Option<Date> {
         };
     }
     // Weekdays and words (`tomorrow`, `next Friday`) go through the time parser, from the start
-    // of the day; `last` is the coming one less a week.
+    // of the day. `last` is the coming one less a week.
     let midnight = sent.start_of_day().ok()?;
     let lower = text.to_lowercase();
     let (text, back) = match (
@@ -112,10 +113,10 @@ pub(crate) fn resolve(text: &str, sent: &Zoned) -> Option<Date> {
     }
 }
 
-/// What a date detected in a draft says moved `days` on from the day it means today, counted from
-/// `now`'s day: `today`, `tomorrow`, its weekday up to six days on (`on Friday` if it said `on`
-/// before a weekday or word), `next Friday` up to ten, else `November 25th` (`, 2027` in another
-/// year), as for a day gone by.
+/// What a date detected in a draft says once it's moved `days` on from the day it means today.
+/// Counted from `now`'s day, it's `today`, `tomorrow`, its weekday up to six days on (`on Friday`
+/// if it said `on` before a weekday or word), `next Friday` up to ten, else `November 25th`
+/// (`, 2027` in another year), as for a day gone by.
 pub(crate) fn shift(text: &str, days: i64, now: &Zoned) -> Option<String> {
     let day = resolve(text, now)?.checked_add(days.days()).ok()?;
     let parts = exo_mail::date_parts(text)?;
@@ -148,7 +149,7 @@ pub(crate) fn shift(text: &str, days: i64, now: &Zoned) -> Option<String> {
     })
 }
 
-/// A written year: two digits are this century's.
+/// A written year, where two digits mean a year in this century.
 fn year_of(year: &str) -> Option<i16> {
     let parsed: i16 = year.parse().ok()?;
     Some(if year.len() <= 2 {

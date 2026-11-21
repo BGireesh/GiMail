@@ -1,6 +1,6 @@
-//! The grammar: rules are runs of reading kinds, each optional (`?`), completed when the input
+//! The grammar. Rules are runs of reading kinds, each optional (`?`), completed when the input
 //! stops right before it (`>`), or never completed (`-`). Every way a rule can take the words'
-//! readings is a parse; where the input stops, the next element is completed with each of its
+//! readings is a parse. Where the input stops, the next element is completed with each of its
 //! readings, which is how `in 2` offers minutes, hours and days.
 
 use std::sync::OnceLock;
@@ -44,9 +44,9 @@ struct Base {
     rule: &'static str,
     interpreter: Interpreter,
     confidence: f64,
-    /// Reminders: no time may come with it.
+    /// For reminders, no time may come with it.
     no_time: bool,
-    /// Calendar: the time and duration may also come before it.
+    /// For the calendar, the time and duration may also come before it.
     expanded: bool,
 }
 
@@ -344,8 +344,8 @@ mod tests {
 
     #[test]
     fn bases_expand_into_every_arrangement() {
-        // Reminders: 13 bases with a time before or after them, 6 without; the calendar's 12
-        // bases with 25 arrangements each, `today` and `tomorrow` 2 more.
+        // For reminders, 13 bases with a time before or after them and 6 without. For the
+        // calendar, 12 bases with 25 arrangements each, and `today` and `tomorrow` 2 more.
         assert_eq!(rules(false, true).len(), 32);
         assert_eq!(rules(true, true).len(), 304);
         let first = &rules(true, true)[0];

@@ -24,8 +24,8 @@ pub const KEYCAP_GAP: f32 = 4.0;
 /// A token that's text between caps rather than a cap: `⌘ K → Open Week`'s arrow, with no margin
 /// before it.
 pub const KEYCAP_ARROW: &str = " → ";
-/// How far a cap's label's baseline is below its top: an inline cap's top is this far above the
-/// text's baseline.
+/// How far a cap's label's baseline is below its top, which is also how far an inline cap's top
+/// sits above the text's baseline.
 pub const KEYCAP_BASELINE: f32 = BASELINE;
 
 /// The colors keycaps take in one placement.
@@ -123,7 +123,7 @@ struct Cap {
     label_width: f32,
     width: f32,
     divider: bool,
-    /// Text between caps ([`KEYCAP_ARROW`]): no cap, no gap before it.
+    /// Text between caps ([`KEYCAP_ARROW`]), with no cap and no gap before it.
     text: bool,
 }
 
@@ -141,7 +141,7 @@ impl Keycaps {
                 let color = if divider { colors.divider } else { colors.text };
                 let mut label = LayoutJob::single_section(label.into_owned(), LABEL.format(color));
                 // Chromium's inline box is the text's advance ceiled to its 1/64px layout unit,
-                // where egui would round it to 1/32px: a cap's edges round as Chromium's do.
+                // where egui would round it to 1/32px, so a cap's edges round as Chromium's do.
                 label.round_output_to_gui = false;
                 let label_width = (ctx
                     .fonts_mut(|fonts| fonts.layout_job(label.clone()))
@@ -150,7 +150,7 @@ impl Keycaps {
                     * 64.0)
                     .ceil()
                     / 64.0;
-                // A divider keeps `min-width` but loses its padding; text is as wide as it is.
+                // A divider keeps `min-width` but loses its padding. Text is as wide as it is.
                 let padding = if divider { 0.0 } else { 2.0 * PADDING_X };
                 let width = if text {
                     label_width
@@ -181,15 +181,15 @@ impl Keycaps {
         Self { gap, ..self }
     }
 
-    /// Caps `height` tall: a cap's padding around a taller line, up to the placement's `max-height`
-    /// (19px in a dialog footer's 20px line). The labels stay put.
+    /// Caps `height` tall, with a cap's padding around a taller line, up to the placement's
+    /// `max-height` (19px in a dialog footer's 20px line). The labels stay put.
     #[must_use]
     pub fn height(self, height: f32) -> Self {
         Self { height, ..self }
     }
 
-    /// Labels whose baseline sits `baseline` below the cap's top: a placement whose line is taller
-    /// than the cap (the status bar's 24px: 14px).
+    /// Labels whose baseline sits `baseline` below the cap's top, for a placement whose line is
+    /// taller than the cap (14px in the status bar's 24px line).
     #[must_use]
     pub fn baseline(self, baseline: f32) -> Self {
         Self { baseline, ..self }
@@ -207,7 +207,7 @@ impl Keycaps {
             .sum()
     }
 
-    /// Paints the row with the first cap's gap starting at `left`, caps' tops at `top`.
+    /// Paints the row with the first cap's gap starting at `left` and the caps' tops at `top`.
     pub fn paint(&self, painter: &Painter, left: f32, top: f32) {
         let line_top = top + self.baseline - LABEL.baseline(painter.ctx());
         let mut x = left;

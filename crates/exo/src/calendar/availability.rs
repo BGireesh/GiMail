@@ -1,5 +1,6 @@
-//! Free times as text: the slots picked on the week, merged and split by day in the zone they're
-//! shared in, written as one sentence for a day of up to three slots, else as a list of days.
+//! Free times as text. The slots picked on the week are merged and split by day in the zone
+//! they're shared in, then written as one sentence for a day of up to three slots, or else as a
+//! list of days.
 
 use jiff::{ToSpan, Zoned, civil::Date, tz::TimeZone};
 
@@ -88,7 +89,7 @@ pub fn text(
         None => String::new(),
     };
     let who = if several_of_us(people) { "We" } else { "I" };
-    // Both left out leave the template's two spaces.
+    // With the length and `on` both left out, the template's two spaces remain.
     let length = if all_meeting_length {
         ""
     } else {
@@ -102,8 +103,8 @@ pub fn text(
     format!("Does {length}{on} {day} work? {who} can do {ranges} {zone}.")
 }
 
-/// The slots in `tz`, overlapping ones merged (across days too), each cut at midnight, grouped by
-/// their start's day in order.
+/// The slots in `tz`, with overlapping ones merged (across days too) and each cut at midnight,
+/// grouped in order by the day they start on.
 pub fn by_day(slots: &[(Zoned, Zoned)], tz: &TimeZone) -> Vec<(Date, Vec<(Zoned, Zoned)>)> {
     let mut sorted: Vec<(Zoned, Zoned)> = slots
         .iter()
@@ -137,7 +138,7 @@ pub fn by_day(slots: &[(Zoned, Zoned)], tz: &TimeZone) -> Vec<(Date, Vec<(Zoned,
     days
 }
 
-/// A slot over midnight as one piece a day; one ending at midnight doesn't reach the next.
+/// A slot over midnight as one piece a day. A slot ending at midnight doesn't reach the next day.
 fn split_across_days((start, end): &(Zoned, Zoned)) -> Vec<(Zoned, Zoned)> {
     let midnight = |date: Date| date.to_zoned(start.time_zone().clone()).ok();
     let mut last = end.date();
@@ -169,7 +170,7 @@ fn split_across_days((start, end): &(Zoned, Zoned)) -> Vec<(Zoned, Zoned)> {
     pieces
 }
 
-/// Several of us meet: someone outside and a teammate besides me.
+/// Several of us meet when there's someone outside and a teammate besides me.
 fn several_of_us(people: &[Person]) -> bool {
     people.iter().any(|person| !person.internal)
         && people
@@ -209,9 +210,9 @@ fn clock(at: &Zoned) -> (String, &'static str) {
     )
 }
 
-/// A day, relative while it's near: `today (Nov 17)`, `tomorrow (Nov 18)`, `Wed Nov 25` within
-/// the week, `Nov 30` after, the year added outside this one (`Jan 5 2027`). `now` is in `at`'s
-/// zone.
+/// A day, relative while it's near: `today (Nov 17)`, `tomorrow (Nov 18)`, `Tue Nov 24` within
+/// the next seven days, `Nov 25` after, and with the year added outside this one (`Jan 5 2027`).
+/// `now` is in `at`'s zone.
 pub fn semi_relative(at: &Zoned, now: &Zoned) -> String {
     let today = now.date();
     let month_day = format!("{} {}", at.strftime("%b"), at.day());
@@ -238,8 +239,8 @@ pub fn semi_relative(at: &Zoned, now: &Zoned) -> String {
     }
 }
 
-/// The zone's abbreviation at `at`, a bare offset written as one (`-03` is `GMT−03:00`, `+0530`
-/// is `GMT+05:30`).
+/// The zone's abbreviation at `at`, with a bare offset written as a GMT offset (`-03` is
+/// `GMT−03:00`, `+0530` is `GMT+05:30`).
 pub fn abbreviation(tz: &TimeZone, at: jiff::Timestamp) -> String {
     let abbreviation = tz.to_offset_info(at).abbreviation().to_owned();
     if !abbreviation.chars().any(|ch| ch.is_ascii_digit()) {
@@ -399,7 +400,7 @@ mod tests {
             render(&one, 30, &[ME, TEAMMATE, OUTSIDE]),
             "Does  Fri Nov 20 work? We can do 2:00–2:30 pm EST."
         );
-        // An outsider alone, or a teammate alone, is still I.
+        // With only an outsider, or only a teammate, the text still says I.
         assert_eq!(
             render(&one, 30, &[ME, OUTSIDE]),
             "Does  Fri Nov 20 work? I can do 2:00–2:30 pm EST."
@@ -486,7 +487,7 @@ mod tests {
             render(&overlapping, 30, &[ME]),
             "Does 30 min on Fri Nov 20 work? I can do 2:00–4:00 pm EST."
         );
-        // 11 pm to 1 am is a piece on each day; one ending at midnight stays on its day.
+        // 11 pm to 1 am is a piece on each day. A slot ending at midnight stays on its day.
         let late = [(at(11, 20, 23, 0), at(11, 21, 1, 0))];
         assert_eq!(
             render(&late, 30, &[ME]),

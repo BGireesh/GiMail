@@ -69,7 +69,7 @@ impl Calendars {
     }
 
     /// Every concrete occurrence in `[min, max)`: single events, generated instances of
-    /// recurring events, and exceptions. Cancelled ones are included; callers filter.
+    /// recurring events, and exceptions. Cancelled ones are included, and callers filter.
     pub fn occurrences(&self, calendar_id: &str, min: Timestamp, max: Timestamp) -> Vec<Event> {
         let mut out = Vec::new();
         for stored in self.stored(calendar_id) {

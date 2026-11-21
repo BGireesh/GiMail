@@ -1,7 +1,7 @@
-//! ⌘C in the list: the cursor's conversation copied as the thread view's ⌘C copies it, without
-//! opening it. A conversation of one message copies as that message, of more as the conversation.
-//! Its bodies come from the store (sync usually has them already) and are rendered off screen for
-//! their new parts.
+//! ⌘C in the list copies the cursor's conversation the way ⌘C in the thread view does, without
+//! opening it. A conversation of one message copies as that message, and a longer one as the
+//! conversation. The bodies come from the store (sync usually has them already) and are rendered
+//! off screen to find their new parts.
 
 use std::sync::{
     Arc,
@@ -53,8 +53,8 @@ pub(crate) fn conversation_hint() -> Hint {
 }
 
 impl Mail {
-    /// ⌘C in the list: starts copying the cursor's conversation, unless several are selected or
-    /// it's a new message being written.
+    /// ⌘C in the list. Starts copying the cursor's conversation, unless several are selected or
+    /// the conversation is a new message being written.
     pub(crate) fn copy_listed(&mut self) {
         if self.inbox.is_selecting() {
             return;
@@ -120,8 +120,8 @@ impl Mail {
         }
     }
 
-    /// Conversation `id`'s messages, rendered: if it's the one being copied, onto the clipboard
-    /// it goes.
+    /// The messages of conversation `id` were rendered. If it's the conversation being copied,
+    /// its copy goes onto the clipboard.
     pub(crate) fn copy_listed_rendered(&mut self, id: &str, facts: &[(String, Facts)]) {
         let Some((_, Some(detail))) = self
             .copy_listed

@@ -134,7 +134,7 @@ fn ime_composition_inserts_once_on_commit() {
 #[test]
 fn double_click_selects_a_word_and_triple_click_the_line() {
     let mut harness = harness("<div>hello brave world</div>", Shared::default());
-    // "hello brave world": the middle of "brave".
+    // The middle of "brave" in "hello brave world".
     click(&mut harness, pos2(ORIGIN.x + 52.0, 30.0), 2);
     assert_eq!(harness.state().editor.selected_text(), "brave");
     click(&mut harness, pos2(ORIGIN.x + 52.0, 30.0), 1);
@@ -245,7 +245,8 @@ fn dragging_selects_across_blocks() {
 
 #[test]
 fn a_pasted_colour_that_isnt_ascii_draws() {
-    // Six bytes after `#`, but not six hex digits: slicing them by byte would split the `é`.
+    // Six bytes follow `#`, but they aren't six hex digits, and slicing them by byte would split
+    // the `é`.
     let mut harness = harness("<div>plain</div>", Shared::default());
     harness
         .state_mut()
@@ -269,7 +270,7 @@ fn undo_brings_back_what_was_cut() {
     harness.input_mut().events.push(Event::Cut);
     harness.run_steps(1);
     assert_eq!(clipboard.0.borrow().1.as_deref(), Some("def"));
-    // A format at the caret records an undo step; it mustn't replace the one before the cut.
+    // A format at the caret records an undo step, which mustn't replace the one before the cut.
     harness
         .state_mut()
         .editor
@@ -400,7 +401,8 @@ fn random_input_through_the_widget() {
 
 #[test]
 fn a_composition_ends_when_the_editor_loses_focus() {
-    // The IME's commit or cancel then goes elsewhere; typing afterwards must still reach the body.
+    // The IME's commit or cancel then goes elsewhere, and typing afterwards must still reach the
+    // body.
     let mut harness = harness("<div>a</div>", Shared::default());
     harness
         .input_mut()
@@ -435,7 +437,7 @@ fn copying_up_to_a_table_leaves_the_table_out() {
 
 #[test]
 fn shift_down_after_down_keeps_the_column() {
-    // egui reports Shift itself as a key: pressing it before ↓ mustn't forget where the caret
+    // egui reports Shift itself as a key, so pressing it before ↓ mustn't forget where the caret
     // came from (Chromium's `x_pos_for_vertical_arrow_navigation`).
     let mut harness = harness(
         "<div>first line here</div><div>short</div><div>third long line here</div>",

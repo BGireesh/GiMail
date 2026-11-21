@@ -1,7 +1,7 @@
-//! An event's description as the event details show it: Calendar's boilerplate lines dropped and
-//! newlines made `<br>`s, sanitized like a message (exo-mail's sanitizer, `<style>` forbidden),
-//! then read into lines of text and links: blocks and `<br>`s break lines, list items are
-//! indented 32px behind a bullet or number, `<b>`/`<strong>` are bold.
+//! An event's description as the event details show it. Calendar's boilerplate lines are dropped
+//! and newlines become `<br>`s. The result is sanitized like a message (exo-mail's sanitizer, with
+//! `<style>` forbidden), then read into lines of text and links: blocks and `<br>`s break lines,
+//! list items are indented 32px behind a bullet or number, and `<b>`/`<strong>` are bold.
 
 use std::sync::LazyLock;
 
@@ -26,8 +26,8 @@ static USELESS: LazyLock<[Regex; 5]> = LazyLock::new(|| {
     .map(|pattern| Regex::new(pattern).expect("valid regex"))
 });
 
-/// `description` without Calendar's boilerplate, as an invite's About has it: the first three
-/// patterns drop their first match, the others every one; then trimmed.
+/// `description` without Calendar's boilerplate, as an invite's About has it. The first three
+/// patterns drop their first match and the others drop every match, then the result is trimmed.
 pub(crate) fn clean(description: &str) -> String {
     let mut cleaned = description.to_owned();
     for (at, pattern) in USELESS.iter().enumerate() {
@@ -78,7 +78,7 @@ struct Style {
 struct Reader {
     lines: Vec<Line>,
     current: Line,
-    /// The lists being read: ordered or not, and items so far.
+    /// The lists being read, each with whether it's ordered and how many items it has so far.
     lists: Vec<(bool, usize)>,
 }
 

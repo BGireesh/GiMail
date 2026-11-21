@@ -140,7 +140,7 @@ fn harness(body: &str, words: &Words) -> Harness<'static, State> {
             },
         );
     harness.run_steps(2);
-    // Focus, the caret at the end.
+    // Focus the editor with the caret at the end.
     let at = pos2(290.0, 30.0);
     harness.input_mut().events.push(Event::PointerMoved(at));
     harness.input_mut().events.push(Event::PointerButton {
@@ -293,8 +293,8 @@ fn marks_follow_the_edits_around_them() {
         [misspelled(1, 2..5)],
         "a line and a word before it"
     );
-    // Into the word: its mark goes, and the word as it reads now is checked again, its dots
-    // waiting for typing to pause.
+    // Moving into the word takes its mark away. The word as it reads now is checked again, and its
+    // dots wait for typing to pause.
     key(&mut harness, Key::ArrowRight, Modifiers::NONE);
     key(&mut harness, Key::ArrowRight, Modifiers::NONE);
     key(&mut harness, Key::ArrowRight, Modifiers::NONE);
@@ -343,7 +343,7 @@ fn the_pill_undoes_a_correction() {
     key(&mut harness, Key::Enter, Modifiers::NONE);
     assert_eq!(text(&harness), "teh ");
     assert_eq!(marks(&mut harness), [misspelled(0, 0..3)]);
-    // Undone, it isn't corrected again.
+    // Once the correction is undone, the word isn't corrected again.
     key(&mut harness, Key::End, Modifiers::NONE);
     type_text(&mut harness, "teh ");
     assert_eq!(text(&harness), "teh teh ");
@@ -372,7 +372,7 @@ fn the_pill_offers_corrections_and_learns_a_word() {
             true
         )
     );
-    // ←/→ go round the corrections and Learn; Escape puts it away until the caret leaves.
+    // ←/→ go round the corrections and Learn. Escape puts the pill away until the caret leaves.
     key(&mut harness, Key::ArrowDown, Modifiers::NONE);
     key(&mut harness, Key::ArrowLeft, Modifiers::NONE);
     assert_eq!(
@@ -399,8 +399,8 @@ fn the_pill_offers_corrections_and_learns_a_word() {
         [corrected(0, 2..5, "dgo", true), misspelled(0, 10..13)]
     );
 
-    // Learning the other: its marks go everywhere, the correction's too
-    // (`[data-incorrect="dgo"]`), and the app hears of it.
+    // Learning the other word takes its marks away everywhere, the mark of the correction made
+    // from `dgo` too, and the app hears of it.
     key(&mut harness, Key::End, Modifiers::NONE);
     key(&mut harness, Key::ArrowLeft, Modifiers::NONE);
     rest(&mut harness);
@@ -427,7 +427,7 @@ fn a_misspelling_being_typed_offers_its_correction() {
         (pill.kind, pill.items.as_slice()),
         (SuggestionKind::Single, &["the".to_owned()][..])
     );
-    // Turned down, the word is marked and left as typed.
+    // When the correction is turned down, the word is marked and left as typed.
     key(&mut harness, Key::Escape, Modifiers::NONE);
     assert_eq!(marks(&mut harness), [misspelled(0, 0..3)]);
     type_text(&mut harness, " ");
@@ -448,11 +448,12 @@ fn autocomplete_finishes_the_word_at_the_end_of_a_line() {
         "yes…: the likeliest completion"
     );
     type_text(&mut harness, "te");
-    // Typing its letters takes them; Backspace gives them back.
+    // Typing the completion's letters takes them from the ghost text, and Backspace gives them
+    // back.
     key(&mut harness, Key::Backspace, Modifiers::NONE);
     key(&mut harness, Key::Tab, Modifiers::NONE);
     assert_eq!(text(&harness), "yesterday");
-    // Not mid-line.
+    // A word typed mid-line isn't completed.
     key(&mut harness, Key::Home, Modifiers::NONE);
     type_text(&mut harness, "yest ");
     assert_eq!(text(&harness), "yest yesterday");
@@ -559,7 +560,7 @@ fn a_capitalisation_is_made_once_a_paragraph_and_never_again_once_undone_by_hand
         "once in its paragraph"
     );
     assert_eq!(marks(&mut harness), [corrected(0, 12..18, "monday", false)]);
-    // Edited by hand, it's rejected.
+    // Once edited by hand, the capitalisation is rejected.
     press(&mut harness, Key::ArrowLeft, 12);
     press(&mut harness, Key::Backspace, 1);
     type_text(&mut harness, "y");

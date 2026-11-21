@@ -101,9 +101,9 @@ fn check(steps: &[Step], expected: &str) {
 
 #[test]
 fn bold_then_a_nested_list() {
-    // `Hello <b>`, not `Hello&nbsp;<b>`: the space typed at the line's end doesn't stay a
-    // no-break space once ⌘B moves typing into a new text node; it's written as the finished line
-    // needs it.
+    // The body has `Hello <b>`, not `Hello&nbsp;<b>`. The space typed at the line's end doesn't
+    // stay a no-break space once ⌘B moves typing into a new text node. It's written as the finished
+    // line needs it.
     check(
         &[
             Type("Hello "),
@@ -374,8 +374,8 @@ fn quote() -> String {
 
 #[test]
 fn reply_sent_without_opening_the_quote() {
-    // No read statuses and no "Sent via" line: the pixel slot is empty and the signature block
-    // holds nothing.
+    // With no read statuses and no "Sent via" line, the pixel slot is empty and the signature
+    // block holds nothing.
     let editor = run(&[
         Type("Hello "),
         Press("Meta+b"),
@@ -454,7 +454,7 @@ fn changing_from_swaps_an_untouched_signature() {
         html.starts_with(r#"<div class=""><div class=""><div class=""><div class="">hi"#),
         "the body stays: {html}"
     );
-    // Edited, it stays as the user left it.
+    // An edited signature stays as the user left it.
     let mut edited = Editor::from_html(&html.replace("Hello from Maya", "Cheers"));
     assert!(!edited.switch_signature(id, &hello, &maya));
     assert!(edited.html().contains("Cheers"));

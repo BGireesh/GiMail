@@ -25,7 +25,7 @@ const APP_CLASSES: &[&str] = &[
     "Exo-quoting-ellipsis",
 ];
 
-/// How deep elements nest: deeper ones become siblings, as Chromium's parser
+/// How deep elements nest. Deeper ones become siblings, as Chromium's parser
 /// (`kMaximumHTMLParserDOMTreeDepth`) makes them. It also keeps every later pass, and Blitz, off a
 /// deep stack.
 const MAX_DEPTH: usize = 512;
@@ -348,8 +348,8 @@ impl Janitor {
     /// Image sources. Remote images load directly, with no proxy, so only hosted emoji images,
     /// read-receipt pixels (`mail.superhuman.com/~backend/read/…`), `cid:` attachments and
     /// non-HTTP sources change. Inline attachments keep their `cid:` URL, which the view's fetch
-    /// hook resolves. Every read-receipt pixel goes, whoever it's addressed to: it's a tracker
-    /// either way.
+    /// hook resolves. Every read-receipt pixel goes, whoever it's addressed to, because it's a
+    /// tracker either way.
     fn fix_sources(&self, node: &NodeRef) -> Verdict {
         for name in ["src", "background", "poster"] {
             let Some(value) = dom::attr(node, name).filter(|v| !v.is_empty()) else {
@@ -394,7 +394,7 @@ impl Janitor {
     }
 }
 
-/// DOMPurify's guard against markup hiding in text: text that reads as tags in a raw-text element,
+/// DOMPurify's guard against markup hiding in text. Text that reads as tags in a raw-text element,
 /// or beside a comment, could come back as unsanitized elements when the serialized HTML is parsed
 /// again in another context.
 fn hides_markup(node: &NodeRef, tag: &str) -> bool {
@@ -408,8 +408,8 @@ fn hides_markup(node: &NodeRef, tag: &str) -> bool {
     !has_elements && children.iter().any(dom::is_comment) && reads_as_markup()
 }
 
-/// DOMPurify's namespace check: an element may only be where parsing could have put it, so
-/// its serialization parses back into the same namespaces instead of turning text into elements.
+/// DOMPurify's namespace check. An element may only be where parsing could have put it, so its
+/// serialization parses back into the same namespaces instead of turning text into elements.
 fn has_valid_namespace(node: &NodeRef, tag: &str, parent: &NodeRef) -> bool {
     use Namespace::{Html, MathMl, Svg};
     let (parent_namespace, parent_tag) = match dom::tag(parent) {
@@ -438,8 +438,8 @@ fn has_valid_namespace(node: &NodeRef, tag: &str, parent: &NodeRef) -> bool {
     }
 }
 
-/// DOMPurify's attribute pass (values trimmed, but `value`'s), plus, for a message, no `tabindex`
-/// or `autoplay`.
+/// DOMPurify's attribute pass (values trimmed, except `value`'s), plus, for a message, no
+/// `tabindex` or `autoplay`.
 fn sanitize_attributes(node: &NodeRef, tag: &str, mode: Mode) {
     dom::retain_attrs(node, |name, value| {
         let name = name.to_ascii_lowercase();
@@ -494,7 +494,7 @@ fn is_attribute_whitespace(c: char) -> bool {
     )
 }
 
-/// Inline CSS: content can't opt out of clicks or selection, and a hidden `<body>` shows.
+/// Fixes inline CSS so content can't opt out of clicks or selection, and a hidden `<body>` shows.
 fn sanitize_css(node: &NodeRef, tag: &str) {
     if !dom::has_attr(node, "style") {
         return;
@@ -518,8 +518,8 @@ fn sanitize_css(node: &NodeRef, tag: &str) {
     }
 }
 
-/// Links: bare domains and addresses become URLs, `#` links target the page itself, and the rest
-/// a new window.
+/// Fixes links. Bare domains and addresses become URLs, `#` links target the page itself, and the
+/// rest a new window.
 fn open_links_in_browser(node: &NodeRef, tag: &str) {
     let href = dom::attr(node, "href");
     if let Some(href) = &href {
@@ -645,7 +645,7 @@ mod tests {
     #[test]
     fn editor_fragments_get_dompurify_without_the_message_hooks() {
         // No `target` (DOMPurify doesn't allow it), no link or source fixes, app classes and
-        // `tabindex` kept; `src-cid` is allowed.
+        // `tabindex` kept, and `src-cid` allowed.
         assert_eq!(
             sanitize_fragment(
                 "<title>t</title><div tabindex=\"1\" class=\"Theme-dark\">a <a href=\"x.com\" target=\"_blank\" onclick=\"x()\">b</a>\
@@ -654,7 +654,7 @@ mod tests {
             "<div tabindex=\"1\" class=\"Theme-dark\">a <a href=\"x.com\">b</a>\
              <img src-cid=\"c\"><img src=\"data:image/png;base64,AA\">d</div>"
         );
-        // Deeper elements become siblings, as in Chromium: none is lost, none nests past 511
+        // Deeper elements become siblings, as in Chromium. None is lost, and none nests past 511
         // inside `<body>`.
         let deep = sanitize_fragment(&("<div>".repeat(5000) + "x"));
         let nesting = deep

@@ -1,9 +1,9 @@
-//! Failed drafts: a send that failed stays in its thread as a message whose header says why,
-//! and lifts its row to the top of the Inbox, until the user deals with it. A click on that
-//! header opens `RecoverDraft`: `Send failed`, no input, `Edit Message` and `Discard`. So does a
-//! click on `Send: when online`, a reply being sent while Gmail can't be reached, and on a
-//! scheduled send's `Scheduled: {date}`, with the prompt `Send message`, the scheduled one with
-//! `Reschedule` first.
+//! Failed drafts. A send that failed stays in its thread as a message whose header says why, and
+//! lifts its row to the top of the Inbox, until the user deals with it. A click on that header
+//! opens `RecoverDraft` with the prompt `Send failed`, no input, and the rows `Edit Message` and
+//! `Discard`. A click on `Send: when online` (a reply being sent while Gmail can't be reached) or
+//! on a scheduled send's `Scheduled: {date}` opens it too, with the prompt `Send message`. For the
+//! scheduled send, `Reschedule` comes first.
 
 use exo_commands::{Command, SubPalette, Toast};
 use exo_store::{DraftAction, StoredDraft};
@@ -30,8 +30,8 @@ impl Mail {
         })
     }
 
-    /// A click on the status in message `message`'s header: `RecoverDraft` for its draft, failed,
-    /// scheduled or being sent.
+    /// A click on the status in the header of message `message`. Opens `RecoverDraft` for the
+    /// message's draft, whether it failed, is scheduled or is being sent.
     pub(super) fn recover(&mut self, message: &str) {
         let mut rows = Vec::new();
         let (prompt, edit, discard) = if let Some(draft) = self.failed_draft(message) {
@@ -41,7 +41,7 @@ impl Mail {
                 Action::DiscardFailed(draft.id.clone()),
             )
         } else if let Some(draft) = self.scheduled_draft(message) {
-            // `Reschedule` and `Edit Message` both take it back to edit.
+            // `Reschedule` and `Edit Message` both take the draft back to edit.
             rows.push(Command::new(
                 "RESCHEDULE",
                 "Reschedule",
@@ -74,8 +74,8 @@ impl Mail {
         );
     }
 
-    /// `Discard` on a send waiting to go, which cancels its send job: it goes, with the toast
-    /// whose Undo brings it back as a draft.
+    /// `Discard` on a send waiting to go, which cancels its send job. The send goes, with the
+    /// toast whose Undo brings it back as a draft.
     pub(super) fn discard_sending(&mut self, id: &str) {
         let Some(at) = self
             .compose
@@ -101,7 +101,7 @@ impl Mail {
         );
     }
 
-    /// `Edit Message`: the failed send is called off, and the draft opens to edit where it was
+    /// `Edit Message` calls off the failed send and opens the draft to edit where it was
     /// written.
     pub(super) fn edit_failed(&mut self, id: &str) {
         let Some(stored) = self
@@ -118,8 +118,8 @@ impl Mail {
         self.reopen(Open::stored(&stored), surface(&stored));
     }
 
-    /// `Edit Message` (or `Reschedule`) on a scheduled send: the send is called off, and the
-    /// draft opens to edit where it was written, its time still set.
+    /// `Edit Message` (or `Reschedule`) on a scheduled send calls off the send and opens the
+    /// draft to edit where it was written, with its time still set.
     pub(super) fn edit_scheduled(&mut self, id: &str) {
         let Some(stored) = self
             .snapshot
@@ -140,8 +140,9 @@ impl Mail {
         self.reopen(open, surface(&stored));
     }
 
-    /// `Discard`, with its toast, on a failed or scheduled send: Undo brings it back as a draft
-    /// to edit. A new message's conversation was only the draft, so it leaves the screen.
+    /// `Discard`, with its toast, on a failed or scheduled send. Undo brings the send back as a
+    /// draft to edit. A new message's conversation was only the draft, so the conversation leaves
+    /// the screen.
     pub(super) fn discard_failed(&mut self, id: &str) {
         let Some(stored) = self
             .snapshot
@@ -176,8 +177,9 @@ impl Mail {
         );
     }
 
-    /// `See Message` on a send's failure alert: the failed draft in its thread. Returns whether
-    /// there was one; a send Gmail had no copy of is a draft again, for compose to reopen.
+    /// `See Message` on a send's failure alert shows the failed draft in its thread. Returns
+    /// whether there was one. A send Gmail had no copy of is a draft again, for compose to
+    /// reopen.
     pub(super) fn see_failed(&mut self, id: &str) -> bool {
         let Some((thread, message)) = self
             .snapshot

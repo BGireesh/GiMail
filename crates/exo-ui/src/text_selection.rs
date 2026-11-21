@@ -1,7 +1,7 @@
 //! Selecting text Exo paints itself (`user-select: text`), such as a thread's subject and its
-//! header's addresses: the screen registers its selectable lines every frame in reading order, a
-//! press and drag selects from one place to another across them, the selection is painted under the
-//! glyphs (`::selection`, in the text selection color) and its text goes to ⌘C.
+//! header's addresses. The screen registers its selectable lines every frame in reading order, and
+//! a press and drag selects from one place to another across them. The selection is painted under
+//! the glyphs (`::selection`, in the text selection color), and its text goes to ⌘C.
 
 use std::sync::Arc;
 
@@ -107,9 +107,9 @@ impl TextSelection {
         })
     }
 
-    /// Handles the pointer over this frame's pieces: a press on one starts a selection there
-    /// (and returns `Some(true)` for the caller to clear any other), a press elsewhere clears it,
-    /// a drag extends it. Returns, on release, what was selected, if anything.
+    /// Handles the pointer over this frame's pieces. A press on one starts a selection there (and
+    /// returns `Some(true)` for the caller to clear any other), a press elsewhere clears it, and a
+    /// drag extends it. On release, returns what was selected, if anything.
     pub fn interact(&mut self, ui: &Ui, id: Id) -> (bool, Option<Released>) {
         let (pressed, released, pointer, origin) = ui.input(|input| {
             (
@@ -163,7 +163,7 @@ impl TextSelection {
         (started, done)
     }
 
-    /// The spot nearest `at`: in the piece under it, else the last piece starting above it.
+    /// The spot nearest `at`, in the piece under it or else the last piece starting above it.
     fn nearest(&self, at: Pos2) -> Spot {
         let index = self
             .pieces
@@ -182,7 +182,7 @@ impl TextSelection {
         (self.anchor, self.focus) = (None, None);
     }
 
-    /// The selected text, the pieces joined as they read, if anything is selected.
+    /// The selected text, with the pieces joined as they read, if anything is selected.
     pub fn text(&self) -> Option<String> {
         let mut text = String::new();
         for (index, piece) in self.pieces.iter().enumerate() {
@@ -231,7 +231,7 @@ impl Piece {
             })
     }
 
-    /// The selection's boxes for characters `from..to`: one per line box they're on.
+    /// The selection's boxes for characters `from..to`, one per line box they're on.
     fn rects(&self, from: usize, to: usize) -> Vec<Rect> {
         let mut rects = Vec::new();
         let mut start = 0;

@@ -384,8 +384,8 @@ fn stamp_new(world: &mut World, mut event: Event) -> Result<Event> {
     Ok(touch(world, conference(event)))
 }
 
-/// Answers a Meet `createRequest` with a call, as Calendar does with `conferenceDataVersion=1`:
-/// a `meet.google.com` link derived from the event's id.
+/// Answers a Meet `createRequest` with a call, as Calendar does with `conferenceDataVersion=1`.
+/// The call is a `meet.google.com` link derived from the event's id.
 fn conference(mut event: Event) -> Event {
     let Some(request) = event
         .conference_data

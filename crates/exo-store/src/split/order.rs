@@ -1,6 +1,6 @@
-//! `splitInboxesV2`: the splits by external id, and one order that places Important, Other and
-//! Inbox among them. Every write leaves the order canonical: the shown tabs first, then the
-//! splits that are off.
+//! `splitInboxesV2` holds the splits by external id, and one order that places Important, Other
+//! and Inbox among them. Every write leaves the order canonical, with the shown tabs first and
+//! then the splits that are off.
 
 use std::collections::BTreeMap;
 
@@ -99,7 +99,7 @@ impl<'a> SplitEntry<'a> {
         }
     }
 
-    /// Turned off (Important, Other and Inbox never are; they're left out instead).
+    /// Turned off (Important, Other and Inbox never are, since they're left out instead).
     pub fn is_disabled(&self) -> bool {
         matches!(self, Self::Split(split) if split.is_disabled)
     }
@@ -109,17 +109,18 @@ impl<'a> SplitEntry<'a> {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct SplitInboxesV2 {
-    /// `splitInboxes`: each split by its external id.
+    /// `splitInboxes`, each split by its external id.
     pub(crate) split_inboxes: BTreeMap<String, SplitInbox>,
-    /// `splitInboxesOrder`: external ids, Important's, Other's and Inbox's among them.
+    /// `splitInboxesOrder`, the external ids in order, with those of Important, Other and Inbox
+    /// among them.
     pub(crate) split_inboxes_order: Vec<String>,
-    /// `hideOtherWhenEmpty`: Other's tab hides while it's empty.
+    /// `hideOtherWhenEmpty`, whether Other's tab hides while it's empty.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) hide_other_when_empty: Option<bool>,
 }
 
 impl SplitInboxesV2 {
-    /// Never written: the account's splits aren't set up yet.
+    /// Never written, so the account's splits aren't set up yet.
     pub(crate) fn is_unset(&self) -> bool {
         self.split_inboxes_order.is_empty()
     }
@@ -185,7 +186,7 @@ impl SplitInboxesV2 {
         self.split_inboxes_order = canonical_order(&order, &self.split_inboxes, unified);
     }
 
-    /// Adds `split`: an enabled split goes where new tabs go, one that's off at the end.
+    /// Adds `split`. An enabled split goes where new tabs go, and one that's off goes at the end.
     pub(crate) fn add(&mut self, mut split: SplitInbox, unified: bool) {
         let id = split
             .external_id
@@ -203,9 +204,9 @@ impl SplitInboxesV2 {
         self.canonicalize(unified);
     }
 
-    /// `new` takes the place of the split whose list id is `id` (they share an external id). One
-    /// turned on moves to where new tabs go; one turned off goes first among those that are off,
-    /// which the canonical order does.
+    /// `new` takes the place of the split whose list id is `id` (they share an external id). A
+    /// split turned on moves to where new tabs go. One turned off goes first among those that are
+    /// off, which the canonical order takes care of.
     pub(crate) fn replace(&mut self, id: &str, new: SplitInbox, unified: bool) {
         let Some(external) = self.split(id).and_then(|old| old.external_id.clone()) else {
             return;
@@ -245,7 +246,7 @@ impl SplitInboxesV2 {
         self.split_inboxes.remove(&external)
     }
 
-    /// The entry `moved` takes `pushed`'s place (both external ids).
+    /// The entry `moved` takes the place of `pushed` (both external ids).
     pub(crate) fn reorder(&mut self, moved: &str, pushed: &str, unified: bool) {
         let order = &mut self.split_inboxes_order;
         let (Some(from), Some(to)) = (
@@ -262,8 +263,8 @@ impl SplitInboxesV2 {
         self.canonicalize(unified);
     }
 
-    /// The order for Important and Other turning on or off: they wrap the shown splits, or move
-    /// after them and Inbox comes first.
+    /// Reorders for Important and Other turning on or off. They either wrap the shown splits, or
+    /// move after them with Inbox first.
     pub(crate) fn toggle_important_other(&mut self, unified: bool) {
         let (enabled, disabled) = split_by_enabled(&self.split_inboxes_order, &self.split_inboxes);
         let id = |system: SystemSplit| system.external_id().to_owned();
@@ -295,8 +296,8 @@ fn split_by_enabled(
         .partition(|id| !splits.get(id).is_some_and(|split| split.is_disabled))
 }
 
-/// The canonical order: the shown splits, Important, Other and Inbox kept where they were
-/// among them, then the splits that are off.
+/// The canonical order. It's the shown splits, with Important, Other and Inbox kept where they
+/// were among them, then the splits that are off.
 fn canonical_order(
     order: &[String],
     splits: &BTreeMap<String, SplitInbox>,
@@ -426,7 +427,7 @@ mod tests {
         let first = v2.split_inboxes_order[0].clone();
         v2.reorder(SystemSplit::Important.external_id(), &first, false);
         assert_eq!(names(&v2), ["Important", "A", "Other", "Inbox"]);
-        // Other last: before Other.
+        // With Other last, a new split goes before Other.
         v2.add(split("B", true), false);
         v2.add(split("Off", false), false);
         assert_eq!(names(&v2), ["Important", "A", "B", "Other", "Inbox", "Off"]);
@@ -494,10 +495,10 @@ mod tests {
             .find(|split| split.name() == "A")
             .and_then(|split| split.external_id.clone())
             .expect("A");
-        // Other dragged onto A: before it.
+        // Other dragged onto A goes before it.
         v2.reorder(SystemSplit::Other.external_id(), &a, false);
         assert_eq!(names(&v2), ["Important", "Other", "A", "B", "Inbox"]);
-        // Important dragged past B: last.
+        // Important dragged past B goes last.
         let b = v2
             .split_inboxes
             .values()

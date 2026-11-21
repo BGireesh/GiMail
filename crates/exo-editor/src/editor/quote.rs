@@ -1,5 +1,5 @@
-//! A reply that quotes the selection of the message it answers: the selection goes in a quote
-//! below the caret's line, the caret two lines under it.
+//! A reply that quotes the selection of the message it answers. The selection goes in a quote
+//! below the caret's line, and the caret goes two lines under the quote.
 
 use super::{Editor, fix_cursors};
 use crate::{
@@ -46,11 +46,12 @@ fn text(blocks: &[Block]) -> String {
 }
 
 impl Editor {
-    /// Quotes `selection` (a message's selected part as HTML, the clone
-    /// [`exo_mail::BodyView::selected_html`] makes): in a gray-barred quote unless it's all quotes
-    /// already, then an empty line, and the caret on the line after. An empty body becomes just
-    /// that; otherwise it goes after the caret's top-level element, an empty line first if that
-    /// has text, or in place of the empty element before it if neither has. One undo step.
+    /// Quotes `selection`, a message's selected part as HTML (the clone
+    /// [`exo_mail::BodyView::selected_html`] makes), in one undo step. The selection goes in a
+    /// gray-barred quote unless it's all quotes already, followed by an empty line and the caret on
+    /// the line after. An empty body becomes just that. Otherwise the quote goes after the caret's
+    /// top-level element, with an empty line first if that element has text, or in place of the
+    /// empty element before it if neither has text.
     pub fn add_quote(&mut self, selection: &str) {
         let quote = if html::is_blockquoted(selection) {
             format!("<div>{selection}</div>")

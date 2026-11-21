@@ -1,24 +1,25 @@
 //! Eviction: the store lets old mail go, so its file stays the size of a few months' mail.
 //!
 //! - A conversation quiet for longer than the age goes whole, rows and all, unless something
-//!   keeps it (below). Each list it was in covers less: the list's coverage boundary moves forward
-//!   past it (`db::coverage`), so the list shows what's stored without a gap, and scrolling back
-//!   past the boundary fetches it from Gmail again as backfill did the first time, from where
-//!   what's stored ends (`ListCursor::before`).
-//! - Of the rest, the bodies of those quiet for longer than the age go (their rows stay, as a
-//!   conversation sync stored for its rows alone: opening it fetches them, [`Store::load_bodies`]),
-//!   and past the budget the oldest bodies go too.
-//! - The calendar's events that ended before the age go, but for the days the calendar read
-//!   this session.
+//!   keeps it (below). Each list it was in covers less, because the list's coverage boundary
+//!   moves forward past it (`db::coverage`). The list shows what's stored without a gap, and
+//!   scrolling back past the boundary fetches the conversation from Gmail again, as backfill did
+//!   the first time, starting where the stored mail ends (`ListCursor::before`).
+//! - Of the rest, the bodies of those quiet for longer than the age go, and past the budget the
+//!   oldest bodies go too. Their rows stay, like a conversation that sync stored for its rows
+//!   alone, and opening one fetches its bodies ([`Store::load_bodies`]).
+//! - The calendar's events that ended before the age go, except those on the days the calendar
+//!   read this session.
 //!
 //! The file gives the space back to the disk (`auto_vacuum = INCREMENTAL`).
 //!
-//! Never evicted: the conversation open, the first threads of the lists sync keeps bodies for
-//! (it would fetch them again), or a conversation with a draft or a send of its own; and, for
-//! their rows, the inbox lists' first [`LIST_CAP`] (their background passes' reach), and a
-//! conversation with a reminder or a change Gmail hasn't had. Nor anything Gmail doesn't have:
-//! drafts and their files, the outbox, held and scheduled sends, reminders, settings,
-//! unsubscribes, and the calendar's queued changes.
+//! Never evicted: the open conversation, the first threads of the lists that sync keeps bodies
+//! for (it would fetch them again), and a conversation with a draft or a send of its own. The
+//! rows, though not the bodies, of the inbox lists' first [`LIST_CAP`] threads (the reach of
+//! their background passes) are kept too, and so are those of a conversation with a reminder or
+//! a change Gmail hasn't had. Nothing Gmail doesn't have is evicted either: drafts and their
+//! files, the outbox, held and scheduled sends, reminders, settings, unsubscribes, and the
+//! calendar's queued changes.
 
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
@@ -39,8 +40,8 @@ use crate::store::{Inner, Store, reindex};
 use crate::sync::{LIST_CAP, ROW_HEADERS};
 use crate::view::Router;
 
-/// Conversations evicted per transaction: a few milliseconds of work, which is as long as a
-/// sync or a write of the user's waits for one.
+/// Conversations evicted per transaction. That's a few milliseconds of work, which is as long as
+/// a sync or a write by the user waits for one.
 const BATCH: usize = 20;
 /// Events let go of per transaction.
 const EVENT_BATCH: usize = 500;
@@ -55,8 +56,8 @@ const STORED: &str = "SELECT s.thread_id, (SELECT max(n.internal_date) FROM mess
 /// Every conversation with no message since `?1` (epoch milliseconds), oldest first: its id and
 /// its newest message's date.
 const QUIET: &str = "SELECT thread_id, max(internal_date) AS newest FROM messages GROUP BY thread_id HAVING newest < ?1 ORDER BY newest, thread_id";
-/// The conversations with a draft, a held or a scheduled send: in Drafts or Scheduled, or named
-/// by a draft of Exo's, by thread or by message.
+/// The conversations with a draft or a held or scheduled send. They're the ones in Drafts or
+/// Scheduled, and the ones that one of Exo's drafts names, by thread or by message.
 const DRAFTED: &str = "SELECT thread_id FROM list_ids WHERE list_id IN (?1, ?2) UNION SELECT thread_id FROM drafts WHERE thread_id IS NOT NULL UNION SELECT m.thread_id FROM drafts d JOIN messages m ON m.id = d.message_id";
 /// The conversations with a reminder or a change Gmail hasn't had.
 const PENDING: &str = "SELECT thread_id FROM reminders UNION SELECT queue FROM outbox";
@@ -66,11 +67,11 @@ const FIRST: &str = "SELECT thread_id FROM list_ids WHERE list_id = ?1 ORDER BY 
 const ENDED: &str = r#"SELECT calendar_id, id, start, "end" FROM events WHERE "end" < ?1"#;
 
 /// What a store keeps: conversations active in the last `age`, their bodies as long as they fit
-/// in `budget`; and the calendar's events since then.
+/// in `budget`, and the calendar's events since then.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Eviction {
-    /// A conversation with no message in this long goes, or, when something keeps it, loses
-    /// its bodies; so does an event that ended this long ago.
+    /// A conversation with no message in this long goes, or loses its bodies when something
+    /// keeps it. So does an event that ended this long ago.
     pub age: SignedDuration,
     /// The most the bodies may take, in bytes of HTML and text. Past it the oldest go too, down
     /// to nine tenths of it, so the next day's mail doesn't start another pass.
@@ -94,11 +95,12 @@ pub struct Evicted {
     pub rows: usize,
     /// Conversations whose bodies went, their rows kept.
     pub threads: usize,
-    /// The bodies' bytes of HTML and text that went, with either.
+    /// The bytes of HTML and text in the bodies that went, with whole conversations or alone.
     pub bytes: u64,
     /// The calendar's events that went.
     pub events: usize,
-    /// Bytes the database file gave back to the disk, eviction's and any other freed pages.
+    /// Bytes the database file gave back to the disk, from pages freed by eviction or anything
+    /// else.
     pub reclaimed: u64,
 }
 
@@ -125,10 +127,10 @@ enum Keep {
 }
 
 impl Store {
-    /// Says which conversation is open on screen (`None`: none), which
+    /// Says which conversation is open on screen (`None` for none), which
     /// [`evict`](Self::evict) leaves alone. Call it before checking
-    /// [`bodies_stored`](Self::bodies_stored): it waits for a batch of eviction in progress, so
-    /// what that finds is what stays.
+    /// [`bodies_stored`](Self::bodies_stored), because it waits for a batch of eviction in
+    /// progress, so what that check finds is what stays.
     pub async fn reading(&self, thread: Option<&ThreadId>) {
         *self.inner.reading.lock().await = thread.map(|thread| thread.as_str().to_owned());
     }
@@ -137,15 +139,16 @@ impl Store {
     /// compacts the search index and gives the space back to the disk. It works in small batches
     /// and steps with pauses between them, each holding the sync lock, so sync and the user's
     /// writes wait for one at most. It calls Gmail for nothing. It tells
-    /// [`changes`](Self::changes) once, when conversations went (lists cover less): the
-    /// conversation on screen and the rows the list on screen has loaded aren't touched.
+    /// [`changes`](Self::changes) once when conversations went, since lists then cover less. The
+    /// conversation on screen and the rows that the list on screen has loaded aren't touched.
     ///
     /// # Errors
-    /// On database failures; what was evicted before stays evicted.
+    /// On database failures. What was evicted before the failure stays evicted.
     pub async fn evict(&self, eviction: &Eviction) -> Result<Evicted> {
         let inner = &self.inner;
         let mut db = inner.db.clone();
-        // What the file gives back is measured from here: the pass itself writes pages too.
+        // What the file gives back is measured from here, because the pass itself writes pages
+        // too.
         let pages = query_i64(&mut db, "PRAGMA page_count").await?;
         let now = Timestamp::now();
         let cutoff = (now - eviction.age).as_millisecond();
@@ -177,7 +180,7 @@ impl Store {
                 let router = inner.router();
                 let mut write = inner.begin(&mut db).await?;
                 let reading = inner.reading.lock().await;
-                // Opened, loaded, drafted or changed since the plan: kept.
+                // Kept if opened, loaded, drafted or changed since the plan.
                 let kept = kept(write.exec(), inner, reading.as_deref(), Keep::Rows).await?;
                 let mut latest: HashMap<String, i64> = HashMap::new();
                 for quiet in batch.iter().filter(|quiet| !kept.contains(&quiet.thread)) {
@@ -199,7 +202,8 @@ impl Store {
             self.forget_parts(&parts);
             tokio::time::sleep(PAUSE).await;
         }
-        // The newest conversation let go: the pre-render doesn't fetch it, or anything older, back.
+        // The newest conversation let go. The pre-render doesn't fetch it, or anything older,
+        // back.
         let mut before = db::kv_get::<i64>(&mut db, EVICTED_BEFORE)
             .await?
             .unwrap_or(i64::MIN);
@@ -210,7 +214,7 @@ impl Store {
                 let router = inner.router();
                 let mut write = inner.begin(&mut db).await?;
                 let reading = inner.reading.lock().await;
-                // Opened or drafted since the plan: kept.
+                // Kept if opened or drafted since the plan.
                 let kept = kept(write.exec(), inner, reading.as_deref(), Keep::Bodies).await?;
                 for stored in batch.iter().filter(|stored| !kept.contains(&stored.thread)) {
                     if let Some(messages) = evict_thread(write.exec(), stored, &router).await? {
@@ -257,9 +261,10 @@ impl Store {
     }
 }
 
-/// Makes the file give back the pages eviction frees (`auto_vacuum = INCREMENTAL`), once: a
-/// file without it is rebuilt with it (`VACUUM`, which can't run in a migration's
-/// transaction), a new one in no time and an older Exo's at about the speed of a copy.
+/// Makes the file give back the pages that eviction frees (`auto_vacuum = INCREMENTAL`), once. A
+/// file without the setting is rebuilt with it (`VACUUM`, which can't run in a migration's
+/// transaction). That takes no time for a new file, and about as long as a copy for a file an
+/// older Exo wrote.
 pub(crate) async fn reclaimable(db: &Db) -> Result<()> {
     let mut connection = db.connection().await?;
     // `auto_vacuum` takes effect with the `VACUUM` on the connection that set it.
@@ -272,7 +277,7 @@ pub(crate) async fn reclaimable(db: &Db) -> Result<()> {
     toasty::sql::statement("VACUUM")
         .exec(&mut connection)
         .await?;
-    // The rebuild went through the WAL: empty it.
+    // The rebuild went through the WAL, so empty it.
     toasty::sql::query("PRAGMA wal_checkpoint(TRUNCATE)")
         .exec(&mut connection)
         .await?;
@@ -319,10 +324,11 @@ async fn quiet(exec: &mut dyn Executor, cutoff: i64) -> Result<Vec<Quiet>> {
         .collect())
 }
 
-/// The conversations eviction leaves alone: the one open, the first threads of each list sync
-/// fetches bodies for ([`Inner::prefetched_lists`]), and those with a draft or a send. For their
-/// rows also the inbox lists' first [`LIST_CAP`], which their passes list (evicted, the next
-/// would fetch them again), and those with a reminder or a change Gmail hasn't had.
+/// The conversations that eviction leaves alone: the open one, the first threads of each list
+/// that sync fetches bodies for ([`Inner::prefetched_lists`]), and those with a draft or a send.
+/// For their rows it also leaves the inbox lists' first [`LIST_CAP`], which their passes list (if
+/// evicted, the next pass would fetch them again), and those with a reminder or a change Gmail
+/// hasn't had.
 async fn kept(
     exec: &mut dyn Executor,
     inner: &Inner,
@@ -393,10 +399,10 @@ fn plan<'a>(
     doomed
 }
 
-/// Drops the conversation's bodies and the headers that came with them, which leaves its
-/// messages as sync stores them for their rows (attachment rows aside, which lists show), and
-/// indexes it again without their text. Returns its messages' ids if it did: one with mail since
-/// the plan stays.
+/// Drops the conversation's bodies and the headers that came with them, and indexes it again
+/// without their text. That leaves its messages as sync stores them for their rows, but with
+/// their attachment rows kept, since lists show them. Returns its messages' ids if it went ahead.
+/// A conversation with mail since the plan stays.
 async fn evict_thread(
     exec: &mut dyn Executor,
     stored: &Stored,
@@ -446,8 +452,8 @@ struct Removed {
 }
 
 /// Drops the conversation: its messages with their bodies and attachment rows, its list
-/// membership, participants and search row. Returns what it was in if it did: one with mail
-/// since the plan stays.
+/// membership, participants and search row. Returns what it was in if it went ahead. A
+/// conversation with mail since the plan stays.
 async fn evict_rows(
     exec: &mut dyn Executor,
     quiet: &Quiet,
@@ -484,10 +490,11 @@ async fn evict_rows(
 }
 
 /// Moves the coverage of each list that held a conversation just evicted forward past it, so
-/// the list shows what's stored without a gap (`db::coverage`): `latest` is the latest sort each
-/// list had one at. A list's coverage is its own pass's reach or All Mail's, whichever is
-/// further, so All Mail's moves past every one, and the Inbox's (which its tabs' share) past its
-/// tabs' and splits'. A pass moved restarts from where what's stored ends (`before:`).
+/// the list shows what's stored without a gap (`db::coverage`). `latest` holds, for each list,
+/// the latest sort at which it had an evicted conversation. A list's coverage is its own pass's
+/// reach or All Mail's, whichever is further. So All Mail's coverage moves past every evicted
+/// conversation, and the Inbox's, which its tabs share, moves past its tabs' and splits'. A pass
+/// this moves restarts from where the stored mail ends (`before:`).
 async fn uncover(
     exec: &mut dyn Executor,
     latest: &HashMap<String, i64>,
@@ -526,9 +533,10 @@ async fn uncover(
     Ok(())
 }
 
-/// Lets go of the calendar's events that ended before `cutoff`, but for those on the days the
-/// calendar read this session (it shows them again without fetching them), and none while a
-/// change to an event waits to go (it shows over the event it changes). Returns how many went.
+/// Lets go of the calendar's events that ended before `cutoff`, except those on the days the
+/// calendar read this session, which it shows again without fetching them. It lets go of none
+/// while a change to an event waits to go, since the change shows over the event it changes.
+/// Returns how many went.
 async fn evict_events(inner: &Inner, db: &mut Db, cutoff: i64) -> Result<usize> {
     let read = inner
         .calendar_read
@@ -584,14 +592,15 @@ async fn evict_events(inner: &Inner, db: &mut Db, cutoff: i64) -> Result<usize> 
 
 /// Merges the search index into one segment a step at a time. FTS5 only marks a deleted row's
 /// words as gone and drops them when it merges them, so until then evicted text still takes its
-/// space, and more: the marks.
+/// space, and the marks take more.
 async fn compact_index(inner: &Inner, db: &mut Db) -> Result<()> {
     loop {
         let merged = {
             let _sync = inner.sync.lock().await;
             let mut write = inner.begin(db).await?;
             let before = query_i64(write.exec(), "SELECT total_changes()").await?;
-            // Negative: every segment, however few, merges into one (FTS5's `merge` command).
+            // A negative step merges every segment, however few, into one (FTS5's `merge`
+            // command).
             toasty::sql::statement(format!(
                 "INSERT INTO search_fts (search_fts, rank) VALUES ('merge', -{STEP})"
             ))
@@ -613,7 +622,7 @@ async fn compact_index(inner: &Inner, db: &mut Db) -> Result<()> {
 /// steps went through. Returns how many bytes the database file shrank by from `before` pages.
 async fn reclaim(inner: &Inner, db: &mut Db, before: i64) -> Result<u64> {
     let page = query_i64(db, "PRAGMA page_size").await?;
-    // What's free now: pages freed meanwhile wait for the next pass.
+    // Only what's free now. Pages freed meanwhile wait for the next pass.
     let mut free = query_i64(db, "PRAGMA freelist_count").await?;
     while free > 0 {
         {
@@ -627,7 +636,8 @@ async fn reclaim(inner: &Inner, db: &mut Db, before: i64) -> Result<u64> {
         free -= STEP;
         tokio::time::sleep(PAUSE).await;
     }
-    // Busy while another connection reads; the next pass, or SQLite's own checkpoint, empties it.
+    // The checkpoint is busy while another connection reads, and then the next pass, or
+    // SQLite's own checkpoint, empties the WAL.
     toasty::sql::query("PRAGMA wal_checkpoint(TRUNCATE)")
         .exec(db)
         .await?;

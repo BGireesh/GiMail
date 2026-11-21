@@ -1,5 +1,6 @@
 //! Label chips: a label's name, lower-cased, on a colored pill. The color comes from hashing the
-//! name, not from Gmail's label color; Classic's eight colors take white text, `#27292d` in Carbon.
+//! name, not from Gmail's label color. Classic's eight colors take white text, or `#27292d` in
+//! Carbon.
 
 use egui::{
     Color32, CornerRadius, Painter, Pos2, Rect, pos2,
@@ -44,8 +45,8 @@ const WATERMELON: &str = "#ef8e8e";
 /// The fill and text colors of a chip for label `name` in `theme`.
 pub fn label_colors(name: &str, theme: Theme) -> (Color32, Color32) {
     let name = name.to_lowercase();
-    // Spam and Trash, names Gmail keeps for its own labels, aren't hashed: watermelon and
-    // `default`.
+    // Spam and Trash, names Gmail keeps for its own labels, aren't hashed. They get watermelon
+    // and `default`.
     let fill = match name.as_str() {
         "spam" => WATERMELON,
         "trash" => HUES[0].1,
@@ -72,8 +73,8 @@ pub struct LabelChip {
 }
 
 impl LabelChip {
-    /// The chip for label `name`. On a selected row (`selected`) its text turns black at .5; in
-    /// Snow the chip keeps its color, in Carbon it turns white.
+    /// The chip for label `name`. On a selected row (`selected`), its text turns black at .5. In
+    /// Snow the chip keeps its color, and in Carbon it turns white.
     pub fn new(painter: &Painter, name: &str, selected: bool) -> Self {
         let theme = crate::theme(painter.ctx());
         let (fill, text) = label_colors(name, theme);

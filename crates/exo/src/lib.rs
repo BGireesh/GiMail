@@ -114,10 +114,10 @@ use crate::{
     thread::ThreadView,
 };
 
-/// The contact pane follows a row the pointer moved the cursor to once the cursor has stayed on
-/// it this long, a trailing debounce on the row the pointer entered.
+/// The contact pane follows a row that the pointer moved the cursor to once the cursor has stayed
+/// on it this long, a trailing debounce on the row the pointer entered.
 pub(crate) const SETTLED_HOVER: f64 = 0.1;
-/// ⌘C again within this long copies the conversation: the copy hint's 10 s.
+/// ⌘C again within this long copies the conversation, matching the copy hint's 10 s.
 const COPY_AGAIN: f64 = 10.0;
 /// How high toasts sit at Inbox Zero, unless the streak animation hides the chrome.
 const INBOX_ZERO_TOAST_BOTTOM: f32 = 68.0;
@@ -126,9 +126,8 @@ const SELECT_ALL_HINT_TOAST_BOTTOM: f32 = 72.0;
 /// How high toasts sit over the status bar.
 const STATUS_BAR_TOAST_BOTTOM: f32 = 64.0;
 
-/// Where Exo's images are (their `images` folder): `Exo.app`'s
-/// `Contents/Resources/assets` (`fastlane build`), else the checkout's `assets`. (Exo's fonts and
-/// icons are compiled in.)
+/// Where Exo's images are (their `images` folder): `Exo.app`'s `Contents/Resources/assets`
+/// (`fastlane build`), else the checkout's `assets`. (Exo's fonts and icons are compiled in.)
 pub fn assets_dir() -> PathBuf {
     let bundled = std::env::current_exe()
         .ok()
@@ -138,8 +137,8 @@ pub fn assets_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets")))
 }
 
-/// The window's options, at its place for a first launch; [`desktop::Placement`] moves it to
-/// where it was.
+/// The window's options, at its place for a first launch. [`desktop::Placement`] moves it to where
+/// it was.
 pub fn native_options() -> eframe::NativeOptions {
     eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -157,9 +156,9 @@ pub fn native_options() -> eframe::NativeOptions {
     }
 }
 
-/// The threads an action applies to: in a thread, that thread alone,
-/// as long as it's still listed (the list's selection only counts in the list); in the list, the
-/// selection, or else the cursor's thread.
+/// The threads an action applies to: in a thread, that thread alone, as long as it's still listed
+/// (the list's selection only counts in the list); in the list, the selection, or else the cursor's
+/// thread.
 fn actionable<'a>(thread: Option<&ThreadView>, inbox: &'a Inbox) -> Vec<&'a ThreadSummary> {
     match thread {
         Some(open) => inbox
@@ -207,15 +206,14 @@ struct Undoable {
     list: ListId,
     threads: Vec<String>,
     cursor: Option<String>,
-    /// The action ran in the open thread, which undo reopens.
+    /// Whether the action ran in the open thread, which undo reopens.
     in_thread: bool,
-    /// It was a move, whose undo says so.
+    /// Whether it was a move, whose undo says so.
     moved: bool,
 }
 
-/// A thread an action may take out of the list without the store having said so beforehand
-/// (a move, removing labels): its row slides out when the first snapshot showing the action
-/// drops it.
+/// A thread an action may take out of the list without the store having said so beforehand (a move,
+/// removing labels). Its row slides out when the first snapshot showing the action drops it.
 struct Departure {
     thread: String,
     /// The action's [`Account::apply`] number.
@@ -236,7 +234,7 @@ pub struct Mail {
     history: history::History,
     /// The Touch Bar's tip, while it's up.
     touch_bar_tip: Option<touch_bar_tip::Tip>,
-    /// The welcome splash, the account's first time on this Mac.
+    /// The welcome splash, shown the account's first time on this Mac.
     welcome: Option<welcome::Welcome>,
     /// The first-run flow after it: account setup and what ends it.
     first_run: first_run::State,
@@ -248,9 +246,9 @@ pub struct Mail {
     command_nudge: command_nudge::State,
     /// The account's latest snapshot.
     snapshot: Arc<Snapshot>,
-    /// The snapshot the list's rows came from; none since the list was switched.
+    /// The snapshot the list's rows came from, or `None` since the list was switched.
     rows_from: Option<Arc<Snapshot>>,
-    /// How many rows the list had when it last asked for more: it asks again once they arrive.
+    /// How many rows the list had when it last asked for more. It asks again once they arrive.
     asked_more_at: Option<usize>,
     /// The newest toast's undo.
     undoable: Option<Undoable>,
@@ -276,9 +274,9 @@ pub struct Mail {
     pane_contact: Option<String>,
     /// The thread whose contact the right pane shows.
     pane_thread: Option<String>,
-    /// The contact a Mail row opened its thread with, or a draft's chip,
-    /// which the pane keeps showing until the focus moves, and what had it then: the thread's
-    /// focused message, or in the list the cursor's thread.
+    /// The contact that a Mail row opened its thread with, or that a draft's chip showed, which the
+    /// pane keeps showing until the focus moves. Also what had the focus then: the thread's focused
+    /// message, or in the list the cursor's thread.
     pane_pin: Option<(Person, Option<String>)>,
     /// Whom the contact pane showed this frame, for `Compose to {email}`.
     pane_shown: Option<Person>,
@@ -290,13 +288,13 @@ pub struct Mail {
     split_highlight: Option<ListId>,
     /// A split just made that's hidden when empty, until its list first empties.
     hidden_split: Option<String>,
-    /// The list was at Inbox Zero last frame.
+    /// Whether the list was at Inbox Zero last frame.
     was_zero: bool,
     /// The day's photo behind Inbox Zero.
     backdrop: backdrop::Backdrop,
     /// The achievements' popups, streak animation and dialog.
     achievements: achievements::State,
-    /// Shows a context menu and returns the item chosen ([`desktop::context_menu::show`]); the
+    /// Shows a context menu and returns the item chosen ([`desktop::context_menu::show`]). The
     /// account's other pages made from this one share it.
     context_menu: std::rc::Rc<std::cell::RefCell<Box<desktop::context_menu::Show>>>,
     /// A right-click in a message body, whose menu shows next frame.
@@ -306,7 +304,7 @@ pub struct Mail {
     /// Whether that spellchecker corrects spelling automatically, autocorrect's default
     /// ([`desktop::spelling::corrects_automatically`]).
     corrects_automatically: fn() -> bool,
-    /// The message ⌘C last copied and when: ⌘C on it again copies the conversation.
+    /// The message ⌘C last copied, and when. ⌘C on it again copies the conversation.
     copied: Option<(String, f64)>,
     /// The cursor's thread and since when, for the contact pane's settle delay.
     cursor_since: (Option<String>, f64),
@@ -330,7 +328,7 @@ pub struct Mail {
     compose: compose::Compose,
     /// The Snippets folder, and the ⌘; picker's origin.
     snippets: snippets::Snippets,
-    /// The HTML of the message ⌘C last copied, and its fields: pasting it outside a text field
+    /// The HTML of the message ⌘C last copied, and its fields. Pasting it outside a text field
     /// makes a draft of it.
     copied_message: Option<(String, compose::Fields)>,
     /// Search mode, over the list on screen.
@@ -347,13 +345,13 @@ pub struct Mail {
     last_filters: std::collections::HashMap<ListId, exo_store::Filter>,
     /// The device's accounts, in the user's order ([`Mail::set_accounts`]).
     accounts: Vec<exo_auth::Account>,
-    /// Signing out is waiting for the account to count what Gmail doesn't have yet.
+    /// Whether signing out is waiting for the account to count what Gmail doesn't have yet.
     signing_out: bool,
     /// What this frame asks of the app, returned by [`Mail::frame`].
     request: Option<accounts::Request>,
     /// The footer's sync line.
     footer: footer_sync::FooterSync,
-    /// What it says this frame.
+    /// What the sync line says this frame.
     footer_line: Option<String>,
     clock: Clock,
     /// The clock's time this frame.
@@ -465,8 +463,8 @@ impl Mail {
         mail
     }
 
-    /// Another page on the account, for another tab: a view of the account of
-    /// its own, at home, set up as this one is (where previews go, the split library, the
+    /// Another page on the account, for another tab. It has a view of the account of its own, opens
+    /// at home, and is set up as this one is (where previews go, the split library, the
     /// spellchecker and context menus, which tests give).
     pub(crate) fn another_page(&self, assets: &Path) -> Box<Self> {
         let mut page = Box::new(Self::new(
@@ -506,14 +504,14 @@ impl Mail {
     }
 
     /// Checks drafts' spelling with what `make` makes, one for each body, instead of macOS's
-    /// spellchecker: tests give a word list, and never change the user's dictionary. Autocorrect
-    /// is off unless turned on in Exo, rather than following macOS.
+    /// spellchecker. Tests give a word list, and never change the user's dictionary. Autocorrect is
+    /// off unless turned on in Exo, rather than following macOS.
     pub fn set_spelling(&mut self, make: impl Fn() -> Box<dyn exo_editor::Spelling> + 'static) {
         self.spelling = std::rc::Rc::new(move || Some(make()));
         self.corrects_automatically = || false;
     }
 
-    /// Whether autocorrect is on for this account: as turned on or off in Exo, else as macOS
+    /// Whether autocorrect is on for this account, as turned on or off in Exo, or else as macOS
     /// corrects spelling.
     pub fn autocorrect(&self) -> bool {
         self.account
@@ -527,7 +525,7 @@ impl Mail {
             .update_settings(|settings| settings.typing_assistance.enabled = Some(on));
     }
 
-    /// Shows context menus with `show` instead of AppKit's: tests choose their items.
+    /// Shows context menus with `show` instead of AppKit's, so tests can choose their items.
     pub fn set_context_menu(
         &mut self,
         show: impl FnMut(&[desktop::context_menu::MenuItem], egui::Pos2) -> Option<usize> + 'static,
@@ -536,7 +534,7 @@ impl Mail {
     }
 
     /// The right-click menu of the list's rows at `at`, for the conversations it acts on, and
-    /// what's chosen in it. Exo's shortcuts are off while it's open; AppKit's menu has the
+    /// what's chosen in it. Exo's shortcuts are off while it's open, and AppKit's menu has the
     /// keyboard then anyway.
     fn show_row_menu(&mut self, at: egui::Pos2, now: f64) {
         let threads = self.inbox.actionable();
@@ -554,7 +552,7 @@ impl Mail {
         }
     }
 
-    /// Shows `Warn Before Quitting` in the settings menu for `warning`; with none, no row.
+    /// Shows `Warn Before Quitting` in the settings menu for `warning`, or no such row with `None`.
     pub fn set_quit_warning(&mut self, warning: Option<desktop::QuitWarning>) {
         self.settings.set_quit_warning(warning);
     }
@@ -587,9 +585,9 @@ impl Mail {
         self.attachment_files.cache()
     }
 
-    /// The account was switched away from, and stays open off screen as it was left: its open
-    /// drafts' last keystrokes are saved and go to Gmail now, not at their pace, and it asks for
-    /// no more frames.
+    /// The account was switched away from, and stays open off screen as it was left. The last
+    /// keystrokes of its open drafts are saved and go to Gmail now, not at their pace, and it asks
+    /// for no more frames.
     pub(crate) fn leave_screen(&mut self) {
         self.save_drafts();
         self.account.write_drafts_now();
@@ -632,9 +630,9 @@ impl Mail {
         self.list_count(&self.account.snapshot().counts)
     }
 
-    /// The count the tab title and the Dock badge show: the conversations the store has in the
-    /// list on screen, of those in `counts`, which are the inbox views counted (the inbox and
-    /// its splits). None in the Snippets folder and the week view, whose badge is the calendar's.
+    /// The count the tab title and the Dock badge show: the number of conversations the store has
+    /// in the list on screen, from `counts`, which counts the inbox views (the inbox and its
+    /// splits). `None` in the Snippets folder and the week view, whose badge is the calendar's.
     fn list_count(&self, counts: &splits::Counts) -> Option<String> {
         let snippets = self.snippets.folder.is_open() && self.search.is_none();
         if snippets || self.calendar_week().is_some() {
@@ -648,7 +646,7 @@ impl Mail {
         self.compose.focus_summary()
     }
 
-    /// The draft with the keyboard's body, as its editor writes it (for tests).
+    /// The body of the draft with the keyboard, as its editor writes it (for tests).
     pub fn compose_body(&self) -> Option<String> {
         self.compose.focused().map(|open| open.editor.html())
     }
@@ -703,12 +701,12 @@ impl Mail {
         self.commands.toast_text()
     }
 
-    /// The new-message pane is showing.
+    /// Whether the new-message pane is showing.
     pub fn compose_pane_open(&self) -> bool {
         self.compose.pane().is_some()
     }
 
-    /// The folder drawer is open.
+    /// Whether the folder drawer is open.
     pub fn folders_open(&self) -> bool {
         self.folders.is_open()
     }
@@ -738,12 +736,12 @@ impl Mail {
         self.pane_shown.as_ref().map(|person| person.email.as_str())
     }
 
-    /// The settings menu is in the right pane.
+    /// Whether the settings menu is in the right pane.
     pub fn settings_visible(&self) -> bool {
         self.settings.visible()
     }
 
-    /// A settings dialog is open.
+    /// Whether a settings dialog is open.
     pub fn settings_dialog_open(&self) -> bool {
         self.settings.dialog_open()
     }
@@ -753,7 +751,7 @@ impl Mail {
         self.commands.toast_text()
     }
 
-    /// Nothing is in flight: the account is idle and every body on screen is laid out and
+    /// Whether nothing is in flight: the account is idle and every body on screen is laid out and
     /// painted. For screenshots and tests.
     pub fn is_idle(&self) -> bool {
         self.account.is_idle()
@@ -782,8 +780,8 @@ impl Mail {
             .is_some()
     }
 
-    /// Opens thread `id` (the list cursor's), marking it read without a toast once its messages
-    /// are in: the unread ones open expanded.
+    /// Opens thread `id` (the list cursor's), marking it read without a toast once its messages are
+    /// in. The unread messages open expanded.
     fn open_thread(&mut self, id: String) {
         if self.snippet_unsaved() {
             self.ask_leaving_snippet(Box::new(move |mail| mail.open_thread(id)));
@@ -935,7 +933,7 @@ impl Mail {
         }
         let rested = now - self.cursor_since.1;
         if self.inbox.cursor_source() == CursorSource::Command || rested >= SETTLED_HOVER {
-            // Its bodies, if they aren't stored, so opening it shows them at once.
+            // Fetch its bodies, if they aren't stored, so opening it shows them at once.
             if let Some(id) = &cursor {
                 self.account.prefetch(id);
             }
@@ -972,7 +970,7 @@ impl Mail {
         }
         // A reply's or a popped-out draft's selected chip, or the recipient it just got, shows
         // until the focus moves (a thread's focused message, else the list's cursor), as a Mail
-        // row's contact does; a chip without an address shows you.
+        // row's contact does. A chip without an address shows you.
         let focused = match &self.thread {
             Some(thread) => thread.focused().map(str::to_owned),
             None => self.pane_thread.clone(),
@@ -1009,9 +1007,9 @@ impl Mail {
         thread.focused_sender().or_else(|| listed(thread.id()))
     }
 
-    /// The contact card for the pane. The account is told whenever the pane's person changes,
-    /// and its next snapshot (a frame or two later) carries their conversations from local
-    /// mail; until then the Mail section is empty rather than someone else's.
+    /// The contact card for the pane. The account is told whenever the pane's person changes, and
+    /// its next snapshot (a frame or two later) carries their conversations from local mail. Until
+    /// then, the Mail section is empty rather than showing someone else's.
     fn pane_card(&mut self) -> Option<ContactCard> {
         let person = self.pane_person()?;
         let key = person.email.to_lowercase();
@@ -1027,9 +1025,8 @@ impl Mail {
         Some(ContactCard { person, recent })
     }
 
-    /// ⌘C with nothing selected in a thread:
-    /// the focused message, or the conversation when it's ⌘C again on the same message while
-    /// the first copy's hint could still show.
+    /// ⌘C with nothing selected in a thread, which copies the focused message, or the conversation
+    /// when it's ⌘C again on the same message while the first copy's hint could still show.
     fn copy_message_or_conversation(&mut self, now: f64) {
         let Some(focused) = self
             .thread
@@ -1051,8 +1048,8 @@ impl Mail {
         }
     }
 
-    /// The open thread's messages a copy includes, with their new parts: drafts aren't, and a
-    /// body still being rendered can't be yet.
+    /// The open thread's messages that a copy includes, with their new parts. Drafts aren't
+    /// included, and a body still being rendered can't be yet.
     fn copyable(&self) -> Vec<(&exo_store::MessageDetail, &str)> {
         let Some(detail) = self.thread.as_ref().and_then(ThreadView::detail) else {
             return Vec::new();
@@ -1143,7 +1140,8 @@ impl Mail {
         }
     }
 
-    /// `Save as PDF`: the save panel, then the open conversation printed into the file chosen.
+    /// `Save as PDF`, which shows the save panel, then prints the open conversation into the file
+    /// chosen.
     fn save_as_pdf(&mut self) {
         if let Some(thread) = &self.thread {
             print::save_as_pdf(
@@ -1157,7 +1155,7 @@ impl Mail {
     }
 
     /// Prints the open conversation into the PDF at `path` (`Save as PDF` without its panel, for
-    /// screenshots and tests); `done` hears whether it was written.
+    /// screenshots and tests). `done` hears whether it was written.
     pub fn print_to_pdf(&mut self, path: std::path::PathBuf, done: print::Done) {
         match &self.thread {
             Some(thread) => print::print(
@@ -1193,8 +1191,8 @@ impl Mail {
         )
     }
 
-    /// Carries out what the folder drawer asked for: it closes, and a chosen list shows, with
-    /// a hint at its keys when it was clicked.
+    /// Carries out what the folder drawer asked for. The drawer closes, and a chosen list shows,
+    /// with a hint at its keys when it was clicked.
     fn folder_action(&mut self, action: folders::Action, now: f64) {
         self.folders.close();
         if action == folders::Action::SwitchAccounts {
@@ -1376,7 +1374,8 @@ impl Mail {
                     _ => {}
                 }
             }
-            // Text selected in the thread's header copies as it is; else the bodies'.
+            // Text selected in the thread's header copies as it is. Otherwise the bodies' selection
+            // copies.
             Action::Copy => match self.thread.as_ref().and_then(ThreadView::selected_text) {
                 Some(text) => self.ctx.copy_text(text),
                 None => self.bodies.copy(),
@@ -1453,7 +1452,7 @@ impl Mail {
                 self.settings.hide();
                 self.calendar_run(calendar::Action::OpenSettings);
             }
-            // `Enable a calendar`: the dialog goes and the week view opens.
+            // `Enable a calendar` closes the dialog and opens the week view.
             Action::Settings(settings::Action::Notifications(
                 settings::NotificationsEvent::EnableCalendar,
             )) => {
@@ -1555,8 +1554,8 @@ impl Mail {
         }
     }
 
-    /// Opens `url` in the system browser without bringing it to the front, if it's a web link:
-    /// what ⌘ does to a click on a link.
+    /// Opens `url` in the system browser without bringing it to the front, if it's a web link. This
+    /// is what ⌘ does to a click on a link.
     fn open_url_in_background(&self, url: &str) {
         let Some(url) = format::urls::web(url) else {
             return;
@@ -1590,11 +1589,11 @@ impl Mail {
         self.triage_threads(&ids, mutation, None, 0, now);
     }
 
-    /// Applies `mutation` to the listed threads among `ids`: their rows slide out if it takes
-    /// them out of this list, and a toast says `text` (or what `mutation` did), with Undo. A
-    /// thread the mutation takes out of the list gives way to the next conversation `direction`
-    /// or Auto Advance's way ([`Self::dismiss_and_advance`]). Returns the toast's undo token,
-    /// when there was something to apply.
+    /// Applies `mutation` to the listed threads among `ids`. Their rows slide out if it takes them
+    /// out of this list, and a toast says `text` (or what `mutation` did), with Undo. A thread the
+    /// mutation takes out of the list gives way to the next conversation in `direction`, or in Auto
+    /// Advance's direction ([`Self::dismiss_and_advance`]). Returns the toast's undo token, when
+    /// there was something to apply.
     fn triage_threads(
         &mut self,
         ids: &[String],
@@ -1687,12 +1686,12 @@ impl Mail {
         Some(token)
     }
 
-    /// Slides `leaving` out of the list and moves on. The cursor goes to the next conversation
-    /// `direction` (`[`, `]`), else the way Auto Advance goes (`desktopAutoAdvance`) from where
-    /// the open conversation was before it moved up the list, or the other way past the end. An
-    /// open thread among them gives way to that conversation, or to the list when Auto Advance
-    /// is off, there's none, or there's none `direction` (back in the list, the cursor goes down
-    /// first).
+    /// Slides `leaving` out of the list and moves on. The cursor goes to the next conversation in
+    /// `direction` (`[`, `]`), else the way Auto Advance goes (`desktopAutoAdvance`) from where the
+    /// open conversation was before it moved up the list, or the other way past the end. An open
+    /// thread among them gives way to that conversation, or to the list when Auto Advance is off,
+    /// when there's no next conversation, or when there's none in `direction` (back in the list,
+    /// the cursor goes down first).
     pub(crate) fn dismiss_and_advance(&mut self, leaving: &[String], direction: isize, now: f64) {
         let toward = if direction != 0 {
             direction
@@ -1726,9 +1725,9 @@ impl Mail {
         }
     }
 
-    /// Slides out the departing rows the latest snapshot no longer lists, before it replaces
-    /// the list's rows. A row an action with a direction (`[`, `]`) leaves in place moves the
-    /// cursor instead.
+    /// Slides out the departing rows that the latest snapshot no longer lists, before the snapshot
+    /// replaces the list's rows. When an action with a direction (`[`, `]`) leaves a row in place,
+    /// the cursor moves instead.
     fn dismiss_departed(&mut self) {
         let applied = self.snapshot.applied;
         let (due, waiting): (Vec<Departure>, Vec<Departure>) = std::mem::take(&mut self.departing)
@@ -1854,7 +1853,7 @@ impl Mail {
                         settings.complete_nudge(inbox::HIDE_EMPTY_SPLIT, &at)
                     });
                     self.sync_snapshot();
-                    // `Try it out`: Split Inbox Settings, asking to hide every empty split.
+                    // `Try it out` opens Split Inbox Settings, asking to hide every empty split.
                     if action == inbox::NudgeAction::Try {
                         self.run(
                             Action::Settings(settings::Action::Open(settings::Dialog::SplitInbox)),
@@ -1869,8 +1868,8 @@ impl Mail {
                     }
                 }
                 inbox::Action::RowMenu(at) => {
-                    // Next frame, once the row has the cursor on screen: the menu waits for the
-                    // user.
+                    // Next frame, once the row has the cursor on screen, since the menu waits for
+                    // the user.
                     self.row_menu = Some(at);
                     self.ctx.request_repaint();
                 }
@@ -1895,7 +1894,7 @@ impl Mail {
                 Action::Settings(settings::Action::Open(settings::Dialog::SplitInbox)),
                 now,
             ),
-            // The search icon: the `/` hint as search opens.
+            // The search icon, which shows the `/` hint as search opens.
             inbox::HeaderAction::Search => {
                 if self.search.is_none() {
                     self.commands.hint(
@@ -1911,7 +1910,7 @@ impl Mail {
             inbox::HeaderAction::ClearFilter => {
                 self.run(Action::Filter(filter::Action::Clear), now)
             }
-            // The compose button: out of search, a new message.
+            // The compose button, which leaves search and starts a new message.
             inbox::HeaderAction::Compose => {
                 self.commands.hint(
                     Hint::new()
@@ -1926,8 +1925,8 @@ impl Mail {
         }
     }
 
-    /// A click on split tab `index`: its list, or for the tab on screen, Important and Other go
-    /// home and Inbox opens the folder drawer.
+    /// A click on split tab `index`, which shows its list. On the tab on screen, Important and
+    /// Other go home and Inbox opens the folder drawer.
     fn show_tab(&mut self, index: usize, now: f64) {
         let tabs = splits::tabs(self.account.settings(), &self.list, &self.snapshot.counts);
         let Some(tab) = tabs.get(index) else { return };
@@ -2103,7 +2102,8 @@ impl Mail {
                     self.commands
                         .hint(Hint::new().text(lead).keys(["⌘", "K"]).text(row));
                 }
-                // A contact a message shows: the pane shows them until the thread's focus moves.
+                // A contact that a message shows, which the pane shows until the thread's focus
+                // moves.
                 thread::Action::ShowContact(person) => self.pane_pin = Some((person, None)),
                 thread::Action::ComposeTo(person, pop_out) => {
                     let name = Some(person.name.clone()).filter(|name| !name.is_empty());
@@ -2207,7 +2207,7 @@ impl Mail {
         self.open_links_hover();
     }
 
-    /// The Show New Messages bar: the messages it held back show, and the conversation is marked
+    /// The Show New Messages bar. The messages it held back show, and the conversation is marked
     /// read, without a toast, if they left it unread.
     fn show_new_messages(&mut self) {
         if self
@@ -2234,7 +2234,7 @@ impl Mail {
         }
     }
 
-    /// A Done button: mark the actionable threads done, or not done when they all are.
+    /// A Done button, which marks the actionable threads done, or not done when they all are.
     fn toggle_done(&mut self, now: f64) {
         let done = actionable(self.thread.as_ref(), &self.inbox)
             .iter()
@@ -2261,7 +2261,7 @@ impl Mail {
         );
     }
 
-    /// A ⌘K button: the palette, and the hint at ⌘K.
+    /// A ⌘K button, which opens the palette and shows the hint at ⌘K.
     fn open_palette_button(&mut self) {
         self.commands.hint(
             Hint::new()
@@ -2272,7 +2272,7 @@ impl Mail {
         self.commands.open_palette(None);
     }
 
-    /// A label chip: that label's list.
+    /// A label chip, which shows that label's list.
     fn show_label(&mut self, name: &str, now: f64) {
         let labels = &self.snapshot.labels;
         // An Auto Label's chip shows the Auto Label's name, not its Gmail label's.
@@ -2318,7 +2318,7 @@ impl Mail {
                 }
             }
         }
-        // ⌘E: what's selected becomes the text to find.
+        // ⌘E makes what's selected the text to find.
         if crate::find::wants_selection(&ctx) {
             let selected = self
                 .thread
@@ -2542,7 +2542,8 @@ impl Mail {
                 snippets::show_pane(&ui.painter_at(pane), pane, rem, snippet, &self.now);
             }
             None => {
-                // A new message's pane leaves out no conversation: the draft is the current one.
+                // A new message's pane leaves out no conversation, because the draft is the current
+                // one.
                 let shown = if self.compose.pane().is_some() {
                     None
                 } else {
@@ -2613,7 +2614,7 @@ impl Mail {
                 | Region::TextFormatterColor
                 | Region::SearchBar
         );
-        // The streak animation hides it.
+        // The streak animation hides the footer.
         let footer = if self.calendar_pane_form() || self.achievements.hides_chrome(now) {
             None
         } else {
@@ -2736,7 +2737,7 @@ impl Mail {
             0.15,
             CubicBezier::EASE,
         );
-        // Over the select-all hint, toasts sit at 72px; hints stay where they are.
+        // Over the select-all hint, toasts sit at 72px. Hints stay where they are.
         let hint_shown = self.thread.is_none() && self.inbox.shows_select_all_hint();
         let toast_bottom = if hint_shown {
             SELECT_ALL_HINT_TOAST_BOTTOM
@@ -2756,7 +2757,8 @@ impl Mail {
         self.commands
             .set_toast_bottom(toast_bottom + (INBOX_ZERO_TOAST_BOTTOM - toast_bottom) * toast_zero);
         self.selection_hint();
-        // The pickers' alert first: signing another account out asks over the Accounts dialog.
+        // The pickers' alert first, because signing another account out asks over the Accounts
+        // dialog.
         let region = if let Some(region) = self.first_run_region() {
             region
         } else if let Some(region) = self.pickers.region() {
@@ -2947,7 +2949,7 @@ impl Mail {
             );
             compose::discard::register(&mut self.commands, threads, exact);
         }
-        // After the list's: the Snippets folder's keys win there.
+        // After the list's, so the Snippets folder's keys win there.
         let focused_draft = self.compose.focused();
         snippets::register(
             &mut self.commands,

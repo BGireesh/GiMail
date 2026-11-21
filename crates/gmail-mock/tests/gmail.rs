@@ -870,7 +870,7 @@ async fn settings_send_as_vacation_and_filters() {
 
     let before = gmail.filters().await.unwrap().filter.len();
     let filter = Filter {
-        // Clients may send an ID; Gmail treats it as output-only.
+        // Clients may send an ID, but Gmail treats it as output-only.
         id: Some("client-generated".into()),
         criteria: Some(FilterCriteria {
             from: Some("deals@fieldandfell.com".into()),
@@ -1059,7 +1059,7 @@ async fn a_quota_refuses_what_the_minute_cant_hold() {
         .id
         .clone()
         .unwrap();
-    // 10 for the list, then two full reads at 120 each: the second doesn't fit in 240.
+    // 10 for the list, then two full reads at 120 each, so the second doesn't fit in 240.
     gmail.thread(&id, Format::Full, &[]).await.unwrap();
     let raw = support::Raw::new(&server);
     let response = raw

@@ -54,7 +54,7 @@ pub fn split<'a>(body: &'a [u8], boundary: &str) -> Option<Vec<Entity<'a>>> {
             .position(|&byte| byte == b'\n')
             .map_or(body.len(), |offset| after + offset + 1);
         let Some(next) = find_delimiter(body, delimiter, start) else {
-            // Unterminated: treat the rest as the last part, as most parsers do.
+            // The body is unterminated, so treat the rest as the last part, as most parsers do.
             parts.push(parse_entity(&body[start..]));
             return Some(parts);
         };
@@ -92,7 +92,7 @@ fn find_delimiter(body: &[u8], delimiter: &[u8], from: usize) -> Option<usize> {
     None
 }
 
-/// Parses headers up to the first blank line; the rest is the body.
+/// Parses headers up to the first blank line. The rest is the body.
 #[must_use]
 pub fn parse_entity(bytes: &[u8]) -> Entity<'_> {
     let mut headers: Vec<(String, String)> = Vec::new();

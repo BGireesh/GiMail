@@ -66,7 +66,7 @@ fn the_auto_advance_dialog_chooses_from_its_list_and_keeps_the_choice() {
     let mut app = start("auto-advance-dialog");
     palette(&mut app, "auto advance settings");
     assert!(app.mail().settings_dialog_open());
-    // ↓ opens the list on the choice, which it lists first; `go back to the list of
+    // ↓ opens the list on the choice, which it lists first. `go back to the list of
     // conversations` is next, by name.
     app.key(Key::ArrowDown);
     app.key(Key::ArrowDown);
@@ -100,7 +100,7 @@ fn auto_advance_up_goes_to_the_newer_conversation() {
     app.key(Key::E);
     assert!(!listed(&app, INVITATION), "marked done");
     assert_eq!(open_subject(&app), CRIT, "the conversation above opens");
-    // In the list too: from `1:1 agenda`, the cursor goes up.
+    // In the list too, the cursor goes up from `1:1 agenda`.
     app.key(Key::Escape);
     app.key(Key::J);
     assert_eq!(app.cursor(), "1:1 agenda");
@@ -132,7 +132,7 @@ fn auto_advance_goes_from_where_the_open_conversation_was_before_it_moved_up() {
     app.key(Key::J);
     app.key(Key::Enter);
     assert_eq!(open_subject(&app), "1:1 agenda");
-    // Priya writes again: the conversation goes to the top while it's open.
+    // Priya writes again, and the conversation goes to the top while it's open.
     let thread = app
         .mail()
         .thread()

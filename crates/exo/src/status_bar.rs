@@ -19,8 +19,8 @@ pub struct StatusBar {
 }
 
 impl StatusBar {
-    /// The bar for `connection`, if something's down; `week` is the calendar's week view being
-    /// open.
+    /// The bar for `connection`, if something's down. `week` is whether the calendar's week view
+    /// is open.
     pub fn offline(connection: &Connection, week: bool) -> Option<Self> {
         let text = MessageBarRun::Text;
         let link = MessageBarRun::Link;
@@ -69,7 +69,7 @@ impl StatusBar {
                 MessageBarColor::Red,
             ),
         };
-        // A full disk can look like the network failing; throttling can't.
+        // A full disk can look like the network failing, but throttling can't.
         let next = if connection.disk_low && connection.outage != Some(Outage::Throttled) {
             vec![text("This may be caused by lack of disk space.")]
         } else {
@@ -82,8 +82,8 @@ impl StatusBar {
         Some(Self { title, runs, color })
     }
 
-    /// The bar while Out of Office Reply's replies go out: green, with ⌘K's keycaps. It can't be
-    /// dismissed.
+    /// The bar while Out of Office Reply's replies go out, which is green, with ⌘K's keycaps. It
+    /// can't be dismissed.
     pub fn out_of_office() -> Self {
         Self {
             title: "Out of Office Reply is On",

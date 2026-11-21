@@ -1,5 +1,5 @@
-//! The Quick Look panel: the shared `QLPreviewPanel` showing one item, the file, under the title it
-//! was given.
+//! The Quick Look panel, which is the shared `QLPreviewPanel` showing one item (the file) under the
+//! title it was given.
 
 use std::{
     cell::RefCell,
@@ -64,8 +64,8 @@ define_class!(
     #[ivars = RefCell<Option<Retained<PreviewItem>>>]
     struct Controller;
 
-    // `QLPreviewPanelController`: the panel takes the first object in the responder chain that
-    // accepts it, and hands itself over while it's open.
+    // The `QLPreviewPanelController` methods. The panel picks the first object in the responder
+    // chain that accepts control of it, and hands itself over while it's open.
     impl Controller {
         #[unsafe(method(acceptsPreviewPanelControl:))]
         fn accepts_preview_panel_control(&self, _panel: Option<&QLPreviewPanel>) -> bool {
@@ -125,8 +125,9 @@ pub(super) struct QuickLook {
 }
 
 impl QuickLook {
-    /// Previews `path` under `title`: at once when it's the file asked for last, else once the
-    /// panel has been closed for [`REOPEN_DELAY`]. Returns how soon to [`QuickLook::poll`].
+    /// Previews `path` under `title`, at once when it's the file asked for last, and otherwise once
+    /// the panel has been closed for [`REOPEN_DELAY`]. Returns how soon to call
+    /// [`QuickLook::poll`].
     pub(super) fn preview(
         &mut self,
         mtm: MainThreadMarker,
@@ -144,7 +145,7 @@ impl QuickLook {
         self.poll(mtm)
     }
 
-    /// Shows the pending file once its pause is over. Returns how long is left of it.
+    /// Shows the pending file once its pause is over. Returns how long is left of the pause.
     pub(super) fn poll(&mut self, mtm: MainThreadMarker) -> Option<Duration> {
         let now = Instant::now();
         if let Some((path, title, _)) = self.pending.take_if(|(_, _, due)| *due <= now) {
@@ -171,8 +172,8 @@ impl QuickLook {
 
     /// The panel's controller. winit owns the window and its delegate, so the first call puts a
     /// controller in the app window's responder chain right after the window, where AppKit puts
-    /// an `NSWindowController`. While Exo isn't active there's no main window: its only window
-    /// is the one, and the panel opens once Exo is back in front.
+    /// an `NSWindowController`. While Exo isn't active there's no main window, so the controller
+    /// goes after Exo's only window, and the panel opens once Exo is back in front.
     fn controller(&mut self, mtm: MainThreadMarker) -> Option<&'static Controller> {
         if self.controller.is_none() {
             let app = NSApplication::sharedApplication(mtm);
@@ -180,7 +181,8 @@ impl QuickLook {
                 log::warn!("no window to preview attachments from");
                 return None;
             };
-            // Leaked: the responder chain doesn't retain it, and it must outlive the window.
+            // Leaked, because the responder chain doesn't retain the controller and the controller
+            // must outlive the window.
             let controller: &'static Controller = Box::leak(Box::new(Controller::new(mtm)));
             // SAFETY: neither side retains its next responder. The controller is never freed, and
             // whatever followed the window is kept alive by its owner, as it was before.

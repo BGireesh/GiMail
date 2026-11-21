@@ -1,7 +1,7 @@
-//! Where attachments download to: one folder for the whole app rather than one in an account's
-//! settings, kept in `downloads.json` beside the account list. Unset, it's the user's Downloads
-//! folder. The app's [`egui::Context`] carries it, so every account's mail sees a change at
-//! once.
+//! Where attachments download to. It's one folder for the whole app rather than one in an
+//! account's settings, kept in `downloads.json` beside the account list. Unset, it's the user's
+//! Downloads folder. The app's [`egui::Context`] carries it, so every account's mail sees a
+//! change at once.
 
 use std::path::{Path, PathBuf};
 
@@ -10,7 +10,7 @@ use egui::{Context, Id};
 /// The file in the state folder.
 const FILE_NAME: &str = "downloads.json";
 
-/// What the file holds: electron-store's key.
+/// What the file holds, under `downloadsLocation`.
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 struct Saved {
@@ -20,9 +20,9 @@ struct Saved {
 /// The location and where it's kept, in the context's data.
 #[derive(Clone, Debug, Default)]
 struct Location {
-    /// `downloads.json`; `None` keeps a change for this run only (screenshots and tests).
+    /// `downloads.json`. `None` keeps a change for this run only (screenshots and tests).
     file: Option<PathBuf>,
-    /// The folder chosen; `None` for the Downloads folder.
+    /// The folder chosen, or `None` for the Downloads folder.
     folder: Option<PathBuf>,
 }
 
@@ -99,7 +99,7 @@ pub fn folder(ctx: &Context) -> Option<PathBuf> {
 ///
 /// # Errors
 /// [`Error::InsideApp`] for a folder inside Exo itself, and [`Error::Save`] when the choice can't
-/// be written; either way nothing changes.
+/// be written. Either way nothing changes.
 pub fn choose(ctx: &Context, folder: PathBuf) -> Result<(), Error> {
     let folder = std::path::absolute(&folder).unwrap_or(folder);
     if inside_app(&folder) {
@@ -122,7 +122,8 @@ pub fn choose(ctx: &Context, folder: PathBuf) -> Result<(), Error> {
     Ok(())
 }
 
-/// Whether `folder` is Exo's app bundle or inside it: downloads must never overwrite the app.
+/// Whether `folder` is Exo's app bundle or inside it, since downloads must never overwrite the
+/// app.
 fn inside_app(folder: &Path) -> bool {
     let Ok(exe) = std::env::current_exe() else {
         return false;
@@ -139,9 +140,9 @@ fn inside_app(folder: &Path) -> bool {
         .any(|root| folder.starts_with(root))
 }
 
-/// The folder the user picks in a folder chooser that starts at `current` (Settings' `Other…`:
-/// folders only, with New Folder, its button `Select`); `None` when they cancel. Runs the panel
-/// modally.
+/// The folder the user picks in a folder chooser that starts at `current`, or `None` when they
+/// cancel. It's the chooser for Settings' `Other…`, which shows folders only, offers New Folder
+/// and has the button `Select`. Runs the panel modally.
 #[cfg(target_os = "macos")]
 pub fn pick(current: Option<&Path>) -> Option<PathBuf> {
     use objc2_app_kit::{NSModalResponseOK, NSOpenPanel};
@@ -206,7 +207,7 @@ mod tests {
         assert_eq!(
             json["downloadsLocation"],
             desktop.to_string_lossy().as_ref(),
-            "electron-store's key"
+            "the downloads folder's key"
         );
         let relaunched = Context::default();
         install(&relaunched, &dir);

@@ -1,11 +1,11 @@
-//! The scrolling panes' overlay scrollbar: a thumb that shows while the pane scrolls or the pointer
+//! The scrolling panes' overlay scrollbar, a thumb that shows while the pane scrolls or the pointer
 //! is over its 11px track, and fades out .2s after a .5s pause.
 
 use egui::{Color32, CornerRadius, Id, Rect, Ui, pos2, vec2};
 
 use crate::motion::{self, CubicBezier};
 
-/// The track: 11px along the pane's edge.
+/// The track is 11px along the pane's edge.
 const TRACK: f32 = 11.0;
 
 /// A pane's scrollbar, remembering when it last scrolled.

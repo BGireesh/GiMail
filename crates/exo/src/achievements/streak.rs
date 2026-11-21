@@ -1,4 +1,4 @@
-//! `Week N`: on the week's first Inbox Zero the chrome hides for 2 s and, over the photo,
+//! The `Week N` animation. On the week's first Inbox Zero the chrome hides for 2 s. Over the photo,
 //! `Inbox Zero Streak` / `Week N` sits over a huge `N - 1` that rolls down out of view as `N` rolls
 //! in after it.
 
@@ -7,7 +7,7 @@ use exo_ui::{Family, Font, TextStyle, motion::CubicBezier};
 
 /// The chrome hides for 2 s.
 const CHROME_HIDDEN: f64 = 2.0;
-/// The animation shows for 2.5 s; the layer hides at 2 s, fading over 150ms.
+/// The animation shows for 2.5 s. The layer hides at 2 s, fading over 150ms.
 const SHOWN: f64 = 2.5;
 const HIDES_AT: f64 = 2.0;
 const FADE: f64 = 0.15;
@@ -41,7 +41,7 @@ impl Animation {
         now - self.since < CHROME_HIDDEN
     }
 
-    /// Paints it over `window` (the photo's), under the app.
+    /// Paints it over `window`, which is the photo's rect, under the app.
     pub fn paint(&self, painter: &Painter, window: Rect, now: f64) {
         let elapsed = now - self.since;
         let opacity = if elapsed < HIDES_AT {
@@ -85,8 +85,8 @@ impl Animation {
                 y += 22.0 + 1.0 + 25.0;
             }
         }
-        // The numbers' baselines at 112 and 472 in the SVG, clipped to `y: 125, height: 360`,
-        // both moving 360px down over 250ms after 250ms (`animation: 250ms ease-in-out 250ms
+        // The numbers' baselines sit at 112 and 472 in the SVG, clipped to `y: 125, height: 360`.
+        // Both move 360px down over 250ms after a 250ms delay (`animation: 250ms ease-in-out 250ms
         // forwards move`).
         let roll =
             360.0 * CubicBezier::EASE_IN_OUT.at(((elapsed - 0.25) / 0.25).clamp(0.0, 1.0) as f32);

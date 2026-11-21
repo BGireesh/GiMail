@@ -2,8 +2,8 @@
 //! shortcut (`Undo` `Z`) and the bottom-centre hint tooltip (`Next time, hit` `Z`
 //! `to undo instantly!`).
 //!
-//! The box: 4px corners, padding `6px 7px 3px`, Exo Sans 12px/20px bold,
-//! `box-shadow: 0 2px 4px rgba(0,0,0,.1), 0 2px 12px rgba(0,0,0,.05)`; dark (`#45494e`, text
+//! The box has 4px corners, padding `6px 7px 3px`, Exo Sans 12px/20px bold and
+//! `box-shadow: 0 2px 4px rgba(0,0,0,.1), 0 2px 12px rgba(0,0,0,.05)`. It's dark (`#45494e`, text
 //! `#ebeef2`) in Snow and light (`#f5f5f5`, text `#18191b`) in Carbon. Tooltips fade in over 200ms,
 //! hint tooltips over 500ms. A hover tooltip shows once hover intent has the pointer settled on its
 //! anchor (polled every 100ms), at once while the keyboard is on the anchor, and goes 150ms after
@@ -28,15 +28,15 @@ const CLOSE_GAP: f32 = 12.5;
 const CLOSE_SIZE: Vec2 = Vec2::new(12.0, 13.0);
 /// A note line's gap above it.
 const NOTE_MARGIN: f32 = 6.0;
-/// A status line's gap above it; its text is at half opacity.
+/// A status line's gap above it. Its text is at half opacity.
 const STATUS_MARGIN: f32 = 4.0;
 /// How long a tooltip stays once the pointer has left its anchor.
 const HIDE_AFTER: f64 = 0.15;
 /// Hover intent's poll on the split tabs, and on the rest.
 const SLOW_INTERVAL: f64 = 0.3;
 const INTERVAL: f64 = 0.1;
-/// Padding on both sides of the box, toward the anchor and away: part of the tooltip, which stays
-/// while the pointer is on it.
+/// Padding on both sides of the box, toward the anchor and away. It counts as part of the tooltip,
+/// which stays while the pointer is on it.
 const PLACEMENT_PADDING: f32 = 8.0;
 
 /// One piece of a tooltip's line: text, or a run of keycaps.
@@ -157,9 +157,9 @@ pub fn paint_tooltip_box(painter: &Painter, rect: Rect) {
     paint_box(painter, rect, true);
 }
 
-/// Paints the box of a tooltip compose's editor anchors to its text, which each dropdown fills its
-/// own colour (the emoji and contact pickers, autocorrect's pill): 4px corners and a tooltip's two
-/// shadows.
+/// Paints the box of a tooltip that compose's editor anchors to its text, which each dropdown fills
+/// in its own colour (the emoji and contact pickers, autocorrect's pill). The box has 4px corners
+/// and a tooltip's two shadows.
 pub fn paint_editor_tooltip(painter: &Painter, rect: Rect, fill: Color32) {
     let rect = pixel_snap(rect);
     let radius = CornerRadius::same(4);
@@ -189,8 +189,8 @@ fn paint_box(painter: &Painter, rect: Rect, shadow: bool) {
     );
 }
 
-/// A hover tooltip naming a control and its shortcut: the text, 10px, then the keycaps; with no
-/// keys, the text alone (`Folders`).
+/// A hover tooltip naming a control and its shortcut, with the text, 10px, then the keycaps. With
+/// no keys, it shows the text alone (`Folders`).
 pub struct KeyTooltip<'a> {
     /// What the control does (`Undo`).
     pub text: &'a str,
@@ -203,8 +203,8 @@ pub struct KeyTooltip<'a> {
 pub enum Placement {
     /// Centred over the anchor, its bottom edge this far below the anchor's top.
     Above(f32),
-    /// Under the anchor: its top edge `gap` px below the anchor's bottom, its centre `shift` px
-    /// right of the anchor's.
+    /// Under the anchor, with its top edge `gap` px below the anchor's bottom and its centre
+    /// `shift` px right of the anchor's.
     Below {
         /// From the anchor's bottom to the box's top.
         gap: f32,
@@ -215,11 +215,11 @@ pub enum Placement {
     Right(f32),
     /// Left of the anchor, `gap` px from its left edge, centred on it vertically.
     Left(f32),
-    /// Its left edge at this point, centred on it vertically, wherever the hovered area is: a
-    /// tether to a box of its own, such as the conversation status's 0×0 one.
+    /// Its left edge at this point, centred on it vertically, wherever the hovered area is. This
+    /// tethers it to a box of its own, such as the conversation status's 0×0 one.
     Beside(Pos2),
-    /// [`Self::Right`], unless the box would end past `until`: then as far left of the anchor, a
-    /// tooltip that doesn't fit its scroll container flipping to the other side.
+    /// [`Self::Right`], unless the box would end past `until`, in which case it goes as far left
+    /// of the anchor, so a tooltip that doesn't fit its scroll container flips to the other side.
     RightOrLeft {
         /// Between the anchor and the box.
         gap: f32,
@@ -325,10 +325,10 @@ impl KeyTooltip<'_> {
     }
 }
 
-/// A tooltip naming one or more commands (rows 6px apart): each row's text at the left and its
-/// keycaps at the right, the box as wide as the widest row; then an optional note line. Compose's
-/// controls show one while hovered or focused (`Send` and `Send + Mark Done`; `Cc`, `Bcc` and
-/// `From` on the expand button).
+/// A tooltip naming one or more commands, in rows 6px apart with each row's text at the left and
+/// its keycaps at the right, and the box as wide as the widest row. An optional note line follows.
+/// Compose's controls show one while hovered or focused (`Send` and `Send + Mark Done`, or `Cc`,
+/// `Bcc` and `From` on the expand button).
 pub struct ShortcutTooltip<'a> {
     /// The commands, one row each.
     pub rows: &'a [KeyTooltip<'a>],
@@ -370,8 +370,8 @@ impl ShortcutTooltip<'_> {
     }
 
     /// Shows it as the footer's calendar button does (`padding: 7px 7px 5px`, 20px rows 4px apart),
-    /// while `anchor` is hovered: centred over it with its bottom edge `overlap` px below the
-    /// anchor's top, moved left as needed to stay `within`.
+    /// while `anchor` is hovered. It's centred over the anchor with its bottom edge `overlap` px
+    /// below the anchor's top, moved left as needed to stay `within`.
     pub fn show_calendar_above(&self, ui: &Ui, anchor: &Response, overlap: f32, within: Rangef) {
         self.show_spaced(
             ui,
@@ -489,7 +489,8 @@ impl ShortcutTooltip<'_> {
     }
 
     /// Paints it with its box's top left at `min`, on `painter`'s layer, for a caller that shows
-    /// it for as long as it likes: compose's `Previous Day` / `Next Day` under a date in the body.
+    /// it for as long as it likes, such as compose's `Previous Day` / `Next Day` under a date in
+    /// the body.
     pub fn paint(&self, painter: &Painter, min: Pos2) {
         let laid = self.lay_out(painter.ctx(), None, &Spacing::DEFAULT);
         laid.paint(
@@ -516,7 +517,7 @@ impl ShortcutTooltip<'_> {
             .note
             .map(|note| Line::new(ctx, &[TooltipPart::Text(note)], 0.0, 0.0));
         let status = status.map(|status| Line::new(ctx, &[TooltipPart::Text(status)], 0.0, 0.0));
-        // A row is a flex row whose keycap line box grows it to 21px; the text keeps 10px clear
+        // A row is a flex row whose keycap line box grows it to 21px. The text keeps 10px clear
         // of the keys. Text alone is a 20px line.
         let width = rows
             .iter()
@@ -608,7 +609,7 @@ impl Spacing {
         gap: NOTE_MARGIN,
     };
 
-    /// A row with keys is a [`Self::row`] tall; text alone is a 20px line.
+    /// A row with keys is a [`Self::row`] tall. Text alone is a 20px line.
     fn row_height(&self, keys: &Keycaps) -> f32 {
         if keys.width() > 0.0 {
             self.row
@@ -626,11 +627,11 @@ impl Spacing {
     };
 }
 
-/// A split tab's tooltip: what the tab is over the key that goes there. The description is normal
-/// weight in Classic, wraps at 224px (`text-wrap: pretty`) and stops at three lines; the box is as
-/// wide as it or the key's row, whichever is wider.
+/// A split tab's tooltip, with what the tab is above the key that goes there. The description is
+/// normal weight in Classic, wraps at 224px (`text-wrap: pretty`) and stops at three lines. The box
+/// is as wide as the description or the key's row, whichever is wider.
 pub struct DescribedTooltip<'a> {
-    /// What the tab shows, if anything says.
+    /// A description of what the tab shows, if there is one.
     pub description: Option<&'a str>,
     /// The key's row.
     pub row: KeyTooltip<'a>,
@@ -712,7 +713,7 @@ impl DescribedTooltip<'_> {
         );
     }
 
-    /// The description's lines: wrapped, and a fourth line's worth cut to an ellipsis at the
+    /// The description's lines, wrapped, with a fourth line's worth cut to an ellipsis at the
     /// end of the third.
     fn lines(ctx: &Context, text: &str) -> Vec<String> {
         let mut lines = Self::TEXT.wrap_pretty(ctx, text, Self::WIDTH);
@@ -729,21 +730,21 @@ impl DescribedTooltip<'_> {
 }
 
 /// A tooltip of wrapping text, open for as long as it's shown, such as a failed draft's reason
-/// under its header: `\n` breaks a line, lines wrap at `max_width`, and an optional `Learn more`
+/// under its header. `\n` breaks a line, lines wrap at `max_width`, and an optional `Learn more`
 /// link follows on a line of its own, underlined and in the text's color.
 pub struct TextTooltip<'a> {
     /// The text.
     pub text: &'a str,
     /// The widest the text gets before it wraps (the content's `max-width`).
     pub max_width: f32,
-    /// Show the `Learn more` line.
+    /// Whether to show the `Learn more` line.
     pub learn_more: bool,
 }
 
 impl TextTooltip<'_> {
-    /// Paints it with `painter` (its layer and clip) centred under `anchor`, its box's top `gap`
-    /// px below the anchor's bottom, moved sideways as needed to stay `within`. Returns whether
-    /// `Learn more` was clicked.
+    /// Paints it with `painter` (its layer and clip) centred under `anchor`, with its box's top
+    /// `gap` px below the anchor's bottom, moved sideways as needed to stay `within`. Returns
+    /// whether `Learn more` was clicked.
     pub fn show_open(
         &self,
         ui: &Ui,
@@ -815,7 +816,7 @@ impl TextTooltip<'_> {
         let link_width = link.as_ref().map_or(0.0, |(job, _)| {
             crate::text::layout(ctx, job.clone()).size().x
         });
-        // Shrink-to-fit, as the inline block's width is: text that wraps fills `max_width`.
+        // Shrink-to-fit, as the inline block's width is, so text that wraps fills `max_width`.
         let unwrapped = crate::text::layout(
             ctx,
             LayoutJob::single_section(self.text.to_owned(), TEXT.format(color)),
@@ -846,7 +847,7 @@ impl TextTooltip<'_> {
         (rect, response.clicked())
     }
 
-    /// Shows the text (no `Learn more`) while `anchor` is hovered, left of it: the box's right
+    /// Shows the text (no `Learn more`) while `anchor` is hovered, left of it, with the box's right
     /// edge `gap` px before the anchor's left and centred on it vertically, as the settings menu's
     /// toggles show theirs.
     pub fn show_left(&self, ui: &Ui, anchor: &Response, gap: f32) {
@@ -863,7 +864,7 @@ impl TextTooltip<'_> {
         let mut job = LayoutJob::single_section(self.text.to_owned(), TEXT.format(color));
         job.wrap = egui::text::TextWrapping::wrap_at_width(self.max_width);
         let galley = crate::text::layout(ctx, job);
-        // Shrink-to-fit: text that wraps fills `max_width`.
+        // Shrink-to-fit, so text that wraps fills `max_width`.
         let unwrapped = crate::text::layout(
             ctx,
             LayoutJob::single_section(self.text.to_owned(), TEXT.format(color)),
@@ -884,19 +885,20 @@ impl TextTooltip<'_> {
         );
         shown.painted(ui, rect, true);
         paint_box(&painter, rect, true);
-        // Chromium puts the box on whole pixels, and the text's lines with it; across, the text
-        // keeps its fraction (measured: a box at y 812.5).
+        // Chromium puts the box on whole pixels, and the text's lines with it. Across, the text
+        // keeps its fraction (measured on a box at y 812.5).
         let text = Pos2::new(rect.min.x + PADDING_X, pixel_snap(rect).min.y + PADDING_TOP);
         crate::text::paint_text(&painter, text, galley, &TEXT);
     }
 }
 
 /// A tooltip of paragraphs whose lines mix text and keycaps, shown beside its anchor as
-/// [`TextTooltip::show_left`] shows text: the settings menu's `Backtick as Escape`. Its lines don't
-/// wrap; the box fits the widest.
+/// [`TextTooltip::show_left`] shows text, such as the settings menu's `Backtick as Escape`. Its
+/// lines don't wrap, and the box fits the widest.
 pub struct LinesTooltip<'a> {
-    /// Its paragraphs (`p`, `padding-bottom: 8px` but the last's), each lines (`br`) of text and
-    /// keycaps. Text keeps its spaces; caps are 4px apart (`margin-left: 4px`).
+    /// Its paragraphs (`p`, with `padding-bottom: 8px` on all but the last), each made of lines
+    /// (`br`) of text and keycaps. Text keeps its spaces, and caps are 4px apart
+    /// (`margin-left: 4px`).
     pub paragraphs: &'a [&'a [&'a [TooltipPart<'a>]]],
 }
 
@@ -904,8 +906,8 @@ impl LinesTooltip<'_> {
     /// Between paragraphs.
     const PARAGRAPH_GAP: f32 = 8.0;
 
-    /// Shows it while `anchor` is hovered, left of it: the box's right edge `gap` px before the
-    /// anchor's left and centred on it vertically, as [`TextTooltip::show_left`].
+    /// Shows it while `anchor` is hovered, left of it, with the box's right edge `gap` px before
+    /// the anchor's left and centred on it vertically, as [`TextTooltip::show_left`] does.
     pub fn show_left(&self, ui: &Ui, anchor: &Response, gap: f32) {
         let Some(shown) = hover(ui, anchor, false, INTERVAL) else {
             return;
@@ -950,8 +952,8 @@ impl LinesTooltip<'_> {
         );
         shown.painted(ui, rect, true);
         paint_box(&painter, rect, true);
-        // As [`TextTooltip::show_left`]'s: the lines on the box's whole pixels down, their own
-        // fraction across.
+        // As in [`TextTooltip::show_left`], the lines sit on the box's whole pixels down and keep
+        // their own fraction across.
         let mut top = pixel_snap(rect).min.y + PADDING_TOP;
         for lines in &paragraphs {
             for line in lines {
@@ -971,7 +973,7 @@ pub struct LineTooltip<'a> {
 }
 
 impl LineTooltip<'_> {
-    /// The box's size: a line with keycaps is a shortcut row's 21px, text alone 20px.
+    /// The box's size. A line with keycaps is a shortcut row's 21px, and text alone is 20px.
     pub fn size(&self, ctx: &Context) -> Vec2 {
         let line = Line::new(ctx, self.parts, 0.0, 0.0);
         Vec2::new(
@@ -1013,11 +1015,11 @@ struct Hover {
     shown: Option<f64>,
     /// When the pointer left the anchor while it showed.
     left: Option<f64>,
-    /// The tooltip with its padding, as last painted: the pointer on it keeps it.
+    /// The tooltip with its padding, as last painted. The pointer on it keeps the tooltip.
     over: Rect,
-    /// Whether the keyboard was on the anchor: losing it hides the tooltip at once.
+    /// Whether the keyboard was on the anchor, since losing the keyboard hides the tooltip at once.
     focused: bool,
-    /// The pass that last drew the anchor: an anchor that went unseen starts over.
+    /// The pass that last drew the anchor, so an anchor that went unseen starts over.
     pass: u64,
 }
 
@@ -1045,8 +1047,8 @@ impl Shown {
     }
 }
 
-/// A tooltip its caller draws, on the same timing as the module's own: a frame [`hover_tooltip`]
-/// shows it in.
+/// A tooltip its caller draws, on the same timing as the module's own. It's a frame that
+/// [`hover_tooltip`] shows it in.
 pub struct HoverTooltip(Shown);
 
 impl HoverTooltip {
@@ -1055,23 +1057,24 @@ impl HoverTooltip {
         self.0.opacity
     }
 
-    /// Says where its box was painted, above or below its anchor: the pointer on it (or on the 8px
-    /// about it) keeps it.
+    /// Says where its box was painted, above or below its anchor. The pointer on the box (or on
+    /// the 8px about it) keeps the tooltip.
     pub fn painted(&self, ui: &Ui, rect: Rect) {
         self.0.painted(ui, rect, false);
     }
 }
 
-/// Whether a tooltip of the caller's own on `anchor` shows this frame: once hover intent has
-/// the pointer settled on it, until 150ms after the pointer has left it and the tooltip.
+/// Whether a tooltip of the caller's own on `anchor` shows this frame. It shows once hover intent
+/// has the pointer settled on the anchor, until 150ms after the pointer has left the anchor and
+/// the tooltip.
 pub fn hover_tooltip(ui: &Ui, anchor: &Response) -> Option<HoverTooltip> {
     hover(ui, anchor, false, INTERVAL).map(HoverTooltip)
 }
 
-/// Whether a hover tooltip on `anchor` shows this frame, and how visibly: from when hover
-/// intent, polling every `interval`, has the pointer settled on the anchor, or at once while
-/// it's `focused`, fading in over 200ms; until the pointer has been off the anchor for 150ms and
-/// isn't on the tooltip, or at once when the anchor loses the keyboard.
+/// Whether a hover tooltip on `anchor` shows this frame, and how visibly. It shows from when hover
+/// intent (polling every `interval`) has the pointer settled on the anchor, or at once while the
+/// anchor is `focused`, fading in over 200ms. It goes once the pointer has been off the anchor for
+/// 150ms and isn't on the tooltip, or at once when the anchor loses the keyboard.
 fn hover(ui: &Ui, anchor: &Response, focused: bool, interval: f64) -> Option<Shown> {
     let ctx = ui.ctx();
     let id = anchor.id.with("exo_ui::tooltip_hover");
@@ -1121,12 +1124,12 @@ fn hover(ui: &Ui, anchor: &Response, focused: bool, interval: f64) -> Option<Sho
     })
 }
 
-/// A tooltip open until its close icon dismisses it: a tooltip box `width` wide, padded
-/// `8px 9px 8px 12px`, its title (12px bold on a 16px line, `top: 1px`) and close icon
+/// A tooltip open until its close icon dismisses it. It's a tooltip box `width` wide, padded
+/// `8px 9px 8px 12px`, with its title (12px bold on a 16px line, `top: 1px`) and close icon
 /// (`DEPRECATED_closeV2`, 10px, white at 30% and 60% hovered, Carbon's black) over content that
-/// wraps 4px under them. The content is drawn as Share Availability's, the one Exo shows: 12px bold
-/// on 20px lines `top: 3px`, its keycaps 1px lower still and 4px clear of the text after them. It
-/// fades in over 350ms, the first 43% of them unseen.
+/// wraps 4px under them. The content is drawn as Share Availability's, the one Exo shows, in 12px
+/// bold on 20px lines at `top: 3px`, with its keycaps 1px lower still and 4px clear of the text
+/// after them. It fades in over 350ms, the first 43% of them unseen.
 pub struct DismissableTooltip<'a> {
     pub title: &'a str,
     pub content: &'a [TooltipPart<'a>],
@@ -1156,7 +1159,7 @@ impl DismissableTooltip<'_> {
     const KEYS_TOP: f32 = 1.0;
     const AFTER_KEYS: f32 = 4.0;
     const CLOSE: f32 = 10.0;
-    /// The close icon's span sits 2px up (`margin-top: -2px`); its icon 3px under that.
+    /// The close icon's span sits 2px up (`margin-top: -2px`), and its icon 3px under that.
     const CLOSE_TOP: f32 = -2.0;
     const CLOSE_ICON_TOP: f32 = 1.0;
     const FADE: f64 = 0.35;
@@ -1227,7 +1230,7 @@ impl DismissableTooltip<'_> {
                 let painter = ui.painter();
                 paint_box(painter, rect, true);
                 let color = text_color(ctx);
-                // Chromium puts the box on whole pixels, and its lines with it; across, they keep
+                // Chromium puts the box on whole pixels, and its lines with it. Across, they keep
                 // their fraction (as `TextTooltip::show_left`'s).
                 let content_left_top = Pos2::new(
                     rect.min.x + Self::PADDING_LEFT,
@@ -1269,8 +1272,9 @@ impl DismissableTooltip<'_> {
                 );
                 let mut top = content_left_top.y + Self::TITLE.line_height + Self::CONTENT_GAP;
                 for line in &lines {
-                    // A cap is an inline block on its label's baseline, `padding-top: 1px` over a line
-                    // of the text's own 20px: its line's baseline (and text) sits 1px lower.
+                    // A cap is an inline block on its label's baseline, with `padding-top: 1px`
+                    // over a line of the text's own 20px, so its line's baseline (and text) sits
+                    // 1px lower.
                     let keys = line
                         .pieces
                         .iter()
@@ -1387,8 +1391,8 @@ pub struct ComposeKeysTooltip<'a> {
 }
 
 impl ComposeKeysTooltip<'_> {
-    /// Paints the tooltip centred under `anchor`, its box's top `gap` px below the anchor's
-    /// bottom and kept `within`, its keycaps at `keys_opacity` (compose's breathe).
+    /// Paints the tooltip centred under `anchor`, with its box's top `gap` px below the anchor's
+    /// bottom and kept `within`, and its keycaps at `keys_opacity` (compose's breathe).
     pub fn show_open(
         &self,
         ui: &Ui,
@@ -1546,7 +1550,7 @@ mod tests {
     const OFF: Pos2 = pos2(10.0, 10.0);
 
     /// Runs a frame at `time` with the pointer at `at`, the anchor drawn (unless `!drawn`) and
-    /// `focused`; returns whether its tooltip shows.
+    /// `focused`, and returns whether its tooltip shows.
     fn frame(ctx: &Context, time: f64, at: Pos2, focused: bool, drawn: bool) -> bool {
         let input = RawInput {
             time: Some(time),
@@ -1590,7 +1594,7 @@ mod tests {
     fn a_pointer_sweeping_across_never_settles() {
         let ctx = Context::default();
         frame(&ctx, 0.0, OFF, false, true);
-        // 5px every 50ms: 10px between polls.
+        // 5px every 50ms, which is 10px between polls.
         for step in 0..6 {
             let at = pos2(101.0 + 5.0 * step as f32, 116.0);
             assert!(

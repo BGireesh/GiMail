@@ -1,6 +1,6 @@
-//! What message bodies load: remote images straight from the sender's server, with no proxy, on
-//! the public internet only (`crate::remote_content`), and `cid:` images from the message's
-//! inline attachments, both through the account's [`Loader`].
+//! Loads what message bodies ask for. Remote images come straight from the sender's server, with
+//! no proxy, and only from the public internet (`crate::remote_content`). `cid:` images come from
+//! the message's inline attachments. Both go through the account's [`Loader`].
 
 use std::{
     collections::HashMap,
@@ -16,12 +16,13 @@ use exo_store::Attachment;
 use super::Job;
 use crate::account::Loader;
 
-/// One thread's [`exo_mail::Fetch`]: it knows the thread's inline attachments by content id.
+/// The [`exo_mail::Fetch`] for one thread, which knows the thread's inline attachments by content
+/// id.
 pub(super) struct Fetcher {
     loader: Loader,
     /// Inline attachments by lower-cased `Content-ID`.
     inline: HashMap<String, Attachment>,
-    /// Wakes the body worker when bytes arrive, counted in its `pending`.
+    /// Wakes the body worker when bytes arrive. Each wake adds one to `pending`.
     wake: Sender<Job>,
     pending: Arc<AtomicUsize>,
 }
@@ -42,7 +43,7 @@ impl Fetcher {
     }
 }
 
-/// `attachments` that have a `Content-ID`, by it, lower-cased.
+/// The `attachments` that have a `Content-ID`, keyed by that id in lower case.
 pub(crate) fn by_content_id(attachments: Vec<Attachment>) -> HashMap<String, Attachment> {
     attachments
         .into_iter()
@@ -50,8 +51,8 @@ pub(crate) fn by_content_id(attachments: Vec<Attachment>) -> HashMap<String, Att
         .collect()
 }
 
-/// The attachment in `inline` (from [`by_content_id`]) a `cid:` URL's `cid` names (`cid:` URLs
-/// may be percent-encoded).
+/// The attachment in `inline` (from [`by_content_id`]) that the `cid` of a `cid:` URL names. The
+/// `cid` may be percent-encoded.
 pub(crate) fn named<'a>(
     inline: &'a HashMap<String, Attachment>,
     cid: &str,

@@ -1,8 +1,8 @@
-//! Zoom: ⌘= (or the keypad's +) zooms in, ⌘- out and ⌘0 back to actual size, with no other
-//! modifier held, before anything else sees the keys; View's zoom items send the same keys.
-//! Chromium's zoom levels, one a press from -3 to 3, each 1.2 times the last, so 57.9% to
-//! 172.8%. The whole app zooms, every account, except the tab strip ([`crate::chrome`]). egui's
-//! own zoom keys (0.1 a press, as far as 500%) are off.
+//! Zoom. ⌘= (or the keypad's +) zooms in, ⌘- out and ⌘0 back to actual size, with no other
+//! modifier held, before anything else sees the keys. View's zoom items send the same keys. The
+//! levels are Chromium's, one a press from -3 to 3, each 1.2 times the last, so 57.9% to 172.8%.
+//! The whole app zooms, every account, except the tab strip ([`crate::chrome`]). egui's own zoom
+//! keys (0.1 a press, as far as 500%) are off.
 //!
 //! The zoom lasts across launches, in `zoom.json` in the state folder.
 
@@ -28,13 +28,13 @@ struct Saved {
 #[derive(Debug, Default)]
 pub struct Zoom {
     level: i32,
-    /// Where it's kept; none for a zoom that lasts the run (screenshots and tests).
+    /// Where it's kept, or none for a zoom that lasts the run (screenshots and tests).
     path: Option<PathBuf>,
 }
 
 impl Zoom {
-    /// The zoom kept in `state`, the state folder: actual size, unless it was zoomed. A file that
-    /// can't be read reads as actual size.
+    /// The zoom kept in `state`, the state folder, which is actual size unless it was zoomed. A
+    /// file that can't be read reads as actual size.
     pub fn load(state: &Path) -> Self {
         let path = state.join(FILE_NAME);
         let saved = match std::fs::read(&path) {
@@ -109,8 +109,9 @@ fn factor(level: i32) -> f32 {
     RATIO.powi(level)
 }
 
-/// What a zoom key does to the level: +1, -1, or 0 for actual size. ⌘ alone, on a press or its
-/// repeats: `=` or `+` in, `-` out, `0` back. Its release is let through, as nothing reads it.
+/// What a zoom key does to the level: +1, -1, or 0 for actual size. With ⌘ alone, on a press or
+/// its repeats, `=` or `+` zooms in, `-` out and `0` back. Its release is let through, as nothing
+/// reads it.
 fn zoom_key(event: &Event) -> Option<i32> {
     let Event::Key {
         key,
@@ -121,7 +122,7 @@ fn zoom_key(event: &Event) -> Option<i32> {
     else {
         return None;
     };
-    // On the Mac ⌘ is `command` and ⌃ `ctrl`; elsewhere `command` is ⌃ itself.
+    // On the Mac ⌘ is `command` and ⌃ `ctrl`. Elsewhere `command` is ⌃ itself.
     if !modifiers.command
         || modifiers.shift
         || modifiers.alt

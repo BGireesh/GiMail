@@ -34,18 +34,18 @@ const PANE_ALL_DAY_OVERLAP: f32 = 3.0;
 const ALL_DAY_PADDING_TOP: f32 = 5.0;
 const ALL_DAY_BLOCK: f32 = 23.0;
 const ALL_DAY_ROW: f32 = 24.0;
-/// The now line: 2px tall, red; in the week view an 8px bulb at its left end (`top: -3px;
-/// left: -4.5px`).
+/// The now line is 2px tall and red. In the week view it has an 8px bulb at its left end
+/// (`top: -3px; left: -4.5px`).
 const NOW_LINE: Color32 = Color32::from_rgb(0xff, 0x56, 0x5e);
 const NOW_BULB: f32 = 8.0;
-/// The gutter: 64px, 60px in the right pane; with a secondary time zone 93px, or 111px when it's
-/// off the hour from this one.
+/// The gutter is 64px, or 60px in the right pane. With a secondary time zone it's 93px, or 111px
+/// when that zone is off the hour from this one.
 const WEEK_GUTTER: f32 = 64.0;
 const PANE_GUTTER: f32 = 60.0;
 const ZONES_GUTTER: f32 = 93.0;
 const MINUTE_ZONES_GUTTER: f32 = 111.0;
-/// The hour and time zone labels: each zone's at least 36px wide (the first 54px off the hour),
-/// right-aligned, 4px apart.
+/// The hour and time zone labels: each zone's is at least 36px wide (the first 54px when off the
+/// hour), right-aligned and 4px apart.
 const ZONE_LABEL: f32 = 36.0;
 const ZONE_GAP: f32 = 4.0;
 /// A weekday header: `padding-top: 28px; padding-bottom: 15px`, a 60px title 22px tall
@@ -91,11 +91,12 @@ pub struct Grid<'a> {
     pub draft: Option<&'a Event>,
     /// An event being edited, which the draft stands in for.
     pub hidden: Option<&'a str>,
-    /// The form is open: the others in the muted palette, and a click on one does nothing.
+    /// The form is open, so the other events take the muted palette and a click on one does
+    /// nothing.
     pub form: bool,
-    /// The details are up: a click only closes them.
+    /// The details are up, so a click only closes them.
     pub details: bool,
-    /// Find Time is on: the hours outside work shaded, the empty grid inert.
+    /// Find Time is on, so the hours outside work are shaded and the empty grid is inert.
     pub finding: bool,
     /// Guests' calendars overlaid as columns: each guest's events, in their colour
     /// ([`super::guests::guest_events`]).
@@ -104,8 +105,8 @@ pub struct Grid<'a> {
     pub expanded: Option<&'a str>,
     /// My events take a column beside the guests'.
     pub mine: bool,
-    /// Share Availability is picking times: a click on empty time makes a slot this many minutes
-    /// long, and none can start before now.
+    /// Share Availability is picking times. A click on empty time makes a slot this many minutes
+    /// long, and no slot can start before now.
     pub sharing: Option<i64>,
     /// Secondary time zones, whose hours and names the week's gutter shows before this one's.
     pub zones: &'a [TimeZone],
@@ -143,7 +144,7 @@ enum Drag {
     New { day: usize, from: i32, to: i32 },
     /// Drafting an all-day event across the days `from` to `to`.
     NewAllDay { from: usize, to: usize },
-    /// Moving event `key` (or with `resize`, its end) to `start`–`end`; `grab` is where the
+    /// Moving event `key` (or with `resize`, its end) to `start`–`end`. `grab` is where the
     /// pointer took it, after its start.
     Event {
         key: String,
@@ -168,14 +169,14 @@ pub enum Variant {
 /// What the pointer did in the grid.
 #[derive(Clone, Debug, PartialEq)]
 pub enum GridAction {
-    /// Clicked event `key`; its details go beside `anchor`: the block's day column at the
-    /// block's height, or an all-day block itself.
+    /// Clicked event `key`. Its details go beside `anchor`, which is the block's day column at
+    /// the block's height, or an all-day block itself.
     Select { key: String, anchor: Rect },
     /// Clicked empty grid or all-day row, outside the events.
     Background,
     /// Started dragging an event I can't change.
     Restricted,
-    /// Clicked or dragged out empty time: a new event there, or the draft moved there.
+    /// Clicked or dragged out empty time, for a new event there or the draft moved there.
     Slot {
         start: Zoned,
         end: Zoned,
@@ -187,20 +188,21 @@ pub enum GridAction {
         start: Zoned,
         end: Zoned,
     },
-    /// Double-clicked event `key`, which I can change: its form.
+    /// Double-clicked event `key`, which I can change, for its form.
     Open(String),
     /// Started picking a time before now while sharing availability.
     Past,
     /// The cross on shared slot `key`.
     Remove(String),
-    /// A time zone's name in the gutter: Calendar Settings, at the secondary time zone.
+    /// A time zone's name in the gutter, for Calendar Settings at the secondary time zone.
     ZoneSettings,
-    /// The pointer rested on a guests' column: it expands, a guest's address or `None` for mine.
+    /// The pointer rested on a guests' column, which expands: a guest's address, or `None` for
+    /// mine.
     Expand(Option<String>),
 }
 
-/// How far a block I can't change follows the pointer: half the way, at most 11px, along `axis`;
-/// back in place when let go.
+/// How far a block I can't change follows the pointer along `axis`: half the way, at most 11px.
+/// It's back in place when let go.
 fn jiggle(
     ui: &Ui,
     response: &egui::Response,
@@ -250,7 +252,7 @@ impl GridView {
         self.drag.is_some()
     }
 
-    /// Escape while dragging: the drag is dropped where it started.
+    /// Escape while dragging, which drops the drag where it started.
     pub fn cancel_drag(&mut self) {
         self.drag = None;
     }
@@ -438,9 +440,9 @@ impl GridView {
         (day, minutes.clamp(0.0, 1440.0))
     }
 
-    /// Clicks and drags on empty grid: a 30-minute event at the quarter hour clicked, or the
-    /// range dragged out; in the all-day row, all-day events. With the details up, a click only
-    /// closes them.
+    /// Clicks and drags on empty grid make a 30-minute event at the quarter hour clicked, or the
+    /// range dragged out, and in the all-day row they make all-day events. With the details up, a
+    /// click only closes them.
     fn drag_background(
         &mut self,
         ui: &Ui,
@@ -723,7 +725,7 @@ impl GridView {
         }
     }
 
-    /// Starts moving or resizing `event` when its block's drag starts; a double click opens its
+    /// Starts moving or resizing `event` when its block's drag starts. A double click opens its
     /// form.
     fn take_event(
         &mut self,
@@ -822,10 +824,10 @@ impl GridView {
             / scale;
     }
 
-    /// The gutter's header: the time zones' abbreviations, the secondary ones first; in the right
-    /// pane, borders below and to the right. Returns whether one of the week's was clicked:
-    /// they're buttons to Calendar Settings, but not while the form or Share Availability has the
-    /// week.
+    /// The gutter's header: the time zones' abbreviations, the secondary ones first, and in the
+    /// right pane, borders below and to the right. Returns whether one of the week's abbreviations
+    /// was clicked. They're buttons to Calendar Settings, but not while the form or Share
+    /// Availability has the week.
     fn paint_timezone(&self, ui: &Ui, painter: &Painter, frame: &Frame, grid: &Grid<'_>) -> bool {
         let palette = exo_ui::palette(painter.ctx());
         let header = Rect::from_min_max(
@@ -1219,10 +1221,10 @@ fn paint_day_headers(painter: &Painter, frame: &Frame, grid: &Grid<'_>) {
 }
 
 impl GridView {
-    /// Notes the guests' column in `rect` (`guest`'s, or mine) when the pointer is over it there and
-    /// in `within`, for [`Self::expand_column`].
+    /// Notes the guests' column in `rect` (`guest`'s, or mine) when the pointer is over it there
+    /// and in `within`, for [`Self::expand_column`].
     fn hover_column(&mut self, ui: &Ui, within: Rect, rect: Rect, column: (Date, Option<String>)) {
-        // Nothing over the grid there: the week's own area doesn't count as covering it.
+        // Nothing is over the grid there. The week's own area doesn't count as covering it.
         let uncovered = |at: egui::Pos2| {
             ui.ctx().layer_id_at(at).is_none_or(|layer| {
                 layer == ui.layer_id() || layer.order == egui::Order::Background
@@ -1341,10 +1343,11 @@ impl GridView {
 }
 
 impl GridView {
-    /// The all-day row while guests are overlaid: each day's columns side by side across the day
-    /// less 5px (`flex: 1; margin-right: 5px`), the open ones 50%, each column's events stacked from
-    /// its top, 2px narrower than it; no borders between the days. A click opens an event's details
-    /// (they don't move), a collapsed column hides their text, and resting on a column expands it.
+    /// The all-day row while guests are overlaid. Each day's columns sit side by side across the
+    /// day less 5px (`flex: 1; margin-right: 5px`), the open ones at 50%, with each column's events
+    /// stacked from its top, 2px narrower than the column. There are no borders between the days.
+    /// A click opens an event's details (the events don't move), a collapsed column hides their
+    /// text, and resting on a column expands it.
     fn paint_attendee_all_day(
         &mut self,
         ui: &Ui,
@@ -1465,9 +1468,9 @@ impl GridView {
         let day_end = midnight
             .tomorrow()
             .map_or(midnight.timestamp(), |next| next.timestamp());
-        // Shared slots span the column under the rest, and events overlapping them are laid out from
-        // 5% in (`inset: 0 1px auto 5%`). With guests' calendars shown, the draft spans the day over
-        // their columns too, and nothing is indented.
+        // Shared slots span the column under the rest, and events overlapping them are laid out
+        // from 5% in (`inset: 0 1px auto 5%`). With guests' calendars shown, the draft spans the
+        // day over their columns too, and nothing is indented.
         let columns_shown = !grid.guests.is_empty();
         let (slots, events): (Vec<&Event>, Vec<&Event>) = all.into_iter().partition(|event| {
             event.share.is_some()
@@ -1552,7 +1555,8 @@ impl GridView {
                 .as_secs_f64()
                 / 3600.0) as f32
                 * HOUR_HEIGHT;
-            // Over guests' columns, to the day's edge; without them, leaving room to click beside it.
+            // Over guests' columns the block reaches the day's edge. Without them, it leaves room
+            // to click beside it.
             let right = if columns_shown {
                 column.right()
             } else {
@@ -1617,7 +1621,8 @@ impl GridView {
             // The moved copy of a dragged event is drawn, not interacted with.
             let copy = extra.is_some_and(|extra| std::ptr::eq(extra, event)) && event.key != DRAFT;
             let id = if copy { id.with("moved") } else { id };
-            // A guest's event opens its details but doesn't move; a collapsed column's bar only shows.
+            // A guest's event opens its details but doesn't move, and a collapsed column's bar only
+            // shows.
             let collapsed = in_column.is_some_and(|placed| placed.collapsed);
             let guest = in_column.is_some_and(|placed| placed.guest);
             let inert = copy || collapsed || guest;
@@ -1634,14 +1639,15 @@ impl GridView {
                 Sense::click_and_drag()
             };
             let response = ui.interact(rect.intersect(clip), id, sense);
-            // The day's events (`width: calc(100% - 4px)`), 1px in from each side; `column` already
+            // The day's events (`width: calc(100% - 4px)`), 1px in from each side. `column` already
             // leaves out the day's right border.
             let anchor = Rect::from_x_y_ranges(
                 column.left() + 1.0..=column.right() - EVENTS_INSET - 1.0,
                 rect.y_range(),
             );
             if event.key == DRAFT {
-                // Over guests' columns the draft spans the day, and the form goes beside that, 1px in.
+                // Over guests' columns the draft spans the day, and the form goes beside that, 1px
+                // in.
                 self.draft_anchor = Some(if columns_shown {
                     Rect::from_x_y_ranges(
                         column.left() + 1.0..=column.right() - 1.0,
@@ -1651,8 +1657,8 @@ impl GridView {
                     anchor
                 });
             }
-            // A slot's cross (`padding: 6px 6px 4px 4px` around it) removes it; a click elsewhere on
-            // it does nothing.
+            // A slot's cross (`padding: 6px 6px 4px 4px` around it) removes the slot. A click
+            // elsewhere on the slot does nothing.
             let cross = Rect::from_min_max(
                 pos2(rect.right() - 18.0, rect.top()),
                 pos2(rect.right(), rect.top() + 18.0),
@@ -1714,8 +1720,8 @@ impl GridView {
                 time_on_same_line,
                 // With slots picked, the rest are previews.
                 preview,
-                // A slot an event starts within half an hour of shows its time and cross on hover
-                // only.
+                // A slot that an event starts within half an hour of shows its time and cross only
+                // on hover.
                 covered: event.share.is_some()
                     && !hovered
                     && indented.iter().any(|other| {
@@ -1749,7 +1755,7 @@ impl GridView {
                 block::paint(ui, clip, rect, event, end.duration_since(start), look);
             }
         }
-        // Hovered and active blocks over the rest; the focused one over them.
+        // Hovered and active blocks go over the rest, and the focused one over them.
         glowing.sort_by_key(|(_, _, _, look)| look.focused);
         for (rect, event, span, look) in glowing {
             block::paint(ui, clip, rect, event, span, look);
@@ -1804,8 +1810,8 @@ fn blend_over(
             channel(top.b(), bottom.b()),
         )
     };
-    // Screened over Carbon's dark page, the whole block lightens; multiplied over Snow's white,
-    // it stays as it is.
+    // Screened over Carbon's dark page, the whole block lightens, while multiplied over Snow's
+    // white it stays as it is.
     let page = exo_ui::palette(ui.ctx()).background_base_default;
     let base = (exo_ui::pixel_snap(rect), page);
     for (block_rect, beneath) in std::iter::once(&base)
@@ -1838,7 +1844,7 @@ fn blend_over(
     }
 }
 
-/// `event` overlaps the draft and starts within three hours of its start.
+/// Whether `event` overlaps the draft and starts within three hours of the draft's start.
 fn overlaps_draft(draft: &Event, event: &Event) -> bool {
     event.start < draft.end
         && event.end > draft.start
@@ -1852,7 +1858,7 @@ struct InColumn {
     collapsed: bool,
     /// It shows its time.
     time: bool,
-    /// A guest's: a click opens its details, it doesn't move.
+    /// A guest's, so a click opens its details and it doesn't move.
     guest: bool,
 }
 
@@ -1951,7 +1957,7 @@ fn draft_like(grid: &Grid<'_>, start: Zoned, end: Zoned, all_day: bool) -> Event
     )
 }
 
-/// Where Chromium paints a border edge laid out at `at`: on the whole px.
+/// Where Chromium paints a border edge laid out at `at`, which is on the whole px.
 fn snap(at: f32) -> f32 {
     (at + 0.5).floor()
 }

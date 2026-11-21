@@ -123,7 +123,7 @@ impl Failure {
         Self::new(403, format!("Delegation denied for {user}"), "forbidden")
     }
 
-    /// Calendar v3 still uses the legacy error body: no `status` field.
+    /// Calendar v3 still uses the legacy error body, which has no `status` field.
     pub fn legacy(mut self) -> Self {
         self.error.status = None;
         self

@@ -1,6 +1,6 @@
-//! What account setup's split step previews: which inbox threads each candidate split would
-//! take, and what Important and Other would be left with, found by routing the inbox Exo has with
-//! the candidates turned on.
+//! What the split step of account setup previews. It shows which inbox threads each candidate
+//! split would take and what Important and Other would be left with, found by routing the inbox
+//! Exo has with the candidates turned on.
 
 use jiff::Timestamp;
 
@@ -17,7 +17,7 @@ use crate::view::{Router, ThreadView};
 pub struct PreviewEmail {
     /// The thread.
     pub id: ThreadId,
-    /// Its latest received message's sender: the name, else the address.
+    /// The sender of its latest received message, by name, else by address.
     pub sender: String,
     /// Its subject.
     pub subject: String,
@@ -34,15 +34,15 @@ pub struct PreviewList {
     pub threads: Vec<PreviewEmail>,
 }
 
-/// Account setup's preview: each candidate's list, in the candidates' order, and Important's and
-/// Other's with every candidate on.
+/// The preview in account setup. It holds a list for each candidate, in the candidates' order,
+/// and the lists for Important and Other with every candidate on.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SplitPreview {
-    /// Each candidate's, in the order asked for.
+    /// Each candidate's list, in the order asked for.
     pub splits: Vec<PreviewList>,
-    /// Important's (`SH_IMPORTANT`).
+    /// Important's list (`SH_IMPORTANT`).
     pub important: PreviewList,
-    /// Other's (`SH_OTHER`).
+    /// Other's list (`SH_OTHER`).
     pub other: PreviewList,
 }
 
@@ -126,7 +126,8 @@ impl Store {
     }
 }
 
-/// `view` as the preview lists it: its latest message from someone else (else its latest).
+/// `view` as the preview lists it, from its latest message from someone else, or else from its
+/// latest message.
 fn preview_email(view: &ThreadView, router: &Router) -> Option<PreviewEmail> {
     let shown = view.messages.iter().filter(|message| !message.is_draft());
     let received = shown

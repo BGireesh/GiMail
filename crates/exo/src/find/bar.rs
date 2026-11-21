@@ -1,5 +1,5 @@
-//! The find field: a tab-strip item between the tabs and +, 240px wide while open, holding the
-//! text field, the `{current}/{total}` count and a close button.
+//! The find field, a tab-strip item between the tabs and + that is 240px wide while open. It holds
+//! the text field, the `{current}/{total}` count and a close button.
 
 use egui::{
     Color32, CornerRadius, CursorIcon, Rect, Stroke, StrokeKind, Ui, UiBuilder, pos2,
@@ -41,7 +41,8 @@ struct Geometry {
 fn geometry(ctx: &egui::Context) -> Geometry {
     let open = with(ctx, |find| find.open);
     let id = exo_ui::id(ctx, "exo::find::bar");
-    // (open, its duration, delay, then the same closing, and the curve).
+    // Each value takes its open value, its opening duration and delay, the same for closing, and
+    // its curve.
     let value =
         |name: &str, on: f32, opening: (f32, f32), closing: (f32, f32), curve: CubicBezier| {
             let (duration, delay) = if open { opening } else { closing };
@@ -90,7 +91,7 @@ fn geometry(ctx: &egui::Context) -> Geometry {
             (0.175, 0.025),
             CubicBezier::LINEAR,
         ),
-        // `opacity 175ms ease`; the close button's own is `opacity 50ms`.
+        // `opacity 175ms ease`, and the close button's own is `opacity 50ms`.
         contents: value(
             "contents",
             1.0,
@@ -109,10 +110,10 @@ pub(crate) fn layout(ctx: &egui::Context) -> (f32, f32) {
     (geometry.margin, geometry.width)
 }
 
-/// Draws the field in `rect` (its border box, as wide as [`layout`] has it) at the strip's scale
-/// `s` (points per CSS px; the strip doesn't zoom with the page), with a `border` like the
-/// tabs'. `close` draws the close button (the tabs' ×) in its rect at an opacity and says whether
-/// it was clicked.
+/// Draws the field in `rect`, its border box, as wide as [`layout`] has it. `s` is the strip's
+/// scale in points per CSS px (the strip doesn't zoom with the page), and `border` is a border
+/// like the tabs'. `close` draws the close button (the tabs' ×) in its rect at an opacity and says
+/// whether it was clicked.
 pub(crate) fn show(
     ui: &mut Ui,
     rect: Rect,
@@ -141,7 +142,8 @@ pub(crate) fn show(
         )
     });
     let carbon = exo_ui::theme(&ctx) == Theme::Carbon;
-    // The text: black at .85, `hsla(0,0%,100%,.9)` in Carbon; the count black at .3, white at .5.
+    // The text is black at .85, or `hsla(0,0%,100%,.9)` in Carbon. The count is black at .3, or
+    // white at .5 in Carbon.
     let (text, count_color) = if carbon {
         (
             Color32::from_white_alpha(230),
@@ -171,8 +173,8 @@ pub(crate) fn show(
             StrokeKind::Inside,
         );
     }
-    // A flex row in the content box (`padding-left` only): the input grows into what the count
-    // and the close button leave.
+    // A flex row in the content box (`padding-left` only), where the input grows into what the
+    // count and the close button leave.
     let content = Rect::from_min_max(
         rect.min + vec2(edge + padding, edge),
         rect.max - vec2(edge, edge),
@@ -208,7 +210,8 @@ pub(crate) fn show(
             None,
         );
     }
-    // The field's keys were taken from the page at the start of the frame; it has them now.
+    // The field's keys were taken from the page at the start of the frame, and the field gets
+    // them now.
     let events = with(&ctx, |find| std::mem::take(&mut find.events));
     let before = ctx.input(|input| input.events.len());
     ctx.input_mut(|input| input.events.extend(events));
@@ -257,8 +260,8 @@ pub(crate) fn show(
         super::close(&ctx);
         return;
     }
-    // A press in the field gives it the keyboard; anywhere else on the window takes it away
-    // (the tab bar's web contents lose focus to the page's).
+    // A press in the field gives it the keyboard, and a press anywhere else on the window takes
+    // the keyboard away (the tab bar's web contents lose focus to the page's).
     if ui.input(|input| input.pointer.primary_pressed()) {
         let inside = response.hovered() || field.hovered();
         let previous = ctx

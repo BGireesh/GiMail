@@ -1,6 +1,6 @@
 //! The Snippets folder's list: the `Private Snippets` section (with `New Private Snippet` and its
 //! columns), a row per snippet (name, subject, text, and its numbers), and the cursor. It takes
-//! the thread list's place; its metrics are a 1280×800 window's.
+//! the thread list's place. Its metrics are a 1280×800 window's.
 
 use egui::{Rect, Sense, Ui, pos2, vec2};
 use exo_commands::{Command, Commands, Region};
@@ -23,12 +23,12 @@ const METADATA: TextStyle =
     TextStyle::new(Font::new(Family::Sans, 400), 12.0, 16.0).letter_spacing(0.017 * 12.0);
 /// Rows are 36px tall.
 const ROW: f32 = 36.0;
-/// The first section header is 36px tall (`padding-top: 10px`), on the list's 3px.
+/// The first section header is 36px tall (`padding-top: 10px`) and starts 3px into the list.
 const FIRST_HEADER: f32 = 36.0;
 const LIST_TOP: f32 = 3.0;
 /// The view's side padding, as the thread list has it.
 const VIEW_PADDING_X: f32 = 6.0;
-/// The top status: 10px, the keycap's 24px line 1px up, 10px.
+/// The top status's height: 10px, the keycap's 24px line moved 1px up, and 10px.
 const TOP_STATUS: f32 = 43.0;
 /// The top status's text: 12px/16px, `top: 1px`.
 const STATUS: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 12.0, 16.0);
@@ -39,7 +39,7 @@ pub(crate) struct Folder {
     open: bool,
     /// The highlighted snippet.
     cursor: Option<String>,
-    /// The order a column's header gave it, until the folder is gone to again.
+    /// The order set by a column's header, until the folder is opened again.
     sort: Option<Sort>,
     /// The snippet open read-only in the pane.
     viewing: Option<String>,
@@ -57,12 +57,12 @@ impl Folder {
         self.open = true;
     }
 
-    /// Another list replaces it (the view closed first).
+    /// Another list replaces the folder (the view closed first).
     pub fn close(&mut self) {
         self.open = false;
     }
 
-    /// Snippet `id` opens read-only, the cursor on its row.
+    /// Opens snippet `id` read-only, with the cursor on its row.
     pub fn view(&mut self, id: &str) {
         self.open = true;
         self.set_cursor(Some(id.to_owned()));
@@ -79,7 +79,7 @@ impl Folder {
         self.viewing.as_deref()
     }
 
-    /// Whether it's the list.
+    /// Whether the folder is the list.
     pub fn is_open(&self) -> bool {
         self.open
     }
@@ -105,14 +105,14 @@ impl Folder {
         );
     }
 
-    /// The cursor goes to `cursor` from a key or the app: the right pane follows at once.
+    /// Moves the cursor to `cursor` for a key or the app, and the right pane follows at once.
     fn set_cursor(&mut self, cursor: Option<String>) {
         self.cursor = cursor;
         self.hovered_at = None;
     }
 
-    /// The pointer moved the cursor to `id`, which highlights the row at once: the right pane
-    /// follows once it has stayed there ([`crate::SETTLED_HOVER`]).
+    /// The pointer moved the cursor to `id`, which highlights the row at once. The right pane
+    /// follows once the pointer has stayed there ([`crate::SETTLED_HOVER`]).
     fn hover_to(&mut self, id: String, now: f64) {
         if self.cursor.as_ref() != Some(&id) {
             self.cursor = Some(id);
@@ -120,8 +120,8 @@ impl Folder {
         }
     }
 
-    /// The snippet the right pane shows at `now`: the cursor's, unless a hover put it there too
-    /// recently, when the one before.
+    /// The snippet the right pane shows at `now`. That's the cursor's, unless a hover moved the
+    /// cursor there too recently, in which case the pane keeps the one before.
     pub fn pane(&mut self, ctx: &egui::Context, now: f64) -> Option<&str> {
         match self.hovered_at {
             Some(at) if now - at < crate::SETTLED_HOVER => {
@@ -140,8 +140,8 @@ impl Folder {
         self.sort
     }
 
-    /// A column's header: the section sorts by it, most first, or the other way when it already
-    /// does.
+    /// A click on a column's header. The section sorts by that column, most first, or the other
+    /// way round when it's already sorted by it most first.
     pub fn sort_by(&mut self, column: Column) {
         let ascending = self
             .sort
@@ -154,7 +154,7 @@ impl Folder {
         self.sort = None;
     }
 
-    /// Keeps the cursor on a row that's there: the first, when it isn't.
+    /// Keeps the cursor on a row that's there, moving it to the first row when its row is gone.
     fn settle(&mut self, ids: &[String]) {
         if self
             .cursor
@@ -166,12 +166,12 @@ impl Folder {
     }
 }
 
-/// The folder's keys, the thread list's over snippets: J / K, Enter to edit, C for a
-/// new one (`Create Snippet`'s place), and `Discard Snippet`.
+/// The folder's keys, which are the thread list's applied to snippets: J / K, Enter to edit, C
+/// for a new snippet (in place of `Create Snippet`), and `Discard Snippet`.
 pub(super) fn register(commands: &mut Commands<commands::Action>, count: usize) {
     const LIST: &[Region] = &[Region::ThreadList];
     let act = commands::Action::Snippets;
-    // Shift moves too: the folder selects nothing.
+    // Shift moves too, because the folder selects nothing.
     commands.add(
         Command::shortcut("SNIPPET_NEXT", act(Action::Move(1)))
             .keys(["j", "down", "shift+j", "shift+down"])
@@ -243,8 +243,8 @@ pub(super) fn register_view(commands: &mut Commands<commands::Action>) {
     );
 }
 
-/// The Replied number's tooltip, 8px under `anchor` on the tooltips' hover timing, the numbers'
-/// thousands grouped.
+/// The Replied number's tooltip, shown 8px under `anchor` on the tooltips' hover timing, with
+/// thousands grouped in its numbers.
 fn replies_tooltip(ui: &Ui, anchor: &egui::Response, replies: u32, sends: u32) {
     let text = format!(
         "{} out of {} messages sent with\nthis snippet were replied to.",
@@ -260,8 +260,8 @@ fn replies_tooltip(ui: &Ui, anchor: &egui::Response, replies: u32, sends: u32) {
     .show_below(ui, anchor, 8.0, within);
 }
 
-/// The folder's top status at `at` (its text's left, the status's top): `Hit C to create a
-/// Snippet!`, after `You currently have no Snippets.` when there are `none`.
+/// The folder's top status at `at`, which is the text's left and the status's top. It says `Hit C
+/// to create a Snippet!`, after `You currently have no Snippets.` when there are `none`.
 fn top_status(ui: &Ui, painter: &egui::Painter, at: egui::Pos2, none: bool) {
     let palette = exo_ui::palette(ui.ctx());
     // `rgba(0,0,0,.5)` (white in Carbon).
@@ -316,7 +316,7 @@ fn statistic(count: u32) -> String {
 
 impl crate::Mail {
     /// Draws the folder in `rect` (the content pane): the thread list's header titled
-    /// `Snippets`, then the section and its rows. Returns what was asked for.
+    /// `Snippets`, then the section and its rows, and runs what was asked for.
     pub(crate) fn show_snippets(
         &mut self,
         ui: &mut Ui,
@@ -362,8 +362,8 @@ impl crate::Mail {
             header += TOP_STATUS;
         }
 
-        // The section header: `flex: 1 1 22.5%` for the title, the action after it.
-        // On its 16px line, `top: .5px`.
+        // The section header gives the title `flex: 1 1 22.5%` and puts the action after it.
+        // The text sits on its 16px line with `top: .5px`.
         SECTION.paint_line(
             &painter,
             pos2(left, header + 10.0),
@@ -372,8 +372,8 @@ impl crate::Mail {
             None,
         );
         let action_left = left + 0.225 * content_width;
-        // Classic's `text-transform: uppercase`, on the container's 16px line
-        // (`top: .5px`); the span's 17px box is what takes the click.
+        // Upper-cased for Classic's `text-transform: uppercase`, on the container's 16px line
+        // (`top: .5px`). The span's 17px box is what takes the click.
         let width = ACTION.paint_line(
             &painter,
             pos2(action_left, header + 10.0),
@@ -391,8 +391,8 @@ impl crate::Mail {
         if button.clicked() {
             actions.push(Action::New(String::new()));
         }
-        // The headers `Sends `, `Opened `, `Replied ` sort the section (not while it's empty),
-        // the sorted one with its arrow; the private section's `Author` doesn't.
+        // The headers `Sends `, `Opened ` and `Replied ` sort the section (not while it's
+        // empty), and the sorted one shows its arrow. The private section's `Author` doesn't sort.
         for (column, title, sorts) in [
             (sends, "Sends ", Some(Column::Sends)),
             (opened, "Opened ", Some(Column::Opened)),
@@ -403,8 +403,8 @@ impl crate::Mail {
                 SECTION.paint_line(&painter, pos2(column, header + 10.0), title, heading, None);
             let Some(by) = sorts else { continue };
             if let Some(sorted) = sort.filter(|sort| sort.column == by) {
-                // `DEPRECATED_downArrow` (12px box), its bottom 4px over the 16px line's; legacy
-                // themes turn it over for ascending.
+                // `DEPRECATED_downArrow` (12px box), its bottom 4px above the 16px line's bottom.
+                // Classic turns it over for ascending.
                 let arrow =
                     Rect::from_min_size(pos2(column + width, header + 10.0), vec2(12.0, 12.0));
                 let turn = if sorted.ascending {
@@ -479,10 +479,10 @@ impl crate::Mail {
                 palette.ink(0.85, 0.85),
                 Some(name_right - left - 2.0 * rem),
             );
-            // The subject whole, then the text cut as the thread list's rows are, to the list's
-            // middle column, `…` after it when cut; a snippet's
-            // thread, in no inbox, counts as done, which takes the Done check's 24px.
-            // The text stops 12px before the Sends column's 8px.
+            // The subject whole, then the text, cut to the list's middle column as the thread
+            // list's rows are, with `…` after it when cut. A snippet's thread is in no inbox, so
+            // it counts as done, which takes the Done check's 24px. The text stops 12px before
+            // the 8px gap ahead of the Sends column.
             let end = sends - 8.0 - 12.0;
             let mut x = name_right;
             if !snippet.subject.is_empty() {
@@ -511,7 +511,8 @@ impl crate::Mail {
                     Some((end - x).max(0.0)),
                 );
             }
-            // As Exo counts them; opens need read statuses, which Exo hasn't got: `--`.
+            // The numbers as Exo counts them. Opens need read statuses, which Exo hasn't got, so
+            // they show `--`.
             let analytics = &snippet.analytics;
             let mut replies = None;
             for (column, value) in [

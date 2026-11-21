@@ -26,7 +26,7 @@ fn palette(app: &mut Fixture, query: &str) {
     app.key(Key::Enter);
 }
 
-/// Marks every conversation in the inbox done: ⌘A, then E.
+/// Marks every conversation in the inbox done with ⌘A, then E.
 fn clear_inbox(app: &mut Fixture) {
     app.press(Key::A, CMD);
     app.key(Key::E);
@@ -68,7 +68,7 @@ fn reaching_inbox_zero_counts_the_day_and_starts_a_streak() {
     app.wait(10.5);
     assert!(app.mail().achievement_popups().is_empty());
 
-    // Inbox Zero again the same day counts nothing more: Done, and back to the inbox.
+    // Inbox Zero again the same day counts nothing more. This goes to Done and back to the inbox.
     for key in [Key::G, Key::E, Key::G, Key::I] {
         app.key(key);
     }
@@ -125,7 +125,7 @@ fn inbox_zero_downloads_its_photo_and_toggles_animated_images() {
         })
         .unwrap_or_default();
     assert_eq!(saved.len(), 1, "{saved:?}");
-    // Animated images: off, then on, with the hint saying so.
+    // Animated images go off, then on, with the hint saying so.
     palette(&mut app, "Disable Animated Images");
     assert!(app.mail().account().settings().reduce_motion);
     palette(&mut app, "Enable Animated Images");

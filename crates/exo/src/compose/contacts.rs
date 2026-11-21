@@ -1,7 +1,7 @@
-//! Recipient suggestions, ranked: each contact is found by its domain (at its
-//! score), its address and every suffix of its name that starts a word (at its score + 3), all
+//! Recipient suggestions, ranked. Each contact is found by its domain (at its score), and by its
+//! address and every suffix of its name that starts a word (at its score + 3). All of these match
 //! by prefix, lower-cased and without diacritics. The open thread's participants come first, then
-//! the address book; domain matches after both.
+//! the address book, and domain matches come after both.
 
 use std::collections::HashSet;
 
@@ -12,7 +12,7 @@ use super::recipients;
 
 /// How many suggestions show.
 pub(crate) const LIMIT: usize = 5;
-/// What addresses and names score over domains.
+/// How much more addresses and names score than domains.
 const SCORE_RANGE: f64 = 3.0;
 /// Thread participants are indexed at this score.
 const PARTICIPANT_SCORE: f64 = 3.0;
@@ -47,7 +47,7 @@ struct Match {
 }
 
 impl Index {
-    /// Indexes `contacts` at their scores; `no-reply` addresses aren't.
+    /// Indexes `contacts` at their scores, leaving out `no-reply` addresses.
     pub fn new(contacts: impl IntoIterator<Item = (Address, f64)>) -> Self {
         let mut index = Self::default();
         for (contact, score) in contacts {
@@ -62,8 +62,8 @@ impl Index {
         Self::book_without(contacts, &std::collections::BTreeMap::new())
     }
 
-    /// The address book but the addresses `Remove Suggestion` took out: compose never suggests
-    /// them.
+    /// The address book without the addresses that `Remove Suggestion` took out, which compose
+    /// never suggests.
     pub fn book_without(
         contacts: &[ScoredContact],
         excluded: &std::collections::BTreeMap<String, String>,
@@ -148,8 +148,8 @@ impl Index {
         self.contacts.push(contact);
     }
 
-    /// Every contact a key of which starts with `query`, best first (score, then address,
-    /// then named before unnamed), once per contact: (address and name matches, domain
+    /// Every contact with a key that starts with `query`, once per contact and best first (by
+    /// score, then address, then named before unnamed). Returns (address and name matches, domain
     /// matches).
     fn query(&self, query: &str) -> (Vec<Match>, Vec<Match>) {
         let query = truncate(normalize(query));
@@ -194,8 +194,8 @@ impl Index {
         (others, domains)
     }
 
-    /// The best `limit` contacts a key of which starts with `query`, by
-    /// address and name first, then by domain (what the search bar suggests people from).
+    /// The best `limit` contacts with a key that starts with `query`, matched by address and name
+    /// first, then by domain (what the search bar suggests people from).
     pub fn top(&self, query: &str, limit: usize) -> Vec<&Address> {
         let (others, domains) = self.query(query);
         others
@@ -228,8 +228,8 @@ impl Index {
     }
 }
 
-/// The open thread's participants, you included, as their own index (score 3): those the
-/// address book doesn't know, or knows by a name no better than the thread's.
+/// The open thread's participants, you included, as their own index (score 3). It holds the
+/// participants the address book doesn't know, or knows by a name no better than the thread's.
 pub(crate) fn participants<'a>(
     people: impl IntoIterator<Item = &'a Address>,
     book: &Index,
@@ -261,9 +261,9 @@ pub(crate) fn participants<'a>(
     Index::new(fresh)
 }
 
-/// Which of two names for one address says more, if they're the
-/// same person's: the one the other is part of, the longer when they're alike, the one whose
-/// words the other has all of; none when they share no first word.
+/// Which of two names for one address says more, if they're the same person's: the one the other
+/// is part of, the longer when they're alike, or the one whose words the other has all of. None
+/// when they share no first word.
 fn better_name<'a>(a: &'a str, b: &'a str) -> Option<&'a str> {
     let squash = |name: &str| {
         name.to_lowercase()
@@ -308,9 +308,8 @@ fn better_name<'a>(a: &'a str, b: &'a str) -> Option<&'a str> {
     }
 }
 
-/// The suggestions for `query`: thread participants, then
-/// the address book, then each one's domain matches; one per address, at most five. Empty for a
-/// blank query.
+/// The suggestions for `query`: thread participants, then the address book, then the domain
+/// matches from each, one per address and at most five. Empty for a blank query.
 pub(crate) fn suggest(book: &Index, thread: &Index, query: &str) -> Vec<Address> {
     suggest_sourced(book, thread, query)
         .into_iter()
@@ -318,7 +317,7 @@ pub(crate) fn suggest(book: &Index, thread: &Index, query: &str) -> Vec<Address>
         .collect()
 }
 
-/// [`suggest`], each suggestion with whether it came from the thread's participants, which
+/// [`suggest`], saying for each suggestion whether it came from the thread's participants, which
 /// can't be removed.
 pub(crate) fn suggest_sourced(book: &Index, thread: &Index, query: &str) -> Vec<(Address, bool)> {
     let query = query.trim();
@@ -343,8 +342,8 @@ pub(crate) fn suggest_sourced(book: &Index, thread: &Index, query: &str) -> Vec<
         .collect()
 }
 
-/// What to call `person`, from their name, the address book's, or their address's local part;
-/// with no address, their name as typed.
+/// What to call `person`, from their name, the address book's name for them, or their address's
+/// local part. With no address, their name as typed.
 pub(crate) fn best_known_first_name(person: &Address, book: Option<&Index>) -> Option<String> {
     if person.email.is_empty() {
         return person.name.clone().filter(|name| !name.is_empty());
@@ -374,10 +373,10 @@ pub(crate) enum Suggestion {
     Domain(String),
 }
 
-/// The suggestions for `query` where a domain can be picked, with no thread: the address book's
-/// matches, where the first contact found by its domain stands for that domain, and the domain
-/// that best fits the query (the shortest that starts with it, else the first) goes first; at
-/// most five.
+/// The suggestions for `query` where a domain can be picked, with no thread, at most five. They're
+/// the address book's matches, where the first contact found by its domain stands for that
+/// domain. The domain that best fits the query (the shortest that starts with it, else the first)
+/// goes first.
 pub(crate) fn suggest_with_domains(book: &Index, query: &str) -> Vec<Suggestion> {
     let query = query.trim();
     if query.is_empty() {
@@ -435,9 +434,9 @@ pub(crate) fn suggest_with_domains(book: &Index, query: &str) -> Vec<Suggestion>
 }
 
 impl crate::Mail {
-    /// `Remove Suggestion` on suggestion `index` of the focused field: its address joins the
+    /// `Remove Suggestion` on suggestion `index` of the focused field. Its address joins the
     /// excluded contacts, the suggestions are asked again without it, and a toast offers Undo
-    /// (⌘Z, also in the field until something's typed).
+    /// (⌘Z, which also works in the field until something's typed).
     pub(super) fn remove_suggestion(&mut self, index: usize) {
         let Some(open) = self.compose.focused_mut() else {
             return;
@@ -467,12 +466,12 @@ impl crate::Mail {
         );
     }
 
-    /// The toast's Undo, or ⌘Z in the field right after: `email` is suggested again.
+    /// The toast's Undo, or ⌘Z in the field right after, so that `email` is suggested again.
     pub(super) fn undo_remove_suggestion(&mut self, email: &str) {
         self.account.update_settings(|settings| {
             settings.excluded_contacts.remove(email);
         });
-        // From the field, the toast goes too.
+        // Undoing from the field hides the toast too.
         if self.commands.toast_text() == Some(format!("Removed {email}.").as_str()) {
             self.commands.hide_toast();
         }
@@ -484,8 +483,8 @@ impl crate::Mail {
         self.suggest_again();
     }
 
-    /// Asks the focused field's suggestions again for what's typed, against the address book as
-    /// its exclusions stand now, keeping the highlight where it was (clamped).
+    /// Asks again for the focused field's suggestions for what's typed, against the address book
+    /// with its current exclusions, keeping the highlight where it was (clamped).
     fn suggest_again(&mut self) {
         self.index_address_book();
         let super::Compose {
@@ -725,7 +724,7 @@ mod tests {
         ("marcus@brightmoor.co", "Marcus Hill", 0.0),
         ("newsletter@freightsignals.com", "Freight Signals", 0.0),
     ];
-    /// What it suggests for each query, with no thread, five at most.
+    /// What the mock book suggests for each query, with no thread, five at most.
     const MOCK_SUGGESTIONS: &[(&str, &[&str])] = &[
         (
             "p",
@@ -972,7 +971,8 @@ mod tests {
         ("sa", &["sam@brightmoor.co"]),
         ("he", &[]),
     ];
-    /// And with the thread's participants, in To of a Reply All to `Design crit moved to 3pm`.
+    /// The suggestions with the thread's participants too, in To of a Reply All to
+    /// `Design crit moved to 3pm`.
     const MOCK_THREAD_SUGGESTIONS: &[(&str, &[&str])] = &[
         (
             "b",

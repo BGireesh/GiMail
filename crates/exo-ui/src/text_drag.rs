@@ -1,7 +1,7 @@
 //! Text dragged across the window's edge, by the Mac's own drag (`NSDraggingSession`), which egui
 //! never sees: text from another app over the window, and an editor's selection dragged out of
 //! it. The app's drag bridge says at the start of the window's frame what is over the window and
-//! what was let go on it ([`begin`]); editors and fields say where they take text and what they
+//! what was let go on it ([`begin`]). Editors and fields say where they take text and what they
 //! drag out as they draw, and the bridge reads it at the frame's end ([`end`]).
 //!
 //! Without a bridge (tests, a window off the main thread) nothing is ever over the window, and an
@@ -16,8 +16,8 @@ use crate::TextStyle;
 pub struct Over {
     /// The pointer, in the window.
     pub at: Pos2,
-    /// The editor whose selection is dragged, when the drag is Exo's: let go in the window, the
-    /// text moves.
+    /// The editor whose selection is dragged, when the drag is Exo's. When it's let go in the
+    /// window, the text moves.
     pub source: Option<Id>,
 }
 
@@ -32,7 +32,7 @@ pub struct Dropped {
     pub text: String,
     /// [`Over::source`]'s.
     pub source: Option<Id>,
-    /// ⌥ was held (or the drag allows no move): a copy.
+    /// Whether ⌥ was held (or the drag allows no move), which makes it a copy.
     pub copy: bool,
 }
 
@@ -123,7 +123,7 @@ pub fn accept(ctx: &Context, rect: Rect) {
     }
 }
 
-/// The text let go in `rect`, for `taker` to put in: taken, nobody else gets it.
+/// The text let go in `rect`, for `taker` to put in. Once it's taken, nobody else gets it.
 pub fn take_drop(ctx: &Context, rect: Rect, taker: Id) -> Option<Dropped> {
     with(ctx, |frame| {
         let dropped = frame.dropped.take_if(|dropped| rect.contains(dropped.at))?;
@@ -148,11 +148,11 @@ pub fn ended(ctx: &Context, source: Id) -> Option<bool> {
     })
 }
 
-/// A one-line field's part in a drag (an `<input>`'s, as Chromium has it) for field `id`, its
-/// `text` on `line` in `style`: while text is dragged over the line, a caret in `color` where it
-/// would go; let go there, it goes in at that character, its line breaks as spaces
-/// (`ReplaceEOLAndLimitLength`), selected, the field focused. Returns where the dropped text is
-/// in `text`, in characters.
+/// A one-line field's part in a drag (an `<input>`'s, as Chromium has it) for field `id`, with its
+/// `text` on `line` in `style`. While text is dragged over the line, a caret in `color` shows where
+/// it would go. When it's let go there, the text goes in at that character with its line breaks
+/// as spaces (`ReplaceEOLAndLimitLength`), selected, and the field is focused. Returns where the
+/// dropped text is in `text`, in characters.
 pub fn field(
     ui: &Ui,
     id: Id,

@@ -1,6 +1,6 @@
-//! Fetching attachments' bytes: Gmail hands out a new attachment id every time it returns a
-//! message, so the store reads a part again from the message when Gmail refuses the stored id;
-//! and someone is waiting on them, so a short rate-limit pause is waited out.
+//! Fetching the bytes of attachments. Gmail hands out a new attachment id every time it returns
+//! a message, so the store reads a part again from the message when Gmail refuses the stored id.
+//! Someone is waiting on the bytes, so a short rate-limit pause is waited out.
 
 mod support;
 
@@ -92,7 +92,7 @@ async fn a_short_rate_limit_pause_is_waited_out() {
     };
 
     // Sync runs out of retries against Gmail's rate limit, which pauses every call for a
-    // moment: an image or file asked for meanwhile arrives once the pause is over.
+    // moment. An image or file asked for meanwhile arrives once the pause is over.
     harness
         .fault(json!({ "method": "GET", "path": "/gmail/v1/users/me/history", "status": 429, "times": 5 }))
         .await;
@@ -235,7 +235,7 @@ async fn a_kept_part_goes_with_its_conversations_bodies() {
         "gone with the bodies"
     );
 
-    // Quiet, the whole conversation goes.
+    // Once the conversation counts as quiet, the whole conversation goes.
     harness.store.load_bodies(&thread).await.expect("opens");
     harness
         .store

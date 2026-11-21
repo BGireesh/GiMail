@@ -1,5 +1,6 @@
-//! The floating formatting toolbar: shown under a non-empty selection, with the link input and the
-//! colour picker as its sub-modes; and the link popover under a caret in a link.
+//! The floating formatting toolbar and the link popover. The toolbar shows under a non-empty
+//! selection, with the link input and the colour picker as its sub-modes, and the popover shows
+//! under a caret in a link.
 
 use egui::{Area, Color32, CornerRadius, Key, Order, Rect, Sense, Ui, Vec2, pos2, vec2};
 use exo_ui::{Family, Font, TextStyle};
@@ -13,15 +14,15 @@ use crate::{
 const BUTTON: f32 = 26.0;
 const GAP: f32 = 7.0;
 const PADDING: f32 = 7.0;
-/// The link input: 200px wide, Exo Sans 12px/24px, `padding: 3px 8px 0`; Chromium's placeholder
-/// colour (`#757575`, in both themes).
+/// The link input: 200px wide, Exo Sans 12px/24px, `padding: 3px 8px 0`, and Chromium's
+/// placeholder colour (`#757575`, in both themes).
 const LINK_WIDTH: f32 = 200.0;
 const LINK_TEXT: TextStyle =
     TextStyle::new(Font::new(Family::Sans, 400), 12.0, 24.0).without_ligatures();
 const LINK_PLACEHOLDER: Color32 = Color32::from_rgb(0x75, 0x75, 0x75);
 /// Keytips while ⌘ is held, and Classic's B, I, U and S faces: 16px/24px Exo Sans, 2px down.
 const KEYTIP: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 16.0, 24.0);
-/// Colour swatches: 32px circles 3px apart, a 26px dot inside.
+/// Colour swatches: 32px circles 3px apart, each with a 26px dot inside.
 const SWATCH: f32 = 32.0;
 const SWATCH_GAP: f32 = 3.0;
 /// The link popover, a tooltip: Exo Sans 12px/20px bold, padding `6px 7px 3px`, its parts 7px
@@ -119,9 +120,9 @@ impl ToolbarAction {
 pub(crate) enum Mode {
     #[default]
     Buttons,
-    /// The link input, with what's typed; `fresh` until it has been focused.
+    /// The link input, with what's typed. `fresh` is set until it has been focused.
     Link { input: String, fresh: bool },
-    /// The colour picker on swatch `index`; `original` is the state to go back to on Esc.
+    /// The colour picker on swatch `index`. `original` is the state to go back to on Esc.
     Color {
         index: usize,
         original: Box<(Document, Selection)>,
@@ -136,10 +137,10 @@ pub(crate) struct State {
     pub(crate) visible: bool,
     /// Whether the link popover showed last frame.
     pub(crate) popover: bool,
-    /// Where Escape closed the link popover: it stays closed until the caret moves or the text
+    /// Where Escape closed the link popover, which stays closed until the caret moves or the text
     /// changes.
     pub(crate) popover_closed: Option<(Selection, u64)>,
-    /// Where the toolbar and the popover were drawn, whose clicks keep the editor's focus.
+    /// Where the toolbar and the popover were drawn. Clicks there keep the editor's focus.
     pub(crate) rects: Vec<Rect>,
     /// The link input's spelling (its `<input>` has Chromium's spellcheck on).
     pub(crate) link_spelling: crate::FieldSpelling,
@@ -147,7 +148,7 @@ pub(crate) struct State {
 
 /// A click in the link popover.
 pub(crate) enum PopoverClick {
-    /// On the URL: open it.
+    /// On the URL, which opens it.
     Open(String),
     /// On the remove button.
     Remove,
@@ -376,7 +377,8 @@ impl Editor {
             } else if let Face::Letter(text) = face {
                 let (left, width) = letter(text);
                 if text == "S" {
-                    // `span::after`: a 1px `currentcolor` line, `bottom: 13px` in the letter's box.
+                    // `span::after` is a 1px `currentcolor` line, `bottom: 13px` in the letter's
+                    // box.
                     let bottom = button.min.y + 2.0 + KEYTIP.content_bottom(ui.ctx()) - 13.0;
                     ui.painter().rect_filled(
                         Rect::from_min_max(pos2(left, bottom - 1.0), pos2(left + width, bottom)),
@@ -395,7 +397,7 @@ impl Editor {
                 // The colour button: three overlapping dots in a 12px square, green above,
                 // red and blue below.
                 // The button's opacity applies to it as a group, so the dots don't show through
-                // each other: each is its colour mixed into the toolbar.
+                // each other. Each is its colour mixed into the toolbar.
                 let under = palette.tooltip_background_default;
                 for (center, [r, g, b]) in [
                     (vec2(0.0, -2.2), [0x5c, 0xba, 0x87]),
@@ -575,8 +577,8 @@ impl Editor {
         self.view.toolbar.mode = Mode::Color { index, original };
     }
 
-    /// The link the caret is in, when it shows the link popover: a link that isn't a mention, the
-    /// popover not closed here with Escape.
+    /// The link the caret is in, when it shows the link popover. The link mustn't be a mention, and
+    /// the popover mustn't have been closed here with Escape.
     pub(crate) fn popover_link(&self) -> Option<(usize, std::ops::Range<usize>, String)> {
         if self.view.toolbar.popover_closed == Some((self.selection, self.revision)) {
             return None;
@@ -589,8 +591,8 @@ impl Editor {
     }
 
     /// Draws the link popover under the link (whose box is `anchor`) for an editor whose left is
-    /// at `left` (the formatting toolbar in a tooltip): the URL without its scheme,
-    /// `www.` and trailing `/`, then the remove button, or its keytip `K` while ⌘ is held.
+    /// at `left` (the formatting toolbar in a tooltip). The popover shows the URL without its
+    /// scheme, `www.` and trailing `/`, then the remove button, or its keytip `K` while ⌘ is held.
     pub(crate) fn link_popover(
         &mut self,
         ui: &Ui,
@@ -625,8 +627,8 @@ impl Editor {
             side + galley.size().x + GAP + REMOVE_MARGIN + REMOVE_SIZE.x + side,
             top + galley.rows.len().max(1) as f32 * POPOVER_TEXT.line_height + bottom,
         );
-        // Centred under the link on a whole pixel of the tooltip layer (`Math.ceil`), which
-        // starts where the editor does to the fraction; 3px below it; kept 8px inside the area.
+        // Centred under the link, rounded up to a whole pixel of the tooltip layer, which starts
+        // where the editor does to the fraction, 3px below the link, and kept 8px inside the area.
         let x = (anchor.center().x - size.x / 2.0).ceil() + left.fract();
         let x = x.clamp(
             bounds.min.x + 8.0,
@@ -723,7 +725,7 @@ impl Editor {
                     response.widget_info(|| {
                         egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Remove link")
                     });
-                    // `:active` is at once; hovering eases.
+                    // `:active` applies at once, and hovering eases.
                     let opacity = if response.is_pointer_button_down_on() {
                         1.0
                     } else {

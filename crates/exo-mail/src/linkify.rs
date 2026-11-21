@@ -65,8 +65,7 @@ static BARE_HOST: LazyLock<Regex> =
 static ORIGIN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)^https?://[^/]+").expect("valid regex"));
 
-/// Links URLs in every text node under `root`, except inside links and stylesheets
-/// (`Linkify.element`).
+/// Links URLs in every text node under `root`, except inside links and stylesheets.
 pub(crate) fn linkify(root: &NodeRef) {
     let mut linked = Vec::new();
     collect_links(root, &mut linked);
@@ -250,7 +249,7 @@ pub(crate) fn add_word_breaks(root: &NodeRef) {
     }
 }
 
-/// The text node `link`'s content comes down to through only children, within 11 levels.
+/// The text node that `link`'s content comes down to through only children, within 11 levels.
 fn only_text(link: &NodeRef) -> Option<NodeRef> {
     let mut node = link.clone();
     for _ in 0..=11 {
@@ -302,7 +301,7 @@ mod tests {
 
     #[test]
     fn autolinking_matches_one_unnormalized_link() {
-        // `links` prints the address as a URL; `match_link` leaves it as written.
+        // `links` prints the address as a URL, but `match_link` leaves it as written.
         assert_eq!(
             match_link("go to Example.com/ü now"),
             Some((6..20, "http://example.com/ü".to_owned()))

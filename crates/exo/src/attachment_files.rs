@@ -1,6 +1,6 @@
-//! Clicked attachments on disk: previewed from a cache folder in Quick Look, or downloaded to the
-//! Downloads setting's folder ([`crate::downloads`]). Off macOS a preview is a download opened in
-//! its default app.
+//! Clicked attachments on disk. A click previews the file in Quick Look from a cache folder, or
+//! downloads it to the folder the Downloads setting names ([`crate::downloads`]). Off macOS a
+//! preview is a download opened in its default app.
 
 mod copy;
 #[cfg(target_os = "macos")]
@@ -10,12 +10,12 @@ mod mail;
 
 pub(crate) use copy::{Copied, OTHER_ACCOUNT};
 
-/// What Copy Attachments put on the clipboard, if it holds that.
+/// What Copy Attachments put on the clipboard, if the clipboard holds it.
 pub(crate) fn pasted(ctx: &egui::Context) -> Option<Copied> {
     crate::clipboard::read_attachments(ctx).and_then(|json| serde_json::from_str(&json).ok())
 }
 
-/// Whether Copy Attachments has anything to copy of a message with `attachments`.
+/// Whether Copy Attachments has anything to copy from a message with `attachments`.
 pub(crate) fn has_copied(attachments: &[Attachment]) -> bool {
     copy::copied(attachments).next().is_some()
 }
@@ -47,10 +47,10 @@ const ARCHIVES: &[&str] = &[
     "s7z", "shar", "sit", "sitx", "tar", "tbz", "tbz2", "tgz", "tlz", "txz", "tzo", "war", "whl",
     "xpi", "xz", "z", "zip", "zipx", "zoo", "zpaq", "zst",
 ];
-/// A preview opens only when its download finished this soon after the click; a slower one just
-/// lands in the cache.
+/// A preview opens only when its download finished this soon after the click. A slower download
+/// just lands in the cache.
 const PREVIEW_WITHIN: Duration = Duration::from_secs(8);
-/// The preview cache's folder in the temp directory, with a folder per account in it, which signing
+/// The preview cache's folder in the temp directory. It holds a folder per account, which signing
 /// out deletes.
 const CACHE_DIR: &str = "ExoAttachmentPreviewCache";
 
@@ -59,11 +59,11 @@ pub(crate) fn default_cache(email: &str) -> PathBuf {
     std::env::temp_dir().join(CACHE_DIR).join(email)
 }
 
-/// An attachment across fetches: its message and MIME part (Gmail's attachment ids change on
-/// every fetch).
+/// Identifies an attachment across fetches by its message and MIME part, because Gmail's
+/// attachment ids change on every fetch.
 pub(crate) type Key = (String, String);
 
-/// What a download's notification does once it's over: fade out after 6 s and go at 8 s.
+/// Once a download is over, its notification fades out after 6 s and goes at 8 s.
 const FADE_AFTER: f64 = 6.0;
 const GONE_AFTER: f64 = 8.0;
 /// A preview's notification goes this soon after the preview opens.
@@ -76,12 +76,13 @@ type Thumbnail = (Key, Option<egui::ColorImage>);
 enum Update {
     /// This much of the file has arrived, in percent.
     Progress(Key, f32),
-    /// The file was saved, and whether to preview it, or why not.
+    /// The fetch ended, with where the file was saved and whether to preview it, or why it wasn't
+    /// saved.
     Done {
         key: Key,
         outcome: Result<(PathBuf, bool), Failure>,
     },
-    /// Message `message`'s files were zipped as `name` and saved, or not.
+    /// The files of message `message` were zipped as `name` and saved, or not.
     Zipped {
         message: String,
         name: String,
@@ -92,7 +93,7 @@ enum Update {
 /// Why a file didn't arrive.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Failure {
-    /// Without a network, and not kept from before: the offline alert, not a notification.
+    /// No network, and no copy kept from before. Exo shows the offline alert, not a notification.
     Offline,
     /// Gmail didn't hand the bytes over (rate limited, refused).
     Fetch,
@@ -101,9 +102,9 @@ pub(crate) enum Failure {
 }
 
 impl Failure {
-    /// What the file notification says when the file named `name` failed:
-    /// `Failed downloading {name}` when the bytes never came, and a failed save's copy otherwise,
-    /// so it's clear which went wrong.
+    /// What the file notification says when the file named `name` failed. It says
+    /// `Failed downloading {name}` when the bytes never came, and the copy for a failed save
+    /// otherwise, so it's clear which went wrong.
     pub(crate) fn text(self, name: &str) -> String {
         match self {
             Self::Offline | Self::Fetch => format!("Failed downloading {name}"),
@@ -127,31 +128,32 @@ impl Failure {
 /// Where a download is.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum State {
-    /// Being fetched (`started`, `progressing`).
+    /// Being fetched.
     Running,
-    /// Saved at this path (`completed`).
+    /// Saved at this path.
     Saved(PathBuf),
-    /// It didn't arrive (`interrupted`).
+    /// It didn't arrive.
     Failed(Failure),
 }
 
-/// One file's download, which its card's bar and its notification show.
+/// One file's download, shown by the bar on its card and by its notification.
 #[derive(Clone, Debug)]
 pub(crate) struct Download {
     pub(crate) key: Key,
     /// The file's name.
     pub(crate) name: String,
     pub(crate) state: State,
-    /// How much has arrived, 0–100; it never goes back (`Math.max`).
+    /// How much has arrived, 0–100. It never goes back.
     pub(crate) progress: f32,
     /// When it ended, which starts its notification's fade.
     ended: Option<f64>,
-    /// Its notification goes at this time, sooner than the fade's end: a preview that opened.
+    /// When a preview opened, its notification goes at this time, before the fade would end.
     clear_at: Option<f64>,
 }
 
 impl Download {
-    /// Its notification is fading out at `now`: from 6 s after it ended.
+    /// Whether its notification is fading out at `now`, which it does from 6 s after the download
+    /// ended.
     pub(crate) fn fading(&self, now: f64) -> bool {
         self.ended.is_some_and(|ended| now >= ended + FADE_AFTER)
     }
@@ -162,7 +164,7 @@ impl Download {
 pub(crate) enum Event {
     /// A file couldn't be had without a network.
     Offline,
-    /// Nor could a message's files for `Download all`.
+    /// A message's files for `Download all` couldn't be had without a network.
     OfflineAll,
 }
 
@@ -171,8 +173,8 @@ pub(crate) struct AttachmentFiles {
     ctx: egui::Context,
     /// The preview cache's folder.
     cache: PathBuf,
-    /// Downloads in the order they started, while their notifications show; a click on a file being
-    /// fetched does nothing.
+    /// Downloads in the order they started, while their notifications show. A click on a file that
+    /// is being fetched does nothing.
     downloads: Vec<Download>,
     updates: (mpsc::Sender<Update>, mpsc::Receiver<Update>),
     /// Image cards' thumbnails as they're decoded, `None` for an image without one.
@@ -181,7 +183,7 @@ pub(crate) struct AttachmentFiles {
     zipping: HashSet<String>,
     /// Exo's viewer, while it's open.
     viewer: Option<viewer::Viewer>,
-    /// The last cards dragged out, whose promises a drop may still call in.
+    /// The last cards dragged out, kept because a drop may still call in their promises.
     #[cfg(target_os = "macos")]
     drags: std::collections::VecDeque<objc2::rc::Retained<drag::Source>>,
     #[cfg(target_os = "macos")]
@@ -227,8 +229,8 @@ impl AttachmentFiles {
             .any(|download| &download.key == key && download.state == State::Running)
     }
 
-    /// A download of `name` under `key` starts, its notification saying so in place of what it said
-    /// before.
+    /// Starts a download of `name` under `key`. A notification already showing for `key` now says
+    /// so in place of what it said before.
     fn start(&mut self, key: Key, name: String) {
         let download = Download {
             key,
@@ -248,9 +250,9 @@ impl AttachmentFiles {
         }
     }
 
-    /// A click on `attachment`: previews it when `preview` (no ⌘ or ⇧, not the download icon) and
-    /// it isn't an archive, else saves it to the download folder. A preview already in the cache
-    /// shows at once, without a notification.
+    /// Handles a click on `attachment`. It previews the file when `preview` is set (no ⌘ or ⇧, not
+    /// the download icon) and the file isn't an archive, and otherwise saves it to the download
+    /// folder. A preview already in the cache shows at once, without a notification.
     pub(crate) fn open(&mut self, loader: &Loader, attachment: Attachment, preview: bool) {
         let key = (attachment.message_id.clone(), attachment.part_id.clone());
         if self.running(&key) {
@@ -295,9 +297,9 @@ impl AttachmentFiles {
         });
     }
 
-    /// A click on a draft's file, kept at `path` under `id` rather than its `name`: previewed from
-    /// a copy named `name` in the cache (Quick Look goes by the name), or copied to the download
-    /// folder, as [`Self::open`] does with a message's.
+    /// Handles a click on a draft's file, which is kept at `path` under `id` rather than its
+    /// `name`. The file is previewed from a copy named `name` in the cache (Quick Look goes by the
+    /// name), or copied to the download folder, as [`Self::open`] does with a message's file.
     pub(crate) fn open_file(&mut self, path: PathBuf, id: &str, name: String, preview: bool) {
         let key = ("draft".to_owned(), id.to_owned());
         if self.running(&key) {
@@ -373,7 +375,8 @@ impl AttachmentFiles {
                                 self.show(path, name);
                             }
                         }
-                        // Offline, an alert instead, and the notification clears at once.
+                        // Offline, Exo shows an alert instead, and the notification clears at
+                        // once.
                         Err(Failure::Offline) => {
                             self.downloads.remove(at);
                             events.push(Event::Offline);
@@ -385,7 +388,7 @@ impl AttachmentFiles {
                         }
                     }
                 }
-                // The zip downloads as a file of its own, its notification saying it's there.
+                // The zip downloads as a file of its own, with a notification saying it's there.
                 Update::Zipped {
                     message,
                     name,
@@ -438,8 +441,8 @@ impl AttachmentFiles {
         events
     }
 
-    /// Drags `attachment`'s card out from `at` (egui points, `zoom` to the window's): the file,
-    /// promised, for wherever it's dropped.
+    /// Drags `attachment`'s card out from `at` (in egui points, which `zoom` scales to the
+    /// window's). The drag carries a promise of the file for wherever it's dropped.
     #[cfg(target_os = "macos")]
     pub(crate) fn drag(
         &mut self,
@@ -448,7 +451,7 @@ impl AttachmentFiles {
         at: egui::Pos2,
         zoom: f32,
     ) {
-        /// Promises kept for drops that haven't asked yet; a drop asks at once, so a few do.
+        /// Promises kept for drops that haven't asked yet. A drop asks at once, so a few will do.
         const KEPT: usize = 8;
         if let Some(source) = drag::start(loader, attachment, at, zoom) {
             if self.drags.len() == KEPT {
@@ -469,8 +472,8 @@ impl AttachmentFiles {
     ) {
     }
 
-    /// Saves `bytes` named `name` to the download folder, as a file in a message's attachment
-    /// downloads, with its notification.
+    /// Saves `bytes` as `name` in the download folder, with a notification, the way a message's
+    /// attachments download.
     pub(crate) fn save_file(&mut self, name: String, bytes: Vec<u8>) {
         let Some(folder) = crate::downloads::folder(&self.ctx) else {
             return;
@@ -494,8 +497,8 @@ impl AttachmentFiles {
         });
     }
 
-    /// Shows `attachment` as being downloaded, `percent` of it there, and keeps it so: its card's
-    /// bar and its notification, for screenshots.
+    /// Shows `attachment` as downloading with `percent` of it arrived, and keeps it that way, so
+    /// screenshots can show its card's bar and its notification.
     pub(crate) fn hold(&mut self, attachment: &Attachment, percent: f32) {
         self.start(
             (attachment.message_id.clone(), attachment.part_id.clone()),
@@ -514,7 +517,7 @@ impl AttachmentFiles {
     /// Previews the file at `path` in Quick Look, titled `title`.
     #[cfg(target_os = "macos")]
     pub(crate) fn show(&mut self, path: PathBuf, title: String) {
-        // eframe runs the UI on the main thread; tests drive it from others.
+        // eframe runs the UI on the main thread, but tests drive it from other threads.
         let Some(mtm) = objc2::MainThreadMarker::new() else {
             return;
         };
@@ -563,8 +566,8 @@ enum Target {
 }
 
 impl Target {
-    /// Writes `bytes`, named `name` in the download folder, quarantined as a download, and
-    /// returns where they went.
+    /// Writes `bytes`, naming the file `name` in the download folder, quarantines it as a
+    /// download, and returns where it went.
     fn save(&self, name: &str, bytes: &[u8]) -> std::io::Result<PathBuf> {
         let path = match self {
             Self::Cache(path) => {
@@ -588,14 +591,14 @@ impl Target {
         Ok(path)
     }
 
-    /// Logs that saving a file here failed with `error`, and says how.
+    /// Logs that saving a file here failed with `error`, and returns the [`Failure`] it was.
     fn failed(&self, error: &std::io::Error) -> Failure {
         let folder = match self {
             Self::Cache(path) => path.parent().unwrap_or(path),
             Self::Downloads(folder) => folder,
         };
-        // macOS keeps a program out of ~/Downloads unless the app it runs under (the terminal,
-        // for a bare binary) is allowed in, and says EPERM.
+        // macOS keeps a program out of ~/Downloads, answering EPERM, unless the app it runs under
+        // (the terminal, for a bare binary) is allowed in.
         let hint = if matches!(self, Self::Downloads(_))
             && error.kind() == ErrorKind::PermissionDenied
         {
@@ -623,8 +626,8 @@ const IMAGE_TYPES: &[&str] = &[
     "image/webp",
 ];
 
-/// Whether `attachment` is an image: its type is one of [`IMAGE_TYPES`], or its extension one of
-/// their subtypes.
+/// Whether `attachment` is an image, meaning its type is one of [`IMAGE_TYPES`] or its extension
+/// is one of their subtypes.
 pub(crate) fn is_image(attachment: &Attachment) -> bool {
     let extension = extension(&attachment.filename);
     IMAGE_TYPES.contains(&attachment.mime_type.to_ascii_lowercase().as_str())
@@ -639,13 +642,14 @@ pub(crate) fn is_eml(attachment: &Attachment) -> bool {
         || attachment.mime_type.eq_ignore_ascii_case("message/rfc822")
 }
 
-/// Whether a click previews `attachment` in Exo's own viewer: images and messages; PDFs and
-/// everything else go to Quick Look.
+/// Whether a click previews `attachment` in Exo's own viewer, which shows images and messages.
+/// PDFs and everything else go to Quick Look.
 pub(crate) fn is_previewable(attachment: &Attachment) -> bool {
     is_image(attachment) || is_eml(attachment)
 }
 
-/// `name`'s extension, lowercase (`extension`: after the last dot, without spaces).
+/// `name`'s extension in lowercase (`extension`, the part after the last dot when it has no
+/// spaces).
 fn extension(name: &str) -> String {
     name.rsplit_once('.')
         .map(|(_, extension)| extension)
@@ -654,14 +658,14 @@ fn extension(name: &str) -> String {
         .to_lowercase()
 }
 
-/// Whether `name` is an archive: its extension (after the last dot, without spaces) is one of
-/// [`ARCHIVES`].
+/// Whether `name` is an archive, meaning its extension (after the last dot, without spaces) is
+/// one of [`ARCHIVES`].
 fn is_archive(name: &str) -> bool {
     ARCHIVES.contains(&extension(name).as_str())
 }
 
-/// Where `attachment`'s preview is cached in `cache`: its own folder per message part, so the
-/// file keeps its name (Quick Look and "Open with" show it). Off macOS there's no cache.
+/// Where `attachment`'s preview is cached in `cache`. Each message part gets its own folder, so
+/// the file keeps its name (Quick Look and "Open with" show it). Off macOS there's no cache.
 fn cache_path(cache: &Path, attachment: &Attachment) -> Option<PathBuf> {
     cfg!(target_os = "macos").then(|| cache_file(cache, attachment))
 }
@@ -676,9 +680,10 @@ fn cache_file(cache: &Path, attachment: &Attachment) -> PathBuf {
 /// The longest file name macOS allows, in UTF-8 bytes.
 const MAX_NAME: usize = 255;
 
-/// `name` as a file can be named on disk: path separators, control and invisible formatting
-/// characters (a right-to-left override can pass `exe.pdf` off as `fdp.exe`) and `"*:<>?|~` become
-/// `_`, the dots and spaces around it go (no hidden files), and it's cut to fit [`MAX_NAME`].
+/// `name` made safe to name a file on disk. Path separators, control and invisible formatting
+/// characters (a right-to-left override can pass `fdp.exe` off as `exe.pdf`) and `"*:<>?|~` become
+/// `_`. The dots and spaces around the name go (no hidden files), and the name is cut to fit
+/// [`MAX_NAME`].
 fn file_name(name: &str) -> String {
     let safe: String = name
         .chars()
@@ -716,9 +721,9 @@ fn with_suffix(name: &str, suffix: &str) -> String {
     format!("{}{suffix}{extension}", &stem[..end])
 }
 
-/// A new file in `folder` named for `name`, or `name (1)`, `name (2)`… before its extension when
-/// that's taken, as browsers name downloads. It never opens a file that's there, or follows a
-/// link someone left under that name.
+/// A new file in `folder` named for `name`, or, when that name is taken, `name (1)`, `name (2)`…
+/// with the number before the extension, as browsers name downloads. It never opens a file that's
+/// there, or follows a link someone left under that name.
 fn create_unique(folder: &Path, name: &str) -> std::io::Result<(PathBuf, File)> {
     let name = file_name(name);
     let mut n = 0;
@@ -785,7 +790,7 @@ mod tests {
             inline: false,
         };
         let cache = Path::new("/tmp/cache");
-        // Gmail's attachment id changes on every fetch; the cached file doesn't.
+        // Gmail's attachment id changes on every fetch, but the cached file doesn't.
         assert_eq!(
             cache_file(cache, &attachment("a", "Board.pdf")),
             cache_file(cache, &attachment("b", "Board.pdf"))
@@ -866,8 +871,8 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn a_folder_that_refuses_writes_is_a_permission_failure() {
-        // What macOS answers (EPERM) when it keeps Exo out of ~/Downloads; a read-only folder
-        // answers EACCES, the same kind.
+        // Covers what macOS answers (EPERM) when it keeps Exo out of ~/Downloads. A read-only
+        // folder answers EACCES, which is the same kind.
         use std::os::unix::fs::PermissionsExt as _;
         let folder =
             std::env::temp_dir().join(format!("exo-downloads-denied-{}", std::process::id()));

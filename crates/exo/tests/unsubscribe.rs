@@ -23,7 +23,7 @@ fn endpoint(app: &Fixture, list: &str) -> String {
 
 /// Delivers a newsletter from [`SENDER`] titled `subject`, with `List-Unsubscribe: {header}`
 /// (and one-click when `one_click`), and syncs. The app's clock moves to the mock's, as the two
-/// run together outside tests: a bulk action is on mail up to now.
+/// run together outside tests, because a bulk action acts on mail up to now.
 fn deliver(app: &mut Fixture, subject: &str, header: Option<&str>, one_click: bool) {
     let mut headers = vec![
         ("Delivered-To".to_owned(), ME.to_owned()),
@@ -101,7 +101,7 @@ fn count(app: &Fixture, q: &str) -> usize {
         .len()
 }
 
-/// The alert showing, its title and text, the `<wbr>`s in its text left out.
+/// The alert showing, as its title and text, with the `<wbr>`s left out of its text.
 fn alert(app: &Fixture) -> Option<(String, String)> {
     app.mail()
         .alert()
@@ -167,7 +167,7 @@ fn a_mailto_unsubscribe_sends_the_request_from_the_account() {
         false,
     );
     cursor_to(&mut app, "Daily digest");
-    // From the list: the conversation's messages are read for it.
+    // From the list, the conversation's messages are read for it.
     app.press(Key::U, CMD);
     app.key(Key::Enter);
     app.key(Key::Enter);

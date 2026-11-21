@@ -1,5 +1,5 @@
-//! The Theme dialog: three radio buttons, then a line about the dark theme. Choosing one applies
-//! it at once; there's no Save. Snow and Carbon read `Light` and `Dark` here.
+//! The Theme dialog has three radio buttons, then a line about the dark theme. Choosing one
+//! applies it at once, and there's no Save. Snow and Carbon read `Light` and `Dark` here.
 
 use egui::{Color32, Context, CursorIcon, Rect, Sense, Ui, pos2, vec2};
 use exo_store::Theme;
@@ -12,11 +12,11 @@ use super::Action;
 const PADDING_TOP: f32 = 20.0;
 const NUDGE: f32 = 3.0;
 const LINE: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 12.0, 20.0);
-/// The footer's `padding: 17px 0 2px`, under the three lines; like every dialog footer, it
+/// The footer's `padding: 17px 0 2px`, under the three lines. Like every dialog footer, it
 /// sits another 3px down.
 const FOOTER_PADDING: [f32; 2] = [17.0, 2.0];
 const BODY_HEIGHT: f32 = PADDING_TOP + 3.0 * 20.0 + FOOTER_PADDING[0] + 20.0 + FOOTER_PADDING[1];
-/// The 12px radio sits on the line's baseline, `top: 2px`, 7px before its label; that's 3px
+/// The 12px radio sits on the line's baseline, `top: 2px`, 7px before its label. That's 3px
 /// below the line's top.
 const RADIO: f32 = 12.0;
 const RADIO_TOP: f32 = 3.0;
@@ -27,7 +27,7 @@ const FOOTER_INK: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 153);
 const FOOTER: &str =
     "The Dark theme can help reduce eyestrain and is best used in low light conditions.";
 
-/// Draws the dialog over `area` with `current` checked; a click on a choice sets it.
+/// Draws the dialog over `area` with `current` checked. A click on a choice sets it.
 pub fn dialog(
     ctx: &Context,
     area: Rect,

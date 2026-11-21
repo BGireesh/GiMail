@@ -1,13 +1,13 @@
-//! Spelling: the body's misspelled words, marked as Chromium marks them on a Mac, by a spellchecker
-//! the app hands the editor ([`Editor::set_spelling`]: macOS's in Exo, a word list in tests), and
-//! what the right-click menu does with one.
+//! Spelling in the body: misspelled words, marked as Chromium marks them on a Mac, and what the
+//! right-click menu does with one. The app hands the editor the spellchecker
+//! ([`Editor::set_spelling`]), which is macOS's in Exo and a word list in tests.
 //!
 //! As Chromium's idle-time checker does, the editor checks only while it has the keyboard, a few
-//! milliseconds' worth of lines a frame (a long quote revealed is checked over a few frames), and
-//! a word isn't marked while it's being typed: the misspelling the caret is in after typing waits
-//! until the caret leaves it (a space, a click, an arrow). Marks stay when the editor loses the
-//! keyboard, as a `contenteditable`'s do. With autocorrect on, none are marked: the body's
-//! spellcheck is off for it, and autocorrect marks words itself ([`crate::autocorrect`]).
+//! milliseconds' worth of lines a frame, so a long quote that's revealed is checked over a few
+//! frames. A word isn't marked while it's being typed. The misspelling the caret is in after
+//! typing waits until the caret leaves it (a space, a click, an arrow). Marks stay when the editor
+//! loses the keyboard, as a `contenteditable`'s do. With autocorrect on, none are marked, because
+//! the body's spellcheck is off then and autocorrect marks words itself ([`crate::autocorrect`]).
 
 use std::{
     collections::HashMap,
@@ -33,8 +33,8 @@ pub trait Spelling {
     fn learn(&mut self, word: &str);
     /// Stops marking `word` in this body (`Ignore Spelling`).
     fn ignore(&mut self, word: &str);
-    /// What autocorrect replaces `word` with whether it's misspelled or not: the user's text
-    /// replacement for it, if any.
+    /// The user's text replacement for `word`, if any, which autocorrect puts in whether the word
+    /// is misspelled or not.
     fn replacement(&mut self, _word: &str) -> Option<String> {
         None
     }
@@ -67,13 +67,15 @@ pub struct Misspelling {
 #[derive(Default)]
 pub(crate) struct State {
     pub(crate) engine: Option<Box<dyn Spelling>>,
-    /// Each block's misspellings, by the block's text: an edit checks only the blocks it changed.
+    /// Each block's misspellings, keyed by the block's text, so an edit checks only the blocks it
+    /// changed.
     checked: HashMap<String, Vec<Range<usize>>>,
     /// The document revision `marks` are for, and whether it was checked then.
     revision: Option<(u64, bool)>,
     /// Each block's misspellings.
     marks: Vec<Vec<Range<usize>>>,
-    /// The last change typed at the caret: the misspelling it's in isn't marked yet.
+    /// Whether the last change was typed at the caret, so the misspelling the caret is in isn't
+    /// marked yet.
     pub(crate) typing: bool,
 }
 
@@ -91,11 +93,12 @@ impl Editor {
         self.spelling.engine.is_some()
     }
 
-    /// Brings the marks up to date with the document: blocks not checked yet are checked when
-    /// `check` (the editor has the keyboard), as many as [`BUDGET`] allows; the others keep what
-    /// they had. Returns whether some are left for next frame.
+    /// Brings the marks up to date with the document. When `check` is set (the editor has the
+    /// keyboard), blocks not checked yet are checked, as many as [`BUDGET`] allows, and the others
+    /// keep what they had. Returns whether some are left for next frame.
     pub(crate) fn update_spelling(&mut self, check: bool) -> bool {
-        // Autocorrect marks words itself: the body's `spellcheck` is off with it on.
+        // Autocorrect marks words itself, so the body's `spellcheck` is off while autocorrect is
+        // on.
         if self.autocorrect.on {
             return false;
         }
@@ -142,7 +145,7 @@ impl Editor {
         left
     }
 
-    /// The misspellings marked now: each one's block and characters.
+    /// The misspellings marked now, as each one's block and characters.
     pub fn marked_misspellings(&self) -> Vec<(usize, Range<usize>)> {
         (0..self.spelling.marks.len())
             .flat_map(|index| {
@@ -152,7 +155,7 @@ impl Editor {
             .collect()
     }
 
-    /// Block `index`'s marked misspellings: all but the one being typed.
+    /// The marked misspellings in block `index`, which are all but the one being typed.
     pub(crate) fn misspellings(&self, index: usize) -> impl Iterator<Item = &Range<usize>> {
         let caret = self.selection.focus;
         let typing = self.spelling.typing && self.selection.is_collapsed() && caret.block == index;
@@ -183,8 +186,8 @@ impl Editor {
         })
     }
 
-    /// Replaces `misspelling` with `correction`, one undo step, the caret after it. Does nothing if
-    /// the word has changed since.
+    /// Replaces `misspelling` with `correction` in one undo step, leaving the caret after it. Does
+    /// nothing if the word has changed since.
     pub fn correct(&mut self, misspelling: &Misspelling, correction: &str) {
         let Some(block) = self.doc.blocks.get(misspelling.block) else {
             return;
@@ -205,7 +208,8 @@ impl Editor {
         );
     }
 
-    /// Adds `word` to the user's dictionary (`Add to Dictionary`): it's marked nowhere from now on.
+    /// Adds `word` to the user's dictionary (`Add to Dictionary`), so it's marked nowhere from now
+    /// on.
     pub fn learn_spelling(&mut self, word: &str) {
         if let Some(engine) = self.spelling.engine.as_mut() {
             engine.learn(word);

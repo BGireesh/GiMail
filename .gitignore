@@ -3,11 +3,12 @@
 .DS_Store
 __pycache__/
 
-# Google OAuth client credentials: each user supplies their own; never commit one.
+# Google OAuth client credentials. Each user supplies their own, so never commit one.
 client_secret*.json
 *oauth-client*.json
 
-# Signing material never enters the repo: match keeps the certificate, CI's secrets the rest.
+# Signing material never enters the repo. fastlane match keeps the certificate, and CI's secrets
+# keep the rest.
 *.p8
 *.p12
 *.cer

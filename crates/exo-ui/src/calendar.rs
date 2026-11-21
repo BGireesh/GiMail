@@ -1,5 +1,5 @@
 //! Calendar colours: the 25 calendar colours and, for each, the colours an event block takes. Each
-//! colour's tokens, the same in Snow and Carbon, give the swatches and the hover glow's colour; the
+//! colour's tokens, the same in Snow and Carbon, give the swatches and the hover glow's colour. The
 //! blocks themselves take Classic's own block colours, which differ from the tokens in Carbon and,
 //! where a preview's border is `currentColor`, in Snow.
 
@@ -14,9 +14,9 @@ pub struct CalendarColor(usize);
 /// Which of a colour's palettes a block takes.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct BlockPalette {
-    /// The block is outlined: I haven't accepted.
+    /// The block is outlined, because I haven't accepted.
     pub unaccepted: bool,
-    /// The block is a preview: a create or edit form is open.
+    /// The block is a preview, because a create or edit form is open.
     pub create: bool,
     /// The event has ended.
     pub past: bool,
@@ -39,7 +39,7 @@ impl CalendarColor {
     /// `blue`, the colour of a calendar with none.
     pub const BLUE: Self = Self(0);
 
-    /// The colour called `name`; `purple`, an old name, is `magenta`.
+    /// The colour called `name`. `purple`, an old name, is `magenta`.
     pub fn from_name(name: &str) -> Option<Self> {
         let name = if name == "purple" { "magenta" } else { name };
         NAMES
@@ -434,7 +434,7 @@ mod tests {
 
     #[test]
     fn classic_blocks_keep_the_tokens_but_where_classic_differs() {
-        // Snow's plain states are the tokens'; a preview's border is its text colour.
+        // Snow's plain states are the tokens'. A preview's border is its text colour.
         for color in CalendarColor::all() {
             let tokens = COLOURS[color.0];
             for (index, classic) in CLASSIC_COLOURS[color.0][0].iter().take(8).enumerate() {

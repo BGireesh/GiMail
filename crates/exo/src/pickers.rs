@@ -73,8 +73,8 @@ pub enum Action {
     RemoveAll,
     /// `!`: the Mark Spam picker for one conversation with a sender to block, else report spam.
     MarkSpam,
-    /// Block everything from this address or domain, after asking; `spam` when asked from the Mark
-    /// Spam picker.
+    /// Block everything from this address or domain, after asking. `spam` when asked from the
+    /// Mark Spam picker.
     Block {
         /// The address or domain.
         from: String,
@@ -113,12 +113,12 @@ pub struct Pickers {
 struct Alert {
     title: String,
     text: String,
-    /// Right to left; the first is selected to start with and is what Enter does.
+    /// Right to left. The first is selected to start with and is what Enter does.
     actions: Vec<&'static str>,
     selected: usize,
     /// Keycaps continuing the text's last line, and the text after them.
     keys: Option<Keys>,
-    /// What the first action does; any other only closes the alert.
+    /// What the first action does. Any other only closes the alert.
     then: Option<Then>,
 }
 
@@ -152,10 +152,10 @@ enum Then {
     Undo(crate::account::UndoToken),
     /// Sign this account out, though it has changes Gmail doesn't have yet.
     SignOut(String),
-    /// An answer to an invite in conversation `thread` Calendar refused: `Open in Gmail`, and
-    /// the second action `See Message`.
+    /// Calendar refused an answer to an invite in conversation `thread`. The first action is
+    /// `Open in Gmail`, and the second `See Message`.
     RsvpFailed(String),
-    /// Update split `id` (named `name`) to definition `query`; the second action (and Escape)
+    /// Update split `id` (named `name`) to definition `query`. The second action (and Escape)
     /// names the new split again.
     UpdateSplit {
         id: String,
@@ -174,7 +174,7 @@ struct Creation {
 }
 
 impl Pickers {
-    /// Asks before running bulk action `plan`: the first of `actions` runs it.
+    /// Asks before running bulk action `plan`, and the first of `actions` runs it.
     pub(crate) fn confirm_bulk(
         &mut self,
         title: &str,
@@ -193,7 +193,8 @@ impl Pickers {
         });
     }
 
-    /// Asks before undoing (or cancelling) the bulk action `token`: the first of `actions` does.
+    /// Asks before undoing (or cancelling) the bulk action `token`, and the first of `actions`
+    /// does it.
     pub(crate) fn confirm_undo(
         &mut self,
         title: &str,
@@ -261,8 +262,8 @@ impl Pickers {
         });
     }
 
-    /// `Update existing Split Inbox?`: a split named as `existing` is being made with definition
-    /// `query`. Yes updates it; No (or Escape) goes back to naming.
+    /// Asks `Update existing Split Inbox?` when a split named as `existing` is being made with
+    /// definition `query`. Yes updates it, and No (or Escape) goes back to naming.
     pub(crate) fn ask_update_split(&mut self, existing: &exo_store::SplitInbox, query: &str) {
         let text = format!(
             "\"{}\" is already a Split Inbox. Would you like to update it?",
@@ -283,8 +284,8 @@ impl Pickers {
         });
     }
 
-    /// The alert for a split whose definition is too long: `Open settings` unless Split Inbox
-    /// Settings is open (`settings_open`), and `Ok`.
+    /// The alert for a split whose definition is too long, with `Open settings` unless Split
+    /// Inbox Settings is open (`settings_open`), and `Ok`.
     pub(crate) fn split_too_long(&mut self, settings_open: bool) {
         let actions = if settings_open {
             vec!["Ok"]
@@ -302,7 +303,8 @@ impl Pickers {
         });
     }
 
-    /// An invite card's answer Calendar refused: try in Gmail, or go to the conversation.
+    /// Calendar refused an invite card's answer. The alert offers to try in Gmail, or to go to the
+    /// conversation.
     pub(crate) fn rsvp_failed(&mut self, thread: String) {
         let text = "We couldn't RSVP due to an error in Gmail. Please try opening this message in Gmail to save your RSVP.".to_owned();
         self.alert = Some(Alert {
@@ -342,8 +344,8 @@ impl Pickers {
                 .key("enter")
                 .regions(ALERT),
         );
-        // Escape only closes it: an index past the actions, as the last of most is Cancel and two
-        // of `RsvpFailed`'s act.
+        // Escape only closes it, through an index past the actions. The last action of most
+        // alerts is Cancel, but two of `RsvpFailed`'s act.
         commands.add(
             Command::shortcut("ALERT_ESC", act(Action::Alert(alert.actions.len())))
                 .key("esc")
@@ -362,7 +364,8 @@ impl Pickers {
     }
 }
 
-/// The name of a label or folder id: the built-in ones' own, else the user's label's.
+/// The name of a label or folder id, which is a built-in one's own name or else the user's
+/// label's.
 pub(crate) fn label_name<'a>(id: &str, labels: &'a [Label]) -> &'a str {
     match id {
         "INBOX" => "Inbox",
@@ -427,8 +430,8 @@ fn compare(
     }
 }
 
-/// Whether the footer offers to create `query`: something is typed, it isn't reserved, and no label
-/// in the picker has that name.
+/// Whether the footer offers to create `query`, which it does when something is typed, it isn't
+/// reserved, and no label in the picker has that name.
 fn creatable<'a>(query: &str, names: impl IntoIterator<Item = &'a str>) -> bool {
     let lower = query.to_lowercase();
     !query.is_empty()
@@ -436,9 +439,10 @@ fn creatable<'a>(query: &str, names: impl IntoIterator<Item = &'a str>) -> bool 
         && !names.into_iter().any(|name| name.to_lowercase() == lower)
 }
 
-/// The Move picker for `threads`, moving them out of `current` (the list on screen's label; none in
-/// search): every place a thread can go, but Starred (and Important and Other with the unified
-/// inbox, or the one on screen); `current` ticked, keys on Spam, Trash and Done.
+/// The Move picker for `threads`, moving them out of `current` (the label of the list on screen,
+/// or none in search). It lists every place a thread can go except Starred (and Important and
+/// Other with the unified inbox, or the one on screen), with `current` ticked and keys on Spam,
+/// Trash and Done.
 pub fn move_palette(
     threads: Vec<String>,
     current: Option<String>,
@@ -510,8 +514,9 @@ pub fn move_palette(
     })
 }
 
-/// The Label picker for `threads`: Starred and the user's labels. Those on every thread are ticked
-/// and listed first, and choosing one removes it; then the recently used; then the rest by name.
+/// The Label picker for `threads`, with Starred and the user's labels. Those on every thread are
+/// ticked and listed first, and choosing one removes it. The recently used come next, then the
+/// rest by name.
 pub fn label_palette(
     threads: &[&ThreadSummary],
     labels: &[Label],
@@ -592,8 +597,8 @@ pub struct Sender {
     pub domain: Option<String>,
 }
 
-/// The Mark Spam picker for `sender`: no input; report spam, or report and block the sender, or
-/// their domain unless it's a webmail one or one of `own`.
+/// The Mark Spam picker for `sender`, with no input. It offers to report spam, or to report it
+/// and block the sender, or their domain unless it's a webmail one or one of `own`.
 fn spam_palette(sender: &Sender, own: &[String]) -> SubPalette<commands::Action> {
     let block = |from: &str, domain: bool| {
         let action = commands::Action::Pick(Action::Block {
@@ -645,8 +650,8 @@ fn create_row(
     )
 }
 
-/// What `Y` takes off threads in `list`: the list's own label, or for Exo's own views and Sent,
-/// the inbox (nothing for threads already done). Nothing in Drafts or Reminders.
+/// What `Y` takes off threads in `list`, which is the list's own label, or for Exo's own views and
+/// Sent, the inbox (nothing for threads already done). Nothing in Drafts or Reminders.
 pub(crate) fn removable_label(list: &ListId) -> Option<String> {
     match list {
         ListId::Drafts | ListId::Reminders => None,
@@ -748,8 +753,8 @@ impl Mail {
                     format!("Move conversation to {name}"),
                     commands::Action::Pick(Action::MoveConversation(other)),
                 )];
-                // Not in Spam or Trash; the sender's row unless it's you, the domain's unless
-                // it's a webmail one.
+                // Not in Spam or Trash. The sender's row shows unless it's you, and the domain's
+                // unless it's a webmail one.
                 if !matches!(self.list, ListId::Spam | ListId::Trash)
                     && let Some(sender) = self.actionable_sender()
                 {
@@ -938,20 +943,20 @@ impl Mail {
         }
     }
 
-    /// One conversation is actionable and has a sender (you included): everything but a new
-    /// message being written.
+    /// Whether one conversation is actionable and has a sender (you included), which is
+    /// everything but a new message being written.
     fn has_actionable_sender(&self) -> bool {
         matches!(crate::actionable(self.thread.as_ref(), &self.inbox)[..], [thread] if !thread.draft_only)
     }
 
-    /// The label of the list actions take threads out of: none while searching.
+    /// The label of the list that actions take threads out of. None while searching.
     fn current_label(&self) -> Option<String> {
         self.search.is_none().then(|| list_label(&self.list))
     }
 
-    /// The one actionable conversation's sender, not you: whom the contact pane shows for it. Only
-    /// a plain address, since blocking and moving put it in a Gmail filter and search
-    /// (`senders::is_plain_address`); for others `!` reports spam alone.
+    /// The one actionable conversation's sender, if it isn't you, which is whom the contact pane
+    /// shows for it. Only a plain address, since blocking and moving put it in a Gmail filter and
+    /// search (`senders::is_plain_address`). For others `!` reports spam alone.
     pub(crate) fn actionable_sender(&self) -> Option<Sender> {
         // One loaded row of a select-all that reaches further isn't one conversation.
         if self.thread.is_none() && !self.inbox.is_exact() {
@@ -1046,7 +1051,7 @@ impl Mail {
         }
     }
 
-    /// An undo ran: a block it undoes comes off the block list.
+    /// An undo ran, so a block it undoes comes off the block list.
     pub(crate) fn picker_undone(&mut self, token: crate::account::UndoToken) {
         if let Some((_, from)) = self
             .pickers
@@ -1099,10 +1104,10 @@ impl Mail {
         }
     }
 
-    /// `Y`, `[` and `]`: takes the list's label off the actionable threads; with a `direction`, the
-    /// cursor moves that way after.
+    /// `Y`, `[` and `]`, which take the list's label off the actionable threads. With a
+    /// `direction`, the cursor moves that way after.
     fn remove_from_list(&mut self, direction: isize, now: f64) {
-        // Search results have no label: they leave the inbox.
+        // Search results have no label, so they leave the inbox.
         let label = if self.search.is_some() {
             Some("INBOX".to_owned())
         } else {

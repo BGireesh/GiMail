@@ -12,12 +12,13 @@ use crate::Error;
 const MARGIN: SignedDuration = SignedDuration::from_mins(5);
 
 /// One account's access tokens: a [`TokenProvider`] for its Gmail, Calendar and People clients.
-/// Cheap to clone; clones share the cached token.
+/// Cheap to clone, and clones share the cached token.
 ///
-/// The token is cached until five minutes before it expires, then refreshed on the next request;
-/// concurrent requests wait for one refresh. A 401 for it
-/// ([`invalidate`](TokenProvider::invalidate)) drops it; one for a token it already replaced
-/// changes nothing. A refresh that finishes after the account was removed hands out nothing.
+/// The token is cached until five minutes before it expires, then refreshed on the next request.
+/// Concurrent requests wait for one refresh. A 401 for the token
+/// ([`invalidate`](TokenProvider::invalidate)) drops it, but a 401 for a token it already
+/// replaced changes nothing. A refresh that finishes after the account was removed hands out
+/// nothing.
 /// When Google says the grant was revoked or expired, every request fails with
 /// [`Error::SignInAgain`] (inside [`gmail::Error::Token`]) without calling Google, and
 /// [`needs_sign_in`](Self::needs_sign_in) turns true, until the account signs in again.
@@ -33,7 +34,7 @@ struct Inner {
 }
 
 struct State {
-    /// The refresh token; `None` once Google rejected it (or there never was one).
+    /// The refresh token, or `None` once Google rejected it (or when there never was one).
     grant: Option<String>,
     access: Option<Access>,
 }
@@ -74,7 +75,7 @@ impl std::fmt::Debug for Tokens {
 }
 
 impl Tokens {
-    /// Tokens for `email` from `grant`, its refresh token (`None`: it has to sign in again).
+    /// Tokens for `email` from `grant`, its refresh token. `None` means it has to sign in again.
     pub(crate) fn new(email: &str, oauth: OAuthClient, grant: Option<String>) -> Self {
         Self(Arc::new(Inner {
             email: email.to_owned(),
@@ -87,20 +88,20 @@ impl Tokens {
         }))
     }
 
-    /// Google rejected the refresh token: the account has to sign in again.
+    /// Google rejected the refresh token, so the account has to sign in again.
     #[must_use]
     pub fn needs_sign_in(&self) -> bool {
         self.state().grant.is_none()
     }
 
-    /// The account signed in again (or just signed in): use its new grant from now on.
+    /// The account signed in again (or just signed in), so use its new grant from now on.
     pub(crate) fn replace(&self, grant: String, access: Access) {
         let mut state = self.state();
         state.grant = Some(grant);
         state.access = Some(access);
     }
 
-    /// The account was removed: stop handing out tokens.
+    /// The account was removed, so stop handing out tokens.
     pub(crate) fn revoke(&self) {
         let mut state = self.state();
         state.grant = None;
@@ -143,7 +144,7 @@ impl Tokens {
             let result = self.0.oauth.refresh(&grant).await;
             let mut state = self.state();
             // The account was removed or signed in again meanwhile, so Google's answer is about
-            // a grant it no longer has: start over from what it has now.
+            // a grant it no longer has. Start over from what it has now.
             if state.grant.as_deref() != Some(grant.as_str()) {
                 continue;
             }

@@ -4,7 +4,7 @@
 //!
 //! The alert covers the window with the full-screen alert backdrop (the photo under a 40% black
 //! scrim), and Enter or Escape performs its first action. The backdrop is the day's Inbox Zero
-//! photo. None of these reload by themselves, and a broken store is one account's: other
+//! photo. None of these reload by themselves, and a broken store is one account's, so other
 //! accounts are a `ctrl+1…9` away.
 
 use egui::{Color32, Key, Modifiers, Rect, Ui, pos2};
@@ -47,11 +47,12 @@ pub enum Reason {
     /// The file can't be used as it is (unreadable, from a schema this build
     /// has no upgrade from, an upgrade that failed). Clearing the cache fixes it.
     Corrupt,
-    /// The disk is full: nothing to do in Exo but wait for space.
+    /// The disk is full, and there's nothing to do in Exo but wait for space.
     DiskFull,
     /// Something else holds the file, which a reload may find let go.
     Locked,
-    /// Anything else, such as the account's runtime not starting: the default teardown.
+    /// Anything else, such as the account's runtime not starting, which gets the default
+    /// teardown.
     Failed,
 }
 
@@ -141,7 +142,7 @@ impl Unopened {
         self.reason
     }
 
-    /// The photo is decoded. For screenshots and tests.
+    /// Whether the photo is decoded. For screenshots and tests.
     pub fn is_idle(&self) -> bool {
         self.backdrop.is_loaded()
     }

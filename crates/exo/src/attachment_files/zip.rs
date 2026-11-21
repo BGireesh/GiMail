@@ -1,12 +1,13 @@
-//! `Download all`'s zip: a message's files in one archive, deflated, the second of two names
-//! `name (1).ext` and so on, named for the conversation.
+//! The zip for `Download all`, which holds a message's files in one deflated archive named for the
+//! conversation. When two files share a name, the second goes in as `name (1).ext`, and so on.
 
 use std::collections::HashMap;
 use std::io::Write as _;
 
-/// The zip's name: the subject lowercased, each run of one or two spaces an underscore, anything
-/// else that isn't a letter, digit or underscore dropped, then the message's place in the
-/// conversation, counting from 1; `attachments.zip` without a subject.
+/// The zip's name, from the subject and the message's place in the conversation. The subject is
+/// lowercased, each run of one or two spaces becomes an underscore, and anything else that isn't a
+/// letter, digit or underscore is dropped. The place follows, counting from 1. Without a subject
+/// the name is `attachments.zip`.
 pub(crate) fn name(subject: &str, position: usize) -> String {
     if subject.is_empty() {
         return "attachments.zip".into();
@@ -15,7 +16,7 @@ pub(crate) fn name(subject: &str, position: usize) -> String {
     let mut chars = subject.chars().peekable();
     while let Some(c) = chars.next() {
         if c.is_whitespace() {
-            // `/\s\s?/g`: a second space goes with the first.
+            // A second space goes with the first, so two make one underscore.
             chars.next_if(|next| next.is_whitespace());
             slug.push('_');
         } else if c.is_ascii_alphanumeric() || c == '_' {
@@ -25,8 +26,8 @@ pub(crate) fn name(subject: &str, position: usize) -> String {
     format!("{slug}_{}.zip", position + 1)
 }
 
-/// The names the files go in under: each as it is, except that a name taken already gets ` (n)`
-/// before its extension, counting how often it came up.
+/// The names the files go in under. Each keeps its name, except that a name already taken gets
+/// ` (n)` before its extension, where n counts how often that name came up.
 fn unique(names: impl IntoIterator<Item = String>) -> Vec<String> {
     let mut seen: HashMap<String, usize> = HashMap::new();
     let mut unique_name = |name: String| -> String {

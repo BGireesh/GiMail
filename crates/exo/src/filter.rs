@@ -84,7 +84,8 @@ fn applies(list: &ListId, filter: Filter, current: Option<Filter>) -> bool {
             && current != Some(Filter::Starred))
 }
 
-/// The filter a list opens with: the current one between inbox tabs, else the one it last had.
+/// The filter a list opens with, which is the current one between inbox tabs and otherwise the
+/// one it last had.
 pub(crate) fn for_list(
     from: &ListId,
     to: &ListId,
@@ -98,7 +99,7 @@ pub(crate) fn for_list(
     }
 }
 
-/// Registers the filter keys and the palette's Filter Conversations for the list on screen;
+/// Registers the filter keys and the palette's Filter Conversations for the list on screen.
 /// `filterable` is false in a thread.
 pub(crate) fn register(commands: &mut Commands<commands::Action>, filterable: bool) {
     if !filterable {

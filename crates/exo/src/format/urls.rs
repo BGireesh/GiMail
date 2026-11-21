@@ -4,9 +4,10 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
-/// `url` normalized, when it's a web link: the only kind Exo hands to the system. Mail decides
-/// what its links and `List-Unsubscribe` headers say, and any other scheme would reach whichever
-/// app claims it (`file:`, app URL schemes; `starts_with("http")` also lets `http-evil:` by).
+/// `url` normalized, when it's a web link, which is the only kind Exo hands to the system. Mail
+/// decides what its links and `List-Unsubscribe` headers say, and any other scheme would reach
+/// whichever app claims it, such as `file:` or an app's URL scheme. A `starts_with("http")` check
+/// would also let `http-evil:` by.
 pub fn web(url: &str) -> Option<String> {
     url::Url::parse(url)
         .ok()
@@ -14,7 +15,7 @@ pub fn web(url: &str) -> Option<String> {
         .map(String::from)
 }
 
-/// Percent-encodes every byte of `text`'s UTF-8 but letters, digits and `-_.!~*'()`.
+/// Percent-encodes every byte of `text` as UTF-8, except letters, digits and `-_.!~*'()`.
 pub fn encode_component(text: &str) -> String {
     text.bytes()
         .map(|byte| {
@@ -27,7 +28,7 @@ pub fn encode_component(text: &str) -> String {
         .collect()
 }
 
-/// The URL a link preview shows in full: without `http://` and a trailing `/`.
+/// The URL a link preview shows in full, without `http://` and a trailing `/`.
 pub fn shown(url: &str) -> String {
     static HTTP: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^http://").expect("valid regex"));
     trailing_slash(&HTTP.replace(url, ""))
@@ -40,8 +41,8 @@ fn trailing_slash(url: &str) -> String {
     SLASH.replace(url, "$1").into_owned()
 }
 
-/// `url` in at most `max` characters: dropping the scheme, `www.`, the fragment and the query
-/// in turn, then middle path segments (`host/a/…/file`), then cutting it short with `…`.
+/// `url` in at most `max` characters. Drops the scheme, `www.`, the fragment and the query in
+/// turn, then middle path segments (`host/a/…/file`), then cuts the URL short with `…`.
 pub fn elide(url: &str, max: usize) -> String {
     static STEPS: LazyLock<[Regex; 5]> = LazyLock::new(|| {
         [r"^http://", r"^https://", r"^www\.", r"#.*", r"\?.*"]

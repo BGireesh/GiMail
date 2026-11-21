@@ -1,9 +1,9 @@
-//! The compose assistant: the emoji and contact dropdowns in the body. `:smi` offers emoji by
-//! name; `+pri` or `@pri` offers contacts, and picking one writes `+Priya` and puts her in To;
+//! The compose assistant shows the emoji and contact dropdowns in the body. `:smi` offers emoji
+//! by name. `+pri` or `@pri` offers contacts, and picking one writes `+Priya` and puts her in To.
 //! `-pri` offers the recipients (and `all external recipients`, `all internal recipients`,
-//! `all @domain`), and picking one writes `−Priya` and takes them off the draft. What the
-//! editor reports as the trigger ([`exo_editor::Trigger`]) opens them; the `;` snippet picker is
-//! [`super::snippets`]'.
+//! `all @domain`), and picking one writes `−Priya` and takes them off the draft. The trigger the
+//! editor reports ([`exo_editor::Trigger`]) opens the dropdowns. The `;` snippet picker lives in
+//! [`super::snippets`].
 
 use std::collections::HashMap;
 
@@ -32,14 +32,14 @@ const PREVIEW: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 24.0, 33
 const PREVIEW_WIDTH: f32 = 25.0;
 const NAME: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 14.0, 24.0);
 const NAME_GAP: f32 = 16.0;
-/// The contact list: 7px above and below its rows, rows a 28px line 4px down, cells padded 16px,
-/// the name's at least 165px; `font-kerning: none`.
+/// The contact list: 7px above and below its rows, each row a 28px line set 4px down, cells
+/// padded 16px, the name column at least 165px wide, and `font-kerning: none`.
 const CONTACT: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 13.0, 28.0);
 const CONTACT_ROW: f32 = 32.0;
 const CONTACT_PADDING: f32 = 7.0;
 const CELL_PADDING: f32 = 16.0;
 const NAME_MIN: f32 = 165.0;
-/// Where each dropdown sits from its trigger character's left.
+/// How far each dropdown sits to the left of its trigger character's left edge.
 fn left_offset(kind: TriggerKind) -> f32 {
     match kind {
         TriggerKind::Emoji => 50.0,
@@ -48,7 +48,7 @@ fn left_offset(kind: TriggerKind) -> f32 {
         _ => 12.0,
     }
 }
-/// How many emoji the picker offers: eight, five in a popped-out draft.
+/// How many emoji the picker offers: eight, or five in a popped-out draft.
 const EMOJI_LIMIT: usize = 8;
 const EMOJI_LIMIT_POPPED: usize = 5;
 /// What reads as the start of an address.
@@ -59,7 +59,7 @@ static ADDRESS_START: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::n
 /// A draft's To, Cc and Bcc.
 type Recipients = [Vec<Address>; 3];
 
-/// A contact row: someone, or one of `−`'s groups.
+/// A contact row: someone, or one of the groups that `−` offers.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Person {
     Contact(Address),
@@ -78,8 +78,8 @@ pub(crate) enum Rows {
     None,
     Emoji(Vec<emoji::Found>),
     Contacts(Vec<Person>),
-    /// No one matched, but what's typed starts an address: it alone,
-    /// lower-cased, highlighted when it's a valid one.
+    /// No one matched, but what's typed starts an address. The row shows that text alone,
+    /// lower-cased, and highlighted when it's a valid address.
     NewAddress {
         text: String,
         valid: bool,
@@ -96,16 +96,16 @@ pub(crate) struct State {
     pub index: usize,
     /// The query the rows are for.
     query: Option<(TriggerKind, String)>,
-    /// The name of the To recipient a mention backspaced into was for: the
-    /// person picked instead takes their place.
+    /// The name of the To recipient whose mention the caret backspaced into. The person picked
+    /// instead takes that recipient's place.
     partial: Option<String>,
-    /// Recipients before and after each change a mention made, by its undo mark: undoing the
-    /// mention in the body undoes the change.
+    /// Recipients before and after each change a mention made, keyed by the mention's undo mark,
+    /// so undoing the mention in the body undoes the change.
     marks: HashMap<u64, (Recipients, Recipients)>,
     next_mark: u64,
     /// How far the shortened emoji picker is scrolled.
     scroll: f32,
-    /// ↑ or ↓ moved the highlight: the shortened picker scrolls it to its top.
+    /// ↑ or ↓ moved the highlight, so the shortened picker scrolls the highlighted row to the top.
     reveal: bool,
 }
 
@@ -120,11 +120,11 @@ impl State {
 pub(crate) enum Key {
     /// ↓ (1) or ↑ (-1), wrapping.
     Move(isize),
-    /// Enter or Tab, or a press on a row: that row.
+    /// Enter or Tab picks the highlighted row, and a press on a row picks that row.
     Pick(Option<usize>),
-    /// `:` after an emoji's name: the emoji named exactly that, else the highlighted one.
+    /// `:` after an emoji's name picks the emoji named exactly that, else the highlighted one.
     Close,
-    /// Escape: the dropdown closes, the text stays.
+    /// Escape closes the dropdown and leaves the text.
     Dismiss,
 }
 
@@ -140,8 +140,9 @@ pub(super) fn note_trigger(open: &mut Open, trigger: Option<&Trigger>) {
     }
 }
 
-/// Backspace (or ⌘Z) at the end of a `+Name` mention whose Name is in To opens its contacts
-/// again as it edits, for swapping that recipient. Call before the body sees the key.
+/// Backspace (or ⌘Z) at the end of a `+Name` mention whose Name is in To opens the contacts
+/// again while the mention is edited, so that recipient can be swapped. Call before the body
+/// sees the key.
 pub(super) fn edit_mention(open: &mut Open, book: Option<&contacts::Index>) {
     let Some(name) = open.editor.mention_before_caret() else {
         return;
@@ -162,8 +163,8 @@ pub(super) fn edit_mention(open: &mut Open, book: Option<&contacts::Index>) {
     }
 }
 
-/// The To recipient `name` stands for, when only one does: by first
-/// name, else full name, else address.
+/// The To recipient that `name` stands for, when only one does. It matches by first name, else
+/// full name, else address.
 fn unambiguous(to: &[Address], name: &str, book: Option<&contacts::Index>) -> Option<Address> {
     let lower = name.to_lowercase();
     let only = |matches: Vec<&Address>| {
@@ -232,9 +233,9 @@ pub(super) fn register_use_emoji(commands: &mut Commands<commands::Action>) {
     );
 }
 
-/// `Use Emoji`: the body gets the keyboard (its caret at the end unless it had it) and
-/// `:hello`, after a space if the caret follows a character, which opens the picker on it.
-/// From the subject too, which has no `:` picker of its own.
+/// `Use Emoji` gives the body the keyboard (with the caret at the end unless the body already
+/// had the keyboard) and types `:hello`, which opens the picker. A space goes first if the caret
+/// follows a character. It works from the subject too, which has no `:` picker of its own.
 pub(super) fn use_emoji(open: &mut Open, now: f64) {
     if open.state.field != super::Field::Body {
         let end = open.editor.document().end();
@@ -254,9 +255,10 @@ pub(super) fn use_emoji(open: &mut Open, now: f64) {
     open.touch(now);
 }
 
-/// Registers the dropdown's keys while it shows, over the body's.
-/// `backtick` is Backtick as Escape, without which a backtick is typed rather than closing it.
-/// Hidden on a date ([`show`]), it doesn't take them: they go to the body.
+/// Registers the dropdown's keys, over the body's, while the dropdown shows. `backtick` is the
+/// Backtick as Escape setting, without which a backtick is typed rather than closing the
+/// dropdown. While the dropdown is hidden on a date ([`show`]), it doesn't take the keys, so they
+/// go to the body.
 pub(super) fn register(commands: &mut Commands<commands::Action>, open: &Open, backtick: bool) {
     if !open.assistant.shown() || open.date.is_some() {
         return;
@@ -283,8 +285,8 @@ pub(super) fn register(commands: &mut Commands<commands::Action>, open: &Open, b
     }
 }
 
-/// The emoji rows for a `:` query: two characters at least, but for queries
-/// starting `a`, `b`, `m`, `o`, `v`, `x`, `+` or `-`.
+/// The emoji rows for a `:` query, which needs two characters at least, except for queries
+/// starting with `a`, `b`, `m`, `o`, `v`, `x`, `+` or `-`.
 fn emoji_rows(query: &str, popped: bool, tone: Option<EmojiSkinTone>) -> Rows {
     let short =
         query.chars().count() < 2 && !query.starts_with(['a', 'b', 'm', 'o', 'v', 'x', '+', '-']);
@@ -308,7 +310,7 @@ fn emoji_rows(query: &str, popped: bool, tone: Option<EmojiSkinTone>) -> Rows {
 }
 
 /// The contacts for a `+`/`@` query: up to five suggestions as the recipient fields have them,
-/// not the draft's From; else the address being typed.
+/// leaving out the draft's From. When none match, the address being typed.
 fn contact_rows(
     open: &Open,
     query: &str,
@@ -340,8 +342,8 @@ fn contact_rows(
     Rows::None
 }
 
-/// The rows for a `−` query: its groups (external and internal recipients, each domain), then
-/// To and Cc, whose name, address or domain the query starts, five at most.
+/// The rows for a `−` query, five at most: the groups (external and internal recipients, each
+/// domain), then To and Cc, keeping each whose name, address or domain starts with the query.
 /// Auto Bcc's addresses and Bcc aren't counted.
 fn removal_rows(open: &Open, query: &str, team: &[String]) -> Rows {
     let others: Vec<&Address> = open
@@ -404,7 +406,7 @@ fn removal_rows(open: &Open, query: &str, team: &[String]) -> Rows {
 }
 
 impl crate::Mail {
-    /// Finds the focused draft's dropdown rows for its trigger, as it changes.
+    /// Finds the dropdown rows for the focused draft's trigger when the trigger changes.
     pub(super) fn assistant_rows(&mut self) {
         let tone = self.account.settings().emoji_skin_tone;
         let popped = self.compose.popped.clone();
@@ -527,7 +529,8 @@ impl crate::Mail {
                 else {
                     return;
                 };
-                // `:` and the name go (the emoji's own `:` only from the key, which isn't typed).
+                // The emoji replaces `:` and the name. A closing `:` comes only from the key, so
+                // it was never typed.
                 if open.state.field == super::Field::Subject {
                     super::subject::replace(open, &trigger, &text);
                 } else {
@@ -544,7 +547,7 @@ impl crate::Mail {
                 open.editor.mark_undo(mark);
             }
             (Rows::NewAddress { text, .. }, TriggerKind::Contact(ch)) => {
-                // A new address: what's typed, and that address in To.
+                // A new address writes what's typed and puts that address in To.
                 let shown = format!("{}{}", trigger_char(ch), trigger.query.trim());
                 let before = recipients_of(open);
                 open.editor.replace(trigger.start, trigger.end, &shown);
@@ -556,7 +559,8 @@ impl crate::Mail {
         }
         open.touch(now);
         if set_tone {
-            // The first emoji that takes a tone: the Emoji Settings hint, and `NONE` from now on.
+            // The first emoji that takes a tone shows the Emoji Settings hint and sets the tone
+            // to `NONE` from then on.
             self.account
                 .update_settings(|settings| settings.emoji_skin_tone = Some(EmojiSkinTone::None));
             self.commands.hint(
@@ -585,15 +589,14 @@ fn recipients_of(open: &Open) -> Recipients {
     ]
 }
 
-/// The trigger as a mention writes it: `-` is written `−`.
+/// The trigger as a mention writes it, with `-` written as `−`.
 fn trigger_char(ch: char) -> char {
     if ch == '-' { '\u{2212}' } else { ch }
 }
 
-/// Picks a contact row: the trigger and their first name
-/// (their full name, else address, when another recipient shares the first name) replace what
-/// was typed; `+` or `@` puts them in To, `−` takes them (or the group) off the draft. Returns
-/// the change's undo mark.
+/// Picks a contact row. The trigger and the person's first name replace what was typed, or their
+/// full name, else address, when another recipient shares the first name. `+` or `@` puts them
+/// in To, and `−` takes them (or the group) off the draft. Returns the change's undo mark.
 fn mention(
     open: &mut Open,
     trigger: &Trigger,
@@ -603,7 +606,7 @@ fn mention(
     book: Option<&contacts::Index>,
 ) -> u64 {
     let before = recipients_of(open);
-    // A mention backspaced into swaps the recipient it was for.
+    // Backspacing into a mention swaps the recipient the mention was for.
     let replaced = open
         .assistant
         .partial
@@ -660,8 +663,8 @@ fn mention(
     open.assistant.remember(before, after)
 }
 
-/// Takes `person` (or everyone in the group) off the draft; a group spares Bcc's Auto Bcc
-/// addresses. `team` is the team's domains.
+/// Takes `person` (or everyone in the group) off the draft. A group spares the Auto Bcc
+/// addresses in Bcc. `team` is the team's domains.
 pub(super) fn remove(open: &mut Open, person: &Person, team: &[String]) {
     let auto = open.auto_bcc.emails.clone();
     let gone = |address: &Address| -> bool {
@@ -689,8 +692,9 @@ pub(super) fn remove(open: &mut Open, person: &Person, team: &[String]) {
     });
 }
 
-/// Registers `Remove External Recipients`, `Remove Internal Recipients` and `Remove Recipients
-/// from {domain}` for what the draft has, Auto Bcc's addresses aside.
+/// Registers `Remove External Recipients`, `Remove Internal Recipients` and
+/// `Remove Recipients from {domain}` for the recipients the draft has, leaving out Auto Bcc's
+/// addresses.
 pub(super) fn register_removals(
     commands: &mut Commands<commands::Action>,
     open: &Open,
@@ -789,15 +793,15 @@ fn count(rows: &Rows) -> usize {
     }
 }
 
-/// The dropdown's room from its layer's edges: at least 8px from the left, and from the right
-/// 22.5px (moved left as far as 22.5px from the left).
+/// How far the dropdown stays from its layer's edges: at least 8px from the left and 22.5px from
+/// the right. Moved left to fit, it comes no closer than 22.5px to the left edge.
 const LAYER_LEFT: f32 = 8.0;
 const LAYER_MARGIN: f32 = 22.5;
 
 /// Draws the dropdown under the trigger, or above it when there's no room below, kept inside
-/// the extent `within` of the layer it's in (the thread's messages), and returns the row
-/// pressed (mouse-down picks; hovering with the mouse moving highlights). Not while the caret
-/// is on a date.
+/// the extent `within` of the layer it's in (the thread's messages). Returns the row pressed:
+/// mouse-down picks, and hovering with the mouse moving highlights. Draws nothing while the
+/// caret is on a date.
 pub(super) fn show(ui: &Ui, open: &mut Open, within: egui::Rangef, id: Id) -> Option<usize> {
     let trigger = open.assistant.trigger.clone()?;
     if !open.assistant.shown() || open.date.is_some() {
@@ -816,7 +820,7 @@ pub(super) fn show(ui: &Ui, open: &mut Open, within: egui::Rangef, id: Id) -> Op
             .sum(),
         Rows::None => 0.0,
     };
-    // The subject's hangs from the trigger's left.
+    // The subject's dropdown hangs from the trigger's left.
     let in_subject = open.state.field == super::Field::Subject;
     let anchor = if in_subject {
         trigger.anchor.left()
@@ -827,9 +831,9 @@ pub(super) fn show(ui: &Ui, open: &mut Open, within: egui::Rangef, id: Id) -> Op
     if left > within.max - LAYER_MARGIN - width {
         left = (within.max - LAYER_MARGIN - width).max(within.min + LAYER_MARGIN);
     }
-    // 3px under the trigger's range: in the body its text's content area, which
-    // ends 4px above the bottom of its 24px line (`BodyText::COMPOSE`), as the snippet
-    // picker's; in the subject under its line.
+    // 3px under the trigger's range. In the body that range is the text's content area, which
+    // ends 4px above the bottom of its 24px line (`BodyText::COMPOSE`), as for the snippet
+    // picker. In the subject the dropdown sits under the subject's line.
     let top = if in_subject {
         trigger.anchor.bottom()
     } else {
@@ -865,7 +869,7 @@ pub(super) fn show(ui: &Ui, open: &mut Open, within: egui::Rangef, id: Id) -> Op
         }
         Rows::NewAddress { text, valid } => {
             let shown = vec![(String::new(), text.clone())];
-            // Only the address cell, the whole of it darker when it's valid.
+            // Only the address cell, all of it darker when the address is valid.
             contact_list(
                 &ctx,
                 &shown,
@@ -926,7 +930,7 @@ fn emoji_picker(
     };
     let most = rows_height - shown;
     if reveal {
-        // The highlighted row at the top, as far as it goes.
+        // Scrolls the highlighted row to the top, as far as the rows can scroll.
         *scroll = *index as f32 * EMOJI_ROW;
     }
     *scroll = scroll.clamp(0.0, most);
@@ -1013,8 +1017,8 @@ fn emoji_picker(
     picked
 }
 
-/// The contact list's name and address columns' widths, padding included: the name's none
-/// when no row has one.
+/// The widths of the contact list's name and address columns, padding included. The name column
+/// has no width when no row has a name.
 fn contact_widths(ctx: &egui::Context, rows: &[(String, String)]) -> [f32; 2] {
     let name_width = rows
         .iter()
@@ -1034,8 +1038,8 @@ fn contact_widths(ctx: &egui::Context, rows: &[(String, String)]) -> [f32; 2] {
     [name_width, email_width]
 }
 
-/// The contact list with its top left at `at`: name and address cells,
-/// what's typed darker in each.
+/// The contact list with its top left at `at`, showing name and address cells with what's typed
+/// darker in each.
 fn contact_list(
     ctx: &egui::Context,
     rows: &[(String, String)],
@@ -1144,7 +1148,7 @@ mod tests {
             (emails(&open.record.to), emails(&open.record.cc)),
             (vec!["priya@x.com"], vec![])
         );
-        // Another Priya on the draft: the full name.
+        // With another Priya on the draft, the mention writes the full name.
         let other = person("Priya Shah", "shah@y.com");
         let mut open = draft(std::slice::from_ref(&other), &[]);
         let trigger = typed(&mut open, "+pri");
@@ -1177,7 +1181,7 @@ mod tests {
         );
         open.editor.type_text(" ");
         open.editor.backspace();
-        // At the end of `+Priya`, who's in To: Backspace opens her contacts again.
+        // At the end of `+Priya`, who's in To, Backspace opens her contacts again.
         edit_mention(&mut open, None);
         open.editor.backspace();
         let trigger = open
@@ -1196,7 +1200,7 @@ mod tests {
             ["pam@x.com"],
             "Pam takes Priya's place"
         );
-        // Someone not in To isn't swapped: their dismissed mention stays closed.
+        // Someone not in To isn't swapped, so their dismissed mention stays closed.
         let mut open = draft(&[], &[]);
         open.editor.type_text("+Zed");
         open.editor.dismiss_trigger();

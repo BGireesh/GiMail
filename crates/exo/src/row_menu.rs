@@ -1,5 +1,5 @@
 //! The thread list's right-click menu (`Thread actions`). It's a native menu
-//! ([`crate::desktop::context_menu`]); its items run the commands their keys run.
+//! ([`crate::desktop::context_menu`]), and its items run the commands their keys run.
 
 use exo_store::{DraftAction, ListId, Mutation};
 
@@ -15,13 +15,13 @@ use crate::{
 pub(crate) struct Entry {
     /// The native menu's item.
     pub item: MenuItem,
-    /// What it runs; none for a separator.
+    /// What it runs, or none for a separator.
     pub action: Option<Action>,
 }
 
-/// The menu for `threads`, the conversations it acts on: the selection when the row clicked is
-/// in it, else that row. `exact` is whether the selection is exactly the rows loaded; `list` the
-/// list on screen.
+/// The menu for `threads`, the conversations it acts on, which are the selection when the row
+/// clicked is in it, or else that row. `exact` is whether the selection is exactly the rows
+/// loaded, and `list` is the list on screen.
 pub(crate) fn entries(threads: &[&ThreadSummary], exact: bool, list: &ListId) -> Vec<Entry> {
     let every = |of: &[&&ThreadSummary], test: fn(&ThreadSummary) -> bool| {
         !of.is_empty() && of.iter().all(|thread| test(thread))

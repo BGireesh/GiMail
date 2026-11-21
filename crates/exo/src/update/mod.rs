@@ -1,18 +1,18 @@
 //! Exo updates itself from its releases on GitHub.
 //!
 //! It checks as it starts and 15 minutes after each check ends. A newer release downloads in
-//! the background, then a notification says it's ready (`Update ready!`): `Install and
+//! the background, then a notification says it's ready (`Update ready!`). `Install and
 //! Restart`, a click on the notification, or the app menu's `Install Update and Restart` hands
-//! it to a helper (a copy of this Exo) and quits; the helper swaps the app for the new one and
-//! opens it, its window back without taking the focus from the app in front. Should the new
-//! one not open its window within a minute, the helper puts this one back. An update nobody
+//! it to a helper (a copy of this Exo) and quits. The helper swaps the app for the new one and
+//! opens it, with its window back but without taking the focus from the app in front. If the new
+//! one doesn't open its window within a minute, the helper puts this one back. An update nobody
 //! installs is installed as Exo next starts, before it opens anything ([`install_kept`]).
 //!
 //! ⌘K's `Check for Updates`, and the app menu's `Check for Updates…` while an account's mail is
-//! on screen, check in front of the user: an alert (`Update Exo`) says how it goes, and Exo
+//! on screen, check in front of the user. An alert (`Update Exo`) says how it goes, and Exo
 //! restarts into the update once it's downloaded. Closing the alert leaves the check to finish
-//! as one nobody asked for. With no mail on screen the app menu's asks with dialogs instead:
-//! whether to download, then whether to install.
+//! as one nobody asked for. With no mail on screen, the app menu's item asks with dialogs
+//! instead: whether to download, then whether to install.
 //!
 //! Each step has a deadline: 30 seconds, or 90 from the last bytes while downloading and
 //! checking the download. A step past it fails, and its answer, should it come, is ignored.
@@ -51,11 +51,11 @@ pub const CONFIG: UpdateConfig = UpdateConfig {
     ..UpdateConfig::new(REPOSITORY, "Exo", "exo", env!("CARGO_PKG_VERSION"))
 };
 
-/// What Exo restarts with after installing an update it was asked to: its window comes back
-/// without taking the focus from the app in front.
+/// The argument Exo restarts with after installing an update it was asked to. Its window comes
+/// back without taking the focus from the app in front.
 pub const UPDATED: &str = "--updated";
 
-/// What `--version` prints: `exo {version}`, which the helper of an earlier Exo checks a
+/// What `--version` prints, `exo {version}`, which the helper of an earlier Exo checks a
 /// download with.
 pub fn version() -> String {
     format!("{} {}", CONFIG.slug, CONFIG.current_version)
@@ -90,23 +90,25 @@ pub enum Stage {
     Available,
     /// Downloading the release.
     Downloading,
-    /// Downloaded; its disk image is being checked.
+    /// Downloaded, with its disk image being checked.
     Preparing,
     /// Downloaded and checked, ready to install.
     Downloaded,
-    /// Handed to the helper; Exo is about to quit.
+    /// Handed to the helper, so Exo is about to quit.
     Restarting,
 }
 
 /// How a check shows itself.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Mode {
-    /// Nobody asked: a newer release downloads, then a notification says it's ready.
+    /// Nobody asked, so a newer release downloads, then a notification says it's ready.
     #[default]
     Background,
-    /// ⌘K's: alerts say how it goes, and Exo restarts into the update once downloaded.
+    /// ⌘K's check, where alerts say how it goes, and Exo restarts into the update once
+    /// downloaded.
     Alerts,
-    /// The app menu's with no mail on screen: dialogs ask before downloading and installing.
+    /// The app menu's check with no mail on screen, where dialogs ask before downloading and
+    /// installing.
     Dialogs,
 }
 
@@ -158,7 +160,8 @@ impl Releases for Updater {
 pub trait Shell: Send + Sync + 'static {
     /// Says the update to `version` is ready to install.
     fn ready(&self, version: &str);
-    /// Shows `dialog` and waits for the button chosen, from 0; `None` when it couldn't show.
+    /// Shows `dialog` and waits for the button chosen, counting from 0, or `None` when it
+    /// couldn't show.
     fn ask(&self, dialog: &Dialog) -> Option<usize>;
     /// Quits Exo, for the helper to install the update.
     fn quit(&self);
@@ -166,8 +169,8 @@ pub trait Shell: Send + Sync + 'static {
     fn changed(&self);
 }
 
-/// The updater for this copy of Exo, when it can replace itself: Exo.app signed by a team, not
-/// run from its disk image or a copy macOS made of a download.
+/// The updater for this copy of Exo, when it can replace itself. That's Exo.app signed by a team,
+/// not run from its disk image or from a copy macOS made of a download.
 pub fn updater() -> Option<Updater> {
     let transport = ReqwestTransport::new(reqwest::blocking::Client::builder())
         .inspect_err(|error| log::warn!("the updater's HTTP client: {error}"))
@@ -187,8 +190,8 @@ pub fn updater() -> Option<Updater> {
 }
 
 /// Whether the Exo at `executable` is signed by a team. Only then must an update be signed by the
-/// same team and pass Gatekeeper, so a copy signed ad hoc (a local build) doesn't update itself:
-/// it would take any release whose checksum, identity and version match.
+/// same team and pass Gatekeeper, so a copy signed ad hoc (a local build) doesn't update itself,
+/// since it would take any release whose checksum, identity and version match.
 fn signed_by_a_team(executable: &std::path::Path) -> bool {
     std::process::Command::new("/usr/bin/codesign")
         .args(["--display", "--verbose=4"])
@@ -207,9 +210,9 @@ fn team(display: &str) -> Option<&str> {
         .filter(|team| *team != "not set")
 }
 
-/// Installs the update an earlier run downloaded and nobody installed, if there's one: the
+/// Installs the update an earlier run downloaded and nobody installed, if there's one. The
 /// helper takes it, swaps it in once this process exits, and opens the new Exo with
-/// `arguments`, this launch's own. Whether it did, for the launch to quit at once.
+/// `arguments`, this launch's own. Returns whether it did, so the launch can quit at once.
 pub fn install_kept(updater: &Updater, arguments: Vec<String>) -> bool {
     let prepared = match updater.kept() {
         Ok(Some(prepared)) => prepared,
@@ -232,8 +235,8 @@ pub fn install_kept(updater: &Updater, arguments: Vec<String>) -> bool {
     }
 }
 
-/// The updater: when to check, how it shows, and the update downloaded, run on a thread of its
-/// own for as long as Exo runs. Cheap to clone, and usable from any thread.
+/// The updater, which tracks when to check, how it shows, and the update downloaded, and runs on
+/// a thread of its own for as long as Exo runs. It's cheap to clone and usable from any thread.
 #[derive(Clone)]
 pub struct Updates(Arc<Shared>);
 
@@ -251,24 +254,25 @@ struct State {
     stage: Stage,
     /// How the check under way shows itself.
     mode: Mode,
-    /// A check is under way.
+    /// Whether a check is under way.
     busy: bool,
     /// A check asked for, for the worker to start.
     asked: Option<Mode>,
-    /// Installing the update was asked for.
+    /// Whether installing the update was asked for.
     install: bool,
     /// How far the download is, in percent.
     percent: u8,
     /// The alert on screen.
     alert: Option<Alert>,
-    /// An account's mail is on screen, which can show the alerts.
+    /// Whether an account's mail is on screen, which can show the alerts.
     alerts_shown: bool,
     /// The update downloaded this run, ready to install.
     downloaded: Option<Prepared>,
 }
 
 impl State {
-    /// Where a finished check leaves the updater: ready when there's an update to install.
+    /// Where a finished check leaves the updater, which is ready when there's an update to
+    /// install.
     fn settled(&self) -> Stage {
         if self.downloaded.is_some() {
             Stage::Downloaded
@@ -347,8 +351,8 @@ impl Shell for AppShell {
 }
 
 impl Updates {
-    /// Updates this Exo with `updater`, checking now and every 15 minutes after: notifications
-    /// through `notifier`, the window woken through `launcher`.
+    /// Updates this Exo with `updater`, checking now and every 15 minutes after, with
+    /// notifications through `notifier` and the window woken through `launcher`.
     pub fn start(updater: Updater, launcher: Launcher, notifier: Option<Notifier>) -> Self {
         Self::spawn(updater, AppShell { launcher, notifier }, TIMING)
     }
@@ -387,7 +391,7 @@ impl Updates {
     }
 
     /// Checks now, shown as `mode` says. With a check under way already, that check shows
-    /// itself so from now on.
+    /// itself that way from now on.
     pub fn check(&self, mode: Mode) {
         {
             let mut state = self.lock();
@@ -414,8 +418,8 @@ impl Updates {
         self.0.shell.changed();
     }
 
-    /// The app menu's item chosen: installs the update ready, or else checks, with alerts while
-    /// an account's mail is on screen to show them and dialogs otherwise.
+    /// The app menu's item was chosen. It installs the update that's ready, or else checks, with
+    /// alerts while an account's mail is on screen to show them and dialogs otherwise.
     pub fn menu_chosen(&self) {
         let (stage, alerts_shown) = {
             let state = self.lock();
@@ -431,7 +435,7 @@ impl Updates {
         }
     }
 
-    /// Installs the update ready, once a check under way is over.
+    /// Installs the update that's ready, once a check under way is over.
     pub fn install(&self) {
         self.lock().install = true;
         self.0.wake.notify_all();
@@ -451,8 +455,8 @@ impl Updates {
         self.lock().alerts_shown = shown;
     }
 
-    /// The helper put this Exo back, as the update it installed didn't open: `Failed to update`
-    /// says so.
+    /// The helper put this Exo back, because the update it installed didn't open, and
+    /// `Failed to update` says so.
     pub fn restored(&self) {
         let shell = Arc::clone(&self.0.shell);
         if let Err(error) = std::thread::Builder::new()
@@ -469,8 +473,8 @@ impl Updates {
         self.0.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// The worker: a check now, then each one asked for and 15 minutes after the last ended,
-    /// and installs asked for.
+    /// The worker. It checks now, then on each check asked for and 15 minutes after the last
+    /// ended, and installs when asked.
     fn run(self) {
         let mut due = Instant::now();
         loop {
@@ -575,7 +579,7 @@ impl Updates {
         Ok(())
     }
 
-    /// Nothing newer: the alert or the dialog says so.
+    /// Nothing is newer, and the alert or the dialog says so.
     fn up_to_date(&self) {
         let mode = {
             let mut state = self.lock();
@@ -591,7 +595,7 @@ impl Updates {
         }
     }
 
-    /// The update is downloaded (`fresh`ly, or by an earlier check): a notification says so,
+    /// The update is downloaded (`fresh`ly, or by an earlier check). A notification says so,
     /// Exo restarts into it, or a dialog asks.
     fn ready(&self, fresh: bool) {
         let (mode, version) = {
@@ -616,7 +620,7 @@ impl Updates {
         }
     }
 
-    /// Hands the update ready to the helper and quits.
+    /// Hands the update that's ready to the helper and quits.
     fn install_now(&self) {
         let prepared = {
             let mut state = self.lock();
@@ -635,7 +639,7 @@ impl Updates {
         match installed {
             Ok(()) => {
                 self.0.shell.quit();
-                // Exo quits now; still running past the deadline, it didn't.
+                // Exo quits now. If it's still running past the deadline, it didn't.
                 std::thread::sleep(self.0.timing.step);
                 self.failed(Failure::TimedOut(Stage::Restarting));
             }
@@ -643,7 +647,7 @@ impl Updates {
         }
     }
 
-    /// A step failed: the alert or the dialog says so.
+    /// A step failed, and the alert or the dialog says so.
     fn failed(&self, failure: Failure) {
         log::warn!("updating Exo: {failure}");
         let connection = failure.connection();
@@ -702,7 +706,7 @@ impl Updates {
         }
     }
 
-    /// The download is `received` bytes of `total` in: once they're all in, its disk image is
+    /// The download is `received` bytes of `total` in. Once they're all in, its disk image is
     /// being checked.
     fn progress(&self, received: u64, total: u64) {
         {

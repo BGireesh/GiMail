@@ -1,5 +1,5 @@
 //! What Achievements count: the account's statistics, kept in its settings (`statistics`), and
-//! the thresholds this device has celebrated, kept in the device's (`achievements`).
+//! the thresholds this device has celebrated, kept in the device's settings (`achievements`).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -32,14 +32,15 @@ pub struct Statistics {
     pub sends_prev_week: u64,
     /// The most messages sent in one week.
     pub sends_week_max: u64,
-    /// `sendsWeek`: the Monday of the week [`sends_this_week`](Self::sends_this_week) counts.
+    /// `sendsWeek`, the Monday of the week that [`sends_this_week`](Self::sends_this_week)
+    /// counts.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sends_week: Option<String>,
-    /// `sendsThisWeek`: messages sent that week.
+    /// `sendsThisWeek`, the messages sent that week.
     pub sends_this_week: u64,
 }
 
-/// `achievements`: which thresholds this device has shown a popup for, by category
+/// `achievements`, which records the thresholds this device has shown a popup for, by category
 /// (`markDone`, `send`, `inboxZero`, `inboxZeroDays`, `gmtz`), and the cards marked `New` until
 /// their category is opened, by the card's key (`INBOX_ZERO`, `MARKED_DONE`, `SENT_MESSAGES`,
 /// `GET_ME_TO_ZERO`).

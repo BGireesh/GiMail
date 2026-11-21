@@ -26,7 +26,7 @@ pub struct Fixture {
     runtime: tokio::runtime::Runtime,
     server: gmail_mock::MockServer,
     endpoints: gmail::Endpoints,
-    /// What time the app thinks it is: the mock's clock until [`Fixture::set_now`].
+    /// What time the app thinks it is, which is the mock's clock until [`Fixture::set_now`].
     now: Arc<Mutex<jiff::Zoned>>,
     /// Takes People API connections and never answers, for [`start_with_silent_people`].
     _silent: Option<std::net::TcpListener>,
@@ -46,7 +46,7 @@ impl Drop for Dir {
 /// Where in the fixture's folder the app keeps attachment previews.
 const PREVIEWS: &str = "previews";
 
-/// Starts the app on an account with one Inbox and no splits, which most tests are about;
+/// Starts the app on an account with one Inbox and no splits, which most tests are about.
 /// `name` keeps concurrent tests' stores apart.
 pub fn start(name: &str) -> Fixture {
     start_with(name, false, true, &|_| {})
@@ -156,7 +156,8 @@ fn launch(
                 Account::open(&store_dir, credentials, cc.egui_ctx.clone()).expect("store opens");
             App::new(cc, &assets, Start::Mail(Box::new(account)), clock).expect("launches")
         });
-    // Tests run side by side, in this process and others: the temp directory's cache is shared.
+    // Tests run side by side, in this process and others, and the cache in the temp directory is
+    // shared, so each fixture keeps its previews in its own folder.
     if let Some(mail) = harness.state_mut().mail_mut() {
         mail.set_preview_cache(dir.join(PREVIEWS));
     }
@@ -209,8 +210,8 @@ impl Fixture {
         self.dir.0.join(name)
     }
 
-    /// Runs frames until the app has nothing in flight and animations are over: until it has
-    /// been idle for 40 frames in a row, past the 550ms slide-out. Idle only counts after a
+    /// Runs frames until the app has nothing in flight and animations are over, which is when it
+    /// has been idle for 40 frames in a row, past the 550ms slide-out. Idle only counts after a
     /// frame, since each one handles the input queued before it and may start work.
     pub fn settle(&mut self) {
         let started = Instant::now();
@@ -350,7 +351,7 @@ impl Fixture {
         self.settle();
     }
 
-    /// The mock's Gmail, as another device sees it; run its calls with [`Fixture::block_on`].
+    /// The mock's Gmail, as another device sees it. Run its calls with [`Fixture::block_on`].
     pub fn gmail(&self) -> gmail::Client {
         gmail::Client::new(
             self.server.endpoints(),
@@ -369,8 +370,9 @@ impl Fixture {
         self.block_on(request.send()).expect("the mock takes it");
     }
 
-    /// The Gmail quota units the app has spent so far (`/__mock/quota`), but for `history.list`:
-    /// the routine sync's look for new mail, which a busy machine can land in any window.
+    /// The Gmail quota units the app has spent so far (`/__mock/quota`), leaving out
+    /// `history.list`. The routine sync calls it to look for new mail, and a busy machine can land
+    /// that call in any window.
     pub fn units(&self) -> u64 {
         let url = self.server.url().join("/__mock/quota").expect("a URL");
         let quota: serde_json::Value = self
@@ -382,7 +384,7 @@ impl Fixture {
         quota["units"].as_u64().expect("units") - history
     }
 
-    /// Takes the mock away, as the network going does: what the app asks gets no answer.
+    /// Takes the mock away, as losing the network does, so nothing the app asks gets an answer.
     pub fn disconnect(&mut self) {
         self.runtime.block_on(self.server.disconnect());
     }

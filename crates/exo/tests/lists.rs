@@ -16,7 +16,7 @@ const COMMAND: Modifiers = Modifiers {
 fn left_opens_the_folder_drawer_and_its_keys_pick_a_folder() {
     let mut app = start("folders");
     app.key(Key::ArrowLeft);
-    // The drawer has the keyboard: J moves its cursor, not the list's.
+    // The drawer has the keyboard, so J moves its cursor, not the list's.
     app.key(Key::J);
     assert_eq!(app.cursor(), "Design crit moved to 3pm");
     app.key(Key::Enter);
@@ -97,8 +97,8 @@ fn a_row_under_a_popped_out_draft_doesnt_take_the_pointer() {
 fn the_contact_pane_follows_a_row_while_the_pointer_keeps_moving_on_it() {
     let mut app = start("pane-follows");
     // Down and right from the first row onto Priya's 1:1 agenda (the third, at 1280×800), then
-    // drifting right along it towards the contact pane without ever stopping, as a hand does:
-    // heading for the right pane, the rows wait 100 ms before taking the cursor.
+    // drifting right along it towards the contact pane without ever stopping, as a hand does.
+    // While the pointer heads for the right pane, the rows wait 100 ms before taking the cursor.
     let path = (0..16)
         .map(|step| egui::pos2(300.0 + 8.0 * step as f32, 150.0 + 4.0 * step as f32))
         .chain((0..30).map(|step| egui::pos2(428.0 + 2.0 * step as f32, 210.0)));

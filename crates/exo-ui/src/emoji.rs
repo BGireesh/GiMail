@@ -4,9 +4,9 @@
 //! as a fallback of every family purely for its advances, and draws nothing. [`fit_advances`]
 //! then gives each emoji the room Chromium gives it, and [`paint`] paints each emoji cluster's
 //! picture (fastframe-emoji, the platform's own artwork) in the font's cell at the start of that
-//! room: one em wide, ascent plus descent tall, on the line's baseline, which is the box
-//! CoreText draws it in. Pictures are drawn at the cell's size in device pixels and kept per
-//! context.
+//! room. The cell is one em wide and ascent plus descent tall, on the line's baseline, which is
+//! the box CoreText draws the emoji in. Pictures are drawn at the cell's size in device pixels and
+//! kept per context.
 
 use std::{collections::HashMap, sync::Arc};
 
@@ -21,8 +21,8 @@ use crate::text::{shift_glyph, update_bounds};
 /// macOS's emoji font, which Chromium falls back to for emoji.
 const SYSTEM_EMOJI: &str = "/System/Library/Fonts/Apple Color Emoji.ttc";
 /// egui lays each emoji out with the font's advance (1em) times this, before [`fit_advances`]
-/// corrects it: Chromium's advance at the 12px and 16px of most UI text, so the few galleys laid
-/// out without [`crate::layout`] are close.
+/// corrects it. This is Chromium's advance at the 12px and 16px of most UI text, so the few
+/// galleys laid out without [`crate::layout`] are close.
 const ADVANCE_SCALE: f32 = 1.25;
 /// The egui font name it's registered under.
 pub(crate) const FONT_NAME: &str = "AppleColorEmoji";
@@ -39,7 +39,7 @@ pub(crate) struct Cell {
 /// Maps the system emoji font for egui and measures its cell. `None` where there is none (off
 /// macOS), and emoji stay egui's replacement glyph.
 pub(crate) fn load() -> Option<(FontData, Cell)> {
-    // Mapped: of its 190 MB, only the tables in use are paged in.
+    // The font is mapped, so of its 190 MB only the tables in use are paged in.
     let bytes = crate::fonts::mapped(SYSTEM_EMOJI)?;
     let font = FontRef::from_index(bytes, 0).ok()?;
     let metrics = font.metrics(Size::unscaled(), LocationRef::default());
@@ -55,7 +55,7 @@ pub(crate) fn load() -> Option<(FontData, Cell)> {
     };
     let mut data = FontData::from_static(bytes);
     data.tweak.hinting = Some(false);
-    // Only the advance matters: the font draws nothing.
+    // Only the advance matters, because the font draws nothing.
     data.tweak.scale = ADVANCE_SCALE;
     Some((data, cell))
 }
@@ -77,11 +77,11 @@ pub(crate) fn install(ctx: &egui::Context, cell: Cell) {
     ctx.data_mut(|data| data.insert_temp(cell_id(), cell));
 }
 
-/// The advance Chromium lays an Apple Color Emoji cluster out with at `size` px: a whole number
-/// of px, wider than the font's 1em up to 24px (CoreText's optical advances). 1.25em rounded up
-/// to 16px, then `(size + 25) / 2` rounded down, which meets 1em at 24px, then 1em rounded:
-/// measured in Chromium from 8px to 48px every 0.05px (in single precision, as Chromium rounds
-/// 12.4px's 15.5 down).
+/// The advance Chromium lays an Apple Color Emoji cluster out with at `size` px. It's a whole
+/// number of px, wider than the font's 1em up to 24px (CoreText's optical advances): 1.25em
+/// rounded up to 16px, then `(size + 25) / 2` rounded down, which meets 1em at 24px, then 1em
+/// rounded. This was measured in Chromium from 8px to 48px every 0.05px (in single precision, as
+/// Chromium rounds 12.4px's 15.5 down).
 fn advance(size: f32) -> f32 {
     (1.25 * size)
         .round()
@@ -90,7 +90,7 @@ fn advance(size: f32) -> f32 {
 }
 
 /// Gives each emoji in `galley` the advance Chromium gives it ([`advance`]) instead of egui's
-/// (1.25em): what follows on its row moves by the difference, on whole device pixels.
+/// (1.25em). What follows on its row moves by the difference, on whole device pixels.
 pub(crate) fn fit_advances(ctx: &egui::Context, galley: &mut Arc<Galley>) {
     let job = galley.job.clone();
     let clusters = clusters(&job.text);
@@ -139,7 +139,7 @@ pub(crate) fn fit_advances(ctx: &egui::Context, galley: &mut Arc<Galley>) {
 
 /// The emoji clusters of `text` (the start of each, in bytes, and the cluster).
 fn clusters(text: &str) -> Vec<(usize, &str)> {
-    // Emoji start at U+00A9; ASCII text has none, and most text is ASCII.
+    // Emoji start at U+00A9, so ASCII text has none, and most text is ASCII.
     if text.is_ascii() {
         return Vec::new();
     }
@@ -191,8 +191,8 @@ pub(crate) fn paint(painter: &Painter, origin: Pos2, galley: &Galley) {
     }
 }
 
-/// Paints `cluster`'s picture filling `rect`, drawing it first if this context hasn't yet: an
-/// emoji as an image (an `<img>` of one), not a glyph in a run of text.
+/// Paints `cluster`'s picture filling `rect`, drawing it first if this context hasn't yet. This is
+/// for an emoji as an image (an `<img>` of one), not a glyph in a run of text.
 pub fn picture(painter: &Painter, cluster: &str, rect: Rect) {
     let ctx = painter.ctx();
     let height = (rect.height() * painter.pixels_per_point())

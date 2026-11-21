@@ -205,8 +205,9 @@ pub struct Page {
     pub text: String,
 }
 
-/// A browser for `Auth::sign_in`: given the consent URL, it loads the URL `visit` makes of it
-/// and follows redirects (the mock's consent answers with one back to the loopback listener).
+/// A browser for `Auth::sign_in`. Given the consent URL, it loads the URL that `visit` makes of
+/// it and follows redirects (the mock's consent answers with a redirect back to the loopback
+/// listener).
 /// The page it lands on arrives on the receiver.
 pub fn browser(
     visit: impl FnOnce(&Url) -> Url + Send + 'static,

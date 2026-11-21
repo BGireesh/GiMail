@@ -21,7 +21,7 @@ fn view(html: &str) -> BodyView {
     )
 }
 
-/// Loads nothing: the bodies here only use `data:` images, which the view decodes itself.
+/// Loads nothing, because the bodies here only use `data:` images, which the view decodes itself.
 struct Offline;
 
 impl Fetch for Offline {
@@ -41,7 +41,7 @@ fn png(width: u32, height: u32, pixels: Vec<u8>) -> String {
     )
 }
 
-/// A footer whose cells say `height: 1px`: each row grows to fit its content instead of the
+/// A footer whose cells say `height: 1px`. Each row grows to fit its content instead of the
 /// rows' text being drawn on top of each other.
 #[test]
 fn table_cells_grow_to_fit_content_taller_than_their_height() {
@@ -59,7 +59,7 @@ fn table_cells_grow_to_fit_content_taller_than_their_height() {
     assert_eq!(view.layout(640.0, 2.0), 58.0 + 25.0 + 72.0);
 }
 
-/// An image cell that asks for more width than the message has (`<td width="1280">`): the
+/// An image cell that asks for more width than the message has (`<td width="1280">`). The
 /// column shrinks to the table's width and the image fits it, rather than the table overflowing
 /// and the image being cut off.
 #[test]
@@ -99,7 +99,7 @@ fn image_edges_dont_wrap_around() {
     assert_eq!(top_row, [255, 255, 255, 255]);
 }
 
-/// A receipt whose content sits in a `<td style="display: block">` (Parque Warner's): the cell
+/// A receipt whose content sits in a `<td style="display: block">` (Parque Warner's). The cell
 /// is wrapped in an anonymous cell, as in Chromium, instead of the whole message vanishing.
 /// Consecutive block cells share one anonymous cell, so they stack.
 #[test]
@@ -115,7 +115,7 @@ fn block_cells_are_wrapped_in_an_anonymous_cell() {
     assert_eq!(view.layout(640.0, 2.0), 140.0 + 30.0 + 50.0);
 }
 
-/// A `<table style="display: block">` (Kickstarter's): its rows go in an anonymous table, so
+/// A `<table style="display: block">` (Kickstarter's). Its rows go in an anonymous table, so
 /// they stack instead of being laid out side by side.
 #[test]
 fn rows_of_a_block_table_stay_rows() {
@@ -161,9 +161,9 @@ fn first_ink(view: &mut BodyView, height: f32) -> Option<f32> {
     (0..image.height).find(|&y| dark(y)).map(|y| y as f32 / 2.0)
 }
 
-/// A cell with its own `height` keeps its content in the middle, as `vertical-align: middle`
-/// does in Chromium (`body-tables.eml`): its text was laid out at the top whenever the body was
-/// laid out again, since the cell is measured again outside the layout cache.
+/// A cell with its own `height` keeps its content in the middle, as `vertical-align: middle` does
+/// in Chromium. Its text was laid out at the top whenever the body was laid out again, since the
+/// cell is measured again outside the layout cache.
 #[test]
 fn a_cell_with_a_height_centres_its_content() {
     let mut view = view(
@@ -173,13 +173,13 @@ fn a_cell_with_a_height_centres_its_content() {
     view.layout(640.0, 2.0);
     view.layout(600.0, 2.0);
     view.layout(640.0, 2.0);
-    // The 24px line box is 18px down; the text's ink starts a few px into it.
+    // The 24px line box is 18px down, and the text's ink starts a few px into it.
     let ink = first_ink(&mut view, 60.0).expect("text");
     assert!((20.0..26.0).contains(&ink), "{ink}");
 }
 
 /// A line that ends in a `<br>` is as tall as the others in a table cell (three 24px lines, a 72px
-/// row); its line break took the cell's `vertical-align: middle` again, which made it 25px.
+/// row). Its line break took the cell's `vertical-align: middle` again, which made it 25px.
 #[test]
 fn a_cells_line_breaks_keep_their_lines_height() {
     let mut view = view(
@@ -189,8 +189,8 @@ fn a_cells_line_breaks_keep_their_lines_height() {
     assert_eq!(view.layout(640.0, 2.0), 72.0);
 }
 
-/// A table without cells has no border spacing, as in Chromium (`body-tables2.eml`): it is only
-/// as big as its borders.
+/// A table without cells has no border spacing, as in Chromium, so it is only as big as its
+/// borders.
 #[test]
 fn tables_without_cells_have_no_border_spacing() {
     let height = |tables: &str| {
@@ -209,7 +209,7 @@ fn tables_without_cells_have_no_border_spacing() {
 
 /// A table's `border` attribute gives it an `outset` border that wide and its cells 1px `inset`
 /// ones (an empty value is 1px), beveled as Chromium bevels black: #a8a8a8 on the table's top
-/// edge, #545454 on a cell's (`body-table-borders.eml`).
+/// edge, #545454 on a cell's.
 #[test]
 fn a_tables_border_attribute_borders_it_and_its_cells() {
     let table = |border: &str| {

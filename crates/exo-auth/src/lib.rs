@@ -45,7 +45,7 @@ pub use tokens::Tokens;
 
 use gmail::oauth::scopes;
 
-/// What Exo asks Google for. Every one is required: sign-in fails when the user unticks any of
+/// What Exo asks Google for. Every one is required, so sign-in fails when the user unticks any of
 /// them on Google's consent screen.
 pub const SCOPES: &[&str] = &[
     // Read, label, archive, trash, draft and send. Exo never deletes mail permanently (trash is a
@@ -68,6 +68,6 @@ pub const SCOPES: &[&str] = &[
     scopes::USERINFO_PROFILE,
 ];
 
-/// What a calendar account (another Google account signed in for its calendars alone) asks
-/// Google for: Calendar and the address only.
+/// What a calendar account asks Google for: Calendar and the address only. A calendar account is
+/// another Google account, signed in for its calendars alone.
 pub const CALENDAR_SCOPES: &[&str] = &[scopes::CALENDAR, scopes::USERINFO_EMAIL];

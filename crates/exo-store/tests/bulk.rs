@@ -115,7 +115,7 @@ async fn a_sender_filter_replaces_the_one_for_the_other_category() {
         [(SENDER.to_owned(), vec!["CATEGORY_SOCIAL".to_owned()])]
     );
 
-    // Undo: the Important filter comes back.
+    // Undoing brings the Important filter back.
     let replaced = gmail::Filter {
         id: None,
         criteria: Some(gmail::FilterCriteria {
@@ -229,8 +229,9 @@ async fn undoing_a_bulk_action_leaves_what_already_had_it() {
     let before = labelled().await;
     let everything = done_list().await;
     assert!(!before.is_empty() && before.len() < everything.len());
-    // Done reaches back past what the store has: most of these threads aren't stored. Gmail's
-    // `-in:inbox` leaves out the trashed rows Done also shows, so a bulk action can't reach them.
+    // Done reaches back past what the store has, so most of these threads aren't stored. Gmail's
+    // `-in:inbox` leaves out the trashed rows that Done also shows, so a bulk action can't reach
+    // them.
     let stored: BTreeSet<String> = harness
         .ids(&ListId::Done)
         .await
@@ -498,8 +499,8 @@ async fn get_me_to_zero_leaves_conversations_with_mail_since_its_cutoff() {
     let inbox = ListId::Label("INBOX".into());
     let rows = harness.all(&inbox).await;
     let cutoff = rows[rows.len() / 2].date;
-    // A conversation the store doesn't have: a read message from before the cutoff, then a
-    // reply since, both in the inbox.
+    // A conversation the store doesn't have, with a read message from before the cutoff and then
+    // a reply since, both in the inbox.
     let now = harness
         .admin(reqwest::Method::GET, "/__mock/clock", serde_json::json!({}))
         .await["now"]
@@ -567,7 +568,7 @@ async fn a_sender_filter_gmail_refuses_leaves_the_one_it_would_replace() {
         .create_sender_filter(SENDER, "CATEGORY_PERSONAL")
         .await
         .unwrap();
-    // Moving the sender to Other: Gmail won't make the new filter.
+    // When the sender moves to Other, Gmail won't make the new filter.
     harness.fault(serde_json::json!({"method": "POST", "path": "/gmail/v1/users/me/settings/filters", "status": 400, "message": "Invalid filter", "reason": "invalidArgument"})).await;
     assert!(
         harness

@@ -6,7 +6,7 @@ use regex::Regex;
 
 use crate::dom::{self, NodeRef};
 
-/// What each capture group of [`DATE`] means (`ns.groups`).
+/// What each capture group of [`DATE`] means.
 const GROUPS: &[Option<Group>] = {
     use Group::*;
     &[
@@ -70,14 +70,14 @@ enum Group {
     Dom,
     Month,
     Year,
-    /// `eod`, `eow`…: not used to filter.
+    /// `eod`, `eow`…, which aren't used to filter.
     Business,
-    /// Joiners, `today`, parts of day: not used to filter.
+    /// Joiners, `today` and parts of day, which aren't used to filter.
     Other,
 }
 
 /// The lookarounds need a backtracking engine. Its default budget is per search, which a long
-/// stretch of text without dates uses up, so it's lifted: the pattern only backtracks a bounded
+/// stretch of text without dates uses up, so it's lifted. The pattern only backtracks a bounded
 /// amount at each position.
 static DATE: LazyLock<fancy_regex::Regex> = LazyLock::new(|| {
     let r2 = r"[0-9]{1,2}";
@@ -155,8 +155,8 @@ pub struct DateParts {
     pub business: Option<String>,
 }
 
-/// The parts of the first date in `text`, a detected date's own text, found the way
-/// `extract` finds it (`find(text, true)`: no context needed).
+/// The parts of the first date in `text`, a detected date's own text. Unlike `find`, it needs no
+/// context around the date, and it only drops a short date with neither a slash nor a weekday.
 pub fn date_parts(text: &str) -> Option<DateParts> {
     let captures = DATE.captures(text).ok()??;
     let group = |wanted: Group| last_group(&captures, wanted).map(str::to_owned);
@@ -171,7 +171,7 @@ pub fn date_parts(text: &str) -> Option<DateParts> {
         dow: group(Group::Dow),
         business: group(Group::Business),
     };
-    // `find(text, true)` still drops a short date without a slash and without a weekday.
+    // A short date without a slash and without a weekday is still dropped.
     let dropped = parts.iso_timestamp.is_none()
         && parts.long_date.is_none()
         && parts
@@ -181,7 +181,7 @@ pub fn date_parts(text: &str) -> Option<DateParts> {
     (!dropped).then_some(parts)
 }
 
-/// The capture of group `wanted`: a later group of the same name wins.
+/// The capture of group `wanted`. A later group of the same name wins.
 fn last_group<'t>(captures: &fancy_regex::Captures<'t>, wanted: Group) -> Option<&'t str> {
     GROUPS
         .iter()
@@ -193,7 +193,7 @@ fn last_group<'t>(captures: &fancy_regex::Captures<'t>, wanted: Group) -> Option
         .find(|s| !s.is_empty())
 }
 
-/// The dates in `text` that get marked, as byte ranges, in order: what compose's editor wraps in
+/// The dates in `text` that get marked, as byte ranges, in order. Compose's editor wraps them in
 /// `span.sh-date`.
 pub fn find_dates(text: &str) -> Vec<std::ops::Range<usize>> {
     find(text)

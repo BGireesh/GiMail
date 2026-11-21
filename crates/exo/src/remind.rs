@@ -3,8 +3,8 @@
 //! the reminders and brings their threads back (`exo_store`'s `reminders`).
 //!
 //! The picker has two modes: Snooze (`H` on threads, which marks them done) and Draft (compose's
-//! ⌘⇧H and Remind button, and the follow-up hint's `Set reminder` on a message just sent), whose
-//! rows are a reminder's (`in 2 days`, `on Monday`). `H` on a sent thread is Snooze too.
+//! ⌘⇧H and Remind button, and `Set reminder` in the follow-up hint on a message just sent). Draft
+//! mode's rows read as reminders (`in 2 days`, `on Monday`). `H` on a sent thread is Snooze too.
 
 use exo_commands::{Command, Dropdown, Hint, SubPalette, command_score};
 use exo_store::{
@@ -23,8 +23,8 @@ use crate::{
 /// The dropdown's options, as `PreviousReminder` and the settings name them.
 const IF_NO_REPLY: &str = "if no reply";
 const REGARDLESS: &str = "regardless";
-/// The default reminder time: a reminder at it is "at the default time", whatever the setting
-/// says.
+/// The default reminder time. A reminder at this hour is "at the default time", whatever the
+/// setting says.
 const DEFAULT_HOUR: i8 = 8;
 
 /// What the picker reminds (`Reminder`'s mode).
@@ -34,13 +34,13 @@ pub enum Target {
     Snooze(Vec<String>),
     /// A draft being written, whose reminder goes with it when it's sent (`DRAFT`).
     Draft(String),
-    /// A draft just sent (the follow-up hint's `Set reminder`): `DRAFT`'s rows, then the
-    /// reminder on its thread, which stays where it is (not marked done).
+    /// A draft just sent (from `Set reminder` in the follow-up hint). It lists `DRAFT`'s rows,
+    /// then sets the reminder on the draft's thread, which stays where it is (not marked done).
     Sent(String),
 }
 
 impl Target {
-    /// Snooze's rows or a reminder's.
+    /// Whether the picker lists Snooze's rows rather than a reminder's.
     fn snoozes(&self) -> bool {
         matches!(self, Self::Snooze(_))
     }
@@ -49,13 +49,13 @@ impl Target {
 /// What Remind me does.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Action {
-    /// Open the picker for the actionable threads (`H`, the palette's `Remind Me`); `button`
-    /// when a clock button did, which hints at `H`.
+    /// Open the picker for the actionable threads (`H`, or `Remind Me` in the palette). `button`
+    /// is set when a clock button opened it, which shows a hint about `H`.
     Open {
         /// A clock button was clicked.
         button: bool,
     },
-    /// A row of the picker: remind `target` at `at`, from the row titled `title`.
+    /// A row of the picker, which reminds `target` at `at` and is titled `title`.
     Set {
         /// What the picker was opened for.
         target: Target,
@@ -66,15 +66,16 @@ pub enum Action {
         /// The dropdown says `regardless`.
         regardless: bool,
     },
-    /// `Remove Reminder`: of `threads`, or the actionable ones.
+    /// `Remove Reminder`, from `threads` or from the actionable threads.
     Remove {
-        /// The picker's threads; `None` for the palette's row.
+        /// The picker's threads, or `None` for the palette's row.
         threads: Option<Vec<String>>,
         /// `Remove Reminder & Move to Inbox`.
         to_inbox: bool,
     },
-    /// `Remove Reminder` on a draft: it's sent without one. From the picker's footer it's `manual`,
-    /// which keeps Automatic Reminders off it while it's open; compose's command isn't.
+    /// `Remove Reminder` on a draft, which is then sent without one. From the picker's footer the
+    /// removal is `manual`, which keeps Automatic Reminders off the draft while it's open.
+    /// Compose's command isn't manual.
     RemoveFromDraft {
         /// The draft.
         draft: String,
@@ -90,7 +91,7 @@ struct Suggestion {
     converted: bool,
 }
 
-/// `now`'s day `days` on at `hour`:`minute`.
+/// The date `days` days after `now`'s, at `hour`:`minute`.
 fn days_on(now: &Zoned, days: i64, hour: i8, minute: i8) -> Timestamp {
     let date = now.date().checked_add(days.days()).unwrap_or(now.date());
     date.at(hour, minute, 0, 0)
@@ -98,8 +99,8 @@ fn days_on(now: &Zoned, days: i64, hour: i8, minute: i8) -> Timestamp {
         .map_or(now.timestamp(), |zoned| zoned.timestamp())
 }
 
-/// `days` on from `now` at `hour`:`minute`, counting only Monday to Friday when `weekdays`
-/// (a day at a time from today, so from a weekend the first is Monday).
+/// `days` days after `now`, at `hour`:`minute`. With `weekdays` it counts only Monday to Friday,
+/// a day at a time from today, so from a weekend the first day is Monday.
 pub(crate) fn in_days(now: &Zoned, days: u32, weekdays: bool, hour: i8, minute: i8) -> Timestamp {
     if !weekdays {
         return days_on(now, i64::from(days), hour, minute);
@@ -125,7 +126,7 @@ fn days_copy(days: u32, weekdays: bool) -> String {
     )
 }
 
-/// The next `weekday` at `hour`:`minute`, a week on when it's today.
+/// The next `weekday` at `hour`:`minute`, a week away when `weekday` is today.
 fn next(now: &Zoned, weekday: Weekday, hour: i8, minute: i8) -> Timestamp {
     let ahead = i64::from(weekday.to_sunday_zero_offset() - now.weekday().to_sunday_zero_offset());
     days_on(
@@ -136,10 +137,10 @@ fn next(now: &Zoned, weekday: Weekday, hour: i8, minute: i8) -> Timestamp {
     )
 }
 
-/// The default rows at the settings' time, after `last used` while that's still ahead.
-/// Snooze mode's (`snoozes`): `tomorrow`, `next week` (Monday), `this weekend` (`next weekend` on
-/// a Saturday or Sunday), `someday` and `never`. Draft mode's: `in {n} days` (or `weekdays`, with
-/// Weekdays Only) as the settings say, `tomorrow`, `on Monday` and the weekend.
+/// The default rows at the settings' time, after `last used` while that time is still ahead.
+/// Snooze mode (`snoozes`) lists `tomorrow`, `next week` (Monday), `this weekend` (`next weekend`
+/// on a Saturday or Sunday), `someday` and `never`. Draft mode lists `in {n} days` (or `weekdays`,
+/// with Weekdays Only) as the settings say, `tomorrow`, `on Monday` and the weekend.
 fn defaults(
     now: &Zoned,
     settings: &ReminderSettings,
@@ -171,7 +172,7 @@ fn defaults(
             row("never", sentinel(dates::NEVER)),
         ]
     } else {
-        // `reminders/days || 2`.
+        // Reminders' days, or 2 while it's unset (0).
         let days = if settings.days == 0 { 2 } else { settings.days };
         let weekdays = settings.weekdays_only();
         let ahead = row(
@@ -228,8 +229,8 @@ fn hidden(now: &Zoned) -> Vec<Suggestion> {
     ]
 }
 
-/// The picker's rows: the defaults; with a query, the parser's times first, then the
-/// defaults and hidden rows it fuzzy-matches, each time once.
+/// The picker's rows. Without a query they're the defaults. With one, the parser's times come
+/// first, then the defaults and hidden rows the query fuzzy-matches, each time listed once.
 fn suggestions(
     query: &str,
     now: &Zoned,
@@ -272,7 +273,7 @@ fn suggestions(
     parsed
 }
 
-/// A row's time on its right, upper-cased.
+/// The time on a row's right side, upper-cased.
 fn side_title(row: &Suggestion, now: &Zoned) -> String {
     let millis = row.at.as_millisecond();
     let text = if millis == dates::SOMEDAY || millis == dates::NEVER {
@@ -285,8 +286,8 @@ fn side_title(row: &Suggestion, now: &Zoned) -> String {
     text.to_uppercase()
 }
 
-/// Snooze mode's footer for `threads`, whose rows are `actionable`: removing the reminder, and
-/// moving them back when some aren't in the inbox.
+/// Snooze mode's footer for `threads`, whose rows are `actionable`. It removes the reminder, and
+/// also moves the threads back when some aren't in the inbox.
 pub fn snooze_footer(
     threads: &[String],
     actionable: &[&ThreadSummary],
@@ -341,7 +342,7 @@ pub fn palette(
         .iter()
         .position(|option| *option == REGARDLESS)
         .unwrap_or_default();
-    // ⌘⇧H cycles it; `regardless` picked from its menu hints at that.
+    // ⌘⇧H cycles the dropdown. Picking `regardless` from its menu shows a hint about the shortcut.
     let dropdown = Dropdown::new(options, 0, "mod+shift+h").hint_on(
         regardless_at,
         Hint::new()
@@ -381,8 +382,8 @@ pub fn palette(
     .footer(move |_| footer.clone())
 }
 
-/// The toast once a reminder is set: `Reminder set: {when}{ if no reply}.`, the date without the
-/// time when it's the default time.
+/// The toast once a reminder is set: `Reminder set: {when}{ if no reply}.` The date leaves out
+/// the time when it's the default time.
 pub fn toast(at: Timestamp, regardless: bool, now: &Zoned) -> String {
     let local = at.to_zoned(now.time_zone().clone());
     let when = if is_default_time(&local) {
@@ -396,7 +397,7 @@ pub fn toast(at: Timestamp, regardless: bool, now: &Zoned) -> String {
     )
 }
 
-/// Whether `at` is at the default time: [`DEFAULT_HOUR`], not the setting's.
+/// Whether `at` is at the default time, which is [`DEFAULT_HOUR`] rather than the setting's.
 fn is_default_time(at: &Zoned) -> bool {
     at.hour() == DEFAULT_HOUR && at.minute() == 0
 }
@@ -475,7 +476,7 @@ impl Mail {
     pub(crate) fn remind(&mut self, action: Action, now: f64) {
         match action {
             Action::Open { button } => {
-                // `H` on a select-all reaching rows not loaded.
+                // `H` on a select-all that reaches rows that aren't loaded.
                 if self.refuse_unloaded("set a reminder") {
                     return;
                 }
@@ -564,7 +565,7 @@ impl Mail {
         }
     }
 
-    /// Opens the picker for `target`, `footer` under its rows.
+    /// Opens the picker for `target`, with `footer` under its rows.
     pub(crate) fn open_remind_me(
         &mut self,
         target: Target,
@@ -760,7 +761,7 @@ mod tests {
             "Saturday's first is Monday"
         );
         assert_eq!(ahead("2026-11-22T09:00[America/New_York]", 2), "2026-11-24");
-        // Typed days count them too, `weeks` not.
+        // Typed days count weekdays too, but typed `weeks` don't.
         let weekdays = ReminderSettings {
             business_days_only: Some(true),
             ..ReminderSettings::default()

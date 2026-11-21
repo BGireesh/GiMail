@@ -38,8 +38,9 @@ const HEADER_LABEL: f32 = 60.0;
 /// A collapsed row's sender: at least 85px wide, then 15px of padding.
 pub(super) const FROM_MIN_WIDTH: f32 = 85.0;
 pub(super) const FROM_PADDING: f32 = 15.0;
-/// A sent message's date: `padding-left: 14px`; and the reply buttons' legacy glyphs: 13×9, 28px
-/// apart, 3px below the line's top, the forward's right edge where the date's padding starts.
+/// A sent message's date has `padding-left: 14px`. The reply buttons' legacy glyphs are 13×9,
+/// 28px apart and 3px below the line's top, with Forward's right edge where the date's padding
+/// starts.
 const DATE_PADDING: f32 = 14.0;
 const ACTION_PITCH: f32 = 28.0;
 const ACTION_SIZE: Vec2 = Vec2::new(13.0, 9.0);
@@ -47,8 +48,8 @@ const ACTION_SIZE: Vec2 = Vec2::new(13.0, 9.0);
 const LABEL_PADDING: Vec2 = Vec2::new(8.0, 10.0);
 const LABEL_GAP: f32 = 4.0;
 const LABEL_MARGIN_LEFT: f32 = 8.0;
-/// `@container message-pane-header (max-width: 500px)`: a labelled header this narrow condenses
-/// its participants.
+/// A labelled header 500px wide or less condenses its participants
+/// (`@container message-pane-header (max-width: 500px)`).
 const CONDENSED_WIDTH: f32 = 500.0;
 /// The Shift-H chevron (`legacy/DEPRECATED_expand`), 4px after the names.
 const CHEVRON: Vec2 = Vec2::new(10.0, 12.0);
@@ -66,8 +67,8 @@ const COLLAPSE: &str = "legacy/DEPRECATED_collapse";
 const PIXEL_BLOCKING: &str = "legacy/DEPRECATED_pixelBlocking";
 const PIXEL_BLOCKING_GAP: f32 = 8.0;
 const PIXEL_BLOCKING_DROP: f32 = 1.0;
-/// Its tooltip, its top left on the icon's bottom left: the box 14px under the icon and 9px left
-/// of it.
+/// The eye's tooltip, placed from the icon's bottom left: the box's top left is 14px under the
+/// icon and 9px left of it.
 const TRACKING_BLOCKED: &str = "Email tracking blocked";
 const PIXEL_BLOCKING_TOOLTIP: Placement = Placement::BelowFrom {
     gap: 14.0,
@@ -114,13 +115,13 @@ pub(super) struct State {
     pub reply_labels: bool,
 }
 
-/// What a draft that's sending, scheduled or failed shows in its date's place, which opens
+/// What a draft that's sending, scheduled or failed shows in place of its date. The status opens
 /// `RecoverDraft`.
 #[derive(Clone, Copy)]
 pub(super) enum Status {
     /// Its send failed.
     Failed(exo_store::SendFailure),
-    /// It's scheduled for then: `#ce9ece` bold.
+    /// It's scheduled for then, shown in bold `#ce9ece`.
     Scheduled(Timestamp),
     /// It waits for the network.
     Offline,
@@ -177,10 +178,10 @@ const SCHEDULED_TOOLTIP: &str = "Message will send at this time";
 
 /// What was clicked in an expanded message, besides its body.
 pub(super) enum Hit {
-    /// The header row: collapse the message.
+    /// The header row, which collapses the message.
     Header,
-    /// Expand or fold the header (Shift-H's): its participants, or its chevron, after which the
-    /// shortcut is suggested (`hint`).
+    /// Expand or fold Shift-H's header, from its participants or its chevron. After the chevron,
+    /// the shortcut is suggested (`hint`).
     HeaderToggle { hint: bool },
     /// The attachment cards or their `Download all`.
     Files(attachments::Click),
@@ -190,12 +191,12 @@ pub(super) enum Hit {
     Recover,
 }
 
-/// The participants' names a header drew, and where: each has a tooltip and shows its contact
-/// once the pointer settles on it.
+/// The participants' names a header drew, and where it drew them. Each name has a tooltip and
+/// shows its contact once the pointer settles on it.
 pub(super) type Named = Vec<(Rect, Contact)>;
 
-/// Whether the card shows as marketing mail: its new part is, or its quoted part
-/// is and it's shown.
+/// Whether the card shows as marketing mail. It does when its new part is marketing, or when its
+/// quoted part is and the quoted part is shown.
 pub(super) fn marketing(facts: &Facts, show_quoted: bool) -> bool {
     facts.unquoted_marketing || (show_quoted && facts.quoted_marketing)
 }
@@ -223,8 +224,8 @@ pub(super) fn body_offset(header_expanded: bool, message: &MessageDetail) -> f32
     PADDING_TOP + header + BODY_MARGIN_TOP
 }
 
-/// An expanded card's height for a body `body` px tall (unknown yet: the placeholder's) under an
-/// invite card `invite` px tall (with its margin).
+/// An expanded card's height for a body `body` px tall under an invite card `invite` px tall,
+/// margin included. A body not laid out yet takes the placeholder's height.
 pub(super) fn expanded_height(
     header_expanded: bool,
     message: Option<&MessageDetail>,
@@ -343,8 +344,8 @@ pub(super) enum CardKind {
     Composing,
 }
 
-/// The card's background and shadow. Beside a popped-out draft, with
-/// `layout`'s, the wide shadows' blurs are `2rem`.
+/// The card's background and shadow. Beside a popped-out draft, the wide shadows' blurs are
+/// `2rem`, in `layout`'s rem.
 pub(super) fn card(ui: &Ui, rect: Rect, layout: &Layout, kind: CardKind, marketing: bool) {
     let palette = exo_ui::palette(ui.ctx());
     let painter = ui.painter();
@@ -465,7 +466,7 @@ fn others(thread: &ThreadDetail) -> usize {
 
 /// The participants: the sender, and in an expanded message ` to ` its recipients when the thread
 /// has more than one other person in it (or is all yours). With `full_names`
-/// (`showSenderFullNames`) the sender is named in full, unless it's you; the recipients keep their
+/// (`showSenderFullNames`) the sender is named in full, unless it's you. The recipients keep their
 /// first names.
 pub(super) fn participants(
     message: &MessageDetail,
@@ -527,7 +528,7 @@ fn participant_pieces<'a>(
     }
     pieces.push((" to ".into(), None));
     join_pieces(&mut pieces, &recipients);
-    // Whoever sent it: a message you got as Bcc says so too.
+    // Whoever sent it, a message you got as Bcc says so too.
     if !message.bcc.is_empty() {
         pieces.push((". Bcc: ".into(), None));
         join_pieces(&mut pieces, &message.bcc.iter().collect::<Vec<_>>());
@@ -535,7 +536,8 @@ fn participant_pieces<'a>(
     pieces
 }
 
-/// `Intersperse`'s pieces: each contact's name, `, ` between and ` & ` before the last.
+/// Adds `contacts` to `pieces` as a list: each contact's name, `, ` between and ` & ` before the
+/// last.
 fn join_pieces<'a>(pieces: &mut Vec<(String, Option<&'a Contact>)>, contacts: &[&'a Contact]) {
     for (at, contact) in contacts.iter().enumerate() {
         if at > 0 {
@@ -653,10 +655,10 @@ impl Condensed<'_> {
     }
 }
 
-/// The condensed list's flex row: the widths the sender and
-/// the lead get, `sender` and `lead` px wide, beside `rest` px that don't shrink, in `room`. The
-/// sender shrinks almost alone (`flex: 0 1000 auto`, weighted by its width), down to 18px, then
-/// the lead (at most half the room) down to 42px; yours never shrink, nor are capped.
+/// The condensed list's flex row: the widths that a sender `sender` px wide and a lead `lead` px
+/// wide get in `room`, beside `rest` px that don't shrink. The sender shrinks almost alone
+/// (`flex: 0 1000 auto`, weighted by its width), down to 18px. Then the lead, capped at half the
+/// room, shrinks down to 42px. Your own name never shrinks and isn't capped.
 fn condense(
     sender: f32,
     lead: f32,
@@ -769,7 +771,7 @@ fn paint_participants(
     }
 }
 
-/// Where a date's hover target is: its text's 15px on the line, from 1px down.
+/// Where a date's hover target is: the 15px of its text on the line, starting 1px down.
 fn date_target(left: f32, width: f32, line: f32) -> Rect {
     Rect::from_min_size(pos2(left, line + 1.0), vec2(width, 15.0))
 }
@@ -853,8 +855,8 @@ pub(super) fn collapsed(
         named,
     );
 
-    // A failed or waiting send says so; `top: 1px`, the
-    // date's trailing letter-spacing inside the right-aligned box.
+    // A failed or waiting send says so in the date's place, at `top: 1px`. The date's trailing
+    // letter-spacing stays inside the right-aligned box.
     let date_left = match Status::of(message, state) {
         Some(status) => {
             let title = status.collapsed_title(now);
@@ -933,8 +935,8 @@ pub(super) fn snippet(
     }
 }
 
-/// An expanded card (`marketing` for a marketing email's): header, body,
-/// attachments. Returns what was clicked besides the body, which the caller hit-tests.
+/// An expanded card with its header, body and attachments, `marketing` for a marketing email's.
+/// Returns what was clicked besides the body, which the caller hit-tests.
 #[expect(
     clippy::too_many_arguments,
     reason = "one card, drawn from the thread's state"
@@ -994,15 +996,16 @@ pub(super) fn expanded(
     let origin = pos2(layout.inner.left(), body_top);
     match bodies.height(&message.id, look) {
         Some(height) => {
-            // The body clips what overflows it (it scrolls sideways); the scissor lands on
+            // The body clips what overflows it (the body scrolls sideways). The scissor lands on
             // device pixels, as Chromium snaps clips.
             let clip = ui
                 .clip_rect()
                 .intersect(Rect::from_min_size(origin, vec2(look.width, height)));
             let opacity = if marketing && exo_ui::theme(ui.ctx()) == Theme::Carbon {
-                // The card's 90% applies to the body as one group with the card, so the body
-                // shows the pane through it, not the card: lay the pane back down under it (on
-                // the device row its bands start on; they cover the column's width).
+                // The card's 90% opacity applies to the body and the card as one group, so the
+                // pane shows through the body, not the card. Lay the pane back down under the
+                // body, from the device row the body's bands start on (the bands cover the
+                // column's width).
                 let ppp = ui.ctx().pixels_per_point();
                 let under = Rect::from_min_size(
                     pos2(origin.x, (origin.y * ppp).round() / ppp),
@@ -1042,7 +1045,7 @@ fn placeholder(ui: &Ui, origin: egui::Pos2, width: f32) {
 
 /// The compact header: participants on the left; on the right the reply buttons (on the focused
 /// message, or while hovered) and the date. A click on the participants expands the header, as
-/// Shift-H does; anywhere else on the row collapses the message.
+/// Shift-H does. A click anywhere else on the row collapses the message.
 #[expect(
     clippy::too_many_arguments,
     reason = "one header row, drawn from the card's state"
@@ -1117,9 +1120,10 @@ fn compact_header(
     ));
     let mut replied = None;
     let from_right = if state.reply_labels {
-        // With labels, always shown: the glyph and its label 4px apart in Classic's `padding:
-        // 10px 8px`, each button's margins (`-9px` right, `8px` left) overlapping the next by 1px,
-        // the forward's right edge 8px into the date's padding; no transitions.
+        // With labels the buttons always show, with no transitions. The glyph and its label sit
+        // 4px apart in Classic's `padding: 10px 8px`. Each button's margins (`-9px` right, `8px`
+        // left) overlap the next button by 1px, and Forward's right edge is 8px into the date's
+        // padding.
         let mut right = date_box + LABEL_MARGIN_LEFT;
         for (k, (icon, label, action)) in actions.iter().enumerate() {
             let label_width = DATE
@@ -1220,9 +1224,10 @@ fn compact_header(
         }
     };
 
-    // With labels, a header 500px wide or less names one recipient and counts the rest, and the
-    // Shift-H chevron after the names always takes its room: 4px after them, 26px of clickable
-    // (8px inside it), 12px after; condensed 18px (4px inside), 4px after.
+    // With labels, a header 500px wide or less names one recipient and counts the rest. The
+    // Shift-H chevron after the names always takes its room: 4px after the names, 26px of
+    // clickable (8px inside it) and 12px after, or when condensed 18px of clickable (4px inside)
+    // and 4px after.
     let condensed = condensed(message, thread, state.full_names)
         .filter(|_| state.reply_labels && layout.inner.width() <= CONDENSED_WIDTH);
     let (chevron_inset, chevron_after) = match (state.reply_labels, condensed.is_some()) {
@@ -1248,7 +1253,7 @@ fn compact_header(
                 .min(room)
         }
     };
-    // A pointer cursor over the row, and on it the participants' label.
+    // A pointer cursor over the row, and over the participants' label on the row.
     let row = ui
         .interact(
             Rect::from_min_max(pos2(left, line), pos2(from_right, line + FROM.line_height)),
@@ -1261,11 +1266,12 @@ fn compact_header(
         .interact(names_rect, id.with("names"), Sense::click())
         .on_hover_cursor(egui::CursorIcon::PointingHand);
 
-    // The Shift-H chevron after the names: without labels it takes room and clicks while the
-    // message is hovered; it fades in while the names or the chevron are (`opacity .2s linear`).
+    // The Shift-H chevron after the names. Without labels, it takes room and clicks while the
+    // message is hovered. It fades in while the names or the chevron are hovered
+    // (`opacity .2s linear`).
     let mut hit = None;
-    // Level with the line's top: the 10×12 chevron, in a clickable
-    // 36px tall with labels (`padding: 10px`, `margin: -10px`).
+    // The 10×12 chevron, level with the line's top, in a clickable that's 36px tall with labels
+    // (`padding: 10px`, `margin: -10px`).
     let chevron = Rect::from_min_size(
         pos2(left + names + CHEVRON_GAP + chevron_inset, line),
         CHEVRON,
@@ -1336,9 +1342,9 @@ fn status_slot(ui: &Ui, layout: &Layout, card: Rect, text: &str) -> Rect {
     )
 }
 
-/// The compact header of a failed or waiting send: the participants, and in the date's place its
-/// status, which opens `RecoverDraft`. No reply buttons. A failed one's tooltip is
-/// [`failed_tooltip`]'s.
+/// The compact header of a failed or waiting send: the participants, and in place of the date its
+/// status, which opens `RecoverDraft`. It has no reply buttons. A failed send's tooltip comes
+/// from [`failed_tooltip`].
 #[expect(
     clippy::too_many_arguments,
     reason = "one header row, drawn from the card's state"
@@ -1392,12 +1398,12 @@ fn status_header(
     }
 }
 
-/// The tooltip under the reason in failed draft `message`'s compact header (card `card`), which
-/// stays open, painted with `painter`: over the messages and under everything above them. Under
-/// the title's span (its 15px content area ends 1px above the line box), past the tooltip's 8px,
-/// pinned to the scroll container; where it settles (one shown while the bodies above still load
-/// stays where they left it until the window resizes or the thread scrolls). Returns where
-/// `Learn more` goes, once clicked.
+/// The tooltip that stays open under the reason in the compact header of failed draft `message`,
+/// on card `card`. It's painted with `painter`, over the messages and under everything above
+/// them. It sits under the title's span (whose 15px content area ends 1px above the line box),
+/// past the tooltip's 8px, pinned to the scroll container where it settles. One shown while the
+/// bodies above still load stays where they left it until the window resizes or the thread
+/// scrolls. Returns where `Learn more` goes, once clicked.
 pub(super) fn failed_tooltip(
     ui: &Ui,
     painter: &egui::Painter,
@@ -1420,9 +1426,9 @@ pub(super) fn failed_tooltip(
     }
 }
 
-/// A full header row's people: each by name and ` <address>`, or
-/// the address alone, comma-separated, after the label's column, wrapped at `width`; names in
-/// `contact`, the rest in `label`.
+/// A full header row's people, comma-separated after the label's column and wrapped at `width`.
+/// Each is a name and ` <address>`, or the address alone. Names and lone addresses are in
+/// `contact`, and the rest is in `label`.
 pub(crate) fn header_job(
     contacts: &[Contact],
     width: f32,
@@ -1451,7 +1457,7 @@ pub(crate) fn header_job(
 
 /// Shift-H's full header: From, To, Cc, Bcc with names and addresses, then the full date (or a
 /// failed or waiting send's status) and the chevron that folds it back. Its text is selectable
-/// (`cursor: text`); only the chevron folds it. With `tracking_blocked`, an eye follows From.
+/// (`cursor: text`), and only the chevron folds it. With `tracking_blocked`, an eye follows From.
 #[expect(
     clippy::too_many_arguments,
     reason = "one header, drawn from the card's state"
@@ -1495,7 +1501,7 @@ fn full_header(
             .rows
             .last()
             .map_or(HEADER_LABEL, |row| row.rect().right());
-        // The addresses are selectable text (`cursor: text`); the labels are `::before` content,
+        // The addresses are selectable text (`cursor: text`). The labels are `::before` content,
         // which isn't.
         selection.add(
             painter,
@@ -1526,13 +1532,14 @@ fn full_header(
         Sense::hover(),
     )
     .on_hover_cursor(egui::CursorIcon::Text);
-    // Over the text, which it takes the pointer from.
+    // The eye goes over the text and takes the pointer from it.
     if let Some(baseline) = eye {
         pixel_blocking(ui, baseline, id.with("pixel-blocking"));
     }
     let date_width = match status {
-        // The 12px/16px slot as an inline block on the header's 24px line, by baselines, then
-        // `top: 1px`: just `Send failed` (and no chevron), or `Send: when online`.
+        // The 12px/16px slot sits as an inline block on the header's 24px line, aligned by
+        // baselines, then moved by `top: 1px`. It says just `Send failed` (with no chevron), or
+        // `Send: when online`.
         Some(status) => {
             // The long `expanded` date when scheduled, and no tooltip.
             let text = status.full_title(now);
@@ -1579,9 +1586,9 @@ fn full_header(
         .then_some(Hit::HeaderToggle { hint: true })
 }
 
-/// The `Email tracking blocked` eye, its bottom edge `PIXEL_BLOCKING_DROP` under `baseline`
-/// (an inline SVG sits on the baseline), in `rgba(0, 0, 0, .45)` (white in
-/// Carbon), with its tooltip.
+/// The `Email tracking blocked` eye with its tooltip, in `rgba(0, 0, 0, .45)` (white in Carbon).
+/// Its bottom edge is `PIXEL_BLOCKING_DROP` under `baseline`, since an inline SVG sits on the
+/// baseline.
 fn pixel_blocking(ui: &Ui, baseline: egui::Pos2, id: egui::Id) {
     let size = exo_ui::icon_size(ui.ctx(), PIXEL_BLOCKING).unwrap_or(vec2(13.0, 10.0));
     let icon = Rect::from_min_size(baseline + vec2(0.0, PIXEL_BLOCKING_DROP - size.y), size);
@@ -1711,7 +1718,7 @@ mod tests {
     #[test]
     fn a_marketing_card_in_dark_mode_keeps_dark_ink() {
         // Morning Ledger's header in Carbon: dark text on the 90% white card (its sender at
-        // (50, 50, 51) and its date at (118, 118, 119)).
+        // (50, 50, 50) and its date at (118, 118, 119)).
         let ctx = egui::Context::default();
         exo_ui::set_theme(&ctx, Theme::Carbon);
         let ink = Ink::new(&ctx, true);
@@ -1728,12 +1735,12 @@ mod tests {
 
     #[test]
     fn condensed_participants_shrink_the_sender_first_then_the_lead() {
-        // Room enough: nothing shrinks; a short lead still takes its least 42px.
+        // With room enough nothing shrinks, and a short lead still takes its least 42px.
         assert_eq!(
             condense(30.0, 20.0, 40.0, 300.0, false, false),
             (30.0, 42.0)
         );
-        // The sender gives up nearly all of it, down to 18px; then the lead.
+        // The sender gives up nearly all of it, down to 18px, and then the lead does.
         let (sender, lead) = condense(100.0, 100.0, 40.0, 200.0, false, false);
         assert!(
             (sender + lead - 160.0).abs() < 0.01 && lead > 99.0 && lead <= 100.0,

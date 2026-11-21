@@ -13,10 +13,10 @@ use super::event::{Event, Style};
 const TITLE: TextStyle = TextStyle::new(Font::new(Family::Sans, 700), 12.0, 16.0);
 /// The time: 11px normal.
 const TIME: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 11.0, 16.0);
-/// Under 30 minutes: 9px/11px, title and time.
+/// The title and time under 30 minutes: 9px/11px.
 const SUB_30_TITLE: TextStyle = TextStyle::new(Font::new(Family::Sans, 700), 9.0, 11.0);
 const SUB_30_TIME: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 9.0, 11.0);
-/// From 45 to 50 minutes: 10px/13px.
+/// The title and time from 45 to 50 minutes: 10px/13px.
 const MID_TITLE: TextStyle = TextStyle::new(Font::new(Family::Sans, 700), 10.0, 13.0);
 const MID_TIME: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 10.0, 13.0);
 /// A line and the box's vertical padding, for the line count.
@@ -37,30 +37,31 @@ const GLOW_DURATION: f32 = 0.1;
 /// How a block is shown.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Look {
-    /// Under the pointer, or its details are open, or it's the invite being read: the glow.
+    /// The glow, which shows while the block is under the pointer, its details are open, or it's
+    /// the invite being read.
     pub glowing: f32,
     /// Ended before now.
     pub past: bool,
     /// A create or edit form is open.
     pub preview: bool,
-    /// In the all-day row: its smaller glow.
+    /// In the all-day row, which takes the smaller glow.
     pub all_day: bool,
     /// Its time on the title's line.
     pub time_on_same_line: bool,
-    /// The event being created, edited or dragged: a solid fill with a shadow.
+    /// The event being created, edited or dragged, drawn with a solid fill and a shadow.
     pub focused: bool,
-    /// A free slot of Find Time's, whose title is its time: no time line.
+    /// A free slot from Find Time, whose title is its time, so there's no time line.
     pub bare: bool,
-    /// A shared slot under an event: its time and cross hidden.
+    /// A shared slot under an event, with its time and cross hidden.
     pub covered: bool,
-    /// No text: a collapsed guests' column's bar, or an event under the draft there.
+    /// No text, for the bar of a collapsed guests' column or an event under the draft there.
     pub no_text: bool,
-    /// No time: a guest's event among three columns or more.
+    /// No time, for a guest's event among three columns or more.
     pub no_time: bool,
-    /// The title's lines cut off by the box, with no `…`: the all-day row's guests' columns
+    /// The title's lines cut off by the box, with no `…`, as in the all-day row's guests' columns
     /// (`word-break: break-word`).
     pub clipped: bool,
-    /// Colours in place of the event's, with no shadow: the draft blended over a guest's event
+    /// Colours in place of the event's, with no shadow, for the draft blended over a guest's event
     /// (`mix-blend-mode`).
     pub colors: Option<BlockColors>,
 }
@@ -79,8 +80,8 @@ pub fn time_range(start: &Zoned, end: &Zoned) -> String {
     format!("{} – {}", start.strftime("%-I:%M"), end.strftime("%-I:%M"))
 }
 
-/// Paints `event`'s block in `rect`, inside `clip`; its duration on the day is `span` (a
-/// multi-day event's part of the day it's drawn on).
+/// Paints `event`'s block in `rect`, inside `clip`. `span` is its duration on the day (for a
+/// multi-day event, the part on the day it's drawn on).
 pub fn paint(ui: &Ui, clip: Rect, rect: Rect, event: &Event, span: SignedDuration, look: Look) {
     if let Some(valid) = event.share {
         paint_slot(ui, clip, rect, event, valid, look);
@@ -109,7 +110,7 @@ pub fn paint(ui: &Ui, clip: Rect, rect: Rect, event: &Event, span: SignedDuratio
             },
         )
     };
-    // The box paints at whole px; the text keeps its place.
+    // The box paints at whole px, while the text keeps its place.
     let box_rect = exo_ui::pixel_snap(rect);
     let sub_30 = span < SignedDuration::from_mins(30);
     let radius = if sub_30 {
@@ -137,10 +138,10 @@ pub fn paint(ui: &Ui, clip: Rect, rect: Rect, event: &Event, span: SignedDuratio
         }
     }
     if event.style() == Style::Dashed && !look.focused {
-        // Dashed: the fill with no border, and an SVG `rect`'s 2px stroke dashed every 6px in
-        // the border's colour (white, Carbon `rgb(39, 41, 45)`; previews `rgba(255,255,255,.9)`,
-        // Carbon `rgb(97, 104, 109)`), under `padding: 5px 6px`, where the border and padding
-        // put the text otherwise.
+        // A dashed block has the fill with no border, and the 2px stroke of an SVG `rect`,
+        // dashed every 6px in the border's colour (white, Carbon `rgb(39, 41, 45)`; previews
+        // `rgba(255,255,255,.9)`, Carbon `rgb(97, 104, 109)`). Its `padding: 5px 6px` puts the
+        // text where the border and padding put it otherwise.
         painter.rect_filled(box_rect, radius, colors.fill);
         paint_dashes(
             &painter.with_clip_rect(box_rect.intersect(clip)),
@@ -170,7 +171,7 @@ pub fn paint(ui: &Ui, clip: Rect, rect: Rect, event: &Event, span: SignedDuratio
     let inside = box_rect.shrink(BORDER).intersect(clip);
     let painter = painter.with_clip_rect(inside);
     let exactly_30 = span == SignedDuration::from_mins(30);
-    // The 45-to-50-minute sizes only while the time shows.
+    // The 45-to-50-minute sizes apply only while the time shows.
     let mid = span >= SignedDuration::from_mins(45)
         && span <= SignedDuration::from_mins(50)
         && !look.no_time;
@@ -224,9 +225,9 @@ pub fn paint(ui: &Ui, clip: Rect, rect: Rect, event: &Event, span: SignedDuratio
         );
     }
     if !look.time_on_same_line && !nowrap && !warning {
-        // A wrapping title alone: broken the way Chromium breaks it, each line placed on its own
-        // (egui's continuation rows land off Chromium's sub-pixel phase), the last of `lines`
-        // ending in "…" when more follows.
+        // A wrapping title alone is broken the way Chromium breaks it, with each line placed on
+        // its own because egui's continuation rows land off Chromium's sub-pixel phase. The last
+        // of `lines` ends in "…" when more follows.
         let wrapped = title_style.wrap(painter.ctx(), &event.title, width);
         let shown = wrapped.len().min(lines);
         for (row, line) in wrapped.iter().take(shown).enumerate() {
@@ -295,7 +296,7 @@ pub fn paint(ui: &Ui, clip: Rect, rect: Rect, event: &Event, span: SignedDuratio
     }
 }
 
-/// The remove button's 8px cross: 6px in from a slot's top right.
+/// The remove button's 8px cross, 6px in from a slot's top right.
 pub fn slot_remove(rect: Rect) -> Rect {
     Rect::from_min_size(
         egui::pos2(rect.right() - 6.0 - 8.0, rect.top() + 6.0),
@@ -303,10 +304,10 @@ pub fn slot_remove(rect: Rect) -> Rect {
     )
 }
 
-/// A slot of availability being shared: the calendar's colour, or red's when it can't be shared,
-/// each paler once past; a dashed border in place of the border (an SVG `rect`'s 2px stroke,
-/// dashed every 6px, half of it inside the box), no shadow, `padding: 5px 6px`, its time in white,
-/// and the remove cross.
+/// A slot of availability being shared: the calendar's colour, or red when the slot can't be
+/// shared, each paler once past; a dashed border in place of the solid one (the 2px stroke of an
+/// SVG `rect`, dashed every 6px, half of it inside the box); no shadow; `padding: 5px 6px`; its
+/// time in white; and the remove cross.
 fn paint_slot(
     ui: &Ui,
     clip: Rect,
@@ -338,8 +339,8 @@ fn paint_slot(
         CornerRadius::same(4)
     };
     painter.rect_filled(box_rect, radius, fill);
-    // The dashes white, Carbon `rgb(39, 41, 45)`; the text `#fff`, Carbon `hsla(0,0%,100%,.9)`
-    // (`.8` past).
+    // The dashes are white (Carbon `rgb(39, 41, 45)`), and the text is `#fff` (Carbon
+    // `hsla(0,0%,100%,.9)`, `.8` past).
     let (dash, text) = match theme {
         exo_ui::Theme::Snow => (Color32::WHITE, Color32::WHITE),
         exo_ui::Theme::Carbon => (
@@ -376,8 +377,8 @@ fn paint_slot(
     );
 }
 
-/// The dashes of an SVG `rect`'s stroke (`stroke-dasharray: 6`) around `rect`, from its top left
-/// clockwise, the inner pixel of each.
+/// The dashes of an SVG `rect`'s stroke (`stroke-dasharray: 6`) around `rect`, clockwise from its
+/// top left, painting the inner pixel of each.
 fn paint_dashes(painter: &Painter, rect: Rect, color: Color32) {
     let edges = [
         (rect.left_top(), Vec2::X, rect.width()),

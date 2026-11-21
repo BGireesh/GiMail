@@ -123,7 +123,7 @@ async fn summaries_carry_what_the_list_shows() {
         assert_eq!(thread.drafts, 0, "Gmail's drafts don't show: {thread:?}");
         assert!(!thread.snippet.contains("&#39;"), "snippets are unescaped");
     }
-    // Senders other than me, unless I'm the only one.
+    // The participants are senders other than me, unless I'm the only one.
     for thread in &inbox {
         let all_me = thread.participants.iter().all(|c| c.is_me);
         assert!(!all_me || thread.participants.len() == 1, "{thread:?}");
@@ -147,7 +147,7 @@ async fn summaries_carry_what_the_list_shows() {
 #[tokio::test]
 async fn lists_show_only_their_backfilled_range() {
     let harness = Harness::synced().await;
-    // Starred has no pass of its own yet: only All Mail's 31 days cover it.
+    // Starred has no pass of its own yet, so only All Mail's 31 days cover it.
     let starred_gmail = harness.gmail_ids(label("STARRED")).await;
     let starred_local = harness.ids(&ListId::Starred).await;
     assert!(starred_local.is_subset(&starred_gmail));
@@ -237,12 +237,12 @@ async fn backfill_fetches_only_missing_or_stale_threads() {
     };
     let fail_threads_get = json!({ "method": "GET", "path": "/gmail/v1/users/me/threads/", "status": 400, "times": 1000 });
 
-    // Nothing to fetch: listing works while every threads.get fails.
+    // With nothing to fetch, listing works while every threads.get fails.
     harness.fault(fail_threads_get.clone()).await;
     assert!(!harness.store.backfill(fresh, 50).await.unwrap());
     assert_eq!(&harness.ids(fresh).await, fresh_ids);
 
-    // A thread that changed since it was stored is stale: listing it needs threads.get.
+    // A thread that changed since it was stored is stale, so listing it needs threads.get.
     let changed = stale_ids.iter().next().unwrap().clone();
     harness
         .deliver(json!({ "from": "Ana <ana@example.com>", "threadId": changed, "text": "One more thing" }))

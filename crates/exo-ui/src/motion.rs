@@ -41,7 +41,7 @@ impl CubicBezier {
         bezier(self.y1, self.y2, self.parameter_for(t))
     }
 
-    /// Solves `x(s) = t` for the curve parameter `s`, like browsers do: Newton's method, with
+    /// Solves `x(s) = t` for the curve parameter `s` as browsers do, by Newton's method with
     /// bisection as the fallback when the slope is too flat.
     fn parameter_for(&self, t: f32) -> f32 {
         let mut s = t;
@@ -139,7 +139,7 @@ pub fn transition_value(
     at(&moving, now)
 }
 
-/// The color `progress` of the way from `from` to `to`, interpolated like a CSS transition:
+/// The color `progress` of the way from `from` to `to`, interpolated like a CSS transition,
 /// per channel on premultiplied sRGB, which is how `Color32` already stores colors.
 pub fn mix(from: Color32, to: Color32, progress: f32) -> Color32 {
     let (from, to) = (from.to_array(), to.to_array());

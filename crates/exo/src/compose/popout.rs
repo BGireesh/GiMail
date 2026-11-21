@@ -1,6 +1,6 @@
-//! The popped-out draft: one draft at a time in a card anchored to the bottom of the window, right
-//! of the thread (or over the list), while the rest of the app goes on. Its thread keeps a
-//! placeholder under the message it answers.
+//! The popped-out draft. One draft at a time shows in a card anchored to the bottom of the
+//! window, right of the thread (or over the list), while the rest of the app goes on. Its thread
+//! keeps a placeholder under the message it answers.
 
 use egui::{Color32, CornerRadius, Rect, Sense, pos2, vec2};
 use exo_store::DraftAction;
@@ -21,7 +21,7 @@ const STILL: f32 = 0.1;
 const SLIDE: f32 = 0.1;
 
 impl crate::Mail {
-    /// ⌘⇧P and the header button: the focused draft pops out, or the popped-out one pops back in.
+    /// ⌘⇧P and the header button pop the focused draft out, or pop the popped-out one back in.
     pub(super) fn compose_pop(&mut self) {
         match (self.compose.focus.clone(), self.compose.popped.clone()) {
             (Some(id), Some(popped)) if id == popped => self.pop_in(),
@@ -32,7 +32,7 @@ impl crate::Mail {
     }
 
     /// Pops draft `id` out, with the keyboard. A new message leaves its pane, which goes back to
-    /// the list; a draft popped out before goes back to its thread.
+    /// the list. A draft popped out before goes back to its thread.
     pub(super) fn pop_out(&mut self, id: &str) {
         if let Some(previous) = self.compose.popped.take().filter(|previous| previous != id) {
             self.put_back(&previous);
@@ -44,8 +44,8 @@ impl crate::Mail {
         self.compose.focus = Some(id.to_owned());
     }
 
-    /// ⌘/ in a draft: it pops out unless it is, and search opens with an empty bar (only the
-    /// filter's token), which has the keyboard.
+    /// ⌘/ in a draft pops the draft out unless it already is, and opens search with an empty bar
+    /// (only the filter's token) that has the keyboard.
     pub(super) fn pop_out_and_search(&mut self, now: f64) {
         let Some(id) = self
             .compose
@@ -72,9 +72,9 @@ impl crate::Mail {
         self.compose.focus = None;
     }
 
-    /// Pops the popped-out draft back in: a reply into its thread, opened if it isn't, a new
-    /// message into the new-message pane, keeping its field. Either takes the place of a snippet
-    /// being edited, once `Save Snippet?` has asked.
+    /// Pops the popped-out draft back in. A reply goes into its thread, which opens if it isn't
+    /// open, and a new message goes into the new-message pane, keeping its field. Either takes the
+    /// place of a snippet being edited, once `Save Snippet?` has asked.
     pub(super) fn pop_in(&mut self) {
         if self.compose.popped.is_some() && self.snippet_unsaved() {
             self.ask_leaving_snippet(Box::new(Self::pop_in));
@@ -110,8 +110,8 @@ impl crate::Mail {
         self.compose.focus = Some(id);
     }
 
-    /// Escape or the cross: the pop-out closes and the keyboard goes back to the app. The draft
-    /// stays in its thread, saved (or, untouched, dropped).
+    /// Escape or the cross closes the pop-out, and the keyboard goes back to the app. The draft
+    /// stays in its thread, saved, or dropped if untouched.
     pub(super) fn close_popout(&mut self) {
         let Some(id) = self.compose.popped.take() else {
             return;
@@ -122,8 +122,8 @@ impl crate::Mail {
         self.put_back(&id);
     }
 
-    /// A draft that's no longer popped out: it stays open under its thread when that's showing,
-    /// and is otherwise saved (or dropped) and closed.
+    /// Puts back a draft that's no longer popped out. It stays open under its thread when that
+    /// thread is showing, and is otherwise saved (or dropped) and closed.
     fn put_back(&mut self, id: &str) {
         let shown = self.thread.as_ref().map(|view| view.id().to_owned());
         let Some(at) = self.compose.drafts.iter().position(|open| open.id == id) else {
@@ -185,8 +185,8 @@ impl crate::Mail {
         }
     }
 
-    /// ⌘D: the keyboard moves between the app and the pop-out, which keeps its field. Out of it,
-    /// its text field lets go too, so what's typed next is the app's.
+    /// ⌘D moves the keyboard between the app and the pop-out, which keeps its field. Moving out of
+    /// the pop-out also releases its text field, so what's typed next goes to the app.
     pub(super) fn cycle_focus(&mut self) {
         let Some(popped) = self.compose.popped.clone() else {
             return;
@@ -203,14 +203,14 @@ impl crate::Mail {
         }
     }
 
-    /// The pop-out's card as last drawn: what's under it doesn't have the pointer there.
+    /// The pop-out's card as last drawn. What's under the card doesn't get the pointer there.
     pub(crate) fn popout_card(&self) -> Option<Rect> {
         self.compose.popout_card
     }
 
-    /// Takes the wheel this frame from what's drawn under the pop-out, while the pointer is over
-    /// its card: the card isn't in the list's or the thread's scroll chain. Returns it, for
-    /// [`Self::show_compose_popout`] to have back.
+    /// Takes this frame's wheel from what's drawn under the pop-out while the pointer is over its
+    /// card, because the card isn't in the list's or the thread's scroll chain. Returns the wheel
+    /// for [`Self::show_compose_popout`] to have back.
     pub(crate) fn take_wheel_over_popout(&self, ctx: &egui::Context) -> Option<egui::Vec2> {
         let card = self.compose.popout_card?;
         ctx.pointer_hover_pos().filter(|at| card.contains(*at))?;
@@ -336,7 +336,7 @@ impl crate::Mail {
                 .flatten()
         });
         if response.clicked_inside || pressed.is_some_and(|at| card.contains(at)) {
-            // The ⌘D hint, as the press gives it the keyboard.
+            // The ⌘D hint, since the press gives the draft the keyboard.
             if self.compose.focus.as_deref() != Some(id.as_str()) {
                 self.commands.hint(
                     exo_commands::Hint::new()
@@ -354,9 +354,9 @@ impl crate::Mail {
     }
 }
 
-/// Once the pointer has rested 100ms, whether it's over the contact pane (not the card over it:
-/// what's under the pointer is the card), or over the card it slid out of that pane's way; a press
-/// in the card lets it slide back.
+/// Once the pointer has rested 100ms, whether it's over the contact pane, or over the card that
+/// slid out of that pane's way. Where the card covers the pane, the pointer is over the card, not
+/// the pane. A press in the card lets the card slide back.
 fn still_over_right_pane(ui: &egui::Ui, still: &mut bool, right_pane: Rect, card: Rect) {
     let (at, rested, pressed) = ui.input(|input| {
         (

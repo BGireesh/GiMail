@@ -1,5 +1,5 @@
-//! The user's settings: the account's and this device's. Each is one JSON document, in its own
-//! row of the `settings` table. Unlike the rest of the database it isn't a cache of Gmail.
+//! The user's settings, one document for the account and one for this device. Each is JSON, in
+//! its own row of the `settings` table. Unlike the rest of the database, it isn't a cache of Gmail.
 //!
 //! ```no_run
 //! # async fn demo(store: &exo_store::Store) -> exo_store::Result<()> {
@@ -43,7 +43,7 @@ mod sealed {
 pub struct Settings {
     /// `theme`.
     pub theme: Theme,
-    /// `splitInboxesV2`: the splits and their order with Important, Other and Inbox. Read and
+    /// `splitInboxesV2`: the splits, and their order among Important, Other and Inbox. Read and
     /// changed through [`Settings::split_entries`] and the methods after it.
     #[serde(skip_serializing_if = "SplitInboxesV2::is_unset")]
     split_inboxes_v2: SplitInboxesV2,
@@ -54,15 +54,15 @@ pub struct Settings {
     pub splits_engagement: SplitsEngagement,
     /// `searchHistory`: recent searches, oldest first.
     pub search_history: Vec<SearchHistoryItem>,
-    /// `nudges`: when each nudge was first shown and last done with, by its id.
+    /// `nudges`: when each nudge was first shown and last done with, keyed by the nudge's id.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub nudges: BTreeMap<String, Nudge>,
-    /// `labelsLastUsed`: when each label was last added or moved to from the Label and Move
-    /// pickers, as ISO timestamps by label id; they list recent ones first.
+    /// `labelsLastUsed`: when each label was last added, or moved to, from the Label and Move
+    /// pickers, as ISO timestamps keyed by label id. The pickers list recently used labels first.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub labels_last_used: BTreeMap<String, String>,
     /// `blockedSenders`: the addresses and domains blocked, oldest first. Gmail filters do the
-    /// blocking; this is the list Exo shows.
+    /// blocking, and this is the list Exo shows.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub blocked_senders: Vec<String>,
     /// `calendar`: the calendar's options.
@@ -72,8 +72,8 @@ pub struct Settings {
     /// colours.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub calendar_accounts: BTreeMap<String, CalendarAccount>,
-    /// `calendarInviteHint/{email}`: the day view's `Add Calendar` for an invite to signed-out
-    /// calendar account `email` was answered (`No thanks`, or `Sign in`).
+    /// `calendarInviteHint/{email}`: whether the day view's `Add Calendar` hint was answered
+    /// (`No thanks` or `Sign in`) for an invite to `email`, a signed-out calendar account.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub calendar_invite_hint: BTreeMap<String, bool>,
     /// `meetingLinks`: the link new events get.
@@ -82,8 +82,8 @@ pub struct Settings {
     /// `snippets`: the personal snippets.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub snippets: Vec<Snippet>,
-    /// `snippetsLastUsed`: when each snippet was last used or saved, as ISO timestamps by id; it
-    /// ranks the pickers and the Snippets folder.
+    /// `snippetsLastUsed`: when each snippet was last used or saved, as ISO timestamps keyed by
+    /// snippet id. The pickers and the Snippets folder rank snippets by it.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub snippets_last_used: BTreeMap<String, String>,
     /// `useSnippetHintCount`: how many times saving a snippet has shown `To use a Snippet, hit
@@ -91,8 +91,8 @@ pub struct Settings {
     #[serde(skip_serializing_if = "is_zero")]
     pub use_snippet_hint_count: u32,
     /// `disableNotifications`: email notifications off for the account, on every device. Exo
-    /// only clears it: turning them off writes the device's setting
-    /// ([`DeviceSettings::disable_notifications`]), turning them on clears both.
+    /// only ever clears it. Turning notifications off writes the device's setting
+    /// ([`DeviceSettings::disable_notifications`]), and turning them on clears both.
     #[serde(skip_serializing_if = "is_false")]
     pub disable_notifications: bool,
     /// `notifications`: when calendar notifications come.
@@ -102,15 +102,16 @@ pub struct Settings {
     /// used` while it's still ahead.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub previous_schedule: Option<PreviousSchedule>,
-    /// `remoteContentBlocking`: which remote images message bodies load (the Images dialog).
-    /// `None` until one is chosen, which reads as the default
-    /// ([`RemoteContentBlocking::default`]), not `none`.
+    /// `remoteContentBlocking`: which remote images load in message bodies (the Images dialog).
+    /// `None` until one is chosen. `None` reads as the default
+    /// ([`RemoteContentBlocking::default`]), not as `none`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remote_content_blocking: Option<RemoteContentBlocking>,
     /// `reminders`: the Reminders dialog's defaults for Remind me.
     #[serde(skip_serializing_if = "ReminderSettings::is_default")]
     pub reminders: ReminderSettings,
-    /// `previousReminder`: the last time chosen in Remind me, its `last used` row.
+    /// `previousReminder`: the last time chosen in Remind me, shown as Remind me's `last used`
+    /// row.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub previous_reminder: Option<PreviousReminder>,
     /// `hasShownFollowUpReminderHint`: the `Follow up on time, every time` alert has shown.
@@ -145,8 +146,8 @@ pub struct Settings {
     #[serde(skip_serializing_if = "is_false")]
     pub convert_hyphen_to_bullet_list: bool,
     /// `enableBacktickAsEscape`: a backtick is Escape in compose too, as it is everywhere else.
-    /// Unset ([`Settings::backtick_as_escape`] reads it as off) until it's turned on or off, which
-    /// the Touch Bar's tip asks about.
+    /// Unset until it's turned on or off, which the Touch Bar's tip asks about.
+    /// [`Settings::backtick_as_escape`] reads unset as off.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enable_backtick_as_escape: Option<bool>,
     /// `customInstantIntro`: Instant Intro's thank-you line, empty for the default
@@ -154,7 +155,7 @@ pub struct Settings {
     #[serde(skip_serializing_if = "String::is_empty")]
     pub custom_instant_intro: String,
     /// `emojiSkinTone`: the skin tone emoji are inserted with. Unset until the Emoji dialog
-    /// opens or the first emoji that has tones is inserted, which both set `NONE`.
+    /// opens or the first emoji that has tones is inserted. Either one sets it to `NONE`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub emoji_skin_tone: Option<EmojiSkinTone>,
     /// `autoBcc`: what Auto Bcc adds to every draft's Bcc, as typed (`123@bcc.hubspot.com`,
@@ -165,14 +166,14 @@ pub struct Settings {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub auto_bcc_exclusions: Vec<String>,
     /// `excludedContacts`: addresses taken out of compose's suggestions (`Remove Suggestion`),
-    /// each with when (ISO 8601).
+    /// each with the time it was taken out (ISO 8601).
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub excluded_contacts: BTreeMap<String, String>,
     /// `quickTips`: whether the Quick Tips bar shows. Off until it's turned on.
     #[serde(skip_serializing_if = "is_default")]
     pub quick_tips: QuickTips,
-    /// `hasShownCommandNudge`: the palette's first-run nudge has been seen, or a triage key used,
-    /// so it doesn't show again.
+    /// `hasShownCommandNudge`: the palette's first-run nudge has been seen, or a triage key has
+    /// been used, so the nudge doesn't show again.
     #[serde(skip_serializing_if = "is_false")]
     pub has_shown_command_nudge: bool,
     /// `hasShownShareAvailabilityTooltip`: Share Availability's `You can now hit ⌘ shift A…`
@@ -203,13 +204,13 @@ pub struct QuickTips {
     pub show: bool,
 }
 
-/// `typingAssistance`: autocorrect and autocomplete. It keeps no languages or learned spellings:
-/// macOS's spellchecker detects the language and keeps the user's dictionary itself.
+/// `typingAssistance`: autocorrect and autocomplete. It keeps no languages or learned spellings,
+/// because macOS's spellchecker detects the language and keeps the user's dictionary itself.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct TypingAssistance {
-    /// `enabled`: autocorrect. Unset follows macOS's `Correct spelling automatically`
-    /// ([`Settings::autocorrect`]) until it's turned on or off in Exo.
+    /// `enabled`: autocorrect. Until it's turned on or off in Exo, it's unset and follows macOS's
+    /// `Correct spelling automatically` ([`Settings::autocorrect`]).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,
     /// `autocompleteEnabled`: unset reads as on.
@@ -291,7 +292,7 @@ impl Notifications {
 #[serde(rename_all = "camelCase", default)]
 pub struct CalendarEventNotifications {
     /// `leadTimeInSeconds`: how long before an event its notification comes, when the event
-    /// keeps its calendar's default reminders; unset, two minutes
+    /// keeps its calendar's default reminders. Two minutes while unset
     /// ([`CalendarEventNotifications::lead_time`]).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lead_time_in_seconds: Option<i64>,
@@ -326,11 +327,11 @@ pub struct PreviousSchedule {
 pub enum RemoteContentBlocking {
     /// `none`: `Show all images`, read receipts included.
     None,
-    /// `reduce-tracking`: `Block all known tracking pixels`. Exo's default: with no image proxy,
-    /// a read receipt would reach the sender straight from your address.
+    /// `reduce-tracking`: `Block all known tracking pixels`. It's Exo's default because, with no
+    /// image proxy, a read receipt would reach the sender straight from your address.
     #[default]
     ReduceTracking,
-    /// `all`: `Block all remote images`, until a message's are shown.
+    /// `all`: `Block all remote images`, until the images in a message are shown.
     All,
 }
 
@@ -339,9 +340,9 @@ pub enum RemoteContentBlocking {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ReminderSettings {
-    /// `days`: Remind me's `in {n} days` for a reminder.
+    /// `days`: the number of days in Remind me's `in {n} days` for a reminder.
     pub days: u32,
-    /// `hour` and `minute`: the time a reminder without one comes back at.
+    /// `hour` and `minute`: the time of day a reminder set without a time comes back at.
     pub hour: i8,
     pub minute: i8,
     /// `triggerCondition`: what the picker's dropdown starts on.
@@ -349,14 +350,14 @@ pub struct ReminderSettings {
     /// `defaultRemindersTrigger`: `NONE`, or `EXTERNAL` for a reminder on every draft with an
     /// external recipient.
     pub default_reminders_trigger: String,
-    /// `businessDaysOnly`: days count weekdays. Unset until the Reminders dialog first opens,
-    /// which writes its default, on ([`ReminderSettings::fill_defaults`]).
+    /// `businessDaysOnly`: only weekdays count as days. Unset until the Reminders dialog first
+    /// opens and writes its default, which is on ([`ReminderSettings::fill_defaults`]).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub business_days_only: Option<bool>,
 }
 
 impl Default for ReminderSettings {
-    /// In 2 days at 8:00 AM if no reply, `businessDaysOnly` aside.
+    /// In 2 days at 8:00 AM if no reply, with `businessDaysOnly` unset.
     fn default() -> Self {
         Self {
             days: 2,
@@ -374,15 +375,16 @@ impl ReminderSettings {
         *self == Self::default()
     }
 
-    /// Days count weekdays: `businessDaysOnly`, off while unset.
+    /// Whether only weekdays count as days (`businessDaysOnly`), off while unset.
     #[must_use]
     pub fn weekdays_only(&self) -> bool {
         self.business_days_only.unwrap_or(false)
     }
 
     /// What the Reminders dialog writes as it opens while `reminders` is unset: the defaults,
-    /// with `businessDaysOnly` on. Unset is the defaults without `businessDaysOnly`, as Exo stores
-    /// no object at its defaults. Returns whether that changed anything.
+    /// with `businessDaysOnly` on. An unset `reminders` reads as the defaults without
+    /// `businessDaysOnly`, because Exo stores no object that is at its defaults. Returns whether
+    /// that changed anything.
     pub fn fill_defaults(&mut self) -> bool {
         if *self != Self::default() {
             return false;
@@ -460,7 +462,7 @@ pub struct Snippet {
     pub id: String,
     /// `name`, which the pickers and the folder show (the editor's `Enter description`).
     pub name: String,
-    /// `subject`, which a new message with none takes.
+    /// `subject`, which a new message without a subject takes.
     pub subject: String,
     /// `body`, HTML.
     pub body: String,
@@ -470,29 +472,30 @@ pub struct Snippet {
     pub cc: Vec<Address>,
     /// `bcc`.
     pub bcc: Vec<Address>,
-    /// `from`: the alias it switches a draft to, or `None` for the draft's own (`"use default"`).
+    /// `from`: the alias it switches a draft to, or `None` to keep the draft's own
+    /// (`"use default"`).
     pub from: Option<Address>,
-    /// Its files, kept with drafts' under their `uuid` ([`Store::draft_files`]).
+    /// Its files, kept with the drafts' files under their `uuid` ([`Store::draft_files`]).
     pub attachments: Vec<DraftAttachment>,
     /// `date`: when it was last saved, as an ISO timestamp.
     pub date: String,
-    /// How it has been used ([`SnippetAnalytics`]); saving the snippet keeps it.
+    /// How it has been used ([`SnippetAnalytics`]). Saving the snippet keeps these counts.
     #[serde(flatten)]
     pub analytics: SnippetAnalytics,
 }
 
-/// How a snippet has been used, as Exo counts it from the messages it sends. There are no opens:
-/// they need read statuses, which Exo hasn't got.
+/// How a snippet has been used, as Exo counts it from the messages it sends. There are no opens,
+/// because counting them needs read statuses, which Exo hasn't got.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct SnippetAnalytics {
     /// `sends`: messages sent with it.
     pub sends: u32,
-    /// `replies`: those someone else has replied to since.
+    /// `replies`: the sent messages that someone else has replied to since.
     pub replies: u32,
-    /// When one last went, an ISO timestamp (empty: never).
+    /// When a message was last sent with it, as an ISO timestamp (empty if never).
     pub last_sent: String,
-    /// The sends no reply has been seen to yet, which Exo keeps looking at.
+    /// The sends that Exo hasn't seen a reply to yet, which it keeps looking at.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub unreplied: Vec<SnippetSend>,
 }
@@ -521,7 +524,7 @@ pub struct CalendarSettings {
     /// `additionalTimezones`.
     pub additional_timezones: Vec<AdditionalTimezone>,
     /// `hasDismissedFindTimeEnterShortcutTooltip`: Meet's `Hit enter to instantly find times!`
-    /// was closed.
+    /// tooltip was closed.
     pub has_dismissed_find_time_enter_shortcut_tooltip: bool,
 }
 
@@ -578,9 +581,9 @@ impl Default for CalendarAccount {
 }
 
 impl Settings {
-    /// Calendar `id`'s settings under a signed-in calendar account (`authed`) that has them.
-    /// A calendar's settings are kept alike under every account that has it
-    /// ([`Settings::update_calendar`]), so any one does.
+    /// The settings for calendar `id`, from any signed-in calendar account (`authed`) that has
+    /// them. A calendar's settings are kept the same under every account that has the calendar
+    /// ([`Settings::update_calendar`]), so any of those accounts will do.
     #[must_use]
     pub fn calendar_setting(&self, id: &str) -> Option<&CalendarSetting> {
         self.calendar_accounts
@@ -589,8 +592,8 @@ impl Settings {
             .find_map(|account| account.calendars.get(id))
     }
 
-    /// Applies `change` to calendar `id`'s settings under calendar account `account` (made if
-    /// new, the account too) and under every other account that has them.
+    /// Applies `change` to the settings for calendar `id` under calendar account `account`, and
+    /// under every other account that has them. The settings, and the account, are made if new.
     pub fn update_calendar(
         &mut self,
         account: &str,
@@ -675,28 +678,28 @@ pub struct CalendarNotifications {
     pub enabled_desktop: bool,
 }
 
-/// A nudge's entry in `nudges`, its times as ISO timestamps.
+/// A nudge's entry in `nudges`, with its times as ISO timestamps.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Nudge {
     /// `firstNudgedAt`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub first_nudged_at: Option<String>,
-    /// `lastCompletedAt`: dismissed or taken up, after which it doesn't show again.
+    /// `lastCompletedAt`: when it was dismissed or taken up. After that it doesn't show again.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_completed_at: Option<String>,
 }
 
 impl Settings {
-    /// Nudge `id` was dismissed or taken up `at`, which is also when it was first shown if that
-    /// wasn't recorded.
+    /// Records that nudge `id` was dismissed or taken up `at`. If no time was recorded for when
+    /// it was first shown, `at` is recorded as that too.
     pub fn complete_nudge(&mut self, id: &str, at: &str) {
         let nudge = self.nudges.entry(id.to_owned()).or_default();
         nudge.first_nudged_at.get_or_insert_with(|| at.to_owned());
         nudge.last_completed_at = Some(at.to_owned());
     }
 
-    /// Nudge `id` was dismissed or taken up.
+    /// Whether nudge `id` was dismissed or taken up.
     pub fn nudge_completed(&self, id: &str) -> bool {
         self.nudges
             .get(id)
@@ -740,8 +743,8 @@ pub struct SplitsEngagement {
 }
 
 impl Settings {
-    /// The splits, Important, Other and Inbox in their order, on or off: Important and Other
-    /// only while they're on, Inbox only while they're off.
+    /// The splits, Important, Other and Inbox in their order, whether on or off. Important and
+    /// Other are included only while they're on, and Inbox only while they're off.
     pub fn split_entries(&self) -> Vec<SplitEntry<'_>> {
         let shown = |entry: &SplitEntry<'_>| match entry {
             SplitEntry::System(SystemSplit::Inbox) => self.unified_inbox,
@@ -749,7 +752,7 @@ impl Settings {
             SplitEntry::Split(_) => true,
         };
         if self.split_inboxes_v2.is_unset() {
-            // Not set up yet ([`Settings::set_up_splits`]): no splits.
+            // Not set up yet ([`Settings::set_up_splits`]), so there are no splits.
             let systems: &[SystemSplit] = if self.unified_inbox {
                 &[SystemSplit::Inbox]
             } else {
@@ -791,8 +794,8 @@ impl Settings {
         self.split_inboxes_v2.hide_other_when_empty = Some(hide);
     }
 
-    /// Gives `splitInboxesV2` its first order, with no splits, unless it has one. Returns
-    /// whether it didn't.
+    /// Gives `splitInboxesV2` its first order, with no splits, unless it already has an order.
+    /// Returns whether it had none.
     fn migrate_splits(&mut self) -> bool {
         if !self.split_inboxes_v2.is_unset() {
             return false;
@@ -814,20 +817,20 @@ impl Settings {
         true
     }
 
-    /// Adds `split`: last if it's off, else where new tabs go.
+    /// Adds `split`, last if it's off, or else where new tabs go.
     pub fn add_split(&mut self, split: SplitInbox) {
         self.migrate_splits();
         self.split_inboxes_v2.add(split, self.unified_inbox);
     }
 
-    /// Puts `new` in place of the split whose list id is `id`; a split turned on moves to where
-    /// new tabs go.
+    /// Puts `new` in place of the split whose list id is `id`. If `new` turns the split on, it
+    /// moves to where new tabs go.
     pub fn replace_split(&mut self, id: &str, new: SplitInbox) {
         self.migrate_splits();
         self.split_inboxes_v2.replace(id, new, self.unified_inbox);
     }
 
-    /// Changes the split whose list id is `id` where it is.
+    /// Changes the split whose list id is `id`, leaving it where it is.
     pub fn update_split(&mut self, id: &str, change: impl FnOnce(&mut SplitInbox)) {
         self.migrate_splits();
         self.split_inboxes_v2.update(id, change);
@@ -854,7 +857,7 @@ impl Settings {
             .toggle_important_other(self.unified_inbox);
     }
 
-    /// Remembers a search: searching for the same thing again moves it to the newest. Only the
+    /// Remembers a search. Searching for the same thing again moves it to the newest. Only the
     /// newest 15 are kept.
     pub fn remember_search(&mut self, value: &str, kind: SearchHistoryKind, now: jiff::Timestamp) {
         let value = value.trim();
@@ -874,29 +877,31 @@ impl Settings {
         self.search_history.drain(..excess);
     }
 
-    /// Whether email notifications are on: neither this device nor the account turned them off
-    /// (the Notifications dialog's checkbox).
+    /// Whether email notifications are on, which they are unless this device or the account
+    /// turned them off (the Notifications dialog's checkbox).
     pub fn email_notifications(&self, device: &DeviceSettings) -> bool {
         !(device.disable_notifications || self.disable_notifications)
     }
 
-    /// Whether replies and forwards carry the signature: `includeSignatureOnReplies`, on unless
-    /// turned off.
+    /// Whether replies and forwards carry the signature (`includeSignatureOnReplies`), which is
+    /// on unless turned off.
     pub fn include_signature_on_replies(&self) -> bool {
         self.include_signature_on_replies.unwrap_or(true)
     }
 
-    /// Whether a backtick is Escape in compose too: `enableBacktickAsEscape`, off unless turned on.
+    /// Whether a backtick is Escape in compose too (`enableBacktickAsEscape`), which is off
+    /// unless turned on.
     pub fn backtick_as_escape(&self) -> bool {
         self.enable_backtick_as_escape.unwrap_or(false)
     }
 
-    /// Whether autocorrect is on: as turned on or off in Exo, else `system` (macOS's own setting).
+    /// Whether autocorrect is on, as turned on or off in Exo, or else `system` (macOS's own
+    /// setting).
     pub fn autocorrect(&self, system: bool) -> bool {
         self.typing_assistance.enabled.unwrap_or(system)
     }
 
-    /// Whether autocomplete is on: unless turned off.
+    /// Whether autocomplete is on, which it is unless turned off.
     pub fn autocomplete(&self) -> bool {
         self.typing_assistance.autocomplete_enabled.unwrap_or(true)
     }
@@ -928,7 +933,7 @@ impl Document for Settings {
     const KEY: &'static str = "account";
 }
 
-/// `theme`, in the Classic style, Exo's only one.
+/// `theme`, in the Classic style, the only style Exo has.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Theme {
@@ -955,18 +960,18 @@ pub struct DeviceSettings {
     pub local_sends_count: u32,
     /// `firstCheckedEscape`: when Escape was first pressed with `enableBacktickAsEscape` unset on
     /// a Mac whose Escape is on its Touch Bar, in milliseconds since the epoch. The Touch Bar's
-    /// tip waits 40 seconds from it.
+    /// tip waits 40 seconds from then.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub first_checked_escape: Option<i64>,
     /// `achievements`: the thresholds celebrated and the cards marked `New`.
     #[serde(skip_serializing_if = "Achievements::is_empty")]
     pub achievements: Achievements,
-    /// The welcome splash is still to show: the account signed in on this Mac for the first
-    /// time and hasn't been past it.
+    /// The welcome splash is still to show, because the account signed in on this Mac for the
+    /// first time and hasn't been past the splash.
     #[serde(skip_serializing_if = "is_false")]
     pub splash_pending: bool,
-    /// The first-run flow reached account setup and hasn't been through it: it opens again at
-    /// the next launch.
+    /// The first-run flow reached account setup and hasn't been through it, so account setup
+    /// opens again at the next launch.
     #[serde(skip_serializing_if = "is_false")]
     pub account_setup_pending: bool,
     /// Get Me To Zero has been run.

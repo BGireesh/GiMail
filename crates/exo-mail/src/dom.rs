@@ -294,7 +294,7 @@ pub(crate) fn take_children(node: &NodeRef) -> Vec<NodeRef> {
 
 /// Makes `children` the node's children.
 ///
-/// Editing the child list in one go keeps passes over long sibling lists linear: the tree has no
+/// Editing the child list in one go keeps passes over long sibling lists linear. The tree has no
 /// sibling links, so each single-node edit has to find the node among its siblings first.
 pub(crate) fn set_children(node: &NodeRef, children: Vec<NodeRef>) {
     for child in &children {

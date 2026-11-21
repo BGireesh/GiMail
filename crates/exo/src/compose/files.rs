@@ -1,4 +1,4 @@
-//! Files added to a draft: Gmail's blocked types and empty files are turned away, a batch that
+//! Files added to a draft. Gmail's blocked types and empty files are turned away, a batch that
 //! would make the message too large for Gmail is refused, and the rest are copied into the
 //! account's draft files.
 
@@ -18,7 +18,7 @@ const BLOCKED: &[&str] = &[
     "scr", "sct", "shb", "sys", "vb", "vbe", "vbs", "vxd", "wsc", "wsf", "wsh", "cab",
 ];
 
-/// Why adding stopped or skipped files: an alert's title and text (no title is `Sorry!`).
+/// Why adding stopped or skipped files, as an alert's title and text. No title means `Sorry!`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Notice {
     pub title: Option<&'static str>,
@@ -109,9 +109,9 @@ pub(crate) fn add(
     (added, notice)
 }
 
-/// An image put in the body: `bytes`, a `mime_type` file named `name`, copied into `folder` as the
-/// inline attachment the body shows by Content-ID `cid`, unless the message would then be too
-/// large for Gmail.
+/// An image put in the body. Copies `bytes`, a `mime_type` file named `name`, into `folder` as the
+/// inline attachment that the body shows by Content-ID `cid`, unless the message would then be
+/// too large for Gmail.
 pub(crate) fn add_inline(
     name: &str,
     mime_type: &str,
@@ -207,9 +207,9 @@ fn is_blocked(name: &str) -> bool {
         .is_some_and(|(_, extension)| BLOCKED.contains(&extension.to_ascii_lowercase().as_str()))
 }
 
-/// Whether the message would be over Gmail's limit: each attachment as base64 with line breaks and
-/// part headers, the HTML twice as quoted-printable (the text alternative is about as long), and
-/// headroom.
+/// Whether the message would be over Gmail's limit. It counts each attachment as base64 with line
+/// breaks and part headers, the HTML twice as quoted-printable (the text alternative is about as
+/// long), and headroom.
 pub(crate) fn exceeds_gmail_limit(sizes: impl IntoIterator<Item = u64>, html: &str) -> bool {
     let attachments: u64 = sizes
         .into_iter()
@@ -277,9 +277,9 @@ pub(crate) fn mime_type(name: &str) -> &'static str {
 }
 
 impl crate::Mail {
-    /// ⌘V in a draft with Copy Attachments' files on the clipboard: they join it by reference to
-    /// their Gmail parts, or, copied in another account, an alert says they can't. Returns whether
-    /// the paste was theirs.
+    /// ⌘V in a draft with files from Copy Attachments on the clipboard. The files join the draft
+    /// by reference to their Gmail parts. If they were copied in another account, an alert says
+    /// they can't. Returns whether the paste was for those files.
     pub(super) fn compose_paste_attachments(&mut self, ctx: &egui::Context, now: f64) -> bool {
         let Some(id) = self.compose.focus.clone() else {
             return false;

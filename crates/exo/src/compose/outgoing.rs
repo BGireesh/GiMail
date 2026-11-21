@@ -1,6 +1,6 @@
-//! What a draft sends, as Exo writes it to its Gmail draft: the body HTML around the editor's
-//! (exo-editor's `outgoing`), the From alias's signature, the quote, and the MIME around them,
-//! with a plain-text alternative. Exo adds no headers of its own.
+//! What a draft sends, as Exo writes it to its Gmail draft: the body HTML that exo-editor's
+//! `outgoing` builds around the editor's HTML, the From alias's signature, the quote, and the
+//! MIME around them, with a plain-text alternative. Exo adds no headers of its own.
 
 use exo_store::{Address, Alias, DraftRecord};
 use jiff::Zoned;
@@ -26,8 +26,8 @@ fn body_html(open: &Open, aliases: &[Alias], skip_signature: bool) -> String {
 }
 
 /// The message `open` sends, dated `now`, without its attachments' bytes (the account adds
-/// them). `account_name` names a From with no name of its own. It always has a Message-ID:
-/// without one, mail-builder would make one from the machine's host name.
+/// them). `account_name` names a From with no name of its own. It always has a Message-ID,
+/// because without one mail-builder would make one from the machine's host name.
 pub(crate) fn message(
     open: &Open,
     aliases: &[Alias],
@@ -75,7 +75,7 @@ fn email(
     }
 }
 
-/// Replies and forwards carry threading headers; new messages and forked replies don't.
+/// Replies and forwards carry threading headers, but new messages and forked replies don't.
 fn threading(record: &DraftRecord) -> bool {
     !matches!(
         record.action,

@@ -1,8 +1,8 @@
-//! Deep links: `exo://deeplink/{name}` opens a setting in the account on screen, and
-//! `exo://{email}/deeplink/{name}` in that account, switching to it first, parsed with the other
-//! links ([`crate::links`]). Each shows the home list first. A name for something Exo leaves out
-//! (AI, what needs a server, teams) does only that; a name no deep link has also says `Update
-//! Required`. `upgrade` checks for updates, as ⌘K's `Check for Updates` does.
+//! Deep links, parsed with the other links ([`crate::links`]). `exo://deeplink/{name}` opens a
+//! setting in the account on screen, and `exo://{email}/deeplink/{name}` opens it in that
+//! account, switching to it first. Each shows the home list first. A name for something Exo
+//! leaves out (AI, what needs a server, teams) does only that. A name no deep link has also says
+//! `Update Required`. `upgrade` checks for updates, as ⌘K's `Check for Updates` does.
 
 use crate::{commands::Action, notice::Notice, settings};
 
@@ -11,7 +11,7 @@ use crate::{commands::Action, notice::Notice, settings};
 enum Opens {
     /// Something Exo has.
     Action(Action),
-    /// Something Exo leaves out: only the home list shows.
+    /// Something Exo leaves out, so only the home list shows.
     Nothing,
     /// A name no deep link has.
     UpdateRequired,
@@ -25,7 +25,7 @@ fn opens(name: &str) -> Opens {
         "reminder-settings" => set(Set::Open(Dialog::Reminders)),
         "calendar-settings" => set(Set::CalendarSettings),
         "split-inbox-settings" => set(Set::Open(Dialog::SplitInbox)),
-        // Its `?role=` filter is the library's, which Exo's doesn't have.
+        // Exo's split library has no role filter, so the link's `?role=` is dropped.
         "split-library" => set(Set::SplitLibrary),
         "hide-empty-split-inboxes" => set(Set::Open(Dialog::HideEmptySplits)),
         "get-me-to-zero" => set(Set::Triage(Triage::GetMeToZero)),
@@ -55,7 +55,7 @@ fn opens(name: &str) -> Opens {
 }
 
 impl crate::Mail {
-    /// Opens deep link `name` in this account: the home list, then what it names.
+    /// Opens deep link `name` in this account, showing the home list and then what it names.
     pub(crate) fn open_deep_link(&mut self, name: &str) {
         let now = self.ctx.input(|input| input.time);
         self.close_thread();

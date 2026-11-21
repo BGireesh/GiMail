@@ -23,7 +23,7 @@ pub struct Contact {
 pub struct Alias {
     /// The address in `From:`.
     pub email: String,
-    /// The name in `From:`; `None` means the account's name.
+    /// The name in `From:`. `None` means the account's name.
     pub name: Option<String>,
     /// Its Gmail signature (HTML, as Gmail stores it).
     pub signature: Option<String>,
@@ -40,37 +40,39 @@ pub struct Alias {
 pub struct RecentThread {
     /// The thread.
     pub id: ThreadId,
-    /// Its subject (its first message's); empty when it has none.
+    /// Its subject, from its first message. Empty when it has none.
     pub subject: String,
-    /// Its latest message outside drafts, Spam and Trash.
+    /// The date of its latest message outside drafts, Spam and Trash.
     pub date: Timestamp,
 }
 
 /// A row of a thread list.
 ///
-/// Drafts Exo didn't write (Gmail web's, another client's) are left out of a row everywhere but
-/// Drafts, where they're the point. "Drafts" below means the ones the row shows.
+/// Drafts that Exo didn't write (in Gmail on the web or in another client) are left out of a row
+/// everywhere but Drafts, where they're the point. "Drafts" below means the ones the row shows.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ThreadSummary {
     /// The thread.
     pub id: ThreadId,
-    /// The thread's subject (its first message's).
+    /// The thread's subject, from its first message.
     pub subject: String,
-    /// Plain-text excerpt of the latest message, drafts included (a draft's `{PLACEHOLDER}`
-    /// braces dropped), HTML entities decoded.
+    /// Plain-text excerpt of the latest message, drafts included, with HTML entities decoded. A
+    /// draft's `{PLACEHOLDER}` braces are dropped.
     pub snippet: String,
-    /// Who to show in the From column, in order: senders in chronological order (recipients in
-    /// Sent, the last message's recipients when the thread has a draft), de-duplicated, without
-    /// you unless you're the only one. Name formatting and overflow are the UI's job.
+    /// Who to show in the From column, in order. These are the senders in chronological order,
+    /// de-duplicated, without you unless you're the only one. When the thread has a draft they're
+    /// the latest draft's recipients, and otherwise in Sent they're the recipients. Name
+    /// formatting and overflow are the UI's job.
     pub participants: Vec<Contact>,
-    /// The thread's date in this list: its latest relevant message (your own replies don't bump
-    /// a thread; in Sent, your latest sent message). Lists are ordered by it, newest first.
+    /// The thread's date in this list, from its latest relevant message. Your own replies don't
+    /// bump a thread, and in Sent it's your latest sent message. Lists are ordered by it, newest
+    /// first.
     pub date: Timestamp,
     /// Some message is unread.
     pub unread: bool,
     /// Some message is starred.
     pub starred: bool,
-    /// Muted: the mute label, and no newer message added you as a recipient.
+    /// Muted, which means it has the mute label and no newer message added you as a recipient.
     pub muted: bool,
     /// Done: not routed to the inbox.
     pub done: bool,
@@ -79,27 +81,29 @@ pub struct ThreadSummary {
     pub labels: Vec<String>,
     /// What the row's attachment icon shows.
     pub attachments: Attachments,
-    /// Its attached files: its shown messages' attachments that aren't inline or invites, one per
-    /// name (the last message's), which a search result shows as cards.
+    /// Its attached files, which a search result shows as cards. These are the attachments of the
+    /// messages the row shows, without inline files and invites, one per name (the last
+    /// message's).
     pub files: Vec<Attachment>,
-    /// Whom the contact pane shows for the thread: the sender of the first unread message, else
-    /// of the latest one, who isn't you.
+    /// Whom the contact pane shows for the thread: the first sender who isn't you, looking at the
+    /// unread messages oldest first and then the rest newest first.
     pub contact: Option<Contact>,
     /// Messages the row shows, drafts included.
     pub messages: usize,
     /// Drafts the row shows, failed ones aside.
     pub drafts: usize,
-    /// The thread has a failed draft, for this reason ([`SendFailure::Other`] when its failed
-    /// drafts don't share one): the row shows it instead of the date.
+    /// Why the thread's failed draft failed, when it has one, which the row shows instead of the
+    /// date. It's [`SendFailure::Other`] when the thread's failed drafts don't share a reason.
     pub failure: Option<SendFailure>,
-    /// A send of the thread's is held or waiting to go: offline, the row says it will go when
-    /// online.
+    /// One of the thread's sends is held or waiting to go. While offline, the row says it will go
+    /// when online.
     pub sending: bool,
-    /// The thread has a scheduled send: the earliest one's time, and whether Gmail has the latest
-    /// version of each: the row says `Scheduled: {date}`, or `Schedule: {date}` until Gmail does.
+    /// The time of the thread's earliest scheduled send, and whether Gmail has the latest version
+    /// of each of its scheduled sends. The row says `Scheduled: {date}`, or `Schedule: {date}`
+    /// until Gmail does.
     pub scheduled: Option<(Timestamp, bool)>,
     /// The triage mutations that would take the thread out of the list it was read from, as
-    /// [`Store::apply`](crate::Store::apply) would apply them: its row can slide out the moment
+    /// [`Store::apply`](crate::Store::apply) would apply them, so its row can slide out the moment
     /// one is applied. Adding a label never takes a thread out of a list.
     pub removed_by: Vec<Mutation>,
     /// Its reminder, while the row shows it.
@@ -120,7 +124,7 @@ pub enum ReminderStatus {
     Returned {
         /// When.
         at: Timestamp,
-        /// Not read since: the row's dot is pink.
+        /// Not read since, so the row's dot is pink.
         unread: bool,
     },
     /// Someone replied, which cancelled an "if no reply" reminder.
@@ -136,9 +140,9 @@ pub enum Attachments {
     /// Nothing attached.
     #[default]
     None,
-    /// Real (non-inline) files: the paperclip.
+    /// Real (non-inline) files, shown as the paperclip.
     Files,
-    /// Only a calendar invite: the calendar icon.
+    /// Only a calendar invite, shown as the calendar icon.
     CalendarInvite,
 }
 
@@ -149,7 +153,7 @@ pub struct ThreadPage {
     pub threads: Vec<ThreadSummary>,
     /// Where the next page starts, when there are more local threads in the backfilled range.
     pub next: Option<Cursor>,
-    /// Gmail may have threads older than what's stored for this list:
+    /// Gmail may have threads older than what's stored for this list.
     /// [`Store::backfill`](crate::Store::backfill) extends the range.
     pub more_remote: bool,
 }
@@ -168,8 +172,8 @@ pub struct ListCount {
     pub threads: usize,
     /// Of those, unread ones.
     pub unread: usize,
-    /// Every thread of the list is stored (its backfill or All Mail's finished), so the counts
-    /// are exact.
+    /// Every thread of the list is stored, because its backfill or All Mail's has finished, so the
+    /// counts are exact.
     pub exact: bool,
 }
 
@@ -178,11 +182,11 @@ pub struct ListCount {
 pub struct ThreadDetail {
     /// The thread.
     pub id: ThreadId,
-    /// The thread's subject (its first message's).
+    /// The thread's subject, from its first message.
     pub subject: String,
     /// Every label id on the thread's messages, including pending changes.
     pub labels: Vec<String>,
-    /// Muted: the mute label, and no newer message added you as a recipient.
+    /// Muted, which means it has the mute label and no newer message added you as a recipient.
     pub muted: bool,
     /// Its reminder, while the header shows it.
     pub reminder: Option<ReminderStatus>,
@@ -229,15 +233,15 @@ pub struct MessageDetail {
     pub headers: Vec<Header>,
     /// The body's HTML and plain-text parts.
     pub body: Body,
-    /// Attachment metadata; fetch bytes with Gmail's `attachments.get`.
+    /// Attachment metadata. Fetch the bytes with Gmail's `attachments.get`.
     pub attachments: Vec<Attachment>,
-    /// A failed draft's reason: the thread shows it as a message, not a draft to edit.
+    /// A failed draft's reason. The thread shows a failed draft as a message, not a draft to edit.
     pub failure: Option<SendFailure>,
-    /// A scheduled send's time: the thread shows it as a message to go then, not a draft to
-    /// edit.
+    /// A scheduled send's time. The thread shows a scheduled send as a message to go then, not a
+    /// draft to edit.
     pub scheduled: Option<Timestamp>,
-    /// A send being held or waiting to go, shown as it will be sent: the stored thread never has
-    /// one, compose adds it.
+    /// A send being held or waiting to go, shown as it will be sent. The stored thread never has
+    /// one, because compose adds it.
     pub sending: bool,
 }
 
@@ -276,7 +280,7 @@ pub struct Header {
     pub value: String,
 }
 
-/// A message body as sent: not sanitized or quote-split yet.
+/// A message body as sent, not sanitized or quote-split yet.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Body {
     /// The `text/html` parts, concatenated.
@@ -290,7 +294,7 @@ pub struct Body {
 pub struct Attachment {
     /// The message it belongs to.
     pub message_id: String,
-    /// Gmail's attachment id, for `attachments.get`; absent when the data was inline.
+    /// Gmail's attachment id, for `attachments.get`. Absent when the data was inline.
     pub attachment_id: Option<String>,
     /// MIME part id (`1`, `1.2`, ...).
     pub part_id: String,
@@ -302,8 +306,8 @@ pub struct Attachment {
     pub size: u32,
     /// `Content-ID` without angle brackets, for `cid:` references in the HTML.
     pub content_id: Option<String>,
-    /// Shown in the body rather than listed: the HTML references its `Content-ID` (or it's a
-    /// Gmail emoji).
+    /// Shown in the body rather than listed, because the HTML references its `Content-ID` or it's
+    /// a Gmail emoji.
     pub inline: bool,
 }
 
@@ -312,7 +316,7 @@ pub struct Attachment {
 pub struct Label {
     /// Label id (`INBOX`, `Label_12`).
     pub id: String,
-    /// Name; `/` separates nesting levels. System labels keep Gmail's id-like names.
+    /// Name, with `/` separating nesting levels. System labels keep Gmail's id-like names.
     pub name: String,
     /// System or user label.
     pub kind: LabelKind,

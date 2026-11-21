@@ -57,7 +57,8 @@ fn is_replaced(tag: &str) -> bool {
     )
 }
 
-/// JavaScript's `\s` (also what its `trim` strips): Unicode white space but U+0085, and U+FEFF.
+/// JavaScript's `\s` (also what its `trim` strips): Unicode white space except U+0085, plus
+/// U+FEFF.
 pub(crate) fn is_space(c: char) -> bool {
     c == '\u{feff}' || (c.is_whitespace() && c != '\u{85}')
 }
@@ -567,7 +568,7 @@ impl Content {
             .binary_search_by(|strut| strut.clean_start.cmp(&at))
         {
             Ok(mut index) => {
-                // Several struts can start at the same offset; take the first.
+                // Several struts can start at the same offset, so take the first.
                 while index > 0 && self.struts[index - 1].clean_start == at {
                     index -= 1;
                 }
@@ -599,7 +600,7 @@ impl Content {
                 dom::set_text(&strut.node, head);
                 dom::insert_after(&strut.node, &tail);
                 // Where the tail's text starts in the node's (collapsed, trimmed) text. Only the
-                // head's start is trimmed: trimming its end too would land a byte early,
+                // head's start is trimmed, because trimming its end too would land a byte early,
                 // mid-character after a second split.
                 let formatted = collapse_spaces(head).trim_start_matches(is_space).len();
                 for later in self.strut_of.values_mut().filter(|i| **i > index) {
@@ -621,7 +622,7 @@ impl Content {
     }
 }
 
-/// Removes empty leading and trailing content under `root` (`DOMContent.trim`).
+/// Removes empty leading and trailing content under `root`.
 pub(crate) fn trim(root: &NodeRef) {
     recursively_empty(root, Direction::Forward, false);
     recursively_empty(root, Direction::Backward, false);

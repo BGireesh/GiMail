@@ -1,5 +1,6 @@
-//! The event form's spelling: its title spellchecked as a one-line field, About as compose's body
-//! is ([`crate::spelling`]), and a right-click in either showing the shell's editable menu.
+//! The event form's spelling: its title spellchecked as a one-line field, About spellchecked like
+//! compose's body ([`crate::spelling`]), and a right-click in either showing the shell's editable
+//! menu.
 
 use exo_commands::Hint;
 
@@ -9,9 +10,9 @@ use crate::{
 };
 
 impl Mail {
-    /// Each frame, before anything draws: the open form's title and About get their
-    /// spellcheckers, About follows the account's autocorrect and autocomplete, and a
-    /// right-click in either last frame shows its menu and does what's chosen in it.
+    /// Runs each frame, before anything draws. The open form's title and About get their
+    /// spellcheckers, About follows the account's autocorrect and autocomplete, and a right-click
+    /// in either field last frame shows its menu and does what's chosen in it.
     pub(crate) fn calendar_spelling(&mut self, ctx: &egui::Context) {
         let (autocorrect, autocomplete) =
             (self.autocorrect(), self.account.settings().autocomplete());

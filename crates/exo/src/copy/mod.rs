@@ -1,5 +1,5 @@
 //! What the copy commands put on the clipboard: a message or a conversation as text and HTML, a
-//! message's recipients and a thread's subject; and ⌘C in the list ([`listed`]).
+//! message's recipients and a thread's subject. ⌘C in the list is in [`listed`].
 
 mod listed;
 mod turndown;
@@ -21,7 +21,7 @@ pub struct Contents {
     pub html: String,
 }
 
-/// `message` as copying it puts it on the clipboard, its new part given by `unquoted_html`.
+/// `message` as copying it puts it on the clipboard, with its new part given by `unquoted_html`.
 pub fn message(message: &MessageDetail, unquoted_html: &str, now: &Zoned) -> Contents {
     conversation(&[(message, unquoted_html)], now)
 }
@@ -132,7 +132,7 @@ fn message_text(message: &MessageDetail, unquoted_html: &str, now: &Zoned) -> St
 fn body_markdown(message: &MessageDetail, unquoted_html: &str) -> (String, Vec<String>) {
     let mut tree = Tree::parse(unquoted_html);
     let mut footnotes = Vec::new();
-    // Every image and link becomes its text, in document order; one inside a link that's
+    // Every image and link becomes its text, in document order. An element inside a link that's
     // already gone still takes a number.
     for id in tree.elements(&["IMG", "A"]) {
         let text = if tree.name(id) == Some("IMG") {

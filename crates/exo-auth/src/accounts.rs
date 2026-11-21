@@ -2,7 +2,7 @@
 //!
 //! New accounts are appended, signing in again keeps an account's place, and the order is the one
 //! ctrl+1…9 and the switchers use. An account Google signed out stays listed until it signs in
-//! again, and one account is the one launch opens. Only metadata lives here; refresh tokens are in
+//! again, and one account is the one launch opens. Only metadata lives here. Refresh tokens are in
 //! the [`SecretStore`](crate::SecretStore).
 
 use std::path::{Path, PathBuf};
@@ -22,17 +22,17 @@ pub struct Account {
     /// The account's full name, when Google has one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    /// Google refused its grant: it's listed, but has to sign in again before its mail opens.
+    /// Google refused its grant. It's listed, but has to sign in again before its mail opens.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub signed_out: bool,
     /// The account used last, which launch opens.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub last_used: bool,
-    /// The color picked for it in the Accounts dialog, by name (`thistle`, `sea`, …); without one
+    /// The color picked for it in the Accounts dialog, by name (`thistle`, `sea`, …). Without one,
     /// it's computed from the address.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
-    /// When it first signed in to Exo on this Mac: the account's join date.
+    /// When it first signed in to Exo on this Mac, which is the account's join date.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub joined: Option<jiff::Timestamp>,
     /// The other Google accounts signed in for its calendars alone, whose grants Exo keeps for it.
@@ -70,8 +70,8 @@ impl Registry {
         self.accounts.iter().any(|account| account.email == email)
     }
 
-    /// The account launch opens: the one used last, unless it's signed out; then the first that
-    /// isn't.
+    /// The account launch opens: the one used last, unless it's signed out, in which case the
+    /// first that isn't.
     pub(crate) fn default_account(&self) -> Option<&Account> {
         let signed_in = |account: &&Account| !account.signed_out;
         self.accounts
@@ -81,9 +81,9 @@ impl Registry {
             .or_else(|| self.accounts.iter().find(signed_in))
     }
 
-    /// Records a sign-in: a new account goes at the end, joined now; one already listed keeps its
-    /// place, its color, its join date and whether it's the last used, and is signed in again.
-    /// Either way its name is Google's latest, and it becomes the one used last.
+    /// Records a sign-in. A new account goes at the end, joined now. An account already listed
+    /// keeps its place, its color, its join date and whether it's the last used, and is signed in
+    /// again. Either way its name is Google's latest, and it becomes the one used last.
     pub(crate) fn sign_in(&mut self, account: Account) -> Result<(), Error> {
         let email = account.email.clone();
         match self
@@ -125,7 +125,7 @@ impl Registry {
         self.save()
     }
 
-    /// Sets the color `email` shows in (`None`: the one computed from its address).
+    /// Sets the color `email` shows in. `None` means the one computed from its address.
     pub(crate) fn set_color(&mut self, email: &str, color: Option<String>) -> Result<(), Error> {
         self.find(email)?.color = color;
         self.save()
@@ -159,7 +159,7 @@ impl Registry {
             .ok_or_else(|| Error::UnknownAccount(email.to_owned()))
     }
 
-    /// Takes `email` out of the list. Whether it was there.
+    /// Takes `email` out of the list, and returns whether it was there.
     pub(crate) fn remove(&mut self, email: &str) -> Result<bool, Error> {
         let before = self.accounts.len();
         self.accounts.retain(|account| account.email != email);

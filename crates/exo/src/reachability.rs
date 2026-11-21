@@ -1,5 +1,6 @@
-//! The OS's word on whether the Mac has a network. It only says the state flipped; the account
-//! then checks whether Gmail answers ([`Account::network_changed`](crate::account::Account::network_changed)).
+//! The OS's word on whether the Mac has a network. It only says the state flipped, and the
+//! account then checks whether Gmail answers
+//! ([`Account::network_changed`](crate::account::Account::network_changed)).
 
 /// Watches the Mac's route to the internet while alive.
 pub struct Reachability {
@@ -26,7 +27,7 @@ impl Reachability {
 #[cfg(target_os = "macos")]
 mod macos {
     // SCNetworkReachability is deprecated in favour of Network.framework's path monitor, which
-    // has no bindings in the objc2 family Exo uses; it still works.
+    // has no bindings in the objc2 family Exo uses. It still works.
     #![allow(deprecated)]
 
     use std::ffi::c_void;
@@ -48,11 +49,12 @@ mod macos {
     pub(super) struct Watch {
         target: CFRetained<SCNetworkReachability>,
         queue: DispatchRetained<DispatchQueue>,
-        /// Owned; freed once the callback can no longer run.
+        /// Owned, and freed once the callback can no longer run.
         state: NonNull<State>,
     }
 
-    /// Online: reachable without first having to bring a connection up.
+    /// Whether `flags` mean online, which is reachable without first having to bring a
+    /// connection up.
     fn online(flags: SCNetworkReachabilityFlags) -> bool {
         flags.contains(SCNetworkReachabilityFlags::Reachable)
             && !flags.contains(SCNetworkReachabilityFlags::ConnectionRequired)
@@ -61,7 +63,7 @@ mod macos {
     impl Watch {
         pub(super) fn start(changed: Box<dyn Fn() + Send + Sync>) -> Option<Self> {
             // The default route, 0.0.0.0.
-            // SAFETY: `sockaddr_in` is plain data; all zeros is the any address.
+            // SAFETY: `sockaddr_in` is plain data. All zeros is the any address.
             let mut address: libc::sockaddr_in = unsafe { std::mem::zeroed() };
             address.sin_len = std::mem::size_of::<libc::sockaddr_in>() as u8;
             address.sin_family = libc::AF_INET as u8;
@@ -90,7 +92,7 @@ mod macos {
                 copyDescription: None,
             };
             // SAFETY: `callback` only reads `State` through `info`, which outlives the callback's
-            // registration (`Drop` unregisters before freeing it); the context is copied.
+            // registration (`Drop` unregisters before freeing it). The context is copied.
             let watching = unsafe {
                 watch.target.set_callback(Some(callback), &mut context)
                     && watch.target.set_dispatch_queue(Some(&watch.queue))

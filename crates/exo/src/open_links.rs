@@ -1,10 +1,10 @@
-//! Open Links & Attachments (`⌘O`, the palette's `Open Link`): a sub-palette of a conversation's
+//! Open Links & Attachments (`⌘O`, the palette's `Open Link`), a sub-palette of a conversation's
 //! one-click actions, files and links, and the palette's row for its last action (`OPEN_ACTION`).
-//! In a thread it lists the focused message's; in the list, every message's of the highlighted
-//! conversation, read (its bodies fetched, if it's stored for its rows alone) and rendered on
-//! demand. A link opens in the browser; a file previews, or downloads when it can't be previewed,
-//! the way a click on its card does. With ⌘ held, a link opens in the background and the list stays
-//! open; with ⌘ or ⇧, a file downloads.
+//! In a thread it lists the focused message's. In the list it lists those of every message of the
+//! highlighted conversation, which is read (its bodies fetched, if it's stored for its rows alone)
+//! and rendered on demand. A link opens in the browser. A file previews, or downloads when it
+//! can't be previewed, the way a click on its card does. With ⌘ held, a link opens in the
+//! background and the list stays open. With ⌘ or ⇧, a file downloads.
 //!
 //! Hovering a link in the focused message, as hover intent has it, hints at `⌘O`.
 
@@ -34,10 +34,11 @@ const REGIONS: &[Region] = &[
     Region::ThreadMessages,
     Region::ThreadMessageCalendarInvite,
 ];
-/// Hover intent's poll (`interval: 250`).
+/// How often hover intent polls the pointer, every 250ms.
 const INTENT_INTERVAL: f64 = 0.25;
-/// A link that says this, to this, is the `Sent via Superhuman` signature's, and links saying
-/// these are its invitations: the list leaves them out.
+/// Links the list leaves out. A link with one of these texts, to a URL that starts with the one
+/// beside it, is the `Sent via Superhuman` signature's. Links whose text has one of
+/// `INVITATION_TEXTS` in it are its invitations.
 const SIGNATURE_LINKS: &[(&str, &str)] = &[
     ("Superhuman", "https://sprh.mn/?vip"),
     ("Superhuman iOS", "https://sprh.mn/?vip"),
@@ -52,7 +53,7 @@ pub enum Action {
     Launch,
     /// A link's row, or an action's.
     Link(String),
-    /// The palette's row for the conversation's last one-click action: it opens in the
+    /// The palette's row for the conversation's last one-click action, which opens in the
     /// background.
     OneClick(String),
     /// A file's row.
@@ -65,7 +66,7 @@ struct Found {
     actions: Vec<exo_mail::Action>,
     attachments: Vec<Attachment>,
     links: Vec<Link>,
-    /// A conversation being read has actions that show.
+    /// Whether a conversation being read has actions that show.
     priority: bool,
 }
 
@@ -148,7 +149,7 @@ pub(crate) fn register(
     }
 }
 
-/// The files a message lists here: every one but its inline images, invites included.
+/// The files a message lists here, which is every one but its inline images, invites included.
 fn attached(message: &MessageDetail) -> impl Iterator<Item = &Attachment> {
     message
         .attachments
@@ -156,7 +157,8 @@ fn attached(message: &MessageDetail) -> impl Iterator<Item = &Attachment> {
         .filter(|attachment| !attachment.inline)
 }
 
-/// A conversation's files, one per name: where the name first appears, the latest message's.
+/// A conversation's files, one per name, each where its name first appears but taken from the
+/// latest message that has it.
 fn conversation_files(detail: &ThreadDetail) -> Vec<Attachment> {
     let mut files: Vec<Attachment> = Vec::new();
     for attachment in detail
@@ -176,8 +178,8 @@ fn conversation_files(detail: &ThreadDetail) -> Vec<Attachment> {
     files
 }
 
-/// Whether the list shows `link`: a web link that says something, and isn't the signature's or
-/// an invitation ([`SIGNATURE_LINKS`]).
+/// Whether the list shows `link`, which it does for a web link that says something and isn't
+/// the signature's or an invitation ([`SIGNATURE_LINKS`]).
 fn can_show(text: &str, url: &str) -> bool {
     let web = ["http://", "https://"].iter().any(|scheme| {
         url.strip_prefix(scheme)
@@ -191,7 +193,7 @@ fn can_show(text: &str, url: &str) -> bool {
         && !INVITATION_TEXTS.iter().any(|said| text.contains(said))
 }
 
-/// A URL as the list shows it: no scheme, `www.` or final `/`.
+/// A URL as the list shows it, without its scheme, `www.` or final `/`.
 fn display_url(url: &str) -> String {
     let url = url
         .strip_prefix("http://")
@@ -201,8 +203,8 @@ fn display_url(url: &str) -> String {
     url.strip_suffix('/').unwrap_or(url).to_owned()
 }
 
-/// Whether a link's text says nothing but "click here" and the like: with the first of each of
-/// those words gone (`click(ing)?` and `visit(ing)?` with their `ing`), nothing is left.
+/// Whether a link's text says nothing but "click here" and the like, so that nothing is left
+/// once the first of each of those words is gone (`click` and `visit` with their `ing`, if any).
 fn is_ambiguous(title: &str) -> bool {
     let mut rest = title.to_lowercase();
     for (word, suffix) in [
@@ -234,13 +236,14 @@ struct LinkRow {
     title: String,
     description: Option<String>,
     url: String,
-    /// A one-click action, and whether it's schema.org's.
+    /// Whether it's a one-click action, and whether that action is schema.org's.
     action: bool,
     declared: bool,
 }
 
-/// The actions' and links' rows, in order and without repeats: each titled by what it says, or
-/// where it goes when that says nothing, with where it goes beside it otherwise.
+/// The rows for the actions and links, in order and without repeats. Each is titled by what it
+/// says, or by where it goes when that says nothing, and otherwise shows where it goes beside
+/// the title.
 fn link_rows(actions: &[exo_mail::Action], links: &[Link]) -> Vec<LinkRow> {
     let actions = actions.iter().map(|action| {
         (
@@ -281,9 +284,9 @@ fn link_rows(actions: &[exo_mail::Action], links: &[Link]) -> Vec<LinkRow> {
     rows
 }
 
-/// The list's rows for `query`, without case: actions, files, then links, those matching best
-/// first. The first schema.org action, or Google Calendar's `More details` link (as `Open in Google
-/// Calendar`), goes on top.
+/// The list's rows for `query`, ignoring case: actions, files, then links, with the best matches
+/// first. The first schema.org action, or Google Calendar's `More details` link (as
+/// `Open in Google Calendar`), goes on top.
 fn rows(found: &Found, query: &str) -> Vec<Command<commands::Action>> {
     let mut links = link_rows(&found.actions, &found.links);
     let top = links.iter().position(|row| {
@@ -351,7 +354,7 @@ fn rows(found: &Found, query: &str) -> Vec<Command<commands::Action>> {
     let mut scored: Vec<(f64, Command<commands::Action>)> = all
         .into_iter()
         .filter_map(|row| {
-            // `title.slice(0, 200)`, in UTF-16 units.
+            // Only the title's first 200 UTF-16 units are scored.
             let units: Vec<u16> = row
                 .title()
                 .unwrap_or_default()
@@ -371,7 +374,7 @@ impl Mail {
     /// Carries out an Open Links & Attachments command.
     pub(crate) fn open_links_run(&mut self, action: Action) {
         match action {
-            // `⌘O` in the list closes it.
+            // `⌘O` with the list open closes it.
             Action::Launch if self.commands.is_sub_palette_open(PALETTE) => {
                 self.commands.close_palette()
             }
@@ -466,8 +469,9 @@ impl Mail {
         );
     }
 
-    /// Keeps the open list in step with what it's for: the focused message, whose render's
-    /// links may arrive after the list opened, or the conversation being read. Call every frame.
+    /// Keeps the open list in step with what it's for, which is the focused message (whose
+    /// rendered links may arrive after the list opened) or the conversation being read. Call
+    /// every frame.
     pub(crate) fn open_links_frame(&mut self) {
         while let Ok((id, detail)) = self.open_links.read.1.try_recv() {
             self.open_links_thread_read(&id, detail.as_ref());
@@ -507,7 +511,7 @@ impl Mail {
         found.actions = actions;
     }
 
-    /// The store read conversation `id`: if the list is for it, its files go in and its messages
+    /// The store read conversation `id`. If the list is for it, its files go in and its messages
     /// are rendered for their links.
     fn open_links_thread_read(&mut self, id: &str, detail: Option<&Arc<ThreadDetail>>) {
         let Some(detail) =
@@ -527,8 +531,8 @@ impl Mail {
         self.bodies.render(id, &messages, self.account.email());
     }
 
-    /// Conversation `id`'s messages, rendered: the list shows their links and actions if it's
-    /// for it (the actions each once, if they show at all).
+    /// The messages of conversation `id` were rendered. If the list is for that conversation, it
+    /// shows their links and actions (the actions each once, if they show at all).
     pub(crate) fn open_links_rendered(&mut self, id: &str, facts: &[(String, crate::body::Facts)]) {
         if self.open_links.target == Some(Target::Conversation(id.to_owned())) {
             let mut found = self.open_links.found.borrow_mut();

@@ -51,8 +51,8 @@ pub struct Harness {
     pub gmail: gmail::Client,
 }
 
-/// The debounce [`options`] gives outages: the default 10 s and 60 s, in the same ratio but
-/// short enough for tests.
+/// The debounce [`options`] gives outages. It keeps the ratio of the default 10 s and 60 s but
+/// is short enough for tests.
 pub const DEBOUNCE: exo_store::Debounce = exo_store::Debounce {
     down: Duration::from_millis(300),
     bounce: Duration::from_millis(1800),
@@ -69,8 +69,8 @@ pub fn options() -> Options {
     }
 }
 
-/// [`options`] with every push writing every draft, for tests of what one write does that
-/// write the same draft twice in a row.
+/// [`options`] with every push writing every draft. It's for tests that write the same draft
+/// twice in a row to check what one write does.
 pub fn unpaced() -> Options {
     Options {
         draft_pace: Duration::ZERO,
@@ -115,7 +115,7 @@ impl Harness {
         Self::synced_with(options()).await
     }
 
-    /// [`synced`](Self::synced), the store opened with `options`.
+    /// [`synced`](Self::synced), with the store opened with `options`.
     pub async fn synced_with(options: Options) -> Self {
         let harness = Self::start_with(Config::default(), options).await;
         harness.sync_all().await;
@@ -267,7 +267,7 @@ impl Harness {
 pub struct Gate(Arc<GateState>);
 
 struct GateState {
-    /// Requests still let through before one is held; negative once it has been.
+    /// Requests still let through before one is held. It goes negative once one has been.
     pass: AtomicI64,
     held: Notify,
     release: Notify,

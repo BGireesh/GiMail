@@ -2,7 +2,7 @@
 //!
 //! Exo draws one style, Classic, in two themes: Snow (light) and Carbon (dark). Classic's colors
 //! are literals, one per component and theme. [`Palette`] names the roles those literals play most
-//! often; a component whose color differs from its role keeps the literal at its call site, saying
+//! often. A component whose color differs from its role keeps the literal at its call site, saying
 //! where it applies.
 
 use egui::{Color32, Context, Id};
@@ -59,15 +59,15 @@ fn app_theme_id() -> Id {
     Id::new("exo_ui::app_theme")
 }
 
-/// The app's theme, even inside a forced-theme island ([`with_theme`]): the few colors a Carbon
+/// The app's theme, even inside a forced-theme island ([`with_theme`]). The few colors a Carbon
 /// dialog doesn't take from Snow (a disabled primary button's fill, for one) read it.
 pub fn app_theme(ctx: &Context) -> Theme {
     ctx.data(|data| data.get_temp(app_theme_id()))
         .unwrap_or_else(|| theme(ctx))
 }
 
-/// Runs `paint` with `theme` as the theme, then restores the current one: a forced-theme island,
-/// like Carbon's dialogs, which keep Snow's colors on a light card.
+/// Runs `paint` with `theme` as the theme, then restores the current one. This makes a
+/// forced-theme island, like Carbon's dialogs, which keep Snow's colors on a light card.
 pub fn with_theme<R>(ctx: &Context, theme: Theme, paint: impl FnOnce() -> R) -> R {
     let current = self::theme(ctx);
     let outermost = ctx

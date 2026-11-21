@@ -1,6 +1,6 @@
-//! The popups' copy, one line per entry; `_…_` is italic.
+//! The popups' copy, one line per entry. `_…_` is italic.
 
-/// A send popup past 200 sends without a message of its own.
+/// The body of a send popup past 200 sends, for a count without a message of its own.
 pub(super) const SEND_POOL: &[&[&str]] = &[
     &["Cheers to accomplishing more and saving time."],
     &["With your hands on the keyboard, no one can", "stop you."],
@@ -29,7 +29,7 @@ pub(super) const SEND_POOL: &[&[&str]] = &[
     ],
 ];
 
-/// A Mark Done popup past 500 without a message of its own.
+/// The body of a Mark Done popup past 500, for a count without a message of its own.
 pub(super) const CLEAR_POOL: &[&[&str]] = &[
     &[
         "Well done! Every email cleared is a weight off",

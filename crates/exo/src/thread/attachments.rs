@@ -18,8 +18,8 @@ const LIST_MARGIN_TOP: f32 = 16.0;
 const LIST_MARGIN_LEFT: f32 = -8.0;
 /// The list's wrapper ends a pixel lower when it holds attachments (measured).
 const LIST_EXTRA: f32 = 1.0;
-/// `Download all`'s row under the cards, around its box (4px over and, in Classic, 8px under a
-/// 16px line) in a line box 2px taller.
+/// The height of the `Download all` row under the cards. Its box is a 16px line with 4px above
+/// and, in Classic, 8px below, in a line box 2px taller.
 const DOWNLOAD_LINE: f32 = 30.0;
 /// `Download all`: 12px/16px, `top: 1px`, `margin-left: 3px`.
 const DOWNLOAD_ALL: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 12.0, 16.0);
@@ -33,13 +33,13 @@ pub(crate) const MAX_THUMBNAIL_SIDE: u32 = 10_000;
 /// What a click on the attachments asks for.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Click {
-    /// A card: preview it (with the others the list can preview), or only download it when ⌘
-    /// or Ctrl was held or the download icon was hit.
+    /// A card, to preview (with the others the list can preview), or only to download when ⌘ or
+    /// Ctrl was held or the download icon was hit.
     Open {
         attachment: Attachment,
         preview: bool,
     },
-    /// `Download all`: message `message`'s files as one zip.
+    /// `Download all`, for the files of message `message` as one zip.
     DownloadAll { message: String },
     /// A card dragged out, from this point.
     Drag {
@@ -52,10 +52,10 @@ pub(crate) enum Click {
 /// thumbnails, and the messages whose files are being zipped.
 #[derive(Default)]
 pub(crate) struct Files {
-    /// Clicked files being fetched, by message and part: the percentage arrived.
+    /// Clicked files being fetched, by message and part, with the percentage that has arrived.
     progress: HashMap<Key, f32>,
-    /// Image attachments' thumbnails, by message and part; `None` once asked for, until it
-    /// comes, or for good when there's none to show.
+    /// Image attachments' thumbnails, by message and part. A thumbnail is `None` once asked for
+    /// until it comes, or for good when there's none to show.
     thumbnails: HashMap<Key, Option<TextureHandle>>,
     /// Messages whose `Download all` is zipping.
     zipping: HashSet<String>,
@@ -67,7 +67,7 @@ impl Files {
         self.progress = progress;
     }
 
-    /// The image attachments of `messages` whose thumbnails haven't been asked for yet; each is
+    /// The image attachments of `messages` whose thumbnails haven't been asked for yet. Each is
     /// asked for once.
     pub(crate) fn thumbnail_requests<'a>(
         &mut self,
@@ -117,8 +117,8 @@ fn key(attachment: &Attachment) -> Key {
     (attachment.message_id.clone(), attachment.part_id.clone())
 }
 
-/// The attachments a message lists: its files, not its inline images or its calendar invite
-/// (which shows as the invite card instead).
+/// The attachments a message lists, which are its files but not its inline images or its
+/// calendar invite (which shows as the invite card instead).
 pub(crate) fn listed(message: &MessageDetail) -> impl Iterator<Item = &Attachment> {
     message
         .attachments
@@ -203,8 +203,8 @@ pub(crate) fn show(
     clicked
 }
 
-/// One card in `card`: the file's name and badge, or its thumbnail; its download icon on hover,
-/// or its progress bar while it downloads.
+/// One card in `card`, showing the file's name and badge or its thumbnail, and its download icon
+/// on hover or its progress bar while it downloads.
 fn show_card(
     ui: &Ui,
     card: Rect,
@@ -261,8 +261,8 @@ fn show_card(
     if let Some(progress) = progress {
         exo_ui::paint_attachment_progress(ui, card, &attachment.filename, progress);
     } else if !extension(&attachment.filename).is_empty() && response.hovered() {
-        // The download icon: Classic's 13px glyph 2px in from the padding, `top: 1px`; .4
-        // while the card is hovered, .7 on the glyph itself.
+        // The download icon is Classic's 13px glyph, 2px in from the padding at `top: 1px`. It's
+        // at .4 while the card is hovered, and .7 with the pointer on the glyph itself.
         let icon = Rect::from_min_size(
             pos2(card.right() - 8.0 - 2.0 - DOWNLOAD_ICON, bottom + 1.0),
             Vec2::splat(DOWNLOAD_ICON),
@@ -277,7 +277,7 @@ fn show_card(
             0.15,
             exo_ui::motion::CubicBezier::EASE,
         );
-        // The glyph: black at .8 (white in Carbon), or white on a thumbnail.
+        // The glyph is black at .8 (white in Carbon), or white on a thumbnail.
         let ink = if thumbnail.is_some() {
             Color32::WHITE
         } else {
@@ -303,8 +303,8 @@ fn show_card(
     })
 }
 
-/// An image card: the thumbnail, cover-cropped already, in the card's 4px
-/// corners, with its hover shadow and, `overlay` (0–1) into the hover, the 50% black overlay.
+/// An image card. It's the thumbnail, already cover-cropped, in the card's 4px corners, with its
+/// hover shadow and the 50% black overlay, faded in by `overlay` (0–1).
 fn paint_image_card(ui: &Ui, card: Rect, texture: &TextureHandle, hover: f32, overlay: f32) {
     let painter = ui.painter();
     let snapped = exo_ui::pixel_snap(card);
@@ -326,7 +326,7 @@ fn paint_image_card(ui: &Ui, card: Rect, texture: &TextureHandle, hover: f32, ov
         );
     painter.add(image);
     if overlay > 0.0 {
-        // The overlay: black, to `.5` on hover (`.125s linear`).
+        // The overlay is black, up to `.5` on hover (`.125s linear`).
         painter.rect_filled(
             snapped,
             CornerRadius::same(4),
@@ -335,13 +335,13 @@ fn paint_image_card(ui: &Ui, card: Rect, texture: &TextureHandle, hover: f32, ov
     }
 }
 
-/// `Download all` at `left`, `top`: the download glyph and the words at .4 (.6
-/// hovered), or while `zipping` the spinner at .4 and `Downloading…`. Returns whether it was
-/// clicked.
+/// `Download all` at `left`, `top`. It shows the download glyph and the words at .4 (.6 hovered),
+/// or while `zipping` the spinner at .4 and `Downloading…`. Returns whether it was clicked.
 fn download_all(ui: &Ui, left: f32, top: f32, zipping: bool, id: egui::Id) -> bool {
     let palette = exo_ui::palette(ui.ctx());
     let painter = ui.painter();
-    // `Download all`: `margin-left: 3px; padding: 4px 4px 8px 0`; black (white in Carbon).
+    // `Download all` has `margin-left: 3px; padding: 4px 4px 8px 0` and is black (white in
+    // Carbon).
     let text_left = left + 3.0 + DOWNLOAD_ALL_ICON + 10.0;
     let label = if zipping {
         "Downloading…"
@@ -376,14 +376,15 @@ fn download_all(ui: &Ui, left: f32, top: f32, zipping: bool, id: egui::Id) -> bo
         0.4
     };
     let ink = palette.ink(1.0, 1.0);
-    // `top: 1px` and the 4px padding, then the 13px glyph on the text's baseline makes the line
-    // box 18px, its text a pixel lower than a 16px one (measured).
+    // `top: 1px` and the 4px padding, plus a pixel because the 13px glyph on the text's
+    // baseline makes the line box 18px, which puts its text a pixel lower than in a 16px one
+    // (measured).
     let line = top + 4.0 + 1.0 + 1.0;
     let icon = Rect::from_min_size(
         pos2(left + 3.0, line - 1.0 + 3.0),
         Vec2::splat(DOWNLOAD_ALL_ICON),
     );
-    // The glyph: black (white) at .8.
+    // The glyph is black (white in Carbon) at .8.
     let glyph = palette.ink(0.8, 0.8);
     if zipping {
         exo_ui::paint_spinner(

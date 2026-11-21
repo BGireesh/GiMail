@@ -10,7 +10,8 @@ use support::{Fixture, start, start_with_settings};
 
 const COMMAND: Modifiers = Modifiers::MAC_CMD.plus(Modifiers::COMMAND);
 
-/// `G` `;`, `C`, Enter (`Private Snippet`): a snippet named `name` with `body`, saved with ⌘Enter.
+/// Creates a snippet named `name` with `body` through `G` `;`, `C`, Enter (`Private Snippet`),
+/// and saves it with ⌘Enter.
 fn create_snippet(app: &mut Fixture, name: &str, body: &str) {
     app.key(Key::G);
     app.key(Key::Semicolon);
@@ -100,7 +101,7 @@ fn leaving_a_snippet_with_changes_asks_to_save_it() {
     app.key(Key::C);
     app.key(Key::Enter);
     app.type_text("draft name");
-    // Escape lets go of the form; Escape again leaves, which asks first.
+    // Escape lets go of the form. Escape again leaves, which asks first.
     app.key(Key::Escape);
     app.key(Key::Escape);
     assert!(app.mail().compose_pane_open(), "Save Snippet? holds it");
@@ -204,7 +205,7 @@ fn going_to_another_list_with_unsaved_changes_asks_to_save_the_snippet() {
     app.key(Key::I);
     assert!(app.mail().compose_pane_open(), "Save Snippet? holds it");
     assert!(app.mail().snippets_folder_open());
-    // Enter takes `Save`, and the going goes on.
+    // Enter takes `Save`, and leaving goes on.
     app.key(Key::Enter);
     assert!(!app.mail().compose_pane_open());
     assert!(!app.mail().snippets_folder_open(), "on to the inbox");
@@ -267,8 +268,8 @@ fn a_reply_to_a_message_sent_with_a_snippet_counts_in_the_folder() {
     );
 }
 
-/// `G` `;`, `C`, Enter, a name typed: a new snippet with unsaved changes, the form letting go of
-/// the keyboard.
+/// Starts a new snippet with `G` `;`, `C`, Enter and types a name, which leaves the snippet with
+/// unsaved changes and the form letting go of the keyboard.
 fn start_unsaved_snippet(app: &mut Fixture) {
     app.key(Key::G);
     app.key(Key::Semicolon);
@@ -416,7 +417,7 @@ fn the_read_only_view_lists_the_snippets_files_and_zips_them() {
     app.key(Key::Semicolon);
     app.key(Key::Enter);
     assert_eq!(app.mail().snippet_viewed(), Some("draft00snippetfiles"));
-    // `Download all` is the last thing under the cards before the footer: just above where the
+    // `Download all` is the last thing under the cards before the footer, just above where the
     // pointer stops being a hand.
     let mut on_files = false;
     let mut at = None;

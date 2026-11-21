@@ -6,21 +6,21 @@ use exo_ui::{Family, Font, TextStyle, Theme};
 use super::{BlockLayout, BodyText};
 use crate::{autocorrect::SuggestionKind, editor::Editor, model::Pos};
 
-/// The pill: 28px tall with 4px of padding.
+/// The pill is 28px tall with 4px of padding.
 const HEIGHT: f32 = 28.0;
 const PADDING: f32 = 4.0;
-/// An item's name: 12px/15px semibold, `padding: 1px 4px 0 4px`, 2px corners; `Learn`'s
-/// `padding-right: 3px`.
+/// An item's name: 12px/15px semibold, `padding: 1px 4px 0 4px`, 2px corners, and
+/// `padding-right: 3px` on `Learn`.
 const NAME: TextStyle = TextStyle::new(Font::new(Family::Sans, 600), 12.0, 15.0);
 const NAME_PADDING: f32 = 4.0;
 const LEARN_PADDING_RIGHT: f32 = 3.0;
-/// The divider between items: 1×13px, 2px either side.
+/// The divider between items is 1×13px, with 2px either side.
 const DIVIDER: (f32, f32) = (1.0, 13.0);
 const DIVIDER_MARGIN: f32 = 2.0;
-/// Classic's undo icon: 10×10, `margin: -2px 0 0 6px`.
+/// Classic's undo icon is 10×10, with `margin: -2px 0 0 6px`.
 const UNDO: f32 = 10.0;
 const UNDO_GAP: f32 = 6.0;
-/// `Icons.DEPRECATED_undoArrow`, the `legacy` partner of the pill's undo icon.
+/// The pill's undo arrow.
 const UNDO_ICON: &str = "legacy/DEPRECATED_undoArrow";
 /// The tooltip's distance from the word (3px below it, 4px above), and from the container's
 /// sides.
@@ -28,7 +28,7 @@ const BELOW: f32 = 3.0;
 const ABOVE: f32 = 4.0;
 const SIDE: f32 = 22.5;
 
-/// The pill's colours in Classic: Snow's base rules and `.Theme-carbon`'s.
+/// The pill's colours in Classic, in Snow and in Carbon.
 struct Colors {
     fill: Color32,
     text: Color32,
@@ -68,11 +68,11 @@ impl Colors {
     }
 }
 
-/// A marked word's dots: a 2px strip 1px above the word's box's bottom,
+/// Paints a marked word's dots in a 2px strip 1px above the bottom of the word's box. The strip is
 /// `radial-gradient(circle at 1px 1px, {colour} 1px, transparent 0)` in 4×2px tiles from 1px in
-/// (`background-position-x: 1px`), as many whole ones as round to the word's width
-/// (`background-repeat: round`); `#b2b7c3` for a correction, `#f67b7b` for a misspelling, in both
-/// themes.
+/// (`background-position-x: 1px`), as many whole tiles as round to the word's width
+/// (`background-repeat: round`). The colour is `#b2b7c3` for a correction and `#f67b7b` for a
+/// misspelling, in both themes.
 pub(super) fn paint_annotation(
     painter: &egui::Painter,
     view: &BlockLayout,
@@ -114,8 +114,9 @@ pub(super) fn paint_annotation(
     }
 }
 
-/// A gradient's 1px-radius disc at `center`, inside `clip`, as Chromium rasterizes its hard stop:
-/// each device pixel in `color` at the share of it the disc covers, with no feathering past it.
+/// Paints a gradient's 1px-radius disc at `center`, inside `clip`, as Chromium rasterizes its hard
+/// stop. Each device pixel gets `color` at the share of the pixel the disc covers, with no
+/// feathering past the disc.
 fn paint_dot(painter: &egui::Painter, center: Pos2, clip: Rect, color: Color32) {
     const SAMPLES: usize = 4;
     let ppp = painter.pixels_per_point();
@@ -164,9 +165,9 @@ struct Slot {
 }
 
 impl Editor {
-    /// Draws the suggestion pill under its word (above it without room below), centred on it,
-    /// for an editor at `origin`; returns the item pressed (mouse-down takes it), the mouse
-    /// moving over one choosing it.
+    /// Draws the suggestion pill centred under its word (above it without room below), for an
+    /// editor at `origin`. Moving the mouse over an item chooses it. Returns the item pressed,
+    /// which mouse-down takes.
     pub(super) fn show_pill(&mut self, ui: &Ui, origin: Pos2) -> Option<usize> {
         let (block, range) = self.pill_word()?;
         let suggestions = self.suggestions()?.clone();
@@ -236,8 +237,8 @@ impl Editor {
         .order(Order::Foreground)
         .fixed_pos(card.min)
         .show(&ctx, |area| {
-            // It takes clicks off the body under it, but never the keyboard (egui would move it
-            // there with ↓).
+            // The pill takes clicks off the body under it, but never the keyboard, which egui
+            // would move to it with ↓.
             area.allocate_rect(card, Sense::CLICK);
             let painter = area.painter();
             exo_ui::paint_editor_tooltip(painter, card, colors.fill);
@@ -283,8 +284,9 @@ impl Editor {
                     None,
                 );
                 if undo {
-                    // The 10px box's margin box centred, 2px of it above the box; the arrow from
-                    // its top left at its own size (10×11, measured), `[fill*=red]`.
+                    // The 10px box's margin box is centred, with 2px of it above the box. The
+                    // arrow is drawn from the box's top left at its own size (10×11, measured),
+                    // in its `[fill*=red]` colour.
                     let icon_top =
                         name.top() + 1.0 + (name.height() - 1.0 - (UNDO - 2.0)) / 2.0 - 2.0;
                     let at = pos2(name.left() + NAME_PADDING + text_width + UNDO_GAP, icon_top);

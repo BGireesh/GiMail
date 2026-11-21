@@ -19,9 +19,9 @@ pub(crate) const OFFLINE_ALL: &str =
     "These attachments are not available offline.\nPlease check your connection and try again.";
 
 impl AttachmentFiles {
-    /// Brings the open thread's cards up to date: how far its clicked files have come, which
-    /// messages are zipping, and the thumbnails that have arrived; and fetches the thumbnails it
-    /// asks for (an image card's data loads as it's shown).
+    /// Brings the open thread's cards up to date with how far its clicked files have come, which
+    /// messages are zipping, and the thumbnails that have arrived. Also fetches the thumbnails the
+    /// thread asks for (an image card's data loads as it's shown).
     pub(crate) fn update_thread(&mut self, loader: &Loader, thread: &mut ThreadView) {
         let progress = self
             .downloads
@@ -40,7 +40,8 @@ impl AttachmentFiles {
             let key = (attachment.message_id.clone(), attachment.part_id.clone());
             let pixels_per_point = ctx.pixels_per_point();
             loader.attachment(&attachment, move |bytes| {
-                // Decoding takes a while for a photo; the account's tasks have better to do.
+                // Decoding a photo takes a while, so it gets its own thread and leaves the
+                // account's tasks free.
                 std::thread::spawn(move || {
                     let image = bytes
                         .ok()
@@ -52,14 +53,14 @@ impl AttachmentFiles {
         }
     }
 
-    /// Brings a read-only snippet's cards up to date: whether its files are zipping.
+    /// Brings a read-only snippet's cards up to date with whether its files are zipping.
     pub(crate) fn update_files(&self, files: &mut crate::thread::attachments::Files) {
         files.set_zipping(&self.zipping);
     }
 
-    /// `Download all` under `message`'s cards, the `position`th in a conversation about
-    /// `subject`: its files zipped into the download folder, the card list saying `Downloading…`
-    /// until then. Nothing happens while it's zipping already.
+    /// `Download all` under the cards of `message`, the `position`th message in a conversation
+    /// about `subject`. It zips the files into the download folder, and the card list says
+    /// `Downloading…` until then. Nothing happens while the message is zipping already.
     pub(crate) fn download_all(
         &mut self,
         loader: &Loader,
@@ -81,8 +82,8 @@ impl AttachmentFiles {
         );
     }
 
-    /// [`Self::download_all`] under a read-only snippet's cards (the message `id`), about
-    /// `subject`: its files, kept in `folder` (the draft files) or still Gmail's.
+    /// [`Self::download_all`] under the cards of a read-only snippet (the message `id`) about
+    /// `subject`. Its files are kept in `folder` (the draft files) or still in Gmail.
     pub(crate) fn download_snippet_files(
         &mut self,
         loader: &Loader,
@@ -126,8 +127,8 @@ impl AttachmentFiles {
         );
     }
 
-    /// `files` zipped as `name` into the download folder, cards `id` saying `Downloading…`
-    /// meanwhile.
+    /// Zips `files` as `name` into the download folder, while the cards under `id` say
+    /// `Downloading…`.
     fn zip(
         &mut self,
         loader: &Loader,
@@ -203,8 +204,8 @@ enum Part {
 }
 
 impl crate::Mail {
-    /// Copy Attachments: the focused message's files on the clipboard, with the hint saying where
-    /// they go.
+    /// Copy Attachments, which puts the focused message's files on the clipboard and shows the
+    /// hint saying where they go.
     pub(crate) fn copy_attachments(&mut self) {
         let Some(thread) = &self.thread else { return };
         let Some(message) = thread.detail().and_then(|detail| {
@@ -231,8 +232,8 @@ impl crate::Mail {
         );
     }
 
-    /// Takes in this frame's news of the clicked files: a fetch offline says so in the offline
-    /// alert.
+    /// Takes in this frame's news of the clicked files. A fetch that failed offline shows the
+    /// offline alert.
     pub(crate) fn attachment_files_poll(&mut self, now: f64) {
         for event in self.attachment_files.poll(now) {
             let text = match event {
@@ -267,7 +268,7 @@ impl crate::Mail {
         }
     }
 
-    /// Exo's viewer over `attachments`, from the `start`th.
+    /// Opens Exo's viewer over `attachments`, starting at the `start`th.
     pub(crate) fn preview_attachments(&mut self, attachments: Vec<Attachment>, start: usize) {
         if attachments.is_empty() {
             return;
@@ -282,8 +283,9 @@ impl crate::Mail {
         ));
     }
 
-    /// A search result's file card: an image or a message in the viewer over the conversation's
-    /// others, anything else in Quick Look, or downloaded.
+    /// Opens a search result's file card. An image or a message opens in the viewer, along with
+    /// the conversation's other previewable files. Anything else previews in Quick Look or
+    /// downloads.
     pub(crate) fn open_result_file(&mut self, file: Attachment, preview: bool) {
         if preview && super::is_previewable(&file) {
             let files: Vec<Attachment> = self
@@ -308,7 +310,7 @@ impl crate::Mail {
         }
     }
 
-    /// The viewer has the keyboard.
+    /// Whether the viewer has the keyboard.
     pub(crate) fn previewing(&self) -> bool {
         self.attachment_files
             .viewer
@@ -316,8 +318,8 @@ impl crate::Mail {
             .is_some_and(|viewer| !viewer.is_closing())
     }
 
-    /// Does what the viewer's keys or clicks ask: a download goes as a click on the card's download
-    /// icon does.
+    /// Does what the viewer's keys or clicks ask. A download works the way a click on the card's
+    /// download icon does.
     pub(crate) fn viewer_run(&mut self, action: ViewerAction, now: f64) {
         let Some(viewer) = self.attachment_files.viewer.as_mut() else {
             return;
@@ -359,7 +361,7 @@ impl crate::Mail {
         }
         match clicked {
             Some(ViewerOutput::Action(action)) => self.viewer_run(action, now),
-            // A `mailto:` link's draft opens under the viewer, which goes to show it.
+            // A `mailto:` link's draft opens under the viewer, which closes to show the draft.
             Some(ViewerOutput::Link { url, .. })
                 if url
                     .get(..7)
@@ -410,8 +412,8 @@ impl crate::Mail {
         );
     }
 
-    /// Holds the `card`th card of the open conversation's last message downloading at
-    /// `percent`, its bar and notification showing (for screenshots).
+    /// Holds the `card`th card of the open conversation's last message as downloading at
+    /// `percent`, with its bar and notification showing (for screenshots).
     pub fn hold_download(&mut self, card: usize, percent: f32) {
         let Some(detail) = self.thread.as_ref().and_then(ThreadView::shared_detail) else {
             return;

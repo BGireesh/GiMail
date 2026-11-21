@@ -1,5 +1,6 @@
 //! What the updater says: the app menu's item, the alerts of ⌘K's `Check for Updates`, the
-//! dialogs of the app menu's with no mail on screen, and the notification of an update ready.
+//! dialogs of the app menu's `Check for Updates…` with no mail on screen, and the notification of
+//! an update that's ready.
 
 use super::Stage;
 
@@ -34,7 +35,7 @@ pub enum Alert {
     Latest,
     /// The update server couldn't be reached.
     Offline,
-    /// Downloading, this far in percent; `OK` leaves it to finish.
+    /// Downloading, this far in percent. `OK` leaves it to finish.
     Installing(u8),
     /// Something else went wrong.
     Failed,
@@ -65,12 +66,12 @@ impl Alert {
 /// answer.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Dialog {
-    /// A newer release, `Download` or `Not now`.
+    /// A newer release, with `Download` or `Not now`.
     Available(String),
     /// Nothing newer.
     UpToDate,
-    /// Downloaded, `Install and Restart` or `Not now`: what the notification of an update ready
-    /// says too.
+    /// Downloaded, with `Install and Restart` or `Not now`. The notification of an update that's
+    /// ready says the same.
     Ready(String),
     /// The update failed, saying why when it was the connection.
     Failed(Option<Connection>),

@@ -4,13 +4,13 @@
 //!
 //! It is [`BodyView`](crate::BodyView)'s document without what only Blitz needs: no host
 //! isolation (a real shadow root isolates) and no presentational hints (a browser maps those
-//! attributes itself). It is always Snow's: the Carbon rules for bodies, like the
-//! thread view's, are screen-only, so Carbon prints exactly as Snow does.
+//! attributes itself). It is always Snow's, because the Carbon rules for bodies, like the thread
+//! view's, are screen-only. So Carbon prints exactly as Snow does.
 //!
-//! Remote content can't load from the engine: every remote URL is rewritten to
+//! Remote content can't load from the engine. Every remote URL is rewritten to
 //! [`REMOTE_SCHEME_PREFIX`]`http(s)`, which only the print view's own handler loads, through the
-//! same guarded fetches as a body on screen, or, with remote content blocked, to
-//! [`BLOCKED_SCHEME`], which nothing loads.
+//! same guarded fetches as a body on screen. With remote content blocked, it's rewritten to
+//! [`BLOCKED_SCHEME`] instead, which nothing loads.
 
 use std::sync::LazyLock;
 
@@ -25,7 +25,7 @@ const PRINT_CSS: &str = include_str!("print.css");
 /// `exo-http:`. A protocol-relative URL resolves against the document, which is the print
 /// view's job to put on `exo-https:` too.
 pub const REMOTE_SCHEME_PREFIX: &str = "exo-";
-/// The scheme a blocked body's remote URLs get: no handler answers it.
+/// The scheme a blocked body's remote URLs get, which no handler answers.
 pub const BLOCKED_SCHEME: &str = "exo-blocked";
 
 /// A remote URL's scheme (or a protocol-relative URL's `//`) in CSS: `url(…)` or `@import "…"`.
@@ -36,9 +36,9 @@ static CSS_URL: LazyLock<Regex> = LazyLock::new(|| {
 static SRCSET_URL: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)(^|,)(\s*)(https?:|//)").expect("valid regex"));
 
-/// `render`'s body as it prints, with its quoted part when `show_quoted` (the `…`
-/// itself doesn't print), loading nothing remote when `block_remote_content`: the markup that
-/// goes inside the message's shadow root.
+/// `render`'s body as it prints: the markup that goes inside the message's shadow root. It has its
+/// quoted part when `show_quoted` (the `…` itself doesn't print), and loads nothing remote when
+/// `block_remote_content`.
 pub fn printable_body(render: &Render, show_quoted: bool, block_remote_content: bool) -> String {
     let options = ViewOptions {
         theme: Theme::Light,
@@ -86,10 +86,11 @@ fn rewrite_html(html: &str, block: bool) -> String {
             && (remote::is_remote(&dom::attr(&element, "src").unwrap_or_default())
                 || remote::srcset_is_remote(&dom::attr(&element, "srcset").unwrap_or_default()))
         {
-            // `body.css`'s box; the print view sizes it as Chromium sizes a broken image.
+            // Marks the image for `body.css`'s box. The print view sizes it as Chromium sizes a
+            // broken image.
             dom::set_attr(&element, "data-exo-blocked", "");
         }
-        // A lazy image would never load: a page that prints isn't scrolled.
+        // A lazy image would never load, because a page that prints isn't scrolled.
         if dom::is(&element, "img") {
             dom::remove_attr(&element, "loading");
         }
@@ -129,7 +130,7 @@ fn rewrite_css(css: &str, block: bool) -> String {
         .into_owned()
 }
 
-/// A remote `url` as the printed body names it; `None` for one that isn't remote.
+/// A remote `url` as the printed body names it, or `None` for one that isn't remote.
 fn rewrite_url(url: &str, block: bool) -> Option<String> {
     let trimmed = url.trim_start();
     if !remote::is_remote(trimmed) {

@@ -15,7 +15,8 @@ const CMD: Modifiers = Modifiers {
 };
 
 /// Where the dialog's controls are at 1280×800 with the mock's three calendars: the email
-/// checkbox, each calendar's, `Notify me:`'s dropdown, and its list's `5 mins before events`.
+/// checkbox, each calendar's, the dropdown of `Notify me:`, and `5 mins before events` in its
+/// list.
 const EMAIL: Pos2 = Pos2::new(875.0, 334.0);
 const CALENDARS: [Pos2; 3] = [
     Pos2::new(875.0, 427.0),

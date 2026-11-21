@@ -1,9 +1,9 @@
 //! Gmail v1 resources, transcribed from the discovery document in `discovery/gmail.v1.json`.
 //!
-//! Every field is optional on the wire: Gmail drops fields per `format`, per resource state and
-//! under `fields` partial responses, so scalars are `Option` and lists default to empty. Field
-//! order follows what Gmail actually sends. `int64`/`uint64` fields are JSON strings; `int32`
-//! fields (sizes, counts) are JSON numbers.
+//! Every field is optional on the wire, because Gmail drops fields per `format`, per resource
+//! state and under `fields` partial responses. So scalars are `Option` and lists default to empty.
+//! Field order follows what Gmail actually sends. `int64`/`uint64` fields are JSON strings, and
+//! `int32` fields (sizes, counts) are JSON numbers.
 
 use serde::{Deserialize, Serialize};
 use serde_with::{DisplayFromStr, serde_as, skip_serializing_none};
@@ -27,14 +27,14 @@ pub struct Profile {
     pub history_id: Option<u64>,
 }
 
-/// A label. `labels.list` omits the counts; `labels.get` includes them.
+/// A label. `labels.list` omits the counts, and `labels.get` includes them.
 #[skip_serializing_none]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Label {
     /// Immutable ID: the name for system labels (`INBOX`), `Label_N` for user labels.
     pub id: Option<String>,
-    /// Display name; `/` separates nesting levels (`Projects/Exo`).
+    /// Display name. `/` separates nesting levels (`Projects/Exo`).
     pub name: Option<String>,
     /// Whether messages with this label show in the message list.
     pub message_list_visibility: Option<MessageListVisibility>,
@@ -51,7 +51,7 @@ pub struct Label {
     pub threads_total: Option<u32>,
     /// Unread threads with the label.
     pub threads_unread: Option<u32>,
-    /// Color; user labels only.
+    /// Color, for user labels only.
     pub color: Option<LabelColor>,
 }
 
@@ -166,7 +166,7 @@ impl Message {
     }
 }
 
-/// One MIME part. The root part has `partId` `""`; children are `0`, `1`, then `0.0`, ...
+/// One MIME part. The root part has `partId` `""`, and children are `0`, `1`, then `0.0`, ...
 #[skip_serializing_none]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -175,7 +175,7 @@ pub struct MessagePart {
     pub part_id: Option<String>,
     /// Content type without parameters, e.g. `text/html`.
     pub mime_type: Option<String>,
-    /// Attachment filename; `""` for non-attachment parts.
+    /// Attachment filename, or `""` for non-attachment parts.
     pub filename: Option<String>,
     /// Headers in message order, RFC 2047-decoded and unfolded.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -279,7 +279,7 @@ pub struct ListMessagesResponse {
     /// The page of messages, newest first. Omitted when empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub messages: Vec<Message>,
-    /// Token for the next page; absent on the last page.
+    /// Token for the next page, absent on the last page.
     pub next_page_token: Option<String>,
     /// Estimated total number of results.
     pub result_size_estimate: Option<u32>,
@@ -311,7 +311,7 @@ pub struct ListThreadsResponse {
     /// The page of threads, most recently active first. Omitted when empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub threads: Vec<Thread>,
-    /// Token for the next page; absent on the last page.
+    /// Token for the next page, absent on the last page.
     pub next_page_token: Option<String>,
     /// Estimated total number of results.
     pub result_size_estimate: Option<u32>,
@@ -405,7 +405,7 @@ pub struct ListDraftsResponse {
     /// The page of drafts, newest first. Omitted when empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub drafts: Vec<Draft>,
-    /// Token for the next page; absent on the last page.
+    /// Token for the next page, absent on the last page.
     pub next_page_token: Option<String>,
     /// Estimated total number of results.
     pub result_size_estimate: Option<u32>,
@@ -417,7 +417,7 @@ pub struct ListDraftsResponse {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct History {
-    /// The record's ID; later records have larger IDs, with gaps.
+    /// The record's ID. Later records have larger IDs, with gaps.
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub id: Option<u64>,
     /// Messages touched by this record (`id` and `threadId` only).
@@ -496,9 +496,9 @@ pub struct ListHistoryResponse {
     /// Records after `startHistoryId`, oldest first. Omitted when empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub history: Vec<History>,
-    /// Token for the next page; absent on the last page.
+    /// Token for the next page, absent on the last page.
     pub next_page_token: Option<String>,
-    /// The mailbox's current history ID; store it for the next sync.
+    /// The mailbox's current history ID. Store it for the next sync.
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub history_id: Option<u64>,
 }
@@ -510,9 +510,9 @@ pub struct ListHistoryResponse {
 pub struct SendAs {
     /// The address that appears in `From:`.
     pub send_as_email: Option<String>,
-    /// The name that appears in `From:`; empty means the account name.
+    /// The name that appears in `From:`. Empty means the account name.
     pub display_name: Option<String>,
-    /// Default `Reply-To:`; empty for none.
+    /// Default `Reply-To:`, or empty for none.
     pub reply_to_address: Option<String>,
     /// HTML signature.
     pub signature: Option<String>,
@@ -524,7 +524,7 @@ pub struct SendAs {
     pub treat_as_alias: Option<bool>,
     /// SMTP relay settings, for external aliases.
     pub smtp_msa: Option<SmtpMsa>,
-    /// Verification state; non-primary addresses only.
+    /// Verification state, for non-primary addresses only.
     pub verification_status: Option<VerificationStatus>,
 }
 
@@ -559,7 +559,7 @@ pub enum SecurityMode {
     Starttls,
 }
 
-/// `SendAs.verificationStatus` (and forwarding addresses').
+/// `SendAs.verificationStatus`, also the verification status of forwarding addresses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum VerificationStatus {

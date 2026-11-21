@@ -1,7 +1,7 @@
-//! Clearing an account's cache (Clear Cache and Restart): its database is made again and its
-//! mail downloaded again, keeping what Gmail doesn't have (the settings, drafts, held sends,
-//! queued changes, reminders, unsubscribes to retry and the calendar's queued changes) when the
-//! old file still reads.
+//! Clearing an account's cache (Clear Cache and Restart). Its database is made again and its
+//! mail downloaded again. When the old file still reads, the store keeps what Gmail doesn't have:
+//! the settings, drafts, held sends, queued changes, reminders, unsubscribes to retry and the
+//! calendar's queued changes.
 
 mod support;
 
@@ -160,7 +160,7 @@ async fn clearing_a_newer_exos_cache_keeps_what_gmail_doesnt_have() {
         server, dir, store, ..
     } = harness;
     drop(store);
-    // As a newer Exo leaves it: with a migration this one doesn't have.
+    // Leave the database as a newer Exo would, with a migration this one doesn't have.
     rusqlite::Connection::open(database(dir.path())).and_then(|db| db.execute_batch("INSERT INTO __toasty_migrations (id, name, applied_at) VALUES (99, '0002_from_a_newer_exo.sql', datetime('now'))")).expect("a newer migration");
     let error = support::try_open(&server, dir.path())
         .await

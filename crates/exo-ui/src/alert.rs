@@ -1,10 +1,10 @@
-//! The alert: a small centered card with a bold title, text and its actions in a row at the bottom
+//! The alert, a small centered card with a bold title, text and its actions in a row at the bottom
 //! right.
 //!
-//! 340px wide, padded `12px 24px 20px 16px`, 4px corners, white in both themes; title and text
-//! are 14px/20px Exo Sans nudged down 3px, the text 8px below the title; the actions sit in a 28px
-//! row 8px below the text, floated right past the padding (`margin-right: -12px`), the second one
-//! 8px left of the first.
+//! The card is 340px wide, padded `12px 24px 20px 16px`, with 4px corners, and white in both
+//! themes. The title and text are 14px/20px Exo Sans nudged down 3px, with the text 8px below the
+//! title. The actions sit in a 28px row 8px below the text, floated right past the padding
+//! (`margin-right: -12px`), with the second one 8px left of the first.
 
 use egui::{Color32, CornerRadius, Rect, Sense, Ui, pos2, vec2};
 
@@ -36,7 +36,7 @@ const ACTIONS_HEIGHT: f32 = 28.0;
 const ACTION_PADDING: [f32; 3] = [8.0, 12.0, 4.0];
 /// The second action's gap before the first.
 const ACTION_GAP: f32 = 8.0;
-/// The title: `rgba(0, 0, 0, .9)`; the text: `rgba(0, 0, 0, .75)`, in both themes.
+/// The title is `rgba(0, 0, 0, .9)` and the text `rgba(0, 0, 0, .75)`, in both themes.
 const TITLE_INK: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 230);
 const TEXT_INK: Color32 = ALERT_TEXT_INK;
 /// The text's `rgba(0, 0, 0, .75)`.
@@ -59,10 +59,10 @@ const SHADOWS: [BoxShadow; 2] = [
 /// A radio: 12px, 7px before its label.
 const RADIO: f32 = 12.0;
 const RADIO_GAP: f32 = 7.0;
-/// A keycap in an alert's text: an 18px cap, at least 18px wide, `padding: 0 5px`, `margin: 0 1px`,
-/// `#abb7c5` (`#555b64` in Carbon) with 3px corners; its label 12px semibold (13px only on a 1×
-/// screen) in a 15px line, white (at `.8` in Carbon), 2.5px down the cap (centered in its 12px
-/// content box, then `translateY(3px)`).
+/// A keycap in an alert's text, an 18px cap at least 18px wide, with `padding: 0 5px`,
+/// `margin: 0 1px`, and 3px corners in `#abb7c5` (`#555b64` in Carbon). Its label is 12px semibold
+/// (13px only on a 1× screen) in a 15px line, white (at `.8` in Carbon), 2.5px down the cap
+/// (centered in its 12px content box, then `translateY(3px)`).
 const KEY_HEIGHT: f32 = 18.0;
 const KEY_MIN_WIDTH: f32 = 18.0;
 const KEY_PADDING: f32 = 5.0;
@@ -74,10 +74,10 @@ const KEY_LABEL_TOP: f32 = 2.5;
 /// Separates `<p>` paragraphs in [`Alert::text`].
 pub const PARAGRAPH: char = '\u{2029}';
 
-/// `text` for an address or domain in an alert: a `<wbr>` before each word that follows a word and
-/// punctuation, so `daniel@brightmoor.co` can break after its `@` and `.`. Chromium lays a `<wbr>`
-/// out as a zero-width space ([`WBR`]), and its glyphs either side don't kern; the alert does the
-/// same.
+/// `text` for an address or domain in an alert, with a `<wbr>` before each word that follows a
+/// word and punctuation, so `daniel@brightmoor.co` can break after its `@` and `.`. Chromium lays a
+/// `<wbr>` out as a zero-width space ([`WBR`]), and its glyphs either side don't kern. The alert
+/// does the same.
 pub fn wbrise(text: &str) -> String {
     #[derive(Clone, Copy, PartialEq, Eq)]
     enum Kind {
@@ -125,10 +125,10 @@ pub fn wbrise(text: &str) -> String {
 pub struct Alert<'a> {
     /// The title (`Almost there…`).
     pub title: &'a str,
-    /// The text: each `\n` is a `<br>` (so a blank line is an empty line), and runs of spaces
+    /// The text. Each `\n` is a `<br>` (so a blank line is an empty line), and runs of spaces
     /// collapse, leading ones included. [`PARAGRAPH`] separates `<p>`s, which sit 8px apart.
     pub text: &'a str,
-    /// The actions' labels, right to left: the first is rightmost.
+    /// The actions' labels, right to left, so the first is rightmost.
     pub actions: &'a [&'a str],
     /// The selected action (usually the first).
     pub selected: usize,
@@ -153,7 +153,7 @@ impl Alert<'_> {
     }
 
     /// [`Alert::show`] with a radio button per option in place of the text, one per line, as a
-    /// recurring event's RSVP puts them (12px, `top: 2px`, 7px before its label); a click on an
+    /// recurring event's RSVP puts them (12px, `top: 2px`, 7px before its label). A click on an
     /// option's line selects it into `chosen`.
     pub fn show_options(
         &self,
@@ -297,10 +297,10 @@ impl Alert<'_> {
         })
     }
 
-    /// [`Alert::show`] with `body` painting the text box ([`ALERT_TEXT_WIDTH`] wide with actions
-    /// and `height` tall, its top already nudged down) itself: an alert whose children aren't plain
-    /// text (bold runs, links, a checkbox). Paint in [`ALERT_TEXT`] and [`ALERT_TEXT_INK`] to match
-    /// the plain text.
+    /// [`Alert::show`] with `body` painting the text box itself ([`ALERT_TEXT_WIDTH`] wide with
+    /// actions and `height` tall, its top already nudged down), for an alert whose children aren't
+    /// plain text (bold runs, links, a checkbox). Paint in [`ALERT_TEXT`] and [`ALERT_TEXT_INK`] to
+    /// match the plain text.
     pub fn show_body(
         &self,
         ui: &mut Ui,
@@ -311,7 +311,7 @@ impl Alert<'_> {
         self.paint(ui, area, height, body)
     }
 
-    /// The text box's width: without actions there's no action row, and a narrower padding.
+    /// The text box's width. Without actions, there's no action row and a narrower padding.
     fn content_width(&self) -> f32 {
         let padding_right = if self.actions.is_empty() {
             PADDING_RIGHT_NO_ACTIONS
@@ -322,7 +322,7 @@ impl Alert<'_> {
     }
 
     /// [`Alert::show_body`] with `emoji` drawn as an image `size` big after the title and a space
-    /// (`Welcome to Exo <img>`): the image stands on the title's baseline, and when it's taller
+    /// (`Welcome to Exo <img>`). The image stands on the title's baseline, and when it's taller
     /// than the baseline is low it raises the title's line box, pushing the rest down.
     pub fn show_body_with_title_emoji(
         &self,
@@ -389,7 +389,7 @@ impl Alert<'_> {
             + TEXT_MARGIN
             + actions_height
             + PADDING_BOTTOM;
-        // Centering can land on a half pixel; Chromium paints the alert's layer at the whole
+        // Centering can land on a half pixel, and Chromium paints the alert's layer at the whole
         // pixel below it, text and all.
         let card = pixel_snap(Rect::from_center_size(area.center(), vec2(WIDTH, height)));
 
@@ -475,9 +475,9 @@ pub fn paint_radio(painter: &egui::Painter, at: egui::Pos2, selected: bool) {
     }
 }
 
-/// Paints `paragraphs`' lines from `at` down, 8px between paragraphs; returns the bottom of the
-/// last line. Each piece between `<wbr>`s ([`wbrise`]) is shaped on its own, as Chromium's are:
-/// no kerning across them.
+/// Paints `paragraphs`' lines from `at` down, 8px between paragraphs, and returns the bottom of
+/// the last line. Each piece between `<wbr>`s ([`wbrise`]) is shaped on its own, as Chromium's
+/// are, with no kerning across them.
 fn paint_paragraphs(painter: &egui::Painter, at: egui::Pos2, paragraphs: &[Vec<String>]) -> f32 {
     let mut y = at.y;
     for (index, paragraph) in paragraphs.iter().enumerate() {
@@ -496,8 +496,8 @@ fn paint_paragraphs(painter: &egui::Painter, at: egui::Pos2, paragraphs: &[Vec<S
 }
 
 /// Wraps `paragraph` as an alert's text wraps: at `<br>`s and spaces, with whitespace collapsed
-/// (`white-space: normal`), and `text-wrap: pretty`'s rule against a last line of one word: the
-/// line above gives up its last word when it can.
+/// (`white-space: normal`), and with `text-wrap: pretty`'s rule against a last line of one word,
+/// under which the line above gives up its last word when it can.
 fn pretty_wrap(ctx: &egui::Context, paragraph: &str, width: f32) -> Vec<String> {
     let mut lines = Vec::new();
     for line in paragraph.split('\n') {

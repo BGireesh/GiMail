@@ -1,15 +1,15 @@
-//! The copy tooltip: a dark tooltip box 8px under its target, centred on it and kept in the window,
-//! on the hover tooltips' timing: it shows once hover intent has the pointer settled on the target,
-//! and goes 150ms after the pointer has left the target, unless it's on the tooltip. Its text is at
-//! 70% (`top: -1px`, cut at 460px, underlined while hovered) and the copy icon 8px after it at 66%
-//! (100% hovered). The text does what its caller says (copy, or compose to the address); the icon
-//! copies.
+//! The copy tooltip, a dark tooltip box 8px under its target, centred on it and kept in the
+//! window. It follows the hover tooltips' timing, showing once hover intent has the pointer
+//! settled on the target and going 150ms after the pointer has left the target, unless the pointer
+//! is on the tooltip. Its text is at 70% (`top: -1px`, cut at 460px, underlined while hovered) and
+//! the copy icon 8px after it at 66% (100% hovered). The text does what its caller says (copy, or
+//! compose to the address), and the icon copies.
 
 use egui::{Color32, Id, Order, Rect, Sense, Ui, Vec2, pos2, vec2};
 
 use crate::{Family, Font, HoverIntent, TextStyle, motion};
 
-/// A tooltip's text: 12px/20px bold, `padding: 6px 7px 3px`; the icon's row a pixel taller.
+/// A tooltip's text: 12px/20px bold, `padding: 6px 7px 3px`, with the icon's row a pixel taller.
 const TEXT: TextStyle = TextStyle::new(Font::new(Family::Sans, 700), 12.0, 20.0);
 const PADDING_X: f32 = 7.0;
 const PADDING_TOP: f32 = 6.0;
@@ -21,7 +21,7 @@ const MAX_TEXT: f32 = 460.0;
 const ICON_GAP: f32 = 8.0;
 const ICON: Vec2 = Vec2::new(11.0, 14.0);
 const COPY: &str = "legacy/DEPRECATED_clipboard";
-/// How long it stays once the pointer is off its target; its 200ms fade in.
+/// How long it stays once the pointer is off its target, and its 200ms fade in.
 const HIDE_AFTER: f64 = 0.15;
 const FADE: f64 = 0.2;
 
@@ -42,8 +42,8 @@ pub enum CopyClick {
     Icon,
 }
 
-/// The tooltip between frames: hover intent on the targets, and the one up, since when, and
-/// since when the pointer has been off its target.
+/// The tooltip's state between frames: hover intent on the targets, and which one is up, since
+/// when, and since when the pointer has been off its target.
 #[derive(Clone, Debug, Default)]
 pub struct CopyTooltip {
     intent: HoverIntent<(String, String)>,
@@ -56,10 +56,10 @@ impl CopyTooltip {
         self.open.is_some()
     }
 
-    /// Follows the pointer: `hovered` is the target under it this frame, if any. Shows the
+    /// Follows the pointer, with `hovered` the target under it this frame, if any. Shows the
     /// tooltip once the pointer has settled on a target, keeps it 150ms after the pointer has
-    /// left the target and while it's on the tooltip (or its 8px towards the target), and paints
-    /// it. Returns a click on it, with its target.
+    /// left the target and while the pointer is on the tooltip (or the 8px between it and the
+    /// target), and paints it. Returns a click on the tooltip, with its target.
     pub fn show(
         &mut self,
         ui: &Ui,
@@ -179,7 +179,7 @@ fn text_width(ui: &Ui, text: &str) -> f32 {
     TEXT.width(ui.ctx(), text).min(MAX_TEXT)
 }
 
-/// The box: centred 8px under its target, inside the window.
+/// The box, centred 8px under its target, inside the window.
 fn rect(ui: &Ui, tip: &CopyTip) -> Rect {
     let width = text_width(ui, &tip.shown) + ICON_GAP + ICON.x + 2.0 * PADDING_X;
     let window = ui.ctx().content_rect();

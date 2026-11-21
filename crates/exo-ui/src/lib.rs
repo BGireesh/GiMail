@@ -166,8 +166,8 @@ pub fn install(ctx: &egui::Context) -> Result<(), AssetError> {
 
 /// The id of `source` in the window `ctx` is drawing. egui keeps one `Context` for every window
 /// (viewport), so what a screen keeps under a fixed id would be shared by two windows drawing at
-/// once: ids of what a window draws go through here, salted with its viewport. What's the app's, a
-/// cache of fonts or icons, keeps a plain `Id::new`.
+/// once. Ids of what a window draws go through here instead, salted with its viewport. What
+/// belongs to the app, such as a cache of fonts or icons, keeps a plain `Id::new`.
 pub fn id(ctx: &egui::Context, source: impl egui::AsId) -> Id {
     Id::new(source).with(ctx.viewport_id())
 }

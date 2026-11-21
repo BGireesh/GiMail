@@ -37,8 +37,8 @@ pub(crate) fn same_address(a: &str, b: &str) -> bool {
 }
 
 /// What's typed as a recipient: `Name <address>`, `"Last, First" <address>` or a bare
-/// address. Text without an `@` past its start becomes a name with no address: an invalid chip
-/// showing it.
+/// address. Text without an `@` past its start becomes a name with no address, which shows as an
+/// invalid chip.
 pub(crate) fn parse(text: &str) -> Address {
     if text.find('@').is_some_and(|at| at > 0) {
         let (email, name) = match NAMED.captures(text) {
@@ -115,7 +115,7 @@ pub(crate) fn sanitize_name(name: &str, strip_via: bool) -> String {
     name
 }
 
-/// A chip as text to edit: `Name <address>`, the name quoted (with `"` and `\` escaped) unless
+/// A chip as text to edit, `Name <address>`. The name is quoted (with `"` and `\` escaped) unless
 /// it only has the characters an RFC 822 word may.
 pub(crate) fn format(address: &Address) -> String {
     match (
@@ -141,8 +141,8 @@ pub(crate) fn format(address: &Address) -> String {
     }
 }
 
-/// Pasted addresses: with a `<` in it, split at `,` `;` and newlines outside quotes;
-/// otherwise at any of those or whitespace.
+/// Pasted addresses. Text with a `<` in it splits at `,`, `;` and newlines outside quotes, and
+/// other text at any of those or whitespace.
 pub(crate) fn split_pasted(text: &str) -> Vec<String> {
     let parts: Vec<String> = if text.contains('<') {
         let mut parts = Vec::new();

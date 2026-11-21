@@ -275,7 +275,8 @@ fn the_cursor_follows_a_body_that_moves_under_a_still_pointer() {
     // On the second line of "Board deck — draft 2", under the full header.
     let at = egui::pos2(560.0, 247.0);
     assert_eq!(app.hover(at), egui::CursorIcon::Text);
-    // The header folds and the body moves up: the pointer is now past the end of a shorter line.
+    // The header folds and the body moves up, so the pointer is now past the end of a shorter
+    // line.
     app.press(Key::H, Modifiers::SHIFT);
     assert_eq!(
         app.harness.output().platform_output.cursor_icon,
@@ -477,7 +478,7 @@ fn the_keyboard_reaches_the_header_and_the_back_gutter() {
     app.key(Key::ArrowDown);
     assert_eq!(region(&app), Region::ThreadMessages, "↓ back");
     app.key(Key::ArrowUp);
-    // Without a status line nothing in the header has the keyboard yet: ← goes to the gutter.
+    // Without a status line nothing in the header has the keyboard yet, so ← goes to the gutter.
     app.key(Key::ArrowLeft);
     assert_eq!(region(&app), Region::ActionPane);
     app.key(Key::ArrowRight);
@@ -567,12 +568,13 @@ fn a_body_too_wide_for_the_column_widens_it_and_the_column_scrolls_sideways() {
     }
     app.key(Key::Enter);
     assert_eq!(open_subject(&app).as_deref(), Some("Black Friday is here"));
-    // The column now runs from the back gutter to 2rem from the pane's right, its first cell's
-    // empty end under the pointer, and the link past the right edge.
+    // The column now runs from the back gutter to 2rem from the pane's right. The empty end of
+    // its first cell is under the pointer, and the link is past the right edge.
     let at = egui::pos2(800.0, 200.0);
     assert_eq!(app.hover(at), egui::CursorIcon::Default);
     let region = |app: &Fixture| app.mail().thread().expect("open").region();
-    // → scrolls the whole column 175px at a time, as far as it goes: the link comes into view.
+    // → scrolls the whole column 175px at a time, as far as it goes, and the link comes into
+    // view.
     for _ in 0..3 {
         app.key(Key::ArrowRight);
     }
@@ -590,7 +592,7 @@ fn a_body_too_wide_for_the_column_widens_it_and_the_column_scrolls_sideways() {
     app.key(Key::ArrowLeft);
     assert_eq!(region(&app), Region::ActionPane, "← at the left edge");
     app.key(Key::ArrowRight);
-    // A sideways swipe scrolls the column too; the thread itself doesn't move up or down.
+    // A sideways swipe scrolls the column too. The thread itself doesn't move up or down.
     let scroll = app.mail().thread().expect("open").scroll();
     app.harness
         .input_mut()
@@ -614,8 +616,8 @@ fn a_body_too_wide_for_the_column_widens_it_and_the_column_scrolls_sideways() {
 fn a_new_accounts_focused_message_labels_its_reply_buttons() {
     let mut app = start("thread-reply-labels");
     app.key(Key::Enter);
-    // Tom to Me & Priya. Labelled, Reply all's label is where the participants' row ends without
-    // labels (reply buttons have labels in the account's first week).
+    // Tom to Me & Priya. With labels, Reply all's label sits where the participants' row ends
+    // without them (reply buttons have labels in the account's first week).
     let label = egui::pos2(725.0, 133.0);
     let replies = |app: &mut Fixture, joined: &str| {
         let joined: Option<jiff::Timestamp> =
@@ -738,7 +740,7 @@ fn double_and_triple_clicks_select_a_word_and_a_paragraph_to_copy() {
         app.key(Key::K);
     }
     app.key(Key::Enter);
-    // The body's first line: the first point down the column, under the header's selectable
+    // The body's first line is the first point down the column, under the header's selectable
     // subject, where the cursor is the I-beam.
     let x = 300.0;
     let line = (140..400)
@@ -759,7 +761,7 @@ fn double_and_triple_clicks_select_a_word_and_a_paragraph_to_copy() {
         copy(&mut app).as_deref(),
         Some("Supercalifragilisticexpialidocious and more\n")
     );
-    // A single click clears it: ⌘C then copies the message, as it does with nothing selected.
+    // A single click clears it, so ⌘C then copies the message, as it does with nothing selected.
     app.click(at);
     assert_ne!(
         copy(&mut app).as_deref(),

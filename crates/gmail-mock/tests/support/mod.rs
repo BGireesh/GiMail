@@ -69,7 +69,7 @@ impl Raw {
 /// A discovery document, used as the schema of record.
 pub struct Discovery {
     document: Value,
-    /// Gmail and People drop empty lists; Calendar sends `"items": []`.
+    /// Gmail and People drop empty lists, but Calendar sends `"items": []`.
     omits_empty_lists: bool,
 }
 

@@ -7,22 +7,24 @@ use exo_ui::{KeyTooltip, ShortcutTooltip};
 use super::{BlockLayout, BodyText};
 use crate::{dates::ActiveDate, editor::Editor, model::Pos};
 
-/// `.sh-date::after`'s `inset 0 .5px #aaa`, in both themes (Carbon's other shadow has no size).
+/// The hairline's `box-shadow: inset 0 .5px #aaa`, in both themes (Carbon's other shadow has no
+/// size).
 const LINE: Color32 = Color32::from_rgb(0xaa, 0xaa, 0xaa);
-/// `::after { bottom: 0; height: 3px }`: the hairline tops a 3px box at the bottom of the span's
-/// content area.
+/// From `::after { bottom: 0; height: 3px }`, the hairline tops a 3px box at the bottom of the
+/// span's content area.
 const LINE_ABOVE_BOTTOM: f32 = 3.0;
 const LINE_HEIGHT: f32 = 0.5;
-/// The date's tooltip: 3px under the date, 22.5px from the window's sides, fading in over 200ms. A
-/// popped-out draft's keeps 7.5px from the left, and while another draft is popped out an inline
-/// one's keeps 7.5px from the right.
+/// The date's tooltip sits 3px under the date and 22.5px from the window's sides, and fades in
+/// over 200ms. A popped-out draft's tooltip keeps 7.5px from the left, and while another draft is
+/// popped out, an inline draft's keeps 7.5px from the right.
 const BELOW: f32 = 3.0;
 const SIDE: f32 = 22.5;
 const POPPED_OUT_SIDE: f32 = 7.5;
 const FADE: f64 = 0.2;
 
-/// `.sh-date::after` under characters `chars` of `view` (a galley range), on each row it's on:
-/// `#aaa`, half a pixel, its ends on whole device pixels, over the text (`z-index: unset`).
+/// Paints a date's hairline under characters `chars` of `view` (a galley range), on each row the
+/// range is on. The line is `#aaa` and half a pixel tall, with its ends on whole device pixels,
+/// over the text (`z-index: unset`).
 pub(super) fn paint_line(
     painter: &egui::Painter,
     view: &BlockLayout,
@@ -55,8 +57,8 @@ pub(super) fn paint_line(
 
 impl Editor {
     /// The tooltip under `date` (`Previous Day` ⌘ shift – / `Next Day` ⌘ shift =), for an editor
-    /// at `origin`: centred under the date's box, kept clear of the window's sides, hidden while
-    /// the date is scrolled out of view, fading in when it first shows.
+    /// at `origin`. It's centred under the date's box, kept clear of the window's sides, hidden
+    /// while the date is scrolled out of view, and fades in when it first shows.
     pub(super) fn show_date_tooltip(&mut self, ui: &Ui, origin: Pos2, date: &ActiveDate, now: f64) {
         let since = *self.view.date_since.get_or_insert(now);
         let Some(target) = self
@@ -89,8 +91,7 @@ impl Editor {
         };
         let size = tooltip.size(&ctx);
         let window = ctx.content_rect();
-        // Centred to a whole pixel of the editor's box (`Math.ceil` of the shadow host's
-        // coordinates).
+        // Centred, rounded up to a whole pixel of the editor's box.
         let mut left =
             origin.x + ((target.left() + target.right()) / 2.0 - origin.x - size.x / 2.0).ceil();
         let (min, max) = match (self.settings.popped_out, self.settings.another_popped_out) {
@@ -122,8 +123,8 @@ impl Editor {
                 area.allocate_rect(card, Sense::CLICK);
                 let mut painter = area.painter().clone();
                 painter.multiply_opacity(exo_ui::motion::CubicBezier::EASE.at(fade));
-                // In its own layer, in the app's theme even over a dialog drawn in Snow's (Out of
-                // Office Reply's `Theme-light`).
+                // The tooltip is in its own layer and in the app's theme, even over a dialog drawn
+                // in Snow, such as Out of Office Reply.
                 exo_ui::with_theme(&ctx, exo_ui::app_theme(&ctx), || {
                     tooltip.paint(&painter, card.min)
                 });

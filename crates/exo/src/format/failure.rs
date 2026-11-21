@@ -8,7 +8,7 @@ use exo_store::SendFailure;
 pub struct Information {
     /// The list row's date column and the message header's date slot.
     pub title: &'static str,
-    /// The header's tooltip; `\n` breaks a line.
+    /// The header's tooltip. `\n` breaks a line.
     pub description: &'static str,
     /// Where `Learn more` in the tooltip goes.
     pub doc_link: Option<&'static str>,
@@ -81,8 +81,8 @@ pub fn collapsed_title(reason: SendFailure) -> &'static str {
     }
 }
 
-/// The `Sorry!` alert a send failing while its toast's observer runs shows. Logged out and invalid
-/// recipients have their states but no alert: only the failed draft shows them.
+/// The `Sorry!` alert that shows when a send fails while its toast's observer runs. Logged out and
+/// invalid recipients have their states but no alert, because only the failed draft shows them.
 pub fn alert(reason: SendFailure) -> Option<&'static str> {
     match reason {
         SendFailure::QuotaExceeded => {

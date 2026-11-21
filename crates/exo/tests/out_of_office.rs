@@ -16,7 +16,7 @@ const CMD: Modifiers = Modifiers {
     ..Modifiers::NONE
 };
 
-/// The dialog at 1280×800: its body starts at (397, 161).
+/// The dialog at 1280×800, whose body starts at (397, 161).
 const SWITCH: Pos2 = Pos2::new(568.0, 193.0);
 const SAVE: Pos2 = Pos2::new(867.0, 684.0);
 const FIRST_DAY: Pos2 = Pos2::new(470.0, 250.0);
@@ -58,7 +58,7 @@ fn the_dialog_shows_gmails_responder_and_saves_to_gmail() {
         .mail()
         .out_of_office_form()
         .expect("the dialog read Gmail");
-    // The mock's Thanksgiving responder: off, its days still to come, so they show.
+    // The mock's Thanksgiving responder is off, with its days still to come, so they show.
     assert!(!form.enabled);
     assert_eq!(form.subject, "Out of office");
     assert_eq!(form.start, at("2026-11-26T05:00:00Z"));
@@ -107,7 +107,7 @@ fn the_dialog_shows_gmails_responder_and_saves_to_gmail() {
         .clone()
         .expect("the copy");
     assert!(copy.is_enabled());
-    // Thanksgiving is next week: no bar yet.
+    // Thanksgiving is next week, so there's no bar yet.
     assert_eq!(app.mail().status_bar(), None);
 }
 
@@ -203,7 +203,7 @@ fn closing_a_changed_form_asks_before_discarding() {
         (title, text.as_str()),
         ("Discard changes?", "Your settings will not be saved.")
     );
-    // Cancel keeps the dialog; Discard (selected) closes it.
+    // Cancel keeps the dialog, and Discard (selected) closes it.
     app.key(Key::ArrowRight);
     app.key(Key::Enter);
     assert!(
@@ -293,7 +293,7 @@ fn the_nudge_offers_a_reply_for_days_off_this_week() {
         text,
         "It looks like you may be out of office from Thursday, November 19 to Friday, November 20.\nWould you like to send automatic out of office replies while you are away?"
     );
-    // `Set reply`: the dialog, with those days and the reply on.
+    // `Set reply` opens the dialog, with those days and the reply on.
     app.key(Key::Enter);
     let form = app.mail().out_of_office_form().expect("the dialog");
     assert!(form.enabled);
@@ -321,7 +321,7 @@ fn the_nudge_offers_a_reply_for_days_off_this_week() {
         ["2026-11-19", "2026-11-20"],
         "both offered, not next week's (the mock's Thanksgiving)"
     );
-    // Offered once: not again.
+    // Offered once, so not again.
     app.relaunch();
     app.wait(2.5);
     assert_eq!(app.mail().out_of_office_alert_text(), None);
@@ -416,7 +416,7 @@ fn tab_reaches_the_subject_and_save_needs_one() {
     let mut app = start("ooo-tab");
     palette(&mut app, "out of office");
     app.click(SWITCH);
-    // From the switch, Tab goes on to the first day; from the form, to the subject (its
+    // From the switch, Tab goes on to the first day. From the form, it goes to the subject (its
     // `tabIndex` of 4 comes before the switch's 0).
     app.key(Key::Tab);
     assert_eq!(
@@ -474,7 +474,8 @@ fn a_date_in_the_message_shows_its_day_and_moves_with_its_keys() {
     );
     palette(&mut app, "out of office");
     assert_eq!(app.mail().calendar_day(), None);
-    // The subject's line from (397, 312); Tab goes on to the message, End past its date.
+    // The subject's line starts at (397, 312). Tab goes on to the message, and End goes past its
+    // date.
     app.click(Pos2::new(800.0, 322.0));
     app.key(Key::Tab);
     app.key(Key::End);

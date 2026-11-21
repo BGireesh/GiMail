@@ -8,7 +8,7 @@ use crate::ids::ThreadId;
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     /// Gmail couldn't be reached (no network, DNS, TLS, timeouts). Reads and queued mutations
-    /// keep working; sync again once the network is back.
+    /// keep working. Sync again once the network is back.
     #[error("Gmail is unreachable: {0}")]
     Offline(#[source] gmail::Error),
     /// Gmail is rate limiting the account, and Exo has paused calls until `until`.
@@ -17,14 +17,15 @@ pub enum Error {
         /// When calls resume.
         until: jiff::Timestamp,
     },
-    /// Gmail rejected the access token even after asking the token provider for a new one: the
-    /// account needs to sign in again.
+    /// Gmail rejected the access token even after the store asked the token provider for a new
+    /// one, so the account needs to sign in again.
     #[error("Gmail rejected the credentials: {0}")]
     Unauthorized(#[source] gmail::Error),
     /// Gmail answered with an error that retrying won't fix, or retries ran out.
     #[error(transparent)]
     Gmail(gmail::Error),
-    /// Calendar has the event an answer is for, cancelled (`Event has been deleted`).
+    /// Calendar has the event that an answer is for, but it's cancelled
+    /// (`Event has been deleted`).
     #[error("the event has been cancelled")]
     EventCancelled,
     /// The local database failed.
@@ -42,8 +43,8 @@ pub enum Error {
         #[source]
         source: toasty::Error,
     },
-    /// The database file has a schema this build can't open: a migration a newer Exo applied.
-    /// It was left as it was.
+    /// The database file has a schema this build can't open, from a migration that a newer Exo
+    /// applied. The file was left as it was.
     #[error("{} has a schema this Exo can't open: {found}", path.display())]
     UnknownSchema {
         /// The database file.
@@ -87,8 +88,8 @@ pub enum Error {
     /// as the hidden mute label.
     #[error("{0} isn't available until the first sync")]
     NotSynced(&'static str),
-    /// A bulk action can't reach the conversations asked for, because Gmail can't search for
-    /// them: those the Important or No reply filter passes.
+    /// A bulk action can't reach the conversations asked for (those the Important or No reply
+    /// filter passes), because Gmail can't search for them.
     #[error("Gmail can't search for the {0} filter")]
     Unsearchable(&'static str),
 }
@@ -107,8 +108,8 @@ pub enum Unusable {
 }
 
 impl Error {
-    /// Why the store can't be used, when this is its database's error (opening it, say); `None`
-    /// for Gmail's errors and the like.
+    /// Why the store can't be used, when this is an error from its database (opening it, say),
+    /// or `None` for Gmail's errors and the like.
     #[must_use]
     pub fn unusable(&self) -> Option<Unusable> {
         let database = match self {
@@ -146,7 +147,8 @@ impl Error {
 /// What a database error says about a store that opened fine.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Failing {
-    /// It can't be used: a corrupt file (`SQLITE_CORRUPT`, reported at once) or a full disk.
+    /// It can't be used, because of a corrupt file (`SQLITE_CORRUPT`, reported at once) or a
+    /// full disk.
     Unusable(Unusable),
     /// A failure that may pass: I/O, or a file SQLite can't open (`SQLITE_IOERR`,
     /// `SQLITE_CANTOPEN`), which the app takes for a corrupt file after five in a row.
@@ -154,8 +156,8 @@ pub enum Failing {
 }
 
 impl Error {
-    /// What this error says about a store that opened fine; `None` when it says nothing (Gmail's
-    /// errors, a busy database, a query of the store's own that failed).
+    /// What this error says about a store that opened fine, or `None` when it says nothing
+    /// (Gmail's errors, a busy database, a query of the store's own that failed).
     #[must_use]
     pub fn failing(&self) -> Option<Failing> {
         let Self::Database(database) = self else {

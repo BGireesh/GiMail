@@ -4,9 +4,9 @@
 //! usage: cargo run -p exo-editor --example shot -- <out.png> <body.html> [--select A B] [--placeholder TEXT] [--caret] [--dark]
 //!
 //! `body.html` is the body to show, a draft's HTML. The window is 1280×800 and the editor sits at
-//! x 248.375, y 269, 640px wide: the inline reply's editor in the first thread. `--select A B`
-//! selects from character `A` to `B` of the body's text (blocks joined by newlines); without
-//! `--caret` the caret is hidden.
+//! x 248.375, y 269, 640px wide, where the inline reply's editor sits in the first thread.
+//! `--select A B` selects from character `A` to `B` of the body's text (blocks joined by
+//! newlines). Without `--caret`, the caret is hidden.
 
 use anyhow::Context as _;
 use egui::{Color32, Pos2, Rect, UiBuilder, Vec2, pos2, vec2};

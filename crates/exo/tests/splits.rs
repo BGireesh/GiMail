@@ -163,7 +163,7 @@ fn tab_held_outside_the_inbox_goes_to_the_first_tab() {
     app.key(Key::G);
     app.key(Key::T);
     assert_eq!(*app.mail().list(), ListId::Sent);
-    // Held past the repeat delay, the highlight would step along the tabs in the inbox; here
+    // Held past the repeat delay, the highlight would step along the tabs in the inbox. Here
     // every step is to the first tab.
     let tab = |pressed| Event::Key {
         key: Key::Tab,
@@ -237,7 +237,7 @@ fn invalid_definitions_and_unsaved_changes_ask_first() {
         split_named(&app, "Budget").is_none(),
         "text can't define a split"
     );
-    // `Sorry!` takes the keyboard: Enter is its OK.
+    // `Sorry!` takes the keyboard, so Enter is its OK.
     assert!(app.mail().settings_dialog_open());
     app.key(Key::Enter);
     assert!(
@@ -246,7 +246,7 @@ fn invalid_definitions_and_unsaved_changes_ask_first() {
     );
     assert!(split_named(&app, "Budget").is_none());
 
-    // Escape with a name typed asks to discard; Discard goes back to the list.
+    // Escape with a name typed asks to discard. Discard goes back to the list.
     app.key(Key::Escape);
     app.key(Key::Enter);
     assert!(
@@ -270,7 +270,7 @@ fn important_and_other_turn_off_and_on_from_the_settings() {
     app.key(Key::Enter);
     assert!(app.mail().account().settings().unified_inbox);
     assert_eq!(*app.mail().list(), ListId::Inbox, "the inbox shows Inbox");
-    // They're off now: the Inactive tab's first row turns them back on.
+    // They're off now, and the Inactive tab's first row turns them back on.
     app.click(INACTIVE_TAB);
     app.click(row(0, true));
     assert!(!app.mail().account().settings().unified_inbox);
@@ -291,7 +291,7 @@ fn dragging_a_row_by_its_handle_reorders_the_tabs() {
     app.key(Key::Enter);
     assert_eq!(tab_names(&app), ["Calloway", "Important", "Other"]);
     palette(&mut app, "split inbox settings");
-    // Calloway's handle, the first row's (its handle at 834,344 28×28), dragged onto Other's.
+    // Calloway's handle, on the first row (at 834,344, 28×28), dragged onto Other's.
     let handle = Pos2::new(848.0, 358.0);
     let button = egui::PointerButton::Primary;
     app.harness
@@ -342,11 +342,11 @@ fn library(app: &mut Fixture) {
 fn a_template_from_the_library_turns_its_split_on() {
     let mut app = start("splits-library-template");
     library(&mut app);
-    // `Sample Tools`: GitHub's card.
+    // GitHub's card, in `Sample Tools`.
     app.click(SECOND_CATEGORY);
     app.wait(1.0);
     app.click(card(0));
-    // GitHub's senders aren't the user's to edit: Enter is `Turn on Split Inbox`.
+    // GitHub's senders aren't the user's to edit, so Enter is `Turn on Split Inbox`.
     app.key(Key::Enter);
     let github = split_named(&app, "GitHub").expect("created from the template");
     assert_eq!(
@@ -382,7 +382,7 @@ fn an_empty_split_offers_to_hide_empty_splits_and_a_new_hidden_one_says_so() {
         "it shows while empty, so it doesn't say so"
     );
     assert!(app.mail().inbox().at_inbox_zero() && app.mail().inbox().view().nudge);
-    // `Try it out`, at the card's bottom right; then `Turn on for all splits`.
+    // `Try it out`, at the card's bottom right, then `Turn on for all splits`.
     app.click(Pos2::new(327.0, 286.0));
     assert!(
         app.mail().settings_dialog_open()
@@ -410,7 +410,7 @@ fn an_empty_split_offers_to_hide_empty_splits_and_a_new_hidden_one_says_so() {
             && !app.mail().account().settings().hides_other_when_empty()
     );
 
-    // GitHub's template split, which hides when empty, has nothing in it: it says so.
+    // GitHub's template split, which hides when empty, has nothing in it, and says so.
     library(&mut app);
     app.click(SECOND_CATEGORY);
     app.wait(1.0);
@@ -423,7 +423,7 @@ fn an_empty_split_offers_to_hide_empty_splits_and_a_new_hidden_one_says_so() {
     );
 }
 
-/// VIP's template at 1280×800: its `Definition` heading.
+/// The `Definition` heading of VIP's template, at 1280×800.
 const DEFINITION: Pos2 = Pos2::new(424.0, 357.0);
 
 #[test]
@@ -444,10 +444,10 @@ fn vip_picks_senders_from_the_address_book_and_refuses_what_isnt_an_address() {
     app.key(Key::Enter);
     app.type_text("brightmoor");
     app.key(Key::Enter);
-    // An address typed in full: Tab takes it.
+    // Tab takes an address typed in full.
     app.type_text("zed@nowhere.org");
     app.key(Key::Tab);
-    // Enter in the empty picker does nothing; off it, it's `Turn on Split Inbox`.
+    // Enter in the empty picker does nothing. Off the picker, Enter is `Turn on Split Inbox`.
     app.key(Key::Enter);
     assert!(
         split_named(&app, "VIP").is_some_and(|vip| vip.is_disabled),
@@ -476,7 +476,7 @@ fn a_built_in_split_and_important_other_open_their_templates() {
     let mut app = start("splits-library-builtins");
     app.with_sample_split_library();
     palette(&mut app, "split inbox settings");
-    // Team (Inactive, the third default) lists the account's domain; Enter turns it on.
+    // Team (Inactive, the third default) lists the account's domain. Enter turns it on.
     app.click(INACTIVE_TAB);
     app.click(row(2, true));
     app.key(Key::Enter);
@@ -486,7 +486,7 @@ fn a_built_in_split_and_important_other_open_their_templates() {
         ("from:brightmoor.co to:me", false)
     );
 
-    // Important's row opens Important • Other's template: turning it off asks first.
+    // Important's row opens the template of Important • Other, and turning it off asks first.
     palette(&mut app, "split inbox settings");
     app.click(row(1, false));
     app.key(Key::Enter);
@@ -756,7 +756,7 @@ fn a_sender_row_takes_the_keyboard_and_backspace_or_enter_removes_it() {
     app.key(Key::Tab);
     app.type_text("bo@nowhere.org");
     app.key(Key::Tab);
-    // Off the empty picker, Tab goes to the first row; Backspace removes it and gives the
+    // Off the empty picker, Tab goes to the first row. Backspace removes it and gives the
     // keyboard back to the picker, from which Tab reaches the (new) first row again.
     app.key(Key::Tab);
     app.key(Key::Backspace);

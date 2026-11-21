@@ -1,11 +1,11 @@
-//! Desktop notifications: new mail and calendar reminders, posted to macOS, and their clicks
-//! handed back to the app; and an update to Exo ready to install.
+//! Desktop notifications for new mail, calendar reminders and an update to Exo ready to install.
+//! They're posted to macOS, and their clicks are handed back to the app.
 //!
 //! Exo raises new mail from its own sync ([`mail`]), and calendar reminders ([`reminders`]).
-//! Either way notifications go through [`Notifier::post`]: macOS asks for permission the first
+//! Either way, notifications go through [`Notifier::post`]. macOS asks for permission the first
 //! time Exo has one to show, and a click comes back through the [`Launcher`], which brings the
-//! window back and opens what the notification was about ([`Click`]). The updater's goes through
-//! [`Notifier::post_update`], and a click on it installs the update.
+//! window back and opens what the notification was about ([`Click`]). The updater's notification
+//! goes through [`Notifier::post_update`], and a click on it installs the update.
 
 pub mod mail;
 pub mod reminders;
@@ -23,20 +23,20 @@ use crate::desktop::Launcher;
 pub const JOIN_MEETING: &str = "Join meeting";
 /// The button's id, for the OS.
 const JOIN: &str = "join";
-/// The key of the notification of an update ready to install: a newer one replaces it.
+/// The key of the notification for an update ready to install, so that a newer one replaces it.
 const UPDATE: &str = "UPDATE";
 /// Its buttons' ids, for the OS.
 const INSTALL: &str = "install";
 const LATER: &str = "later";
-/// How many notifications keep listening for their clicks: older ones stay in Notification
+/// How many notifications keep listening for their clicks. Older ones stay in Notification
 /// Center, but a click on one does nothing (fastframe-notifications' advice, as ZapFast does).
 const LISTENING: usize = 32;
 
 /// A notification to post.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Notice {
-    /// Its key: `EMAIL-{message}` or `CALENDAR-{event}`. A notice whose key is showing
-    /// replaces it.
+    /// Its key: `EMAIL-{message}` or `CALENDAR-{event}`. A notice whose key is already showing
+    /// replaces that notification.
     pub key: String,
     /// The title.
     pub title: String,
@@ -77,17 +77,19 @@ pub struct Click {
 /// What a click opens.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Open {
-    /// The conversation, on the message: from home's list, or more of it if it's open already.
+    /// The conversation, opened from home's list unless it's open already, with the message
+    /// expanded and focused. In an open conversation, a message that the Show New Messages bar
+    /// holds back shows with the rest.
     Thread {
         /// The thread.
         thread: String,
         /// The message the notification was about.
         message: String,
     },
-    /// The week view on the event's day with its details up; with `url`, the call opens too
+    /// The week view on the event's day with its details up. With `url`, the call opens too
     /// (`Join meeting`).
     Event {
-        /// The event's key on the calendar ([`crate::calendar`]'s `Event::key`).
+        /// The event's key on the calendar (`Event::key` in [`crate::calendar`]).
         key: String,
         /// Its day.
         day: Date,
@@ -98,13 +100,13 @@ pub enum Open {
     },
 }
 
-/// Posts notifications for the accounts, and hands their clicks to the [`Launcher`]. One per
-/// process; cheap to clone, and usable from any thread.
+/// Posts notifications for the accounts, and hands their clicks to the [`Launcher`]. There's one
+/// per process. It's cheap to clone and usable from any thread.
 #[derive(Clone)]
 pub struct Notifier(Arc<Inner>);
 
 struct Inner {
-    /// The OS's notifications; none in a test's notifier, which only records.
+    /// The OS's notifications, or none in a test's notifier, which only records.
     client: Option<fastframe_notifications::Client>,
     /// What a test's notifier was given.
     posted: Mutex<Vec<Notice>>,
@@ -113,7 +115,7 @@ struct Inner {
     listening: Mutex<VecDeque<(String, fastframe_notifications::Handle)>>,
     /// One permission prompt at a time.
     asking: tokio::sync::Mutex<()>,
-    /// Said once that macOS won't show Exo's notifications.
+    /// Whether the log has said that macOS won't show Exo's notifications, which it says once.
     refused: std::sync::atomic::AtomicBool,
 }
 
@@ -158,9 +160,9 @@ impl Notifier {
             .clone()
     }
 
-    /// Shows `notices` in order, asking macOS for permission first if it never has; without
-    /// permission none shows. They go on a task of their own, so a permission prompt waiting for
-    /// its answer holds up nothing else: call from a Tokio runtime (an account's).
+    /// Shows `notices` in order, asking macOS for permission first if it never has. Without
+    /// permission, none shows. They go on a task of their own, so a permission prompt waiting for
+    /// its answer holds up nothing else. Call it from a Tokio runtime (an account's).
     pub fn post(&self, notices: Vec<Notice>) {
         let Some(client) = self.0.client.clone().filter(|_| !notices.is_empty()) else {
             self.0
@@ -203,10 +205,10 @@ impl Notifier {
         }
     }
 
-    /// Says the update to `version` is downloaded: `Update ready!`, with `Install and Restart`,
-    /// which a click on the notification does too, and `Not now`. Asks macOS for permission
-    /// first if it never has, and waits for its answer: call off the UI thread and outside a
-    /// Tokio runtime (the updater's thread).
+    /// Says the update to `version` is downloaded, with `Update ready!` and the buttons
+    /// `Install and Restart` (which a click on the notification does too) and `Not now`. Asks
+    /// macOS for permission first if it never has, and waits for its answer, so call it off the UI
+    /// thread and outside a Tokio runtime (the updater's thread).
     pub fn post_update(&self, version: &str) {
         let Some(client) = self.0.client.clone() else {
             return;
@@ -268,8 +270,8 @@ impl Notifier {
 }
 
 impl crate::Mail {
-    /// Opens what a clicked notification is about: any dialog goes, then the conversation opens
-    /// from home's list on the message, marked read, or the week shows the event.
+    /// Opens what a clicked notification is about. Any dialog closes first. Then the conversation
+    /// opens from home's list on the message, marked read, or the week shows the event.
     pub fn open_notification(&mut self, open: Open) {
         let now = self.ctx.input(|input| input.time);
         if self.settings.dialog_open() {
@@ -287,7 +289,7 @@ impl crate::Mail {
                         now,
                     );
                     self.open_thread(thread.clone());
-                    // Home's rows may not be in yet to say it's unread; on a read thread this
+                    // Home's rows may not be in yet to say it's unread. On a read thread this
                     // changes nothing.
                     self.account.apply(
                         std::slice::from_ref(&thread),
@@ -314,8 +316,8 @@ impl crate::Mail {
     }
 }
 
-/// The notification of the update to `version`, ready to install: what the dialog asking to
-/// install it says.
+/// The notification for the update to `version`, ready to install. It says what the dialog asking
+/// to install it says.
 fn update_notification(version: &str) -> fastframe_notifications::Notification {
     let ready = crate::update::Dialog::Ready(version.to_owned());
     fastframe_notifications::Notification::new(ready.title())
@@ -325,7 +327,7 @@ fn update_notification(version: &str) -> fastframe_notifications::Notification {
         .action(LATER, crate::update::NOT_NOW)
 }
 
-/// The bundle id Exo runs as, when it's an app bundle (`Exo.app`); a bare binary has none, and
+/// The bundle id Exo runs as, when it's an app bundle (`Exo.app`). A bare binary has none, and
 /// posts no notifications.
 pub fn bundle_id() -> Option<String> {
     #[cfg(target_os = "macos")]
@@ -359,7 +361,7 @@ mod tests {
         }
     }
 
-    // fastframe-notifications keeps a notification's fields to itself; its `Debug` shows them.
+    // fastframe-notifications keeps a notification's fields to itself, but its `Debug` shows them.
     #[test]
     fn the_subtitle_stays_out_of_the_body() {
         let shown = format!(

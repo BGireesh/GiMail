@@ -1,7 +1,7 @@
 //! Inline images: where an `<img>` gets its pixels, the box Chromium lays it out in under the
 //! editor's CSS, and the sizes the resizer writes on it.
 //!
-//! The editor never loads anything: [`crate::Editor::image_requests`] says which images it has
+//! The editor never loads anything. [`crate::Editor::image_requests`] says which images it has
 //! no pixels for, and the app answers each with [`crate::Editor::set_image`]. Until then an image
 //! takes the room its attributes give it, as a loading image does in Chromium. An animated one
 //! plays as Chromium plays it ([`exo_mail::Player`]) while it's on screen.
@@ -21,15 +21,15 @@ const PASTED_STYLE: &str = "max-width:100%; height: auto";
 /// The narrowest a drag of the resizer makes an image.
 pub(crate) const MIN_DRAG_WIDTH: f32 = 16.0;
 /// A blocked image's least box (`img[src^="https://media-blocked"] { min-width: 16px;
-/// min-height: 16px }`) and its side padding in the editor (`.Squire img[…] { padding: 0 3px }`).
+/// min-height: 16px }`) and its side padding in the editor (`padding: 0 3px`).
 const BLOCKED_MIN: f32 = 16.0;
 const BLOCKED_PADDING: f32 = 3.0;
 
 /// Where an image gets its pixels.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ImageSource {
-    /// One of the draft's inline attachments, by Content-ID: `src-cid`, or a `cid:` URL as a
-    /// draft written in Gmail has it.
+    /// One of the draft's inline attachments, by Content-ID, from `src-cid` or from a `cid:` URL
+    /// as a draft written in Gmail has it.
     Cid(String),
     /// A `data:` URL (a signature's logo, say).
     Data(String),
@@ -38,7 +38,7 @@ pub enum ImageSource {
 }
 
 impl ImageSource {
-    /// Where `image` (an `<img>`) gets its pixels; `None` when it names nothing loadable (an
+    /// Where `image` (an `<img>`) gets its pixels, or `None` when it names nothing loadable (an
     /// empty `src`, a `blob:` or `file:` URL).
     pub fn of(image: &Element) -> Option<Self> {
         if let Some(cid) = image.attr("src-cid").filter(|cid| !cid.is_empty()) {
@@ -57,8 +57,8 @@ impl ImageSource {
         }
     }
 
-    /// What the editor knows its pixels by: its URL, `cid:` and the Content-ID for an
-    /// attachment.
+    /// What the editor knows the image's pixels by, which is its URL, or `cid:` and the
+    /// Content-ID for an attachment.
     pub fn key(&self) -> String {
         match self {
             Self::Cid(cid) => format!("cid:{cid}"),
@@ -76,8 +76,8 @@ pub struct Picture {
     /// How many pixels make a CSS pixel by the file's resolution (2 for a 144 dpi Retina
     /// screenshot), which Best Fit divides by.
     pub retina: u32,
-    /// The file: an animated one (a GIF, an APNG, an animated WebP) plays, and a kept table's
-    /// Blitz document decodes its images from theirs.
+    /// The file. An animated file (a GIF, an APNG, an animated WebP) plays, and a kept table's
+    /// Blitz document decodes its images from the files.
     pub file: Arc<[u8]>,
 }
 
@@ -85,7 +85,7 @@ pub struct Picture {
 pub enum ImageLoad {
     /// It loaded.
     Loaded(Picture),
-    /// The Images setting blocks it: an empty box shows instead.
+    /// The Images setting blocks it, so an empty box shows instead.
     Blocked,
     /// It couldn't be had, or isn't an image.
     Broken,
@@ -122,7 +122,7 @@ impl Pictures {
         self.states.get(key)
     }
 
-    /// Whether `key` has been asked for or answered; asks for it if not.
+    /// Whether `key` has been asked for or answered. Asks for it if not.
     pub(crate) fn ask(&mut self, key: String) -> bool {
         if self.states.contains_key(&key) {
             return false;
@@ -155,9 +155,9 @@ impl Pictures {
         }
     }
 
-    /// Makes textures of the pixels that arrived for the images `shown` (by key): an image only a
-    /// kept table shows is drawn by its table, and needs none. Large images draw scaled down a
-    /// lot, so they get mipmaps, as Chromium's image filtering has.
+    /// Makes textures of the pixels that arrived for the images `shown` (by key). An image that
+    /// only a kept table shows is drawn by its table, and needs no texture. Large images draw
+    /// scaled down a lot, so they get mipmaps, as Chromium's image filtering has.
     pub(crate) fn upload(&mut self, ctx: &egui::Context, shown: impl Fn(&str) -> bool) {
         for (key, state) in &mut self.states {
             if let State::Loaded {
@@ -180,7 +180,7 @@ impl Pictures {
     }
 
     /// Moves the animated images `shown` (by key) on to the frames due at `now` (the input's clock,
-    /// in seconds): each starts its clock the first time it shows. Returns how long until the
+    /// in seconds). Each starts its clock the first time it shows. Returns how long until the
     /// next frame is due.
     pub(crate) fn animate(&mut self, now: f64, shown: impl Fn(&str) -> bool) -> Option<f64> {
         let now = Duration::from_secs_f64(now.max(0.0));
@@ -244,7 +244,7 @@ pub(crate) struct ImageBox {
     pub(crate) size: Vec2,
     pub(crate) padding: f32,
     pub(crate) look: Look,
-    /// `display: block`: a block box, as tall as it is, with no line around it.
+    /// Whether it's `display: block`, a block box as tall as the image with no line around it.
     pub(crate) block: bool,
 }
 
@@ -280,8 +280,9 @@ impl ImageBox {
         self.size.x + 2.0 * self.padding
     }
 
-    /// Its top and bottom from the line's baseline (down is positive): on the baseline, or, for
-    /// a blocked one (`vertical-align: middle`), centred half the text's x-height above it.
+    /// Its top and bottom from the line's baseline (down is positive). An image sits on the
+    /// baseline, or, when blocked (`vertical-align: middle`), is centred half the text's x-height
+    /// above it.
     pub(crate) fn extent(&self, x_height: f32) -> (f32, f32) {
         match self.look {
             Look::Picture | Look::Table(_) => (-self.size.y, 0.0),
@@ -313,9 +314,9 @@ fn is_block(image: &Element) -> bool {
 }
 
 /// An `<img>`'s used size (CSS 2.1 sections 10.3.2, 10.6.2 and 10.4) under the editor's
-/// `img { max-width: 100% !important }`: its `style` width and height (or, without them, its
-/// attributes), the missing one from its aspect ratio (its pixels', or its attributes' while it
-/// loads), clamped to the block.
+/// `img { max-width: 100% !important }`. That's its `style` width and height (or, without them,
+/// its attributes), with the missing one taken from its aspect ratio (its pixels', or its
+/// attributes' while it loads), clamped to the block.
 fn css_size(image: &Element, natural: Option<Vec2>, container: f32) -> Vec2 {
     let style = declarations(image.attr("style").unwrap_or_default());
     let property = |name: &str| {
@@ -372,9 +373,9 @@ fn css_size(image: &Element, natural: Option<Vec2>, container: f32) -> Vec2 {
     vec2(w.max(0.0), h.max(0.0))
 }
 
-/// A blocked image's box: Chromium's for the broken image under it, its size and ratio with both
-/// dimension attributes and either no alt text or `display: block`, else a 16px square; never
-/// smaller than 16px.
+/// A blocked image's box, which is Chromium's box for the broken image under it. That box has the
+/// image's size and ratio when it has both dimension attributes and either no alt text or
+/// `display: block`, and is a 16px square otherwise. It's never smaller than 16px.
 fn blocked_size(image: &Element, container: f32) -> Vec2 {
     let attribute = |name: &str| {
         image
@@ -401,9 +402,9 @@ fn blocked_size(image: &Element, container: f32) -> Vec2 {
     size.max(Vec2::splat(BLOCKED_MIN))
 }
 
-/// Best Fit: the image at its resolution's size, no wider than 640px and no taller than 500px.
-/// Both caps hold at once, so a wide and tall image (a whole-window screenshot) stays within
-/// 640px rather than coming out 800px wide or more.
+/// Best Fit, which is the image at its resolution's size, no wider than 640px and no taller than
+/// 500px. Both caps hold at once, so a wide and tall image (a whole-window screenshot) stays
+/// within 640px rather than coming out 800px wide or more.
 pub(crate) fn best_fit(natural: Vec2, retina: f32) -> f32 {
     let (width, height) = (natural.x / retina, natural.y / retina);
     let tall = if height > 500.0 {
@@ -414,7 +415,8 @@ pub(crate) fn best_fit(natural: Vec2, retina: f32) -> f32 {
     tall.min(640.0)
 }
 
-/// The `data-retina` an image carries (`parseFloat(dataset.retina || "1") || 1`).
+/// The `data-retina` an image carries, read as its leading number, or 1 when that's missing,
+/// unreadable or 0.
 pub(crate) fn retina(image: &Element) -> f32 {
     image
         .attr("data-retina")
@@ -423,7 +425,7 @@ pub(crate) fn retina(image: &Element) -> f32 {
         .unwrap_or(1.0)
 }
 
-/// The `<img>` Insert Image puts in: shown by Content-ID `cid`, its `src` empty until it loads.
+/// The `<img>` Insert Image puts in, shown by Content-ID `cid` with its `src` empty until it loads.
 pub(crate) fn inserted(cid: &str) -> Element {
     Element::with(
         "img",
@@ -436,8 +438,8 @@ pub(crate) fn inserted(cid: &str) -> Element {
     )
 }
 
-/// What a pasted `data:` image becomes: its `src` emptied and the picture shown by Content-ID `cid`
-/// (its own `src-cid` if it had one) instead.
+/// Turns a pasted `data:` image into one shown by Content-ID `cid` (its own `src-cid` if it had
+/// one), with its `src` emptied.
 pub(crate) fn pasted(image: &mut Element, cid: &str) {
     image.set_attr("src", "");
     if image.attr("src-cid").is_none_or(str::is_empty) {
@@ -456,7 +458,7 @@ pub(crate) fn pasted(image: &mut Element, cid: &str) {
     image.set_attr("style", PASTED_STYLE);
 }
 
-/// `_onImageLoaded`: an inserted image with no width yet gets its resolution and Best Fit's.
+/// Gives an inserted image with no width yet its resolution and Best Fit's width once it loads.
 pub(crate) fn fit_on_load(image: &mut Element, natural: Vec2, picture_retina: u32) {
     image.set_attr("data-retina", &picture_retina.max(1).to_string());
     let style = declarations(image.attr("style").unwrap_or_default());
@@ -470,8 +472,8 @@ pub(crate) fn fit_on_load(image: &mut Element, natural: Vec2, picture_retina: u3
     image.set_attr("width", &dom_unsigned(width));
 }
 
-/// Resizes `image` to `width`: the width, and the height that keeps the picture's ratio, in its
-/// style and its attributes, marked resized.
+/// Resizes `image` to `width`. The width, and the height that keeps the picture's ratio, go in its
+/// style and its attributes, and the image is marked resized.
 pub(crate) fn resize(image: &mut Element, width: f32, natural: Vec2) {
     let height = width * (natural.y / natural.x);
     set_style(image, "width", &format!("{}px", css_number(width)));
@@ -499,8 +501,8 @@ fn declarations(style: &str) -> Vec<(String, String)> {
 }
 
 /// Sets one property through the CSSOM (`element.style.width = …`), which writes the whole
-/// attribute back as Chromium serializes it: `name: value;`, space separated, the property kept
-/// in its place or added last.
+/// attribute back as Chromium serializes it, as `name: value;` declarations separated by spaces,
+/// with the property kept in its place or added last.
 fn set_style(image: &mut Element, property: &str, value: &str) {
     let mut style = declarations(image.attr("style").unwrap_or_default());
     match style.iter_mut().find(|(name, _)| name == property) {
@@ -529,8 +531,8 @@ fn length(value: &str, percent_of: Option<f32>) -> Option<f32> {
     }
 }
 
-/// An HTML dimension attribute (the rules for parsing dimension values): leading digits, a
-/// percentage of `percent_of` if a `%` follows.
+/// An HTML dimension attribute (the rules for parsing dimension values), read as its leading
+/// digits, or as a percentage of `percent_of` if a `%` follows.
 fn dimension(value: &str, percent_of: Option<f32>) -> Option<f32> {
     let number = leading_number(value)?;
     let rest = value
@@ -598,7 +600,7 @@ pub fn uuid_v4() -> String {
     )
 }
 
-/// The selection colour over a selected image: Chromium blends an opaque `::selection` colour
+/// The selection colour over a selected image. Chromium blends an opaque `::selection` colour
 /// with white into a translucent one that looks the same on white (`Color::BlendWithWhite`),
 /// and leaves a translucent one as it is.
 pub(crate) fn selection_tint(selection: egui::Color32) -> egui::Color32 {

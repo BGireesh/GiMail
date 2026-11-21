@@ -1,10 +1,10 @@
-//! The Accounts dialog: the device's accounts in their order, each with its
+//! The Accounts dialog lists the device's accounts in their order. Each row has the account's
 //! avatar, its address, its ctrl+N (with two or more accounts) and a color swatch that opens the
-//! color picker; hovered, `Sign out` and (with two or more) a drag handle that reorders them.
-//! Under them, `Sign in with your email provider to add an account.`
+//! color picker. A hovered row also shows `Sign out` and, with two or more accounts, a drag handle
+//! that reorders them. Under the rows is `Sign in with your email provider to add an account.`
 //!
-//! Metrics are fixed offsets from the card rather than the rows' flex layout (negative margins,
-//! `line-height: 0` wrappers) rebuilt.
+//! Metrics are fixed offsets from the card, rather than a rebuild of the rows' flex layout
+//! (negative margins, `line-height: 0` wrappers).
 
 use egui::{Color32, Context, CornerRadius, Rect, Sense, Ui, pos2, vec2};
 use exo_ui::{Dialog, DialogResponse, Family, Font, KeycapColors, Keycaps, TextStyle, motion};
@@ -30,7 +30,7 @@ pub enum Event {
         /// The color's name.
         color: &'static str,
     },
-    /// The footer's link: sign in to another account.
+    /// The footer's link, which signs in to another account.
     Add,
 }
 
@@ -45,14 +45,14 @@ pub struct State {
 }
 
 impl State {
-    /// The color picker is open: Escape closes it, not the dialog.
+    /// Whether the color picker is open, so that Escape closes it rather than the dialog.
     pub fn picker_open(&self) -> bool {
         self.picker.is_some()
     }
 
-    /// What `key` does to the open color picker of `accounts`' rows: the color its account
-    /// changes to at once, if any. Escape (back to the color it
-    /// opened on), Enter and Space close it.
+    /// What `key` does to the open color picker of `accounts`' rows, which is the color its
+    /// account changes to at once, if any. Escape (back to the color the picker opened on), Enter
+    /// and Space close it.
     pub fn picker_key(
         &mut self,
         key: exo_ui::PickerKey,
@@ -73,14 +73,14 @@ impl State {
         })
     }
 
-    /// The dialog opened: no picker, nothing dragged.
+    /// The dialog opened, so there's no picker and nothing dragged.
     pub fn reset(&mut self) {
         *self = Self::default();
     }
 }
 
-/// Rows are 32px, 44px apart (`margin-bottom: 12px`), the first 41px below
-/// the card's top; the avatar 4px into it, the address's 20px line and the caps 6px.
+/// Rows are 32px tall and 44px apart (`margin-bottom: 12px`), the first 61px below the card's top.
+/// The avatar sits 4px into a row, and the address's 20px line and the caps 6px.
 const FIRST_ROW: f32 = 61.0;
 const ROW_STEP: f32 = 44.0;
 const ROW_HEIGHT: f32 = 32.0;
@@ -93,8 +93,8 @@ const KEYS_TOP: f32 = 6.0;
 /// right of it.
 const ROW_LEFT: f32 = 13.0;
 const ROW_RIGHT: f32 = 9.0;
-/// The swatch: a 14px square with 2px corners, `top: -1px`, its right edge 1px past the body,
-/// 12px after the caps.
+/// The swatch is a 14px square with 2px corners at `top: -1px`, with its right edge 1px past the
+/// body and 12px after the caps.
 const SWATCH: f32 = 14.0;
 const SWATCH_TOP: f32 = 8.0;
 const SWATCH_GAP: f32 = 12.0;
@@ -112,18 +112,18 @@ const FOOTER_TOP: f32 = 71.0;
 /// The body: the rows, the footer's 40px and 4px of the list's margins, and 4px more padding
 /// at the bottom than the dialog shell's (24px).
 const BODY_EXTRA: f32 = 48.0;
-/// A row's text: 12px/20px; the address in `rgba(0, 0, 0, .85)`.
+/// A row's text is 12px/20px, with the address in `rgba(0, 0, 0, .85)`.
 const TEXT: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 12.0, 20.0);
 const NAME_INK: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 217);
 /// `Sign out` and the handle's fill: black at .3, .4 hovered.
 const SUBDUED: [u8; 2] = [77, 102];
-/// The footer: `rgba(0, 0, 0, .6)`, its link `#54acdc`.
+/// The footer is `rgba(0, 0, 0, .6)`, and its link `#54acdc`.
 const FOOTER_INK: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 153);
 const LINK_INK: Color32 = Color32::from_rgb(0x54, 0xac, 0xdc);
 /// The 24px avatar's initial: 12px with `dy: .375em`, in black.
 const INITIAL: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 12.0, 16.0);
-/// The color picker ([`exo_ui::ColorPicker`]) under the swatch (a 10px offset less the tooltip's
-/// 8px padding), two rows of six.
+/// The color picker ([`exo_ui::ColorPicker`]) sits under the swatch (a 10px offset less the
+/// tooltip's 8px padding), in two rows of six.
 const PICKER_BELOW: f32 = -2.0;
 /// The tooltip's transparent 8px padding over the box, which covers the rows under it.
 const PICKER_PLACEMENT: f32 = 8.0;
@@ -133,8 +133,8 @@ const FOOTER_LINK: &str = "Sign in with your email provider";
 const FOOTER_REST: &str = "to add an account.";
 const SIGN_OUT: &str = "Sign out";
 
-/// Draws the dialog over `area`: `accounts` in their order, `keycaps` in the app's theme (the
-/// dialog draws in Snow's). Returns what was clicked or dragged.
+/// Draws the dialog over `area`, with `accounts` in their order and `keycaps` in the app's theme
+/// (the dialog draws in Snow's). Returns what was clicked or dragged.
 pub fn dialog(
     ctx: &Context,
     area: Rect,
@@ -149,13 +149,13 @@ pub fn dialog(
         Dialog::new("accounts", "Accounts", body_height).show(ctx, area, open, |ui, body| {
             list(ui, body, state, accounts, keycaps, &mut swatch)
         });
-    // The picker is a tooltip of the page's, outside the dialog's Snow-drawn card.
+    // The picker is a tooltip on the page, outside the dialog's card, which draws in Snow.
     if let (Some(index), Some(swatch), Some(inner)) =
         (state.picker, swatch, response.inner.as_mut())
         && let Some(account) = accounts.get(index)
     {
         match picker(ctx, swatch, account) {
-            // It stays open: a click on a color doesn't close it.
+            // It stays open, since a click on a color doesn't close it.
             exo_ui::Picked::Color(index) => {
                 *inner = Some(Event::Color {
                     email: account.email.clone(),
@@ -169,7 +169,7 @@ pub fn dialog(
     response
 }
 
-/// The rows and the footer; `picker_swatch` gets the swatch the color picker opened from.
+/// The rows and the footer. `picker_swatch` gets the swatch the color picker opened from.
 fn list(
     ui: &mut Ui,
     body: Rect,
@@ -179,7 +179,7 @@ fn list(
     picker_swatch: &mut Option<Rect>,
 ) -> Option<Event> {
     let ctx = ui.ctx().clone();
-    // The body starts under the header; the metrics are from the card's top and right.
+    // The body starts under the header. The metrics are from the card's top and right.
     let (card_top, right) = (body.top() - 40.0, body.right() + 1.0);
     let columns = Columns {
         body,
@@ -302,12 +302,12 @@ struct Columns {
     body: Rect,
     /// The swatches' right edge.
     right: f32,
-    /// More than one account: rows get the caps and the drag handle.
+    /// Whether there's more than one account, which gives rows the caps and the drag handle.
     several: bool,
     keycaps: KeycapColors,
 }
 
-/// The `index`th account's row at `top`; `pointer_free` when nothing covers or drags over it.
+/// The `index`th account's row at `top`. `pointer_free` says nothing covers or drags over it.
 fn row(
     ui: &mut Ui,
     columns: &Columns,
@@ -470,7 +470,7 @@ fn color_index(account: &exo_auth::Account) -> usize {
         .unwrap_or_default()
 }
 
-/// The account colors' picker, `chosen` on its white circle.
+/// The picker of account colors, with `chosen` on its white circle.
 fn picker_spec(chosen: Option<usize>) -> exo_ui::ColorPicker<'static> {
     const SWATCHES: [Color32; COLORS.len()] = {
         let mut swatches = [Color32::WHITE; COLORS.len()];
@@ -489,7 +489,7 @@ fn picker_spec(chosen: Option<usize>) -> exo_ui::ColorPicker<'static> {
     }
 }
 
-/// The color picker under `swatch`, `account`'s color chosen.
+/// The color picker under `swatch`, with `account`'s color chosen.
 fn picker(ctx: &Context, swatch: Rect, account: &exo_auth::Account) -> exo_ui::Picked {
     let picker = picker_spec(Some(color_index(account)));
     picker.show(

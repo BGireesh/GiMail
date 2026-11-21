@@ -93,7 +93,7 @@ async fn other_google_errors_are_reported() {
 async fn redirects_from_other_attempts_are_turned_away() {
     let harness = Harness::new().await;
     // Before the user approves, a stale tab or a page that found the port sends redirects
-    // without this attempt's `state`: they're answered, and the attempt keeps waiting.
+    // without this attempt's `state`. They're answered, and the attempt keeps waiting.
     let (sender, pages) = tokio::sync::oneshot::channel();
     let open = move |url: &url::Url| {
         let forged = [
@@ -218,7 +218,7 @@ async fn dropping_the_future_cancels_and_frees_the_port() {
 
 #[tokio::test(start_paused = true)]
 async fn gives_up_when_the_browser_never_comes_back() {
-    // Nothing is contacted: the user never finishes in the browser.
+    // Nothing is contacted, because the user never finishes in the browser.
     let dir = tempfile::tempdir().unwrap();
     let client = ClientConfig::new("id", "secret", gmail::Endpoints::google());
     let auth = Auth::open(client, dir.path(), MemorySecrets::default()).unwrap();

@@ -21,16 +21,17 @@ const QUOTE: &[TooltipPart<'static>] = &[
     TooltipPart::Separator(" · "),
     TooltipPart::Keys(&["F"]),
 ];
-/// The hint's top: 31px under the selection's bottom, relative to the table, in the scroll
-/// container, whose content starts 16px above the table.
+/// The hint's top, 31px under the selection's bottom as measured from the table, placed in the
+/// scroll container, whose content starts 16px above the table.
 const QUOTE_DROP: f32 = 31.0 - 16.0;
-/// Where `Create Event`'s box starts below the date's box as Blitz has it (its line box): the
+/// Where `Create Event`'s box starts below the date's box as Blitz has it (its line box). The
 /// tooltip sits 15px under the date's bottom from a layer 16px above the table, and its box shows
-/// 8px into it, so 7px under the date's content area, which ends 4px above the line box (a date
-/// bottom at 249 puts the box's top at 256).
+/// 8px into it, which puts the box 7px under the date's content area. That area ends 4px above the
+/// line box (a date bottom at 249 puts the box's top at 256).
 const DATE_DROP: f32 = 3.0;
 const CREATE_EVENT: &[TooltipPart<'static>] = &[TooltipPart::Text("Create Event")];
-/// `TOOLTIP_HOVER`: how long `Create Event` stays once the pointer leaves the date and it.
+/// `TOOLTIP_HOVER`, how long `Create Event` stays once the pointer leaves both the date and the
+/// tooltip.
 const TOOLTIP_HOVER: f64 = 0.15;
 
 /// A detected date's `Create Event` tooltip: the message, the date's text and box (in its body),
@@ -44,8 +45,8 @@ pub(super) struct DateTip {
 }
 
 impl ThreadView {
-    /// The pointer over `href`, a `mailto:` link in a body, this frame; hover intent shows its
-    /// first address's contact.
+    /// The pointer over `href`, a `mailto:` link in a body, this frame. Hover intent shows the
+    /// contact for the link's first address.
     pub(super) fn hover_mailto(&mut self, ctx: &Context, href: Option<String>) {
         if let Some(href) = self.mailto_intent.update(ctx, href) {
             // Its first address.
@@ -60,7 +61,7 @@ impl ThreadView {
         }
     }
 
-    /// The day a detected date in message `id` means, read against the day it was sent; `None`
+    /// The day a detected date in message `id` means, read against the day it was sent. `None`
     /// for one that names no day.
     pub(super) fn date_on(&self, id: &str, text: &str) -> Option<jiff::civil::Date> {
         let sent = self
@@ -153,7 +154,7 @@ impl ThreadView {
     }
 
     /// The hint under selected text in the message whose body is at `body` on screen, in the
-    /// scroll container `messages`: centred on the selection, within the table's margins.
+    /// scroll container `messages`. It's centred on the selection, within the table's margins.
     pub(super) fn selection_hint(
         &self,
         ui: &egui::Ui,

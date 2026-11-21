@@ -1,4 +1,4 @@
-//! Every triage mutation, end to end: visible at once, then sent to Gmail.
+//! Every triage mutation, end to end. Each is visible at once, then sent to Gmail.
 
 mod support;
 
@@ -77,7 +77,7 @@ async fn done_and_not_done() {
     );
     assert_eq!(harness.gmail_labels(&thread.id).await, before);
 
-    // INBOX comes off the messages that had it; nothing else changes.
+    // INBOX comes off the messages that had it, and nothing else changes.
     assert_eq!(harness.store.flush().await.unwrap().completed, 1);
     assert_eq!(
         harness.gmail_labels(&thread.id).await,
@@ -340,7 +340,8 @@ async fn muted_threads_stay_out_of_the_inbox() {
     }
     assert!(harness.ids(&ListId::Muted).await.contains(thread.as_str()));
 
-    // A reply lands in Gmail's inbox, but stays out of Exo's: muting is Exo's rule, not Gmail's.
+    // A reply lands in Gmail's inbox but stays out of Exo's, because muting is Exo's rule, not
+    // Gmail's.
     harness
         .deliver(
             json!({ "from": "Ana <ana@example.com>", "threadId": thread.as_str(), "text": "Ping" }),
@@ -519,7 +520,7 @@ async fn create_a_label_then_move_a_thread_into_it() {
             .iter()
             .any(|stored| stored.id == label.id && stored.kind == LabelKind::User)
     );
-    // Gmail refuses a name that's taken; nothing is stored.
+    // Gmail refuses a name that's taken, and nothing is stored.
     assert!(harness.store.create_label("Receipts/2026").await.is_err());
 
     let thread = inbox_thread_with_reply(&harness).await;

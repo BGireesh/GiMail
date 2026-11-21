@@ -1,7 +1,7 @@
 //! Gmail's per-user quota and what each method costs, from Google's "Usage limits" page
 //! (<https://developers.google.com/workspace/gmail/api/reference/quota>, limits as of
 //! May 1, 2026). Projects that used the API between November 2025 and April 2026 keep their
-//! older, larger quota; every project created since gets these.
+//! older, larger quota. Every project created since gets these.
 
 /// Quota units one user may spend per minute ("Per minute per user per project").
 pub const PER_USER_PER_MINUTE: u32 = 6_000;
@@ -15,8 +15,8 @@ pub fn units(method: &str, path: &str, query: Option<&str>) -> Option<u32> {
     cost(method, path, query).map(|(_, units)| units)
 }
 
-/// [`units`], with the API method charged for, as Google's reference names it
-/// (`history.list`, `threads.get`); `other` for a write the table doesn't list.
+/// [`units`], with the API method charged for, named as in Google's reference (`history.list`,
+/// `threads.get`). The method is `other` for a write the table doesn't list.
 #[must_use]
 pub fn cost(method: &str, path: &str, query: Option<&str>) -> Option<(&'static str, u32)> {
     let path = path.strip_prefix("/upload").unwrap_or(path);
@@ -75,7 +75,8 @@ pub fn cost(method: &str, path: &str, query: Option<&str>) -> Option<(&'static s
         ("PUT" | "PATCH" | "POST", ["settings", "sendAs", ..]) => ("settings.sendAs", 100),
         ("PUT", ["settings", "vacation"]) => ("settings.updateVacation", 5),
         ("POST" | "DELETE", ["settings", "filters", ..]) => ("settings.filters", 5),
-        // Every other write the page lists costs 5 or 100; the dearer keeps a budget safe.
+        // Every other write the page lists costs 5 or 100. Charging the dearer keeps a budget
+        // safe.
         _ => ("other", 100),
     })
 }

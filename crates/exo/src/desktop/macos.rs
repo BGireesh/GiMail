@@ -19,29 +19,30 @@ use objc2_foundation::{
 use super::Launcher;
 use super::quit::{self, QuitWarning};
 
-/// The class of the view egui draws in, winit's, which has the keyboard in Exo's window.
+/// The class of the view that egui draws in (winit's view), which has the keyboard in Exo's window.
 pub(super) const WINIT_VIEW: &std::ffi::CStr = c"WinitView";
 
 /// `kCoreEventClass`.
 const CORE_EVENT_CLASS: u32 = u32::from_be_bytes(*b"aevt");
-/// `kAEOpenApplication`: the event an app is launched with, when not to open something.
+/// `kAEOpenApplication`: the event an app is launched with when it isn't launched to open
+/// something.
 const OPEN_APPLICATION: u32 = u32::from_be_bytes(*b"oapp");
-/// `kAEReopenApplication`: the Dock icon was clicked, or Exo opened again, while it runs.
+/// `kAEReopenApplication`, sent when the Dock icon is clicked or Exo is opened again while it runs.
 const REOPEN_APPLICATION: u32 = u32::from_be_bytes(*b"rapp");
 /// `keyAEPropData`: the launch event's property saying why the app was launched.
 const PROPERTY_DATA: u32 = u32::from_be_bytes(*b"prdt");
 /// `keyAELaunchedAsLogInItem`: that property for a login item.
 const LAUNCHED_AS_LOGIN_ITEM: u32 = u32::from_be_bytes(*b"lgit");
-/// `kAEQuitApplication`: the Dock's Quit, Activity Monitor's, AppleScript's, and macOS's as it
+/// `kAEQuitApplication`, sent by the Dock's Quit, Activity Monitor, AppleScript, and macOS as it
 /// ends the session.
 const QUIT_APPLICATION: u32 = u32::from_be_bytes(*b"quit");
 /// `kAEQuitReason`: why macOS sent a quit event (`kAEReallyLogOut`, `kAERestart`, `kAEShutDown`,
-/// `kAEQuitAll`), there only when macOS sent it.
+/// `kAEQuitAll`). It's there only when macOS sent the event.
 const QUIT_REASON: u32 = u32::from_be_bytes(*b"why?");
 
-/// Whether macOS launched Exo as a login item (Open at Login): the Apple event being handled is
-/// the open-application one, saying so. Only while Exo finishes launching, when AppKit is
-/// handling that event; `false` off the main thread.
+/// Whether macOS launched Exo as a login item (Open at Login), which the Apple event being handled
+/// says when it's the open-application event. This works only while Exo finishes launching, when
+/// AppKit is handling that event. `false` off the main thread.
 pub(super) fn launched_at_login() -> bool {
     if MainThreadMarker::new().is_none() {
         return false;
@@ -50,8 +51,8 @@ pub(super) fn launched_at_login() -> bool {
         return false;
     };
     // SAFETY: `eventClass` and `eventID` return the event's `AEEventClass` and `AEEventID`
-    // (`UInt32`), `paramDescriptorForKeyword:` takes an `AEKeyword` and returns a descriptor or
-    // nil. Through `msg_send!`: objc2 types them only with objc2-core-services.
+    // (`UInt32`), and `paramDescriptorForKeyword:` takes an `AEKeyword` and returns a descriptor or
+    // nil. They go through `msg_send!` because objc2 types them only with objc2-core-services.
     let (class, id, property): (u32, u32, Option<Retained<NSAppleEventDescriptor>>) = unsafe {
         (
             msg_send![&event, eventClass],
@@ -73,8 +74,9 @@ fn is_login_launch(class: u32, id: u32, property: Option<u32>) -> bool {
         )
 }
 
-/// Turns AppKit's animations for ordering Exo's window in and out off, or back to the ones AppKit
-/// picks (`animationBehavior`); minimizing has its own, either way. Off the main thread, nothing.
+/// Turns off AppKit's animations for ordering Exo's window in and out, or turns them back to the
+/// ones AppKit picks (`animationBehavior`). Minimizing keeps its own animation either way. Does
+/// nothing off the main thread.
 pub(super) fn set_animations(on: bool) {
     let Some(mtm) = MainThreadMarker::new() else {
         return;
@@ -107,10 +109,10 @@ define_class!(
     }
 );
 
-/// Brings the window back when the Dock icon is clicked or Exo is opened again while it runs.
-/// winit owns the app's delegate, so this answers the reopen event itself, in place of AppKit's
-/// handler, which only took a minimized window out of the Dock (bringing the window back does
-/// that too).
+/// Brings the window back when the Dock icon is clicked or Exo is opened again while it runs. winit
+/// owns the app's delegate, so this answers the reopen event itself, in place of AppKit's handler.
+/// AppKit's handler only took a minimized window out of the Dock, which bringing the window back
+/// does too.
 pub(super) fn on_reopen(launcher: Launcher) {
     let Some(mtm) = MainThreadMarker::new() else {
         return;
@@ -119,7 +121,7 @@ pub(super) fn on_reopen(launcher: Launcher) {
     // SAFETY: `NSObject`'s designated initializer.
     let handler: Retained<Reopen> = unsafe { msg_send![super(this), init] };
     // SAFETY: `handleReopen:withReplyEvent:` takes the event and its reply, as an Apple event
-    // handler's selector must; the class and ID are `AEEventClass` and `AEEventID` (`UInt32`).
+    // handler's selector must. The class and ID are `AEEventClass` and `AEEventID` (`UInt32`).
     unsafe {
         let _: () = msg_send![
             &NSAppleEventManager::sharedAppleEventManager(),
@@ -144,13 +146,14 @@ define_class!(
     unsafe impl NSObjectProtocol for Quit {}
 
     impl Quit {
-        /// ⌘Q and the app menu's `Quit Exo`, which AppKit's `terminate:` answered.
+        /// ⌘Q and the app menu's `Quit Exo`, which AppKit's `terminate:` would otherwise answer.
         #[unsafe(method(quit:))]
         fn quit(&self, _sender: Option<&AnyObject>) {
             self.terminate_if_confirmed();
         }
 
-        /// A quit Apple event. macOS ending the session says why, and quits at once.
+        /// A quit Apple event. When macOS ends the session, the event says why, and Exo quits at
+        /// once.
         #[unsafe(method(handleQuit:withReplyEvent:))]
         fn handle_quit(&self, event: &NSAppleEventDescriptor, _reply: &NSAppleEventDescriptor) {
             if is_session_end(event) {
@@ -172,11 +175,11 @@ impl Quit {
     }
 }
 
-/// Whether quit event `event` comes from macOS ending the session: it gives a reason only then.
-/// `AERegistry.h` calls the reason a parameter, and apps read it as an attribute; either counts.
+/// Whether quit event `event` comes from macOS ending the session, the only time it gives a reason.
+/// `AERegistry.h` calls the reason a parameter, and apps read it as an attribute, so either counts.
 fn is_session_end(event: &NSAppleEventDescriptor) -> bool {
-    // SAFETY: both take an `AEKeyword` and return a descriptor or nil. Through `msg_send!`: objc2
-    // types them only with objc2-core-services.
+    // SAFETY: both take an `AEKeyword` and return a descriptor or nil. They go through `msg_send!`
+    // because objc2 types them only with objc2-core-services.
     let (attribute, parameter): (
         Option<Retained<NSAppleEventDescriptor>>,
         Option<Retained<NSAppleEventDescriptor>>,
@@ -189,21 +192,22 @@ fn is_session_end(event: &NSAppleEventDescriptor) -> bool {
     attribute.is_some() || parameter.is_some()
 }
 
-/// Asks before quitting: a native alert, in front of whatever app is (the Dock's Quit leaves
-/// another app active). Whether to quit; quitting with `Do not ask again` ticked turns `warning`
-/// off. Cancel, Escape included, leaves everything as it was, whatever the checkbox says.
+/// Asks before quitting with a native alert, in front of whatever app is active (the Dock's Quit
+/// leaves another app active). Returns whether to quit. Quitting with `Do not ask again` ticked
+/// turns `warning` off. Cancel, Escape included, leaves everything as it was, whatever the checkbox
+/// says.
 fn confirm_quit(app: &NSApplication, warning: &QuitWarning) -> bool {
-    // `activate` is macOS 14's, and Exo runs on 13 (`LSMinimumSystemVersion`).
+    // `activate` is new in macOS 14, and Exo runs on 13 (`LSMinimumSystemVersion`).
     #[allow(deprecated)]
     app.activateIgnoringOtherApps(true);
     let alert = NSAlert::new(app.mtm());
     alert.setAlertStyle(NSAlertStyle::Warning);
     alert.setMessageText(&NSString::from_str(quit::MESSAGE));
     alert.setInformativeText(&NSString::from_str(quit::INFORMATIVE_TEXT));
-    // NSAlert gives the first button Return, and one titled `Cancel` Escape.
+    // NSAlert gives the first button Return, and a button titled `Cancel` Escape.
     alert.addButtonWithTitle(&NSString::from_str(quit::QUIT));
     alert.addButtonWithTitle(&NSString::from_str(quit::CANCEL));
-    // macOS titles it (`Do not ask again`), in the user's language.
+    // macOS titles the checkbox (`Do not ask again`) in the user's language.
     alert.setShowsSuppressionButton(true);
     let quit = alert.runModal() == NSAlertFirstButtonReturn;
     warning.answered(
@@ -214,10 +218,10 @@ fn confirm_quit(app: &NSApplication, warning: &QuitWarning) -> bool {
     )
 }
 
-/// Asks before quitting from now on, while `warning` is on (see [`quit`]): the app menu's `Quit
+/// Asks before quitting from now on, while `warning` is on (see [`quit`]). The app menu's `Quit
 /// Exo` (⌘Q) and quit Apple events come here rather than to AppKit, which would quit at once.
-/// `terminate:` stays AppKit's, for Exo to quit by itself without asking. Call once the menu bar
-/// is up.
+/// `terminate:` stays AppKit's, so Exo can quit by itself without asking. Call once the menu bar is
+/// up.
 pub(super) fn confirm_quit_from(warning: QuitWarning) {
     let Some(mtm) = MainThreadMarker::new() else {
         return;
@@ -231,14 +235,15 @@ pub(super) fn confirm_quit_from(warning: QuitWarning) {
         .and_then(|item| item.submenu());
     for item in app_menu.iter().flat_map(|menu| menu.itemArray()) {
         if item.action() == Some(sel!(terminate:)) {
-            // SAFETY: the action is the handler's, taking the sender; the handler outlives the item.
+            // SAFETY: the action is the handler's and takes the sender, and the handler outlives
+            // the item.
             unsafe {
                 item.setAction(Some(sel!(quit:)));
                 item.setTarget(Some(&handler));
             }
         }
     }
-    // SAFETY: as `on_reopen`'s: the selector takes the event and its reply, and the class and ID
+    // SAFETY: as in `on_reopen`, the selector takes the event and its reply, and the class and ID
     // are `UInt32`s. This replaces AppKit's handler, which calls `terminate:`.
     unsafe {
         let _: () = msg_send![
@@ -249,19 +254,21 @@ pub(super) fn confirm_quit_from(warning: QuitWarning) {
             andEventID: QUIT_APPLICATION,
         ];
     }
-    // Neither the menu item nor the Apple Event manager retains it; it answers for as long as Exo
-    // runs.
+    // Neither the menu item nor the Apple Event manager retains the handler, which answers for as
+    // long as Exo runs.
     std::mem::forget(handler);
 }
 
-/// `The background process has crashed repeatedly.`, a modal critical alert with `gave_up`'s
-/// attempts. Its second step names Clear Cache and Restart, which keeps what Gmail doesn't have.
-/// Then Exo quits once the frame showing it is over, without asking.
+/// Shows `The background process has crashed repeatedly.` in a modal critical alert, with the
+/// number of attempts from `gave_up`. Its second step names Clear Cache and Restart, which keeps
+/// what Gmail doesn't have. Then Exo quits without asking, once the frame showing the alert is
+/// over.
 pub(super) fn crashed_repeatedly(gave_up: crate::recovery::GaveUp) {
     let Some(mtm) = MainThreadMarker::new() else {
         return;
     };
-    // In front: the window may be closed, or another app active. `activate` is macOS 14's.
+    // Bring Exo to the front, because the window may be closed or another app active. `activate` is
+    // new in macOS 14.
     #[allow(deprecated)]
     NSApplication::sharedApplication(mtm).activateIgnoringOtherApps(true);
     let alert = NSAlert::new(mtm);
@@ -282,9 +289,9 @@ pub(super) fn crashed_repeatedly(gave_up: crate::recovery::GaveUp) {
     terminate_soon();
 }
 
-/// Quits through AppKit's `terminate:`, without asking, once the main thread is done with what
-/// it's doing: not from inside a frame, which AppKit's `applicationWillTerminate:` would run
-/// again.
+/// Quits through AppKit's `terminate:`, without asking, once the main thread is done with what it's
+/// doing. Quitting from inside a frame would have AppKit's `applicationWillTerminate:` run that
+/// frame again.
 pub(super) fn terminate_soon() {
     dispatch2::DispatchQueue::main().exec_async(|| {
         if let Some(mtm) = MainThreadMarker::new() {
@@ -293,7 +300,7 @@ pub(super) fn terminate_soon() {
     });
 }
 
-/// A modal alert, on the main thread, with Exo in front: see [`super::ask`].
+/// A modal alert, on the main thread, with Exo in front (see [`super::ask`]).
 pub(super) fn ask(message: &str, detail: &str, buttons: &[&str]) -> Option<usize> {
     let (message, detail) = (message.to_owned(), detail.to_owned());
     let buttons: Vec<String> = buttons.iter().map(|&button| button.to_owned()).collect();
@@ -302,7 +309,8 @@ pub(super) fn ask(message: &str, detail: &str, buttons: &[&str]) -> Option<usize
         let Some(mtm) = MainThreadMarker::new() else {
             return;
         };
-        // In front: the window may be closed, or another app active. `activate` is macOS 14's.
+        // Bring Exo to the front, because the window may be closed or another app active.
+        // `activate` is new in macOS 14.
         #[allow(deprecated)]
         NSApplication::sharedApplication(mtm).activateIgnoringOtherApps(true);
         let alert = NSAlert::new(mtm);
@@ -345,8 +353,8 @@ define_class!(
 );
 
 /// Hears a window finish leaving full screen (`windowDidExitFullScreen:`), which winit doesn't pass
-/// on: it says the window is out as soon as it's asked to leave, and hiding it mid-animation has
-/// AppKit put it back on screen at the end.
+/// on. winit says the window is out as soon as it's asked to leave, and hiding the window
+/// mid-animation has AppKit put it back on screen at the end.
 pub(super) struct FullScreenExits(Retained<ExitObserver>);
 
 impl FullScreenExits {
@@ -386,7 +394,8 @@ impl Drop for FullScreenExits {
     }
 }
 
-/// macOS's accent colour is Graphite: the `AppleAccentColor` default is -1 (0 when unset).
+/// Whether macOS's accent colour is Graphite, which is when the `AppleAccentColor` default is -1 (0
+/// when unset).
 pub(super) fn graphite_accent() -> bool {
     NSUserDefaults::standardUserDefaults().integerForKey(ns_string!("AppleAccentColor")) == -1
 }
@@ -409,7 +418,7 @@ pub(super) fn model() -> Option<String> {
         return None;
     }
     let mut value = vec![0u8; size];
-    // SAFETY: `value` holds `size` bytes, which `size` says.
+    // SAFETY: `value` holds `size` bytes, and `size` says so.
     if unsafe {
         libc::sysctlbyname(
             name.as_ptr(),
@@ -429,7 +438,7 @@ pub(super) fn model() -> Option<String> {
         .map(str::to_owned)
 }
 
-/// Puts `label` on the Dock icon; empty, none.
+/// Puts `label` on the Dock icon, or no badge when `label` is empty.
 pub(super) fn set_badge(label: &str) {
     let Some(mtm) = MainThreadMarker::new() else {
         return;
@@ -460,8 +469,8 @@ pub(super) fn open_in_background(url: &str) -> bool {
     true
 }
 
-/// Whether Exo's window is on screen: shown, and not in the Dock. `None` off the main thread,
-/// where AppKit can't be asked.
+/// Whether Exo's window is on screen, meaning shown and not in the Dock. `None` off the main
+/// thread, where AppKit can't be asked.
 pub(super) fn on_screen() -> Option<bool> {
     let mtm = MainThreadMarker::new()?;
     let windows = NSApplication::sharedApplication(mtm).windows();
@@ -516,9 +525,9 @@ mod tests {
     /// A quit Apple event, with `reason` as an attribute or a parameter.
     fn quit_event(reason: Option<(&[u8; 4], bool)>) -> Retained<NSAppleEventDescriptor> {
         let class = <NSAppleEventDescriptor as objc2::ClassType>::class();
-        // SAFETY: Foundation's constructors and setters, through `msg_send!` as above:
-        // `kAutoGenerateReturnID` (an `AEReturnID`) and `kAnyTransactionID` (an
-        // `AETransactionID`), no target, and descriptors for `AEKeyword`s.
+        // SAFETY: Foundation's constructors and setters, called through `msg_send!` as above, with
+        // `kAutoGenerateReturnID` (an `AEReturnID`), `kAnyTransactionID` (an `AETransactionID`), no
+        // target, and descriptors for `AEKeyword`s.
         unsafe {
             let event: Retained<NSAppleEventDescriptor> = msg_send![class, appleEventWithEventClass: CORE_EVENT_CLASS, eventID: QUIT_APPLICATION, targetDescriptor: None::<&NSAppleEventDescriptor>, returnID: -1_i16, transactionID: 0_i32];
             if let Some((reason, attribute)) = reason {

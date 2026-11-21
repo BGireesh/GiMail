@@ -74,7 +74,7 @@ pub fn router(app: Arc<App>) -> Router<Arc<App>> {
         .route("/drafts/send", post(send_draft))
         .route("/drafts/{id}", put(update_draft));
 
-    // Every route is under `users/{userId}`; checking it once keeps handlers to their logic.
+    // Every route is under `users/{userId}`, so checking it once keeps handlers to their logic.
     Router::new()
         .nest("/gmail/v1/users/{user}", users)
         .nest("/upload/gmail/v1/users/{user}", uploads)
@@ -102,7 +102,7 @@ fn no_content() -> Response {
 
 // Profile
 
-/// The mailbox's, reporting the address the token signs in (`oauth::Identity`).
+/// The mailbox's profile, reporting the address the token signs in (`oauth::Identity`).
 async fn profile(
     State(app): Shared,
     axum::Extension(identity): axum::Extension<crate::oauth::Identity>,
@@ -611,8 +611,8 @@ async fn update_vacation(
     State(app): Shared,
     Body(mut settings): Body<VacationSettings>,
 ) -> Reply<VacationSettings> {
-    // Gmail keeps one body: given both, the HTML one ("If both responseBodyPlainText and
-    // responseBodyHtml are specified, responseBodyHtml will be used").
+    // Gmail keeps one body. Given both, it keeps the HTML one ("If both responseBodyPlainText
+    // and responseBodyHtml are specified, responseBodyHtml will be used").
     if settings
         .response_body_html
         .as_deref()
@@ -671,7 +671,7 @@ async fn patch_send_as(
     change_send_as(&app, &email, request, true)
 }
 
-/// Updates the user-settable fields of an alias; making one the default clears the others.
+/// Updates the user-settable fields of an alias. Making one the default clears the others.
 fn change_send_as(app: &App, email: &str, request: SendAs, patch: bool) -> Reply<SendAs> {
     let mut world = app.lock();
     let index = send_as_index(&world, email)?;

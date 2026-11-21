@@ -1,7 +1,8 @@
-//! The contact picker: a field that suggests people (and domains) from the address book as you
-//! type, in a contact list under it that is Snow in either theme, and adds the one picked; with
-//! nothing to suggest, an address typed in full shows as its own row. A `+` at its right adds
-//! what's typed. Split Inbox's VIP definition uses it, without the picker's focus bar.
+//! The contact picker, a field that suggests people (and domains) from the address book as you
+//! type and adds the one picked. The suggestions show in a contact list under it that is Snow in
+//! either theme. With nothing to suggest, an address typed in full shows as its own row. A `+` at
+//! its right adds what's typed. Split Inbox's VIP definition uses it, without the picker's focus
+//! bar.
 
 use std::sync::LazyLock;
 
@@ -19,7 +20,7 @@ use crate::compose::{
 
 /// A row's name and address: 12px on the 28px line.
 const ROW_TEXT: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 12.0, 28.0);
-/// 36px rows; the avatar cell 36px, the name 172px and the address the rest of the row, each
+/// 36px rows, with the avatar cell 36px, the name 172px and the address the rest of the row, each
 /// padded 16px a side.
 const ROW: f32 = 36.0;
 const AVATAR_CELL: f32 = 36.0;
@@ -59,7 +60,7 @@ pub(crate) enum PickerKey {
     Select,
     /// Space: the address typed, when there are no suggestions.
     Space,
-    /// Escape with text: it's cleared.
+    /// Escape with text, which clears it.
     Clear,
 }
 
@@ -71,13 +72,13 @@ pub(crate) struct ContactPicker {
     query: String,
     suggestions: Vec<Suggestion>,
     highlight: usize,
-    /// Without suggestions: the typed text shows as its own row, and it's an address that row
-    /// adds.
+    /// Whether the typed text shows as its own row, as it does without suggestions. That row adds
+    /// it as an address.
     typed_row: bool,
     valid: bool,
-    /// It had the keyboard last frame.
+    /// Whether it had the keyboard last frame.
     focused: bool,
-    /// It asks for the keyboard next frame.
+    /// Whether it asks for the keyboard next frame.
     focus: bool,
     /// The field's spellchecking, boxed to keep the dialog screens it's in small.
     pub spelling: Box<exo_editor::FieldSpelling>,
@@ -135,7 +136,7 @@ impl ContactPicker {
         keys
     }
 
-    /// Carries out `key`; returns the sender it picked.
+    /// Carries out `key`. Returns the sender it picked.
     pub fn key(&mut self, key: PickerKey) -> Option<String> {
         match key {
             PickerKey::Move(delta) => {
@@ -156,7 +157,7 @@ impl ContactPicker {
     }
 
     /// The field (`input`) on `line` (its 20px line box, nudged down) with its `+` and list.
-    /// Returns the sender picked with the pointer: an address, or a domain.
+    /// Returns the sender picked with the pointer, an address or a domain.
     pub fn show(
         &mut self,
         ui: &mut Ui,
@@ -185,8 +186,9 @@ impl ContactPicker {
             self.suggest(book);
         }
         if self.focused {
-            // The field keeps the caret through the keys it takes; egui would move it on Tab and
-            // drop it on Escape. After the `TextEdit`'s own filter, which it sets each frame.
+            // The field keeps the caret through the keys it takes, where egui would move it on Tab
+            // and drop it on Escape. This goes after the `TextEdit` sets its own filter, which it
+            // does each frame.
             let tab = !self.suggestions.is_empty() || self.valid;
             let filter = egui::EventFilter {
                 tab,
@@ -226,8 +228,8 @@ impl ContactPicker {
                     .with_opacity(glow)
                     .paint(ui.painter(), add, round);
             }
-            // `Icons.DEPRECATED_plusCircle` is two colors (its `red` circle tinted, a white plus
-            // `M8 2V14M2 8H14` clipped to the middle 8px), which one tint can't draw.
+            // `legacy/DEPRECATED_plusCircle` is two colors (its circle tinted, a white plus across
+            // the middle 8px), which one tint can't draw.
             let add = exo_ui::pixel_snap(add);
             let painter = ui.painter();
             painter.circle_filled(add.center(), ADD / 2.0, PERIWINKLE);
@@ -263,7 +265,7 @@ impl ContactPicker {
         picked
     }
 
-    /// The list, if any: the suggestions, or the typed address's row. Returns `Some` when a row
+    /// The list, if any, of the suggestions or the typed address's row. Returns `Some` when a row
     /// was pressed (with what it picked).
     fn list(
         &mut self,
@@ -298,7 +300,7 @@ impl ContactPicker {
                             avatar: Some(avatar(name)),
                         }
                     }
-                    // A domain's row: no avatar.
+                    // A domain's row has no avatar.
                     Suggestion::Domain(domain) => ContactRow {
                         name: domain,
                         email: "",
@@ -317,8 +319,8 @@ impl ContactPicker {
             };
             (rows, self.text.as_str(), Some(self.highlight), columns)
         } else if self.typed_row && !self.text.is_empty() {
-            // The typed row: the text in a name cell as wide as the row, dark and filled once it's
-            // a whole address; its avatar's color is its first letter's.
+            // The typed row has the text in a name cell as wide as the row, dark and filled once
+            // it's a whole address. Its avatar's color is its first letter's.
             let first: String = self.text.chars().take(1).collect();
             let rows = vec![ContactRow {
                 name: &self.text,
@@ -368,7 +370,7 @@ impl ContactPicker {
         })
     }
 
-    /// The suggestions for the text; with none, a domain typed in full is one, and an address typed
+    /// The suggestions for the text. With none, a domain typed in full is one, and an address typed
     /// (or its start) shows as its own row.
     fn suggest(&mut self, book: Option<&contacts::Index>) {
         self.highlight = 0;
@@ -391,7 +393,7 @@ impl ContactPicker {
         self.typed_row = self.valid || ADDRESS_START.is_match(text);
     }
 
-    /// Suggestion `index`'s sender; the field empties.
+    /// Takes the sender of suggestion `index`, and the field empties.
     fn take(&mut self, index: usize) -> Option<String> {
         let sender = match self.suggestions.get(index)? {
             Suggestion::Contact(contact) => contact.email.clone(),
@@ -402,7 +404,7 @@ impl ContactPicker {
         Some(sender)
     }
 
-    /// The address typed, when it's one; the field empties.
+    /// Takes the address typed, when it's one, and the field empties.
     fn take_typed(&mut self) -> Option<String> {
         if !self.valid {
             return None;
@@ -412,7 +414,7 @@ impl ContactPicker {
         Some(sender)
     }
 
-    /// The `+`: the highlighted suggestion, else the domain or address typed.
+    /// What the `+` adds: the highlighted suggestion, or else the domain or address typed.
     fn add_button(&mut self) -> Option<String> {
         if !self.suggestions.is_empty() {
             return self.take(self.highlight);

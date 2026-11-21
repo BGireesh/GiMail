@@ -1,10 +1,10 @@
-//! Message bodies on screen: exo-mail's render pipeline and Blitz view, painted as egui textures.
-//! This module is the only place Exo talks to exo-mail.
+//! Message bodies on screen, rendered by exo-mail's pipeline and Blitz view and painted as egui
+//! textures. This module is the only place Exo talks to exo-mail.
 //!
 //! A [`exo_mail::BodyView`] isn't `Send` and laying out or painting one can take tens of
 //! milliseconds, so every view lives on one worker thread. The UI sends it requests (render a
 //! thread, lay a body out, paint a band of it, hit-test, select) and picks the answers up on a
-//! later frame; nothing here blocks a frame. Bodies are painted in horizontal bands so a tall
+//! later frame. Nothing here blocks a frame. Bodies are painted in horizontal bands so a tall
 //! newsletter only costs the bands on screen, and every band is cached until the body's layout,
 //! selection or images change. A band covers the body's whole width, so a body wider than its
 //! column scrolls sideways without painting again. Animated images play in patches painted over
@@ -46,8 +46,8 @@ pub struct Facts {
     /// The new part, and the quoted part, look like marketing mail.
     pub unquoted_marketing: bool,
     pub quoted_marketing: bool,
-    /// Read-receipt pixels were removed: "Email tracking blocked", unless the Images setting
-    /// shows all images ([`Bodies::tracking_blocked`]).
+    /// Read-receipt pixels were removed, so the header says "Email tracking blocked" unless the
+    /// Images setting shows all images ([`Bodies::tracking_blocked`]).
     pub tracking_blocked: bool,
     /// Something in it loads from the network.
     pub remote_images: bool,
@@ -82,8 +82,8 @@ pub struct Look {
     pub rem: f32,
     /// The quoted part is expanded below the `…`.
     pub show_quoted: bool,
-    /// The body is a notification its invite card replaces: nothing shows above the `…`, and the
-    /// new part is behind it.
+    /// The body is a notification that its invite card replaces, so nothing shows above the `…`
+    /// and the new part is behind it.
     pub hide_original: bool,
     /// The fractional part of the body's x on screen, in CSS px (glyphs land on quarter device
     /// pixels of their absolute position).
@@ -107,17 +107,19 @@ pub enum Event {
     Copied(String),
     /// A copy found no text selected.
     NothingSelected,
-    /// What conversation `thread`'s messages hold, by message id, rendered for [`Bodies::render`].
+    /// What the messages of conversation `thread` hold, by message id, rendered for
+    /// [`Bodies::render`].
     Rendered {
         thread: String,
         facts: Vec<(String, Facts)>,
     },
-    /// What an in-message link in message `id` points at starts `top` CSS px down its body
+    /// The target of an in-message link in message `id` starts `top` CSS px down the body
     /// ([`Bodies::find_anchor`]).
     Anchored { id: String, top: f32 },
-    /// A right-click at `at` on screen in message `id` ([`Bodies::context_menu`]): what it
-    /// landed on, and the text selected then, with where its first line's baseline starts on
-    /// screen (roughly: the selection's box, a line's ascent down).
+    /// A right-click at `at` on screen in message `id` ([`Bodies::context_menu`]). It carries
+    /// what the click landed on, and the text selected then, with where the baseline of its
+    /// first line starts on screen (roughly the top left of the selection's box, a line's ascent
+    /// down).
     ContextMenu {
         id: String,
         at: Pos2,
@@ -133,7 +135,7 @@ pub enum Event {
 struct Selected {
     /// The message it's in.
     message: String,
-    /// It as HTML, for a reply that quotes it.
+    /// The selection as HTML, for a reply that quotes it.
     html: String,
     /// Its text, for ⌘E.
     text: String,
@@ -142,8 +144,8 @@ struct Selected {
 }
 
 enum Job {
-    /// A new thread, whose messages load their read receipts when first shown
-    /// (`read_receipts`, `Show all images`).
+    /// A new thread. With `read_receipts` (`Show all images`), its messages load their read
+    /// receipts when first shown.
     Thread {
         messages: Vec<MessageDetail>,
         own_domains: Vec<String>,
@@ -157,7 +159,8 @@ enum Job {
         look: Look,
         block_remote: bool,
     },
-    /// Paint band `band`, `width` CSS px wide (the content's, short of the GPU's texture limit).
+    /// Paint band `band`, `width` CSS px wide (the content's width, capped at the GPU's texture
+    /// limit).
     Paint {
         id: String,
         generation: u64,
@@ -195,8 +198,9 @@ enum Job {
         id: String,
         name: String,
     },
-    /// A right-click at `at` in message `id`, `screen` on screen: unless it's on the selection,
-    /// the word under it is selected, or the selection goes.
+    /// A right-click at `at` in message `id`, at `screen` on screen. Unless it's on the
+    /// selection, it selects the word under it, or clears the selection when there's no text
+    /// there.
     ContextMenu {
         id: String,
         at: Pos2,
@@ -212,9 +216,9 @@ enum Job {
     Wake,
     /// Find (⌘F) searches every body for this, or stops.
     Find(Option<String>),
-    /// Find's current match is this one of message `.0`'s (or in none of them).
+    /// Find's current match is now match `.1` in message `.0`, or there's none.
     CurrentMatch(Option<(String, usize)>),
-    /// Find stopped: its current match, of message `id`'s, becomes the selection.
+    /// Find stopped, and its current match (match `index` in message `id`) becomes the selection.
     SelectMatch {
         id: String,
         index: usize,
@@ -274,8 +278,8 @@ enum Output {
         band: u32,
         image: exo_mail::Image,
     },
-    /// Animated images' new frames, painted over the bands: each a part of the body (`[left,
-    /// top, width, height]`, whole CSS px) and its pixels.
+    /// New frames of animated images, painted over the bands. Each patch is a part of the body
+    /// (`[left, top, width, height]`, whole CSS px) and its pixels.
     Animated {
         id: String,
         generation: u64,
@@ -291,8 +295,8 @@ enum Output {
         hit: Option<Hit>,
     },
     Copied(Option<String>),
-    /// The worker panicked outside a job and started again, without the views it had: the
-    /// thread is to be sent again.
+    /// The worker panicked outside a job and started again without the views it had, so the
+    /// thread has to be sent again.
     Restarted,
     Conversation {
         thread: String,
@@ -304,13 +308,14 @@ enum Output {
         id: String,
         top: Option<f32>,
     },
-    /// Find's matches for `query` in message `id`'s body, as boxes in its CSS px.
+    /// Find's matches for `query` in the body of message `id`, as boxes in the body's CSS px.
     Found {
         id: String,
         query: Option<String>,
         boxes: Vec<Rect>,
     },
-    /// A right-click's hit, and the selection's text and box then (in the body's CSS px).
+    /// What a right-click hit, and the selection's text and box at that moment (in the body's CSS
+    /// px).
     ContextMenu {
         id: String,
         at: Pos2,
@@ -342,14 +347,15 @@ struct Entry {
     bands: HashMap<u32, (u64, TextureHandle)>,
     asked_bands: HashSet<(u64, u32)>,
     hover: Option<Hit>,
-    /// Where the last hover was asked: it's asked again only once the pointer or the body moves.
+    /// Where the last hover was asked. A hover is asked again only once the pointer or the body
+    /// moves.
     hovered_at: Option<Pos2>,
     /// How far a body wider than its column is scrolled sideways, in CSS px.
     scroll_x: f32,
     /// Animated images' latest frames, by the part of the body they cover.
     patches: HashMap<[u32; 2], (u64, [f32; 4], TextureHandle)>,
     animation: AnimationState,
-    /// Find's matches in it, in its CSS px, and the query they're for.
+    /// Find's matches in the body, in the body's CSS px, and the query they're for.
     found: Vec<Rect>,
     found_for: Option<String>,
 }
@@ -380,26 +386,26 @@ pub struct Bodies {
     images_shown: HashSet<String>,
     /// The text selection, if any.
     selection: Option<Selected>,
-    /// What find searches the bodies for, as last sent to the worker; the current match among
-    /// theirs as sent, and as this frame's painting found it.
+    /// What find searches the bodies for, as last sent to the worker. The next two are find's
+    /// current match among the bodies' matches, as sent and as this frame's painting found it.
     searched: Option<String>,
     current_match: Option<(String, usize)>,
     painted_match: Option<(String, usize)>,
-    /// What the pipeline does besides the usual: the attachment viewer's messages have no
-    /// detected dates, a read-only snippet isn't classified.
+    /// How the pipeline departs from the usual. The attachment viewer's messages have no
+    /// detected dates, and a read-only snippet isn't classified.
     options: exo_mail::RenderOptions,
 }
 
 impl Bodies {
-    /// Starts the worker; it loads the email fonts and repaints `ctx` whenever it has something
-    /// new.
+    /// Starts the worker, which loads the email fonts and repaints `ctx` whenever it has
+    /// something new.
     pub fn new(ctx: &egui::Context) -> Self {
         let (jobs, job_receiver) = channel();
         let (output_sender, outputs) = channel();
         let pending = Arc::new(AtomicUsize::new(0));
         let (wake, worker_pending, ctx) = (jobs.clone(), pending.clone(), ctx.clone());
         // Views aren't `Send`, so the worker is built on its own thread. A panic outside a job
-        // starts it again, as a background is (`recovery`).
+        // restarts the worker, the way an account's background restarts (`recovery`).
         let spawned = std::thread::Builder::new()
             .name("exo-bodies".into())
             .spawn(move || {
@@ -462,8 +468,8 @@ impl Bodies {
         }
     }
 
-    /// Renders as the attachment viewer shows a message, cleaned and nothing more: no dates
-    /// marked, nothing behind a `…` ([`exo_mail::RenderOptions`]).
+    /// Renders as the attachment viewer shows a message, cleaned and nothing more, with no dates
+    /// marked and nothing behind a `…` ([`exo_mail::RenderOptions`]).
     #[must_use]
     pub fn cleaned_only(mut self) -> Self {
         self.options = exo_mail::RenderOptions {
@@ -474,8 +480,8 @@ impl Bodies {
         self
     }
 
-    /// Renders bodies unclassified: never marketing, no colors tagged for the restyle, as the
-    /// read-only snippet view shows a snippet ([`exo_mail::RenderOptions::classify`]).
+    /// Renders bodies unclassified, as the read-only snippet view shows a snippet. Nothing is
+    /// marketing and no colors are tagged for the restyle ([`exo_mail::RenderOptions::classify`]).
     #[must_use]
     pub fn unclassified(mut self) -> Self {
         self.options.classify = false;
@@ -488,8 +494,8 @@ impl Bodies {
     }
 
     /// Renders `messages` (one thread's, oldest first) unless they're what's rendered already.
-    /// `account` is the account's address, whose domain is the user's own; `loader` fetches the
-    /// messages' images. Messages that stay keep their layout and painted bands until the new
+    /// `account` is the account's address, whose domain is the user's own, and `loader` fetches
+    /// the messages' images. Messages that stay keep their layout and painted bands until the new
     /// render replaces them, so a reply arriving neither blanks the thread nor moves its scroll.
     pub fn set_thread(&mut self, messages: &[&MessageDetail], account: &str, loader: &Loader) {
         if messages
@@ -535,7 +541,8 @@ impl Bodies {
         self.images_shown.insert(id.to_owned());
     }
 
-    /// Whether `id`'s remote content is blocked: `Block all remote images`, until shown.
+    /// Whether `id`'s remote content is blocked, as it is under `Block all remote images` until
+    /// shown.
     fn blocks_images(&self, id: &str) -> bool {
         self.images == RemoteContentBlocking::All && !self.images_shown.contains(id)
     }
@@ -545,8 +552,8 @@ impl Bodies {
         self.blocks_images(id) && self.facts(id).is_some_and(|facts| facts.remote_images)
     }
 
-    /// Whether `id`'s header says `Email tracking blocked`: it had read receipts, which only
-    /// `Show all images` loads.
+    /// Whether `id`'s header says `Email tracking blocked`, because it had read receipts and only
+    /// `Show all images` loads them.
     pub fn tracking_blocked(&self, id: &str) -> bool {
         self.images != RemoteContentBlocking::None
             && self.facts(id).is_some_and(|facts| facts.tracking_blocked)
@@ -558,10 +565,10 @@ impl Bodies {
     }
 
     /// Message `id`'s body as it prints (`exo_mail::printable_body`), with its quoted part when
-    /// `show_quoted` and its remote content blocked as on screen; `None` until it's rendered.
+    /// `show_quoted` and its remote content blocked as on screen. `None` until it's rendered.
     pub fn printable(&self, id: &str, show_quoted: bool) -> Option<String> {
         let facts = self.facts(id)?;
-        // The parts of the render a body is composed from, which is all printing reads.
+        // The parts of the render that a body is composed from, which are all that printing reads.
         let render = Render {
             unquoted_html: facts.unquoted_html.clone(),
             quoted_html: facts.quoted_html.clone(),
@@ -578,7 +585,7 @@ impl Bodies {
         ))
     }
 
-    /// The body of `id`'s height when shown with `look`, asking for a layout when the look
+    /// The height of `id`'s body when shown with `look`, asking for a layout when the look
     /// changed. Until one arrives it's the last layout's height, or `None` the first time.
     pub fn height(&mut self, id: &str, look: Look) -> Option<f32> {
         let block_remote = self.blocks_images(id);
@@ -596,7 +603,8 @@ impl Bodies {
         self.entries.get(id)?.laid.as_ref().map(|laid| laid.height)
     }
 
-    /// How much wider than its column `id`'s body is, in CSS px: how far it scrolls sideways.
+    /// How much wider than its column `id`'s body is, in CSS px, which is how far it scrolls
+    /// sideways.
     pub fn overflow(&self, id: &str) -> f32 {
         self.entries
             .get(id)
@@ -616,8 +624,8 @@ impl Bodies {
         self.entries.get(id).map_or(0.0, |entry| entry.scroll_x)
     }
 
-    /// Scrolls `id`'s body sideways to `x` CSS px (kept within its overflow), on a device pixel
-    /// of `scale`.
+    /// Scrolls `id`'s body sideways to `x` CSS px (kept within its overflow), rounded to a device
+    /// pixel at `scale`.
     pub fn set_scroll_x(&mut self, id: &str, x: f32, scale: f32) {
         let overflow = self.overflow(id);
         if let Some(entry) = self.entries.get_mut(id) {
@@ -632,9 +640,9 @@ impl Bodies {
             .is_some_and(|entry| entry.laid.is_some())
     }
 
-    /// Paints the part of `id`'s body inside `clip`, its top left at `origin` (less how far it's
-    /// scrolled sideways), asking for the bands that aren't painted yet and dropping those far off
-    /// screen, and plays its animated images on screen. `opacity` fades the whole body (a
+    /// Paints the part of `id`'s body inside `clip`, with its top left at `origin` less how far
+    /// it's scrolled sideways. It asks for the bands that aren't painted yet, drops those far off
+    /// screen, and plays the animated images on screen. `opacity` fades the whole body (a
     /// marketing card in dark mode is 90% opaque).
     pub fn paint(&mut self, painter: &Painter, id: &str, origin: Pos2, clip: Rect, opacity: f32) {
         let Some(entry) = self.entries.get_mut(id) else {
@@ -644,14 +652,15 @@ impl Bodies {
             return;
         };
         let ppp = painter.pixels_per_point();
-        // The worker painted the fractional x into the band; the texture sits on the whole px
-        // below it, and on a device pixel vertically (glyphs don't move vertically in Chromium).
+        // The worker painted the fractional x into the band, so the texture sits on the whole px
+        // below it. Vertically it sits on a device pixel (glyphs don't move vertically in
+        // Chromium).
         let left = origin.x.floor() - entry.scroll_x;
         let top = (origin.y * ppp).round() / ppp;
         let shown = (clip.y_range().min - top)..(clip.y_range().max - top);
         let visible = visible_bands(shown.start, shown.end, laid.height);
         if visible.is_empty() {
-            // Out of view (painted only for find to search the thread): what's painted stays.
+            // Out of view (painted only so find can search the thread), so what's painted stays.
             return;
         }
         let kept = visible.start.saturating_sub(KEPT_BANDS)..visible.end.saturating_add(KEPT_BANDS);
@@ -701,7 +710,7 @@ impl Bodies {
                     .image(texture.id(), at, whole, tint);
             }
         }
-        // Animated images play while they show: the worker is asked for their next frames when
+        // Animated images play while they show. The worker is asked for their next frames when
         // they're due, and again whenever another one scrolls into view.
         let on_screen: Vec<usize> = laid
             .animations
@@ -732,7 +741,7 @@ impl Bodies {
     }
 
     /// Hit-tests `at` (CSS px from the body's top left) in `id`, unless that's what it last did
-    /// and the body hasn't changed since; [`Bodies::hovered`] has the answer a frame or two later.
+    /// and the body hasn't changed since. [`Bodies::hovered`] has the answer a frame or two later.
     pub fn hover(&mut self, id: &str, at: Pos2) {
         let Some(entry) = self.entries.get_mut(id) else {
             return;
@@ -759,7 +768,7 @@ impl Bodies {
         }
     }
 
-    /// A click at `at` in `id`; [`Bodies::poll`] reports what it hit.
+    /// A click at `at` in `id`. [`Bodies::poll`] reports what it hit.
     pub fn click(&self, id: &str, at: Pos2) {
         self.send(Job::Click {
             id: id.to_owned(),
@@ -767,8 +776,8 @@ impl Bodies {
         });
     }
 
-    /// Starts a text selection at `at` in `id`, clearing any other: a caret for one click, the
-    /// word or paragraph there for a double or triple click.
+    /// Starts a text selection at `at` in `id`, clearing any other. One click places a caret,
+    /// and a double or triple click selects the word or paragraph there.
     pub fn select_from(&self, id: &str, at: Pos2, granularity: Granularity) {
         self.send(Job::SelectFrom {
             id: id.to_owned(),
@@ -795,7 +804,7 @@ impl Bodies {
         self.send(Job::ClearSelection);
     }
 
-    /// Asks for the selected text; [`Bodies::poll`] reports it if there is any.
+    /// Asks for the selected text. [`Bodies::poll`] reports it if there is any.
     pub fn copy(&self) {
         self.send(Job::Copy);
     }
@@ -834,7 +843,7 @@ impl Bodies {
         });
     }
 
-    /// Finds where in-message link `#name` points in message `id`; [`Bodies::poll`] reports it
+    /// Finds where in-message link `#name` points in message `id`. [`Bodies::poll`] reports it
     /// if it points anywhere.
     pub fn find_anchor(&self, id: &str, name: &str) {
         self.send(Job::Anchor {
@@ -843,9 +852,9 @@ impl Bodies {
         });
     }
 
-    /// Renders conversation `thread`'s `messages` (oldest first) for what they hold (their links,
-    /// their new parts), which [`Bodies::poll`] reports; `account` as for [`Bodies::set_thread`].
-    /// The open thread's bodies stay as they are.
+    /// Renders the `messages` of conversation `thread` (oldest first) for what they hold (their
+    /// links, their new parts), which [`Bodies::poll`] reports. `account` is as for
+    /// [`Bodies::set_thread`]. The open thread's bodies stay as they are.
     pub fn render(&self, thread: &str, messages: &[&MessageDetail], account: &str) {
         let own_domains = account
             .rsplit_once('@')
@@ -1042,7 +1051,8 @@ impl Bodies {
                     events.extend(top.map(|top| Event::Anchored { id, top }))
                 }
                 Output::Found { id, query, boxes } => {
-                    // An answer for an earlier query is outdated: the worker searches again.
+                    // An answer for an earlier query is outdated, because the worker searches
+                    // again.
                     if query == self.searched {
                         let entry = self.entries.entry(id).or_default();
                         (entry.found, entry.found_for) = (boxes, query);
@@ -1055,7 +1065,8 @@ impl Bodies {
                     hit,
                     selection,
                 } => {
-                    // A line's ascent down the selection's box: about where its baseline is.
+                    // A line's ascent down from the top of the selection's box, which is about
+                    // where its baseline is.
                     let baseline = |bounds: Rect| {
                         screen + (bounds.min - at) + vec2(0.0, 0.75 * bounds.height().min(20.0))
                     };
@@ -1112,11 +1123,11 @@ struct Worker {
     fetch: Option<Arc<dyn exo_mail::Fetch>>,
     /// The thread's messages load their read receipts when first shown.
     read_receipts: bool,
-    /// The messages that have, since the thread was opened.
+    /// The messages that have loaded them since the thread was opened.
     receipts_loaded: HashSet<String>,
     /// The view holding the text selection.
     selected: Option<String>,
-    /// What find searches for, and its current match (a message's, and which of its matches).
+    /// What find searches for, and its current match (the message, and which of its matches).
     query: Option<String>,
     current_match: Option<(String, usize)>,
     generation: u64,
@@ -1128,7 +1139,7 @@ struct Worker {
 impl Worker {
     fn run(mut self, jobs: &Receiver<Job>, outputs: &Sender<Output>, ctx: &egui::Context) {
         while let Ok(first) = jobs.recv() {
-            // While a window resizes, layouts queue up faster than they run: only the newest
+            // While a window resizes, layouts queue up faster than they run, so only the newest
             // layout (and hover) of each body in the queue is worth doing.
             let mut batch = vec![first];
             batch.extend(jobs.try_iter());
@@ -1138,8 +1149,8 @@ impl Worker {
                 .map(|(at, job)| batch[at + 1..].iter().any(|later| job.superseded_by(later)))
                 .collect();
             for (job, skip) in batch.into_iter().zip(superseded) {
-                // A job answers with as many outputs as it changed; each output is one unit of
-                // `pending` on the UI side, so the job's own unit is swapped for them.
+                // A job answers with an output for each thing it changed. Each output is one unit
+                // of `pending` on the UI side, so the job's own unit is swapped for them.
                 let produced = if skip {
                     Vec::new()
                 } else {
@@ -1157,8 +1168,8 @@ impl Worker {
         }
     }
 
-    /// [`Self::handle`], surviving a panic in the body engine: the message the job was about
-    /// loses its view and render (its body stays a placeholder) and the other bodies carry on.
+    /// [`Self::handle`], surviving a panic in the body engine. The message the job was about
+    /// loses its view and render (its body stays a placeholder), and the other bodies carry on.
     /// Otherwise one hostile body would leave every body blank until Exo restarts.
     fn handle_caught(&mut self, job: Job) -> Vec<Output> {
         let id = job.message().map(str::to_owned);
@@ -1264,7 +1275,7 @@ impl Worker {
                 now,
                 visible,
             } => {
-                // Always answered: the UI asks again only once this one is.
+                // Always answered, because the UI asks again only once this one is.
                 let Some(view) = self.views.get_mut(&id) else {
                     return vec![Output::Animated {
                         id,
@@ -1364,7 +1375,8 @@ impl Worker {
                         });
                 let mut out = Vec::new();
                 if !on_selection {
-                    // A Mac's right-click selects the word under it (`SelectClosestWordOrLinkFromMouseEvent`).
+                    // A Mac's right-click selects the word under it
+                    // (`SelectClosestWordOrLinkFromMouseEvent`).
                     out = self.clear_selection();
                     if hit.text
                         && let Some(view) = self.views.get_mut(&id)
@@ -1622,8 +1634,8 @@ fn visible_bands(from: f32, to: f32, height: f32) -> Range<u32> {
     band((from / BAND).floor())..band((to / BAND).ceil())
 }
 
-/// Runs the pipeline on every message, oldest first, each against the one it replies to: the
-/// message its `In-Reply-To` names, else the one before it.
+/// Runs the pipeline on every message, oldest first, each against the one it replies to, which is
+/// the message its `In-Reply-To` names or else the one before it.
 fn render_thread(
     sources: &[MessageDetail],
     own_domains: &[String],
@@ -1678,8 +1690,8 @@ fn render_thread(
         .collect()
 }
 
-/// The text a reader sees of each of `sources`, each read against the one it replies to as
-/// [`render_thread`] reads them: what the search index holds (`Store::index_text_with`).
+/// The text a reader sees in each of `sources`, each read against the one it replies to as
+/// [`render_thread`] reads them. This is what the search index holds (`Store::index_text_with`).
 pub(crate) fn visible_texts(sources: &[exo_store::TextSource]) -> Vec<String> {
     let messages: Vec<exo_mail::Message> = sources
         .iter()
@@ -1705,7 +1717,7 @@ pub(crate) fn visible_texts(sources: &[exo_store::TextSource]) -> Vec<String> {
         .collect()
 }
 
-/// A body as the pipeline takes it: its HTML, or its plain text as HTML.
+/// A body as the pipeline takes it, which is its HTML or its plain text as HTML.
 fn body_html(body: &exo_store::Body) -> String {
     match (&body.html, &body.text) {
         (Some(html), _) => html.clone(),
@@ -1737,8 +1749,9 @@ fn facts(render: &Render) -> Facts {
     }
 }
 
-/// The render of a body its invite card replaces: no new part and no `<body>` attributes, and the
-/// new part, when it has anything, as the quoted one behind the `…`.
+/// The render of a body that its invite card replaces. It has no new part and no `<body>`
+/// attributes, and the original new part, when it has anything, becomes the quoted part behind
+/// the `…`.
 fn hidden(render: &Render) -> Render {
     let has_body = !render.unquoted_html.trim().is_empty();
     Render {
@@ -1866,14 +1879,15 @@ mod tests {
             let store = indexed_store(&server, &dir).await;
             let http = reqwest::Client::new();
             let deliver = server.url().join("/__mock/deliver").expect("a URL");
-            // Ann asks, signing with her company; Ben answers above her message, quoted whole.
+            // Ann asks, signing with her company. Ben answers above her message, which he quotes
+            // whole.
             let first = "<div>Shall we try the boathouse on Friday? The walrus exhibit opens then.</div><div class=\"gmail_signature\">Ann Lee · Zanzibar Shipping</div>";
             let asked: serde_json::Value = http.post(deliver.clone()).json(&serde_json::json!({ "from": "Ann Lee <ann@example.com>", "subject": "Friday lunch", "html": first })).send().await.expect("delivers").json().await.expect("a message");
             let reply = format!("<div>Noon by the pergola works too.</div><div class=\"gmail_quote\"><div class=\"gmail_attr\">On Mon, Nov 16, 2026 at 9:00 AM Ann Lee &lt;ann@example.com&gt; wrote:</div><blockquote class=\"gmail_quote\">{first}</blockquote></div>");
             http.post(deliver).json(&serde_json::json!({ "from": "Ben Ortiz <ben@example.com>", "html": reply, "threadId": asked["threadId"] })).send().await.expect("delivers");
             while store.sync().await.expect("syncs").backfilling {}
             store.index_texts().await.expect("indexes");
-            // The local index alone (offline): online, Gmail's search adds what it finds.
+            // The local index alone (offline). Online, Gmail's search adds what it finds.
             let found = async |query: &str| -> Vec<String> {
                 let page = store.search(&mut exo_store::Search::new(query), 50, false, 15).await.expect("searches");
                 page.results.into_iter().map(|result| result.thread.subject).collect()
@@ -1886,9 +1900,10 @@ mod tests {
         });
     }
 
-    /// What working out the search index's visible text costs (`Store::index_text_with`): the
-    /// pipeline's time per 100 conversations, the mock's mail as it is, then 100 conversations of
-    /// two messages (a reply quoting the first) at sizes of real mail.
+    /// What it costs to work out the visible text for the search index
+    /// (`Store::index_text_with`). It prints the pipeline's time per 100 conversations, first for
+    /// the mock's mail as it is, then for 100 conversations of two messages (a reply quoting the
+    /// first) at sizes of real mail.
     ///
     /// `cargo test --release -p exo --lib -- --ignored --nocapture index_text_cost`
     #[test]

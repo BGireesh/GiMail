@@ -1,10 +1,10 @@
 //! Toasts with undo, and hint tooltips.
 //!
-//! There is one toast at a time: a new one replaces the current one. It stays 8s, fades out over
-//! 2s (`ease-in`) and is gone; hovering cancels both timers and brings a fading toast back over
-//! 0.2s, and leaving restarts the 8s. Its actions are bound to their keys (`z` / ⌘Z for Undo) only
-//! while it exists: undo is per toast, there is no history. Hints are a separate single slot shown
-//! for 10s that fades out over 500ms.
+//! There is one toast at a time, and a new one replaces the current one. It stays 8s, fades out
+//! over 2s (`ease-in`) and is gone. Hovering cancels both timers and brings a fading toast back
+//! over 0.2s, and leaving restarts the 8s. Its actions are bound to their keys (`z` / ⌘Z for Undo)
+//! only while it exists, because undo is per toast and there is no history. Hints are a separate
+//! single slot shown for 10s that fades out over 500ms.
 
 use std::borrow::Cow;
 
@@ -36,8 +36,8 @@ pub struct Toast<A> {
     auto_hide: bool,
     /// The lines between actions show without hovering.
     divided: bool,
-    /// Correlates the toasts of one flow: a send's toast is updated only while it's still the one
-    /// showing.
+    /// Correlates the toasts of one flow, so a send's toast is updated only while it's still the
+    /// one showing.
     tag: Option<u64>,
 }
 
@@ -263,7 +263,7 @@ struct Shown<A> {
 enum Timer {
     /// Shown for 8s from `since`, then fading out for 2s (if it auto-hides).
     Running { since: f64 },
-    /// Hovered, so held: coming back from opacity `from` over 0.2s since `at`.
+    /// Hovered, so held. It comes back from opacity `from` over 0.2s since `at`.
     Paused { at: f64, from: f32 },
 }
 

@@ -1,11 +1,11 @@
-//! The Quick Tips bar: the status bar's gradient, centred variant, whose line teaches the keys of
+//! The Quick Tips bar, the status bar's gradient, centred variant, whose line teaches the keys of
 //! what has the keyboard, and whose cross turns it off.
 //!
-//! The line is 12px/24px Exo Sans at `.8` black (`.8` white in Carbon), 1px down, centred in the bar
-//! less `2rem` each side; keycaps `#abb7c5` (`#555b64`) 5px either side of words, a group's caps
-//! 4px apart; `·` 7px after a word and 2px before the next, at `.5` black (`.4` white); a
-//! `"keyword"` 5px after what's before it. The cross is a 12px icon at `.35` (`.5` hovered), `2rem`
-//! from the right.
+//! The line is 12px/24px Exo Sans at `.8` black (`.8` white in Carbon), 1px down, centred in the
+//! bar less `2rem` each side. Keycaps are `#abb7c5` (`#555b64`), 5px either side of words, with a
+//! group's caps 4px apart. A `·` sits 7px after a word and 2px before the next, at `.5` black (`.4`
+//! white), and a `"keyword"` sits 5px after what's before it. The cross is a 12px icon at `.35`
+//! (`.5` hovered), `2rem` from the right.
 //!
 //! The background is an SVG image (`background-size: cover`): a 1180×65 field of `#f2f4fa`
 //! (`#2f3237` in Carbon) under three blurred ellipses, drawn here from the same shapes.
@@ -31,7 +31,7 @@ const KEYCAP_TOP: f32 = 6.0;
 /// A cap's `max-height`, its label on the line's baseline.
 const KEYCAP_HEIGHT: f32 = 19.0;
 const KEYCAP_BASELINE: f32 = 14.0;
-/// `margin: 0 5px` around a cap or a group of caps; a group's caps 4px apart.
+/// `margin: 0 5px` around a cap or a group of caps, with a group's caps 4px apart.
 const KEY_MARGIN: f32 = 5.0;
 const GROUP_GAP: f32 = 4.0;
 /// The `·`'s `margin: 0 2px 0 7px`.
@@ -52,7 +52,8 @@ const IMAGE: Vec2 = vec2(1180.0, 65.0);
 pub enum TipPart<'a> {
     /// Words (`Hit`, `to Mark Done`).
     Text(&'a str),
-    /// Caps side by side, one per token: a group when there are several (`["⌘", "K"]`).
+    /// Caps side by side, one per token, which make a group when there are several
+    /// (`["⌘", "K"]`).
     Keys(&'a [&'a str]),
     /// `·` between two tips.
     Dot,
@@ -63,7 +64,7 @@ pub enum TipPart<'a> {
 /// The Quick Tips bar, to paint.
 #[derive(Clone, Copy, Debug)]
 pub struct QuickTipsBar<'a> {
-    /// The line; with none the bar is empty and has no cross (the `default` context).
+    /// The line. With none, the bar is empty and has no cross (the `default` context).
     pub parts: &'a [TipPart<'a>],
 }
 
@@ -77,7 +78,7 @@ impl QuickTipsBar<'_> {
         );
         let tokens = palette(&ctx);
         let painter = ui.painter_at(bar);
-        // `background-size: cover` from the top left: the image as wide as the bar.
+        // With `background-size: cover` from the top left, the image is as wide as the bar.
         let texture = background(&ctx, tokens.theme);
         let scale = bar.width() / IMAGE.x;
         let uv = Rect::from_min_max(
@@ -104,8 +105,8 @@ impl QuickTipsBar<'_> {
             .map(|part| item(&ctx, *part, colors, ink, dot))
             .collect();
         let width: f32 = items.iter().map(|(width, _)| width).sum();
-        // The description: `padding: 0 2rem; justify-content: center`, the tip `margin: 0 auto` in
-        // it.
+        // The description has `padding: 0 2rem; justify-content: center`, with the tip
+        // `margin: 0 auto` in it.
         let inner = Rect::from_min_max(
             pos2(bar.left() + 2.0 * rem, bar.top()),
             pos2(bar.right() - 2.0 * rem, bar.bottom()),

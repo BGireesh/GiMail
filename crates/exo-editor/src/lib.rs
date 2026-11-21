@@ -4,22 +4,22 @@
     clippy::complexity,
     clippy::perf
 )]
-//! The compose body editor: Squire's editing model, rebuilt for egui.
+//! The compose body editor, an HTML editing model with its egui widget.
 //!
 //! # The model
 //!
-//! A [`Document`] is Squire's DOM flattened into leaf blocks (`div`, `li`, …), each with the
+//! A [`Document`] is the body's DOM flattened into leaf blocks (`div`, `li`, …), each with the
 //! containers around it (lists, quotes, indents, wrapper `div`s) and inline runs carrying the
-//! elements they sit in. Editing commands on [`Editor`] follow Squire's semantics, quirks included:
-//! Enter in a quote breaks out into three empty lines, ⌘] in a quote adds a level outside it, lists
-//! nest as sibling lists with `aria-level`. [`Editor::html`] is the draft body that's saved;
-//! [`outgoing::html`] is what's sent.
+//! elements they sit in. Editing commands on [`Editor`] work on that structure, quirks included.
+//! Enter in a quote breaks out into three empty lines, ⌘] in a quote adds a level outside it, and
+//! lists nest as sibling lists with `aria-level`. [`Editor::html`] is the draft body that's saved,
+//! and [`outgoing::html`] is what's sent.
 //!
 //! # Wiring it into compose
 //!
 //! The app owns an [`Editor`] per draft and draws it with [`Editor::ui`]. Keys go through
 //! `exo-commands` first, so the formatting shortcuts are commands the compose region registers,
-//! each calling an editor method; [`FormatCommand`] lists them with their keys and help-sheet
+//! each calling an editor method. [`FormatCommand`] lists them with their keys and help-sheet
 //! titles:
 //!
 //! ```ignore
@@ -33,26 +33,26 @@
 //! ```
 //!
 //! Everything else (typing, arrows, Enter, Backspace, ⌘Z, ⌘A, clipboard, IME) the widget
-//! handles itself, as Squire does inside its `contenteditable`.
+//! handles itself, as a browser does inside a `contenteditable`.
 //!
 //! The inline triggers (`:` emoji, `;` snippets, `+`/`@`/`-` mentions) are reported, not
-//! resolved: [`EditorResponse::trigger`] has the kind, the query and the anchor rect; the app
-//! shows its dropdown, and while it's open registers ↑ ↓ Enter Tab Esc so they reach it instead
-//! of the editor; picking an item calls [`Editor::replace`].
+//! resolved. [`EditorResponse::trigger`] has the kind, the query and the anchor rect. The app
+//! shows its dropdown and, while the dropdown is open, registers ↑ ↓ Enter Tab Esc so they reach
+//! the dropdown instead of the editor. Picking an item calls [`Editor::replace`].
 //!
-//! Dates in the text are detected as message bodies' are: [`EditorResponse::date`] is the
-//! one the caret is on, whose day the app shows, and [`Editor::shift_date`] writes what it says a
-//! day earlier or later.
+//! Dates in the text are detected the same way as in message bodies. [`EditorResponse::date`] is
+//! the date the caret is on, whose day the app shows, and [`Editor::shift_date`] writes what the
+//! date says a day earlier or later.
 //!
-//! Spelling is the app's spellchecker's ([`Editor::set_spelling`], a [`Spelling`]): with
-//! autocorrect off ([`Editor::set_autocorrect`]) misspellings are marked as Chromium marks them;
-//! with it on, finished words are corrected or marked as they're finished, and the
+//! The app's spellchecker, a [`Spelling`] handed over with [`Editor::set_spelling`], checks the
+//! body. With autocorrect off ([`Editor::set_autocorrect`]), misspellings are marked as Chromium
+//! marks them. With autocorrect on, words are corrected or marked as they're finished, and the
 //! suggestion pill is the editor's own. Autocomplete's ghost text ([`Editor::set_autocomplete`])
-//! comes from the same spellchecker's completions; Tab takes it ([`Editor::wants_tab`]).
+//! comes from the same spellchecker's completions, and Tab takes it ([`Editor::wants_tab`]).
 //!
-//! Images are the app's to load: [`Editor::image_requests`] says which images the body shows
-//! without pixels, and [`Editor::set_image`] hands each its [`ImageLoad`]. Insert Image is
-//! [`Editor::insert_image`] with the Content-ID the app keeps the file by; a paste's `data:`
+//! The app loads images. [`Editor::image_requests`] says which images the body shows without
+//! pixels, and [`Editor::set_image`] hands each its [`ImageLoad`]. Insert Image calls
+//! [`Editor::insert_image`] with the Content-ID the app keeps the file by. A paste's `data:`
 //! images come back from [`Editor::take_uploads`] for the app to keep the same way.
 
 mod autocorrect;

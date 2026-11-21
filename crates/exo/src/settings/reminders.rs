@@ -1,11 +1,11 @@
-//! The Reminders dialog: Remind me's defaults. Everything applies as it's changed.
+//! The Reminders dialog, which sets Remind me's defaults. Everything applies as it's changed.
 //!
 //! `in {n} days` and `Weekdays Only` drive Remind me's `in {n} days` row and typed days,
 //! `Automatic Reminders` puts the default reminder on drafts with an external recipient
 //! (`compose::reminder`), and the time and `if no reply` / `regardless` are what the picker
 //! uses. Opening it writes `Weekdays Only`'s default while it's unset.
 //!
-//! Metrics at a 1280×800 window. In Carbon the card keeps Snow's colours.
+//! Metrics are at a 1280×800 window. In Carbon the card keeps Snow's colours.
 
 use egui::{Color32, Context, Id, Rect, Sense, Stroke, Ui, pos2, text::CCursorRange, vec2};
 use exo_store::{ReminderSettings, TriggerCondition};
@@ -14,20 +14,20 @@ use jiff::Zoned;
 
 use crate::time_suggest::{self, Options};
 
-/// The rows' text: 12px (13px only on a 1× screen), the headers bold in 20px lines, the
-/// subheaders in 16px ones; the labels and inputs 20px, the inputs bold.
+/// The rows' text is 12px (13px only on a 1× screen), with the headers bold in 20px lines and the
+/// subheaders in 16px ones. The labels and inputs have 20px lines, and the inputs are bold.
 const HEADER: TextStyle = TextStyle::new(Font::new(Family::Sans, 700), 12.0, 20.0);
 const SUBHEADER: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 12.0, 16.0);
 const LABEL: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 12.0, 20.0);
 const INPUT: TextStyle = TextStyle::new(Font::new(Family::Sans, 700), 12.0, 20.0);
 /// `rgba(0,0,0,.9)` for the headers, labels and the dropdown's value, `.55` the subheaders, `.8`
-/// the inputs; the caret `.3`, black while the dropdown has the keyboard or the pointer.
+/// the inputs. The caret is `.3`, or black while the dropdown has the keyboard or the pointer.
 const STRONG: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 230);
 const SUBDUED: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 140);
 const INPUT_INK: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 204);
 const CARET: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 77);
 /// The inputs' `border-bottom`: 1px `rgba(0,0,0,.1)`, 2px `#aeb1dd` focused, `#ef8e8e` invalid
-/// (its text too); their selection `#d5d7ed`.
+/// (its text too). Their selection is `#d5d7ed`.
 const UNDERLINE: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 26);
 const FOCUSED: Color32 = Color32::from_rgb(0xae, 0xb1, 0xdd);
 const INVALID: Color32 = Color32::from_rgb(0xef, 0x8e, 0x8e);
@@ -45,8 +45,8 @@ const VALUE_TOP: f32 = 81.0;
 const RULE_TOP: f32 = 123.0;
 const AUTOMATIC_TOP: f32 = 147.0;
 const WEEKDAYS_TOP: f32 = 223.0;
-/// A header's subheader 26px below it (`margin-bottom: 6px`), and the checkbox's image 3px below
-/// the header's top (the box's `margin-top: -5px` and `padding: 8px`).
+/// A header's subheader sits 26px below it (`margin-bottom: 6px`), and the checkbox's image 3px
+/// below the header's top (the box's `margin-top: -5px` and `padding: 8px`).
 const SUBHEADER_BELOW: f32 = 26.0;
 const CHECKBOX_DOWN: f32 = 3.0;
 /// The checkbox image's left, 14px in from the content's right (`margin-right: -9px`).
@@ -59,13 +59,13 @@ const WEEKDAYS_HEIGHT: f32 = 78.0;
 const BODY_HEIGHT: f32 = 296.0;
 /// The space after a row's label.
 const LABEL_GAP: f32 = 16.0;
-/// The days input is `size` characters wide: 7px each and 4px more (Chromium's average and
-/// widest Exo Sans Bold digits); the time input 52px.
+/// The days input is `size` characters wide, 7px each plus 4px (Chromium's average and widest Exo
+/// Sans Bold digits). The time input is 52px.
 const DAYS_CHAR: f32 = 7.0;
 const DAYS_EXTRA: f32 = 4.0;
 const TIME_WIDTH: f32 = 52.0;
-/// The dropdown's value 1px into its box, the caret 4px after it; its list 18px left of the value
-/// and 26px under the button's top.
+/// The dropdown's value sits 1px into its box, with the caret 4px after it. Its list opens 18px
+/// left of the value and 26px under the button's top.
 const VALUE_LEFT: f32 = 1.0;
 const MENU_OFFSET: egui::Vec2 = vec2(-18.0, 26.0);
 /// The dropdown's rows: their names and the triggers they pick.
@@ -74,7 +74,7 @@ const TRIGGERS: [(&str, TriggerCondition); 2] = [
     ("regardless", TriggerCondition::Regardless),
 ];
 
-/// What has the keyboard: the inputs and the dropdown (`tabIndex: 0`).
+/// What has the keyboard: the inputs and the dropdown, each a tab stop.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Control {
     Days,
@@ -93,7 +93,7 @@ pub enum Event {
     Enter,
     /// ↓ (1) or ↑ (-1) in the open list.
     MenuMove(isize),
-    /// Escape with the list open: it closes.
+    /// Escape with the list open, which closes it.
     MenuClose,
     /// A click on an input or the dropdown.
     Focus(Control),
@@ -120,7 +120,7 @@ pub struct State {
     days: String,
     /// The time input's text.
     time: String,
-    /// The time typed doesn't read as one.
+    /// Whether the time typed doesn't read as one.
     time_invalid: bool,
     focus: Option<Control>,
     /// The list is open, with this row highlighted.
@@ -139,7 +139,7 @@ fn formatted(settings: &ReminderSettings, now: &Zoned) -> String {
     crate::format::dates::time(&at)
 }
 
-/// The time `text` names (`tomorrow at {text}`), 8:00 for nothing.
+/// The time `text` names (`tomorrow at {text}`), or 8:00 for nothing.
 fn parse_time(text: &str, now: &Zoned) -> Option<(i8, i8)> {
     if text.trim().is_empty() {
         return Some((8, 0));
@@ -153,8 +153,7 @@ fn parse_time(text: &str, now: &Zoned) -> Option<(i8, i8)> {
 }
 
 impl State {
-    /// The dialog as it opens: the days input has the keyboard, its text
-    /// selected.
+    /// The dialog as it opens, with the keyboard in the days input and its text selected.
     pub fn open(settings: &ReminderSettings, now: &Zoned) -> Self {
         Self {
             days: settings.days.to_string(),
@@ -166,12 +165,12 @@ impl State {
         }
     }
 
-    /// The list is open: Escape and the arrows are its.
+    /// Whether the list is open, in which case Escape and the arrows are its own.
     pub fn menu_open(&self) -> bool {
         self.menu.is_some()
     }
 
-    /// Applies `event` to `settings`; returns the settings to save, if it changed them.
+    /// Applies `event` to `settings`, and returns the settings to save, if it changed them.
     pub fn handle(
         &mut self,
         event: Event,
@@ -200,7 +199,7 @@ impl State {
             }
             Event::Enter => match self.focus {
                 Some(Control::Trigger) => self.menu = Some(trigger_index(settings)),
-                // In an input: the time as saved again, the input's text selected.
+                // In an input, Enter puts back the time as saved and selects the input's text.
                 Some(_) => {
                     self.time = formatted(settings, now);
                     self.time_invalid = false;
@@ -243,8 +242,8 @@ impl State {
         (saved != *settings).then_some(saved)
     }
 
-    /// Moves the keyboard to `to`, blurring what had it: the time input shows the saved time; an
-    /// empty or zero days input becomes 1.
+    /// Moves the keyboard to `to`, blurring what had it. The time input shows the saved time, and
+    /// an empty or zero days input becomes 1.
     fn move_focus(
         &mut self,
         to: Option<Control>,
@@ -351,7 +350,7 @@ fn draw(
         event = Some(Event::Focus(Control::Days));
     }
     if state.days != typed {
-        // Two digits at most, nothing else; a number is saved.
+        // Two digits at most and nothing else. A number is saved.
         if state.days.chars().count() > 2 || !state.days.chars().all(|c| c.is_ascii_digit()) {
             state.days = typed;
         } else if let Ok(days) = state.days.parse() {
@@ -496,9 +495,9 @@ fn draw(
     event
 }
 
-/// One of the row's inputs in `field` (its box: the 20px line, the underline below it): `text`
-/// centered, bold, editable while `control` has the keyboard (`focus`), its text selected when
-/// `select` asks. Returns whether it was clicked.
+/// One of the row's inputs in `field`, whose box is the 20px line with the underline below it.
+/// `text` is centered, bold, and editable while `control` has the keyboard (`focus`), with its
+/// text selected when `select` asks. Returns whether it was clicked.
 #[expect(
     clippy::too_many_arguments,
     reason = "one input of the dialog, drawn from its state"
@@ -522,8 +521,7 @@ fn input(
         (false, false) => (INPUT_INK, UNDERLINE, 1.0),
     };
     // Chromium paints the input's box from the whole pixel nearest its layout position (its
-    // `getBoundingClientRect` left, rounded); its text is centered
-    // in the unrounded box.
+    // `getBoundingClientRect` left, rounded). Its text is centered in the unrounded box.
     ui.painter().rect_filled(
         Rect::from_min_size(
             pos2(field.left().round(), field.bottom()),
@@ -536,7 +534,7 @@ fn input(
         .interact(field, id.with("box"), Sense::click())
         .on_hover_cursor(egui::CursorIcon::Text)
         .clicked();
-    // `text-align: center`: the field spans the text, from where centering puts it.
+    // `text-align: center`, so the field spans the text, from where centering puts it.
     let width = INPUT.width(&ctx, text);
     let line = Rect::from_min_size(
         pos2(field.center().x - width / 2.0, field.top()),

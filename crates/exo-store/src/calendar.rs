@@ -8,9 +8,9 @@
 //!
 //! Other Google accounts can be signed in for their calendars alone (`calendarAccounts`,
 //! [`Store::add_calendar_account`]). Their lists are kept beside the mail account's, and each
-//! calendar is read, and changed, through one account: the one whose primary it is, else the one
-//! with the most access to it ([`Store::calendars`]). Events are kept by calendar, whichever
-//! account read them.
+//! calendar is read and changed through one account: the one whose primary calendar it is, else
+//! the one with the most access to it ([`Store::calendars`]). Events are kept by calendar,
+//! whichever account read them.
 //!
 //! ```no_run
 //! # async fn demo(store: &exo_store::Store) -> exo_store::Result<()> {
@@ -47,13 +47,13 @@ use crate::store::Store;
 pub(crate) mod outbox;
 pub(crate) mod recurrence;
 
-/// The event types the calendar shows: not working locations or birthdays.
+/// The event types the calendar shows, which leave out working locations and birthdays.
 const EVENT_TYPES: [&str; 4] = ["default", "focusTime", "outOfOffice", "fromGmail"];
 /// Calendar's largest page.
 const PAGE: u32 = 2500;
 /// Sync's retries for one call.
 const ATTEMPTS: u32 = 3;
-/// The `maxResults` for someone else's calendar: one page of it.
+/// The `maxResults` for someone else's calendar, which is one page of it.
 const ATTENDEE_PAGE: u32 = 500;
 
 /// An event in the cache, and the calendar it's on.
@@ -64,7 +64,7 @@ pub struct StoredEvent {
     /// The event (an instance, for a recurring one) as Calendar listed it, with the changes
     /// queued for it.
     pub event: Event,
-    /// Calendar doesn't have it yet: it's a new event still queued.
+    /// Calendar doesn't have it yet, because it's a new event still queued.
     pub unsynced: bool,
 }
 
@@ -78,12 +78,12 @@ pub struct AccountCalendar {
 }
 
 impl Store {
-    /// The calendars on the lists of the account and of its calendar accounts signed in, as last
+    /// The calendars on the lists of the account and of its signed-in calendar accounts, as last
     /// synced. Each shows once, from the account it's read through: the one whose primary
     /// calendar it is, else the one with the most access to it (owner, writer, reader), else the
-    /// mail account, else the first by address. The mail account's come first, then the others'
-    /// by address, each in Calendar's order. Hidden calendars aren't kept, except a hidden
-    /// primary one.
+    /// mail account, else the first by address. The mail account's calendars come first, then the
+    /// other accounts' by address, each in Calendar's order. Hidden calendars aren't kept, except
+    /// a hidden primary one.
     ///
     /// # Errors
     /// On database failures.
@@ -95,8 +95,8 @@ impl Store {
         }))
     }
 
-    /// Lists `account`'s calendars from Google (the mail account's, or a calendar account's
-    /// signed in) and stores them in place of its last list.
+    /// Lists the calendars of `account` (the mail account or a signed-in calendar account) from
+    /// Google and stores them in place of its last list.
     ///
     /// # Errors
     /// When Calendar can't be reached or refuses, or on database failures.
@@ -149,9 +149,9 @@ impl Store {
         Ok(entries)
     }
 
-    /// Reads calendar account `email`'s calendars with `tokens` from now on (it signed in, or the
-    /// account opened): its list joins [`Store::calendars`], and the calls about the calendars
-    /// it's read through use it.
+    /// Reads the calendars of calendar account `email` with `tokens` from now on, after it signed
+    /// in or the account opened. Its list joins [`Store::calendars`], and the calls about the
+    /// calendars read through `email` use `tokens`.
     pub fn add_calendar_account(&self, email: &str, tokens: impl TokenProvider + 'static) {
         let client = Client::new(self.inner.api.client().endpoints().clone(), tokens);
         self.inner
@@ -161,9 +161,10 @@ impl Store {
             .insert(email.to_owned(), client);
     }
 
-    /// Stops reading calendar account `email` (Google signed it out): its calendars leave
-    /// [`Store::calendars`] until it's added again. With `forget` (it was removed), its list
-    /// goes, and the events of the calendars no other account lists.
+    /// Stops reading calendar account `email`, as when Google signed it out. Its calendars leave
+    /// [`Store::calendars`] until it's added again. With `forget`, for an account that was
+    /// removed, its list goes too, along with the events of the calendars that no other account
+    /// lists.
     ///
     /// # Errors
     /// On database failures.
@@ -199,8 +200,8 @@ impl Store {
         write.publish().await
     }
 
-    /// Whether `account`'s calendars are read now: it's the mail account, or a calendar account
-    /// signed in.
+    /// Whether `account`'s calendars are read now, which they are for the mail account and for
+    /// signed-in calendar accounts.
     fn reads(&self, account: &str) -> bool {
         account == self.inner.account
             || self
@@ -211,8 +212,9 @@ impl Store {
                 .contains_key(account)
     }
 
-    /// `account`'s client: the mail account's, or a calendar account's signed in (the mail
-    /// account's for one that isn't, whose calls Calendar then refuses as it would anyone's).
+    /// The client for `account`: the mail account's, or a signed-in calendar account's. An
+    /// account that isn't signed in gets the mail account's client, whose calls Calendar then
+    /// refuses as it would anyone's.
     fn client(&self, account: &str) -> Client {
         let clients = self
             .inner
@@ -225,12 +227,12 @@ impl Store {
             .unwrap_or_else(|| self.inner.api.client().clone())
     }
 
-    /// The client `calendar` is read through ([`Store::calendars`]' rule): the mail account's
-    /// for a calendar on no list (someone's address).
+    /// The client that `calendar` is read through, by the rule in [`Store::calendars`]. A
+    /// calendar on no list (someone's address) gets the mail account's.
     ///
     /// # Errors
-    /// [`crate::Error::Unauthorized`] for a calendar only signed-out accounts list (or ones not
-    /// added yet this session, at launch), whose changes wait for them.
+    /// [`crate::Error::Unauthorized`] for a calendar that only signed-out accounts list (or
+    /// accounts not added yet this session, at launch). Its changes wait for them.
     async fn client_for(&self, calendar: &str) -> Result<Client> {
         let mut db = self.inner.db.clone();
         let rows = CalendarRow::filter(CalendarRow::fields().id().eq(calendar))
@@ -249,8 +251,8 @@ impl Store {
         }
     }
 
-    /// The accounts whose calendars are read now: the mail account, then its calendar accounts
-    /// signed in, by address.
+    /// The accounts whose calendars are read now: the mail account, then its signed-in calendar
+    /// accounts, by address.
     #[must_use]
     pub fn calendar_accounts(&self) -> Vec<String> {
         let clients = self
@@ -324,7 +326,7 @@ impl Store {
     }
 
     /// `calendar`'s events (instances of recurring ones) overlapping `from` to `to`, as Calendar
-    /// lists them now, without touching the cache: what Out of Office Reply looks through for
+    /// lists them now, without touching the cache. Out of Office Reply looks through them for
     /// out-of-office events coming up.
     ///
     /// # Errors
@@ -372,8 +374,8 @@ impl Store {
         Ok(events)
     }
 
-    /// Writes `event` (which has an id) over the cache's copy on `calendar`: what Calendar
-    /// answered.
+    /// Writes `event`, which has an id and is what Calendar answered, over the cache's copy on
+    /// `calendar`.
     async fn put_event(&self, calendar: &str, event: &Event) -> Result<()> {
         let mut db = self.inner.db.clone();
         let mut write = self.inner.begin(&mut db).await?;
@@ -382,7 +384,7 @@ impl Store {
     }
 
     /// Sets my answer to event `id` on `calendar` (whose id is my address) and caches what
-    /// Calendar answers: a patch of my attendee entry alone, and updates sent.
+    /// Calendar answers. The patch has my attendee entry alone, and it sends updates.
     async fn respond(&self, calendar: &str, id: &str, status: &str) -> Result<Event> {
         let patch = Event {
             attendees_omitted: Some(true),
@@ -441,8 +443,8 @@ impl Store {
     }
 
     /// When each of `calendars` (anyone's address, for their primary calendar) is busy between
-    /// `from` and `to` (`freebusy.query`): their busy spans, or `None` for a calendar Calendar
-    /// won't say about.
+    /// `from` and `to` (`freebusy.query`). Each gets its busy spans, or `None` when Calendar
+    /// won't say.
     ///
     /// # Errors
     /// When Calendar can't be reached or refuses.
@@ -513,12 +515,12 @@ impl Store {
             .collect())
     }
 
-    /// Person `email`'s events from `from` to `to` as their calendar shows me
-    /// (`events.list` on their address, a page of up to 500 instances), through the calendar
-    /// account that read it last, else through every account whose calendars are read, at once:
-    /// the first answer with a public event, else the first answer. When Calendar won't list it
-    /// through any, their busy times as events without details (`freebusy.query`); `None` when
-    /// Calendar says neither.
+    /// Person `email`'s events from `from` to `to` as their calendar shows me (`events.list` on
+    /// their address, a page of up to 500 instances). It asks through the calendar account that
+    /// read their calendar last, else through every account whose calendars are read, at once,
+    /// and takes the first answer with a public event, else the first answer. When Calendar won't
+    /// list the calendar through any account, it returns their busy times as events without
+    /// details (`freebusy.query`), and `None` when Calendar says neither.
     ///
     /// # Errors
     /// When Calendar can't be reached or refuses otherwise.
@@ -616,7 +618,7 @@ impl Store {
         }))
     }
 
-    /// Series `id`'s `recurrence` lines on `calendar`, as Calendar has them now: what an
+    /// The `recurrence` lines of series `id` on `calendar`, as Calendar has them now, which an
     /// instance's details describe.
     ///
     /// # Errors
@@ -625,8 +627,8 @@ impl Store {
         Ok(self.fetch_event(calendar, id).await?.recurrence)
     }
 
-    /// Event `id` on `calendar` as Calendar has it now (`events.get`): a series' master, or an
-    /// instance.
+    /// Event `id` on `calendar` as Calendar has it now (`events.get`), either a series' master or
+    /// an instance.
     async fn fetch_event(&self, calendar: &str, id: &str) -> Result<Event> {
         let client = self.client_for(calendar).await?;
         Ok(self
@@ -638,9 +640,10 @@ impl Store {
             .await?)
     }
 
-    /// Adds `event` to `calendar` (`events.insert`, invitations sent to its guests when
-    /// `notify`) and caches what Calendar answers. Its id is Exo's (random): taken means a retry whose earlier
-    /// attempt Calendar made, only its answer lost, so the event as Calendar has it comes back.
+    /// Adds `event` to `calendar` (`events.insert`, sending invitations to its guests when
+    /// `notify`) and caches what Calendar answers. Exo picks its id at random, so an id that's
+    /// taken means this is a retry of an attempt that Calendar carried out but whose answer was
+    /// lost. The event then comes back as Calendar has it.
     async fn insert_event(&self, calendar: &str, event: &Event, notify: bool) -> Result<Event> {
         let updates = if notify { "all" } else { "none" };
         let client = self.client_for(calendar).await?;
@@ -702,7 +705,8 @@ impl Store {
     }
 
     /// Deletes event `id` of `calendar` (`events.delete`), sending the guests a cancellation
-    /// when `notify`, and drops it from the cache: the instance, or every instance of a series.
+    /// when `notify`, and drops it from the cache, either the instance or every instance of a
+    /// series.
     async fn delete_event(&self, calendar: &str, id: &str, notify: bool) -> Result<()> {
         let updates = if notify { "all" } else { "none" };
         let client = self.client_for(calendar).await?;
@@ -714,7 +718,7 @@ impl Store {
             })
             .await
         {
-            // Already deleted: by an attempt whose answer was lost, or elsewhere.
+            // Already deleted, by an attempt whose answer was lost or elsewhere.
             Err(failure) if has_status(&failure, 410) => {}
             result => result?,
         }
@@ -787,8 +791,8 @@ impl Store {
 }
 
 impl crate::store::Inner {
-    /// Remembers that the calendar read `days` (in `tz`) this session, which eviction keeps the
-    /// events of: the calendar shows days it fetched this session from the store.
+    /// Remembers that the calendar read `days` (in `tz`) this session, so eviction keeps the
+    /// events of those days. The calendar shows the days it fetched this session from the store.
     fn read_calendar(&self, days: &Range<Date>, tz: &TimeZone) {
         let span = (
             midnight(days.start, tz)
@@ -811,9 +815,9 @@ impl crate::store::Inner {
     }
 }
 
-/// `rows`, the calendar accounts' lists, with each calendar once ([`Store::calendars`]' rule)
-/// among the accounts read now (`reads`): the mail account's (`mail`) first, then the others'
-/// by address, each in its list's order.
+/// `rows`, the calendar accounts' lists, with each calendar once by the rule in
+/// [`Store::calendars`], among the accounts read now (`reads`). The mail account's (`mail`) come
+/// first, then the others' by address, each in its list's order.
 fn held(rows: Vec<CalendarRow>, mail: &str, reads: impl Fn(&str) -> bool) -> Vec<AccountCalendar> {
     let access = |entry: &CalendarListEntry| match entry.access_role.as_deref() {
         _ if entry.primary == Some(true) => 0,
@@ -924,7 +928,7 @@ fn overlaps((start, end, all_day): (i64, i64, bool), days: &Range<Date>, tz: &Ti
     start < to && end > from
 }
 
-/// An event's stored span: epoch milliseconds, and whether it's all-day.
+/// An event's stored span in epoch milliseconds, and whether it's all-day.
 fn span(event: &Event) -> Option<(i64, i64, bool)> {
     let (start, end) = (event.start.as_ref()?, event.end.as_ref()?);
     if let (Some(start), Some(end)) = (&start.date, &end.date) {
@@ -951,7 +955,7 @@ fn midnight(day: Date, tz: &TimeZone) -> Timestamp {
     )
 }
 
-/// `day`'s UTC midnight, in milliseconds: how an all-day date is stored.
+/// `day`'s UTC midnight in milliseconds, which is how an all-day date is stored.
 fn utc_midnight(day: Date) -> i64 {
     day.to_zoned(TimeZone::UTC)
         .map(|zoned| zoned.timestamp().as_millisecond())

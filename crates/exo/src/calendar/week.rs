@@ -20,9 +20,9 @@ const SIDEBAR: f32 = 288.0;
 const TOP_BAR_TOP: f32 = 24.0;
 const TOP_BAR_LEFT: f32 = 58.0;
 const TOP_BAR_HEIGHT: f32 = 32.0;
-/// Today and Create: small secondary buttons 30px tall, 1px down the bar, a 1px inset ring,
-/// radius 8px, their 12px/18px text 6px down between 10px sides; Create's 16px plus 8px in, 7px
-/// down and 4px before its text.
+/// Today and Create are small secondary buttons 30px tall, 1px down the bar, with a 1px inset
+/// ring, radius 8px, and their 12px/18px text 6px down between 10px sides. Create's 16px plus sits
+/// 8px in, 7px down and 4px before its text.
 const BUTTON: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 12.0, 18.0);
 const BUTTON_TOP: f32 = 1.0;
 const BUTTON_HEIGHT: f32 = 30.0;
@@ -34,8 +34,8 @@ const PLUS_TOP: f32 = 7.0;
 const PLUS_GAP: f32 = 4.0;
 /// Create's `margin-right: 24px`.
 const CREATE_RIGHT: f32 = 24.0;
-/// 32px after Today and after the chevrons; the chevrons (8×15) 24px apart, 8px down, with 4px
-/// of hit slop around each.
+/// 32px after Today and after the chevrons. The chevrons (8×15) are 24px apart and 8px down, with
+/// 4px of hit slop around each.
 const GAP: f32 = 32.0;
 const CHEVRON: f32 = 16.0;
 const CHEVRON_GAP: f32 = 24.0;
@@ -43,8 +43,8 @@ const CHEVRON_TOP: f32 = 8.0;
 /// The month: 21px/32px nudged `top: 3px`.
 const DATE: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 21.0, 32.0);
 const DATE_TOP: f32 = 3.0;
-/// The sidebar's content: `padding: 32px 18px 28px`, sections 28px apart; the mini month sits
-/// 14px out to the left.
+/// The sidebar's content has `padding: 32px 18px 28px` and sections 28px apart. The mini month
+/// sits 14px out to the left.
 const SIDEBAR_PADDING_TOP: f32 = 32.0;
 const SIDEBAR_PADDING_X: f32 = 18.0;
 const SECTION_GAP: f32 = 28.0;
@@ -52,9 +52,9 @@ const MONTH_LEFT: f32 = -14.0;
 /// Section headers: a 16px icon, then a 12px/16px weight-600 `h2` 24px in, nudged `top: 1px`.
 const HEADER: TextStyle = TextStyle::new(Font::new(Family::Sans, 600), 12.0, 16.0);
 const HEADER_TEXT_LEFT: f32 = 24.0;
-/// The account header 36px below the section's, its address 12px bold; calendars from 28px
-/// below that, every 28px: a 14px checkbox and the name 22px in, 12px/16px. The next account's
-/// header comes 36px after the last calendar's row (`margin-top: 20px`).
+/// The account header sits 36px below the section's, with its address 12px bold. Calendars start
+/// 28px below that, one every 28px: a 14px checkbox and the name 22px in, 12px/16px. The next
+/// account's header comes 36px after the last calendar's row (`margin-top: 20px`).
 const ACCOUNT_TOP: f32 = 36.0;
 const ACCOUNT_GAP: f32 = 36.0;
 /// The Calendars header's 12px `+` at its right, `#bfc8d2` (Carbon `#555b64`) like its calendar
@@ -64,15 +64,16 @@ const ADD: f32 = 12.0;
 /// `Signed out` tooltip 14px left of it.
 const DEAUTH: f32 = 14.0;
 const DEAUTH_INK: Color32 = Color32::from_rgb(0xe5, 0x67, 0x5c);
-/// The headers' menus: their top 8px under the header, their right 16px past its right; `Sign in
-/// with Google`'s 165px wide at least, the signed-out menu's 94px plus its padding.
+/// The headers' menus have their top 8px under the header and their right 16px past its right.
+/// `Sign in with Google`'s menu is at least 165px wide, and the signed-out menu is 94px plus its
+/// padding.
 const MENU_BELOW: f32 = 8.0;
 const MENU_RIGHT: f32 = 16.0;
 const ADD_MENU_WIDTH: f32 = 165.0;
 const SIGNED_OUT_MENU_WIDTH: f32 = 126.0;
 /// Loading (`margin-top: 4px`): `Loading calendars` (12px/16px nudged `top: 1px`, black or white
-/// at `.5`), then 8px after it a 12px spinner (`#bfbfbf`, both themes) 4px down the row; the
-/// next account's header 56px under this one's.
+/// at `.5`), then 8px after it a 12px spinner (`#bfbfbf`, both themes) 4px down the row. The
+/// next account's header is 56px under this one's.
 const LOADING_TOP: f32 = 16.0 + 4.0;
 const LOADING_GAP: f32 = 8.0;
 const LOADING_SPINNER: f32 = 12.0;
@@ -90,8 +91,8 @@ const ROW: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 12.0, 16.0);
 const FOOTER_BUTTON: f32 = 28.0;
 const FOOTER_BOTTOM: f32 = 12.0;
 /// The footer bar, 58px with its 28px buttons, under the content, which scrolls above it with
-/// `padding-bottom: 28px`; while it can, a 1px line tops the footer 18px in from either side
-/// (`box-shadow: 0 -1px 0 0`, black at `.05`, Carbon white at `.08`).
+/// `padding-bottom: 28px`. While the content can scroll, a 1px line tops the footer 18px in from
+/// either side (`box-shadow: 0 -1px 0 0`, black at `.05`, Carbon white at `.08`).
 const FOOTER: f32 = 58.0;
 const SIDEBAR_PADDING_BOTTOM: f32 = 28.0;
 
@@ -105,9 +106,9 @@ pub struct ListedAccount {
 pub enum AccountState {
     /// Its calendars.
     Calendars(Vec<ListedCalendar>),
-    /// `Loading calendars`: it just signed in.
+    /// `Loading calendars`, since it just signed in.
     Loading,
-    /// Google signed it out: its header, a warning, and a menu.
+    /// Google signed it out, so it shows its header, a warning, and a menu.
     SignedOut,
 }
 
@@ -153,7 +154,7 @@ pub enum WeekAction {
     /// Today, or the chevrons: this week, or one week back (-1) or on (1).
     Today,
     Step(i64),
-    /// Create: a new event in the week.
+    /// Create, for a new event in the week.
     Create,
     /// A day in the mini month.
     Select(Date),
@@ -167,7 +168,7 @@ pub enum WeekAction {
     SignInAgain(String),
     /// A signed-out account's `Remove account`.
     RemoveAccount(String),
-    /// An account's header or caret: its calendars folded away, or back.
+    /// An account's header or caret, which folds its calendars away or back.
     Fold(String),
     /// The footer's gear.
     Settings,
@@ -247,7 +248,7 @@ impl Week {
         self.grid.select(key);
     }
 
-    /// Moves to `date`'s week, the mini month with it.
+    /// Moves to `date`'s week, and the mini month with it.
     pub fn go_to(&mut self, date: Date) {
         self.active = date;
         self.month = date.first_of_month();
@@ -427,8 +428,8 @@ fn origin_button_width(ctx: &egui::Context, text: &str, plus: bool) -> f32 {
 }
 
 /// A small secondary button at `at`: Classic's black at `.7` in a `#dedbd5` ring, `#f2f0eb`
-/// hovered with the text `#141413`; Carbon's white at `.7` in a `#474543` ring, filled with it
-/// hovered.
+/// hovered with the text `#141413`; Carbon's white at `.7` in a `#474543` ring, filled with the
+/// ring's colour when hovered.
 fn origin_button(ui: &Ui, id: Id, at: egui::Pos2, text: &str, plus: bool) -> egui::Response {
     let ctx = ui.ctx();
     let palette = exo_ui::palette(ctx);
@@ -719,10 +720,10 @@ impl Week {
             );
             // The caret's 12px box at the header's right.
             let fold = Rect::from_min_size(pos2(right - 14.0, top), Vec2::splat(16.0));
-            // The caret: the 14×8 glyph in a box 12px wide (`width: 12px`, its `height="8"` kept),
-            // which it fits inside, 1px under the box's centre; turned over while folded
-            // (`rotate(180deg)`, then 2px down), its ink where the upright one's is. A box as tall
-            // as the fitted caret would round to 6px and shrink it.
+            // The caret is the 14×8 glyph fitted inside a box 12px wide (`width: 12px`, its
+            // `height="8"` kept), 1px under the box's centre. While folded it's turned over
+            // (`rotate(180deg)`, then 2px down), with its ink where the upright one's is. A box as
+            // tall as the fitted caret would round to 6px and shrink it.
             let icon = "legacy/DEPRECATED_dropdownLarge";
             let glyph = Rect::from_center_size(fold.center(), vec2(12.0, 8.0))
                 .translate(vec2(0.0, if folded { 2.0 } else { 1.0 }));
@@ -779,7 +780,7 @@ impl Week {
                     )
                     .on_hover_cursor(egui::CursorIcon::PointingHand);
                 let theme = exo_ui::theme(ui.ctx());
-                // The tick is cut out of the swatch: the sidebar shows through, in Carbon too.
+                // The tick is cut out of the swatch, so the sidebar shows through, in Carbon too.
                 exo_ui::paint_tinted_checkbox(
                     painter,
                     pos2(left, top + 1.0),
@@ -822,8 +823,8 @@ impl Week {
         };
     }
 
-    /// The open account menu, under `header` (which opens and closes it, `on_trigger` while the
-    /// pointer is on it): a pick, a hover, or a click elsewhere, which closes it.
+    /// The open account menu, under `header`, which opens and closes it (`on_trigger` while the
+    /// pointer is on it). It takes a pick, a hover, or a click elsewhere, which closes it.
     fn account_menu_list(
         &mut self,
         ui: &Ui,
@@ -866,10 +867,10 @@ impl Week {
         }
     }
 
-    /// A calendar row's `…` (12px at the row's right, 2px down, shown while the row is hovered or
-    /// its picker is open, its dots at `.3`, `.5` hovered, a 6px reach around it) and its colour
-    /// picker: five rows of the 25 colours, tethered by its top right 16px right of the button's
-    /// bottom right, 8px under it.
+    /// A calendar row's `…` and its colour picker. The `…` is 12px at the row's right, 2px down,
+    /// shown while the row is hovered or its picker is open, with its dots at `.3` (`.5` hovered)
+    /// and a 6px reach around it. The picker has five rows of the 25 colours, tethered by its top
+    /// right 16px right of the button's bottom right and 8px under it.
     fn calendar_menu(
         &mut self,
         ui: &mut Ui,
@@ -942,8 +943,8 @@ impl Week {
     }
 }
 
-/// The page's loading spinner: a 48px white disc with its top left at the window's centre (`top:
-/// 50%; left: 50%`, no translate), a soft shadow, and a 16px spinner in its middle.
+/// The page's loading spinner: a 48px white disc with its top left at the window's centre
+/// (`top: 50%; left: 50%`, no translate), a soft shadow, and a 16px spinner in its middle.
 fn paint_spinner(ui: &Ui) {
     const SHADOWS: [exo_ui::BoxShadow; 3] = [
         exo_ui::BoxShadow::new(

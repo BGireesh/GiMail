@@ -1,7 +1,7 @@
-//! "Almost there…": the teardown alert for an account Google signed out.
+//! The "Almost there…" teardown alert, for an account Google signed out.
 //!
-//! It's the full-screen alert ([`teardown::paint`]), and Sign In, Enter, Escape or five seconds lead
-//! to the sign-in screen.
+//! It's the full-screen alert ([`teardown::paint`]), and Sign In, Enter, Escape or five seconds
+//! lead to the sign-in screen.
 
 use std::path::Path;
 
@@ -14,7 +14,7 @@ use crate::{backdrop::Backdrop, log_in::LogIn, teardown};
 /// The sign-in screen follows by itself after 5 s.
 const RELOAD_AFTER: f64 = 5.0;
 
-/// The alert's copy: "Google" is long enough for a space before the second sentence rather than
+/// The alert's copy. "Google" is long enough for a space before the second sentence rather than
 /// a line break.
 const TITLE: &str = "Almost there…";
 const TEXT: &str = "It looks like you've been signed out of Google. Please sign in again.";
@@ -50,7 +50,7 @@ impl SignedOut {
         &self.email
     }
 
-    /// The photo is decoded. For screenshots and tests.
+    /// Whether the photo is decoded. For screenshots and tests.
     pub fn is_idle(&self) -> bool {
         self.backdrop.is_loaded()
     }

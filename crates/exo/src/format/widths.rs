@@ -1,6 +1,6 @@
-//! The per-character width table the width estimate sums: advances in px, close to the UI face's at
-//! 12px but not equal to them (85 of the 386 entries differ by 1/64px), so it is kept as data
-//! rather than derived from a font.
+//! The per-character width table that the width estimate sums. Its advances in px are close to the
+//! UI face's at 12px but not equal to them (85 of the 386 entries differ by 1/64px), so the table
+//! is kept as data rather than derived from a font.
 
 /// `(character, width)`, sorted by character.
 pub(super) const WIDTHS: &[(char, f64)] = &[

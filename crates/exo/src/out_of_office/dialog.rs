@@ -45,7 +45,7 @@ const SKELETON_HEIGHT: f32 = 16.0;
 
 /// The body's rows, from the body's top (below the header): the toggle's line box, the switch,
 /// the rule, the dates' line, the subject's label and input, the message's label, the editor
-/// (the Squire 1px up) and its rule, the recipients' lines, and the footer's buttons.
+/// (moved 1px up) and its rule, the recipients' lines, and the footer's buttons.
 const TOGGLE_TOP: f32 = 23.0;
 const SWITCH_TOP: f32 = 24.0;
 const SWITCH_GAP: f32 = 12.0;
@@ -54,7 +54,7 @@ const DATES_TOP: f32 = 79.0;
 /// The date inputs' line box: 2px under the text's (`top: -1px` on the picker, `top: 1px` and
 /// a 16px line in the input).
 const DATE_INPUT_TOP: f32 = 81.0;
-/// A date picker's `padding: 0 4px`; the two spans 16px apart.
+/// A date picker's `padding: 0 4px`, with the two spans 16px apart.
 const DATE_PADDING: f32 = 4.0;
 const DATES_GAP: f32 = 16.0;
 const SUBJECT_LABEL_TOP: f32 = 119.0;
@@ -77,7 +77,7 @@ const ACTIONS_GAP: f32 = 8.0;
 /// Down to the footer's `margin-bottom: 7px`.
 const BODY_HEIGHT: f32 = 539.0;
 /// While loading, skeletons stand in for the dates (20px under the rule) and the subject (12px
-/// down), and the message's label sits 4px lower (`padding-top: 28px`): everything from the
+/// down), and the message's label sits 4px lower (`padding-top: 28px`), so everything from the
 /// subject's label down ends up 1px lower.
 const LOADING_DATES: f32 = 77.0;
 const LOADING_SUBJECT: f32 = 149.0;
@@ -196,7 +196,7 @@ pub enum Event {
     Enter,
     /// Space on the focused control.
     Space,
-    /// ↓ in a date input: its month opens.
+    /// ↓ in a date input, which opens its month.
     Down,
     /// A file was pasted in the message.
     PastedFile,
@@ -212,7 +212,7 @@ pub struct Dialog {
     pub submitting: bool,
     /// The form.
     pub form: Form,
-    /// What the copy filled it with, for the discard check; the toggle as the copy had it.
+    /// What the copy filled it with, for the discard check, with the toggle as the copy had it.
     initial: Form,
     /// The days the nudge opened it with.
     days: Option<OutOfOfficeDays>,
@@ -239,7 +239,7 @@ pub struct Dialog {
 }
 
 impl Dialog {
-    /// The dialog for `email`'s account, loading; `days` from the nudge.
+    /// The dialog for `email`'s account, loading, with `days` from the nudge.
     pub fn new(email: &str, days: Option<OutOfOfficeDays>, now: &Zoned) -> Self {
         let form = Form::of(None, now);
         let domain = email
@@ -274,7 +274,7 @@ impl Dialog {
         }
     }
 
-    /// Gmail answered and `copy` is up to date: the form takes it, and the nudge's days with the
+    /// Gmail answered and `copy` is up to date. The form takes it, and the nudge's days with the
     /// reply on.
     pub fn loaded(&mut self, copy: Option<&OutOfOfficeResponder>, now: &Zoned) {
         self.loading = false;
@@ -294,8 +294,8 @@ impl Dialog {
         !self.loading && self.form != self.initial
     }
 
-    /// Save can't be pressed: it's waiting, the reply is off and was when it opened, the subject or
-    /// message is empty, or a typed date is wrong.
+    /// Save can't be pressed when it's waiting, the reply is off and was when it opened, the
+    /// subject or message is empty, or a typed date is wrong.
     pub fn save_disabled(&self) -> bool {
         self.loading
             || self.submitting
@@ -484,15 +484,15 @@ impl Dialog {
         if start {
             self.pick_start(date, now);
         } else {
-            // The month closes; the input keeps the keyboard.
+            // The month closes, and the input keeps the keyboard.
             self.pick_end(Some(date), now);
             self.end.month = None;
         }
         true
     }
 
-    /// Picks the first day: it moves to `date`; a last day before it moves along to keep the time
-    /// away as long; the last day's input gets the keyboard.
+    /// Picks the first day, which moves to `date`. A last day now before it moves along to keep
+    /// the time away as long, and the last day's input gets the keyboard.
     fn pick_start(&mut self, date: Date, now: &Zoned) {
         let start = midnight(date, now);
         if let Some(end) = self.form.end.filter(|end| start > *end) {
@@ -504,8 +504,8 @@ impl Dialog {
         self.set_focus(Some(Control::End), now);
     }
 
-    /// Picks the last day: `date`'s last second, or none; the input keeps the keyboard, its month
-    /// closed.
+    /// Picks the last day, `date`'s last second, or none. The input keeps the keyboard, with its
+    /// month closed.
     fn pick_end(&mut self, date: Option<Date>, now: &Zoned) {
         self.form.end = date
             .and_then(|date| {
@@ -578,7 +578,7 @@ impl Dialog {
         let focus_before = self.focus;
         let mut claimed = false;
 
-        // The toggle: its label greys out only while loading.
+        // The toggle, whose label greys out only while loading.
         let label_width = LABEL.paint_line(
             &painter,
             pos2(left, top + TOGGLE_TOP),
@@ -700,7 +700,7 @@ impl Dialog {
         } else {
             let line =
                 Rect::from_min_size(pos2(left, top + SUBJECT_TOP), vec2(width, TEXT.line_height));
-            // `input[type=text]`: white (`#f5f5f5` in Carbon) behind it.
+            // The text input has white (`#f5f5f5` in Carbon) behind it.
             painter.rect_filled(
                 line,
                 0.0,
@@ -885,7 +885,7 @@ impl Dialog {
         event
     }
 
-    /// Draws the message's editor in `area`, scrolling past its 164px (the Squire 1px up).
+    /// Draws the message's editor in `area`, scrolling past its 164px (moved 1px up).
     /// Returns a file pasted in it, and whether it took the keyboard.
     fn message(
         &mut self,
@@ -1053,7 +1053,7 @@ fn midnight(date: Date, now: &Zoned) -> Timestamp {
         .map_or_else(|_| now.timestamp(), |zoned| zoned.timestamp())
 }
 
-/// A loading skeleton in `rect`, its shine where the 2s animation has it.
+/// A loading skeleton in `rect`, with its shine where the 2s animation has it.
 fn skeleton(ui: &Ui, rect: Rect) {
     let painter = ui.painter();
     painter.rect_filled(rect, CornerRadius::same(4), SKELETON);

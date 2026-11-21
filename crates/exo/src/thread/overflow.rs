@@ -1,6 +1,6 @@
-//! A body wider than its column scrolls sideways (`overflow-x: auto`): by a sideways swipe or
-//! Shift-wheel over it, or by dragging the thumb of its scrollbar, an 11px strip below the body
-//! whose thumb shows only while the pointer moves over the body.
+//! A body wider than its column scrolls sideways (`overflow-x: auto`), by a sideways swipe or
+//! Shift-wheel over it, or by dragging the thumb of its scrollbar. The scrollbar is an 11px strip
+//! below the body, and its thumb shows only while the pointer moves over the body.
 
 use egui::{Color32, CornerRadius, Pos2, Rect, Sense, Ui, pos2, vec2};
 use exo_mail::SCROLLBAR_HEIGHT;
@@ -16,7 +16,7 @@ const NEAR_SCROLLBAR: f32 = 200.0;
 const THUMB_BORDER: f32 = 2.0;
 /// The shortest thumb (its `width: 7px`).
 const MIN_THUMB: f32 = 7.0;
-/// The thumb: black at .5 while it shows, eased in and out over `.2s`.
+/// The thumb is black at .5 while it shows, eased in and out over `.2s`.
 const THUMB_OPACITY: f32 = 0.5;
 const FADE: f32 = 0.2;
 
@@ -36,7 +36,7 @@ pub(super) fn scroll(ui: &Ui, bodies: &mut Bodies, id: &str, body: Rect) -> Rect
         return body;
     }
     let scale = ui.ctx().pixels_per_point();
-    // A sideways swipe (or the wheel with Shift, which egui turns sideways) scrolls the body; the
+    // A sideways swipe (or the wheel with Shift, which egui turns sideways) scrolls the body. The
     // thread takes the vertical part of the gesture.
     if ui.rect_contains_pointer(body) {
         let delta = ui.input(|input| input.smooth_scroll_delta);
@@ -113,7 +113,7 @@ pub(super) fn scrollbar(ui: &Ui, bodies: &Bodies, id: &str, body: Rect) {
         CubicBezier::EASE_IN_OUT,
     );
     if opacity > 0.0 {
-        // `border-radius: 100px`: a capsule.
+        // `border-radius: 100px`, a capsule.
         let alpha = (THUMB_OPACITY * opacity * 255.0).round() as u8;
         ui.painter().with_clip_rect(ui.clip_rect()).rect_filled(
             thumb.shrink(THUMB_BORDER),
@@ -158,7 +158,8 @@ mod tests {
 
     #[test]
     fn the_thumb_spans_the_part_in_view() {
-        // A 1200px body in a 600px column, scrolled halfway: half the track, in its middle.
+        // A 1200px body in a 600px column, scrolled halfway, has a thumb half the track long, in
+        // the track's middle.
         let body = Rect::from_min_size(pos2(100.0, 0.0), vec2(600.0, 311.0));
         let (track, thumb) = scrollbar_geometry(body, 600.0, 300.0);
         assert_eq!(

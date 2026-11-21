@@ -35,13 +35,14 @@ fn database(dir: &Path) -> PathBuf {
     dir.join(format!("{ACCOUNT}.sqlite3"))
 }
 
-/// A connection reading the store in `dir` beside it.
+/// A second, read-only connection to the store in `dir`, beside the store's own.
 fn reader(dir: &Path) -> rusqlite::Connection {
     rusqlite::Connection::open_with_flags(database(dir), rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
         .expect("opens the store")
 }
 
-/// `sql`'s rows on the store in `dir`, each value as text, read beside the store.
+/// The rows `sql` returns from the store in `dir`, each value as text, read through a second
+/// connection.
 fn rows(dir: &Path, sql: &str) -> Vec<Vec<String>> {
     let db = reader(dir);
     let mut statement = db
@@ -69,8 +70,8 @@ fn rows(dir: &Path, sql: &str) -> Vec<Vec<String>> {
         .collect()
 }
 
-/// The conversations with a body stored, with their newest message's date and their bodies'
-/// bytes.
+/// The conversations with a body stored, each with the date of its newest message and the bytes
+/// of its bodies.
 fn bodied(dir: &Path) -> BTreeMap<String, (i64, u64)> {
     let db = reader(dir);
     let mut statement = db
@@ -91,7 +92,7 @@ fn bodied(dir: &Path) -> BTreeMap<String, (i64, u64)> {
         .collect()
 }
 
-/// The threads of lists `lists`.
+/// The threads in any of the lists `lists`.
 fn listed(dir: &Path, lists: &[&str]) -> BTreeSet<String> {
     let lists = lists
         .iter()
@@ -107,8 +108,8 @@ fn listed(dir: &Path, lists: &[&str]) -> BTreeSet<String> {
     .collect()
 }
 
-/// Every table's rows but the mail cache's (what eviction lets go: conversations, their bodies,
-/// lists and search index), sorted.
+/// The rows of every table but the mail cache's, sorted. The mail cache is what eviction lets go
+/// of: conversations, their bodies, lists and the search index.
 fn kept_tables(dir: &Path) -> BTreeMap<String, Vec<Vec<String>>> {
     const MAIL: &str = "'threads', 'messages', 'attachments', 'bodies', 'list_ids', 'participants', 'lists', 'text_due'";
     let tables = rows(
@@ -121,7 +122,7 @@ fn kept_tables(dir: &Path) -> BTreeMap<String, Vec<Vec<String>>> {
         .into_iter()
         .map(|row| {
             let table = row[0].clone();
-            // But for the mark eviction leaves of what it let go of (`evicted_before`).
+            // Except the mark that eviction leaves of what it let go of (`evicted_before`).
             let own = if table == "kv" {
                 " WHERE key <> 'evicted_before'"
             } else {
@@ -142,7 +143,7 @@ fn stored(dir: &Path) -> BTreeSet<String> {
         .collect()
 }
 
-/// Calls of Gmail method `method` the mock has seen.
+/// How many calls to the Gmail method `method` the mock has seen.
 async fn calls(harness: &Harness, method: &str) -> u64 {
     harness
         .admin(reqwest::Method::GET, "/__mock/quota", json!({}))
@@ -151,8 +152,8 @@ async fn calls(harness: &Harness, method: &str) -> u64 {
         .unwrap_or_default()
 }
 
-/// Backfills `list` as scrolling past its end does until it shows `rows` threads. Returns how
-/// many pages Gmail listed.
+/// Backfills `list` the way scrolling past its end does, until it shows `rows` threads. Returns
+/// how many pages Gmail listed.
 async fn scroll_back(harness: &Harness, list: &ListId, rows: usize) -> usize {
     let before = calls(harness, "threads.list").await;
     while harness.all(list).await.len() < rows {
@@ -170,7 +171,7 @@ const DAY: Eviction = Eviction {
     budget: u64::MAX,
 };
 
-/// Gmail quota units the mock has seen spent.
+/// How many Gmail quota units the mock has seen spent.
 async fn units(harness: &Harness) -> u64 {
     harness
         .admin(reqwest::Method::GET, "/__mock/quota", json!({}))
@@ -179,7 +180,7 @@ async fn units(harness: &Harness) -> u64 {
         .expect("units")
 }
 
-/// A new message to Ann, as compose saves it, on `thread` if a reply.
+/// A new message to Ann as compose saves it, on `thread` if it's a reply.
 fn draft(id: &str, thread: Option<&ThreadId>, send_later: Option<SendLater>) -> Draft {
     let email = gmail::mime::Email {
         from: Some(gmail::mime::Mailbox::new("Maya Okafor", ACCOUNT)),
@@ -226,8 +227,8 @@ fn draft(id: &str, thread: Option<&ThreadId>, send_later: Option<SendLater>) -> 
     }
 }
 
-/// Opens (fetches the bodies of) the first `n` conversations of Done without a draft. Returns
-/// them, with the Gmail quota units each open spent.
+/// Opens the first `n` conversations of Done that have no draft, fetching their bodies. Returns
+/// them with the Gmail quota units each open spent.
 async fn open_done(harness: &Harness, n: usize) -> Vec<(ThreadId, u64)> {
     let drafted = listed(harness.dir.path(), &["DRAFT"]);
     let done: Vec<ThreadId> = harness
@@ -254,7 +255,7 @@ async fn quiet_conversations_go_and_scrolling_back_fetches_them_again() {
     let harness = Harness::synced().await;
     let (store, dir) = (&harness.store, harness.dir.path());
     let opened = open_done(&harness, 6).await;
-    // Today's mail; the fixture's is days old.
+    // Mail from today, since the fixture's is days old.
     harness
         .admin(
             reqwest::Method::POST,
@@ -325,7 +326,8 @@ async fn quiet_conversations_go_and_scrolling_back_fetches_them_again() {
     );
     assert!(shown.iter().all(|id| left.contains(id)) && gone.iter().all(|id| !shown.contains(id)));
 
-    // Scrolled back past it, All Mail fetches what went again, starting where what's stored ends.
+    // Scrolled back past its end, All Mail fetches what went again, starting where what's stored
+    // ends.
     let pages = scroll_back(&harness, &ListId::All, all.len()).await;
     assert_eq!(
         ids(harness.all(&ListId::All).await)[..all.len()],
@@ -338,8 +340,8 @@ async fn quiet_conversations_go_and_scrolling_back_fetches_them_again() {
         gone.len()
     );
 
-    // Done has no pass of its own: it starts where All Mail's ends too. Trash comes back with
-    // All Mail's pass, which lists it, and not with Done's (`-in:INBOX`).
+    // Done has no pass of its own, so it also starts where All Mail's pass ends. Trash comes back
+    // with All Mail's pass, which lists it, and not with Done's (`-in:INBOX`).
     store.evict(&DAY).await.expect("evicts");
     let listed = harness
         .gmail_ids(ListQuery {
@@ -363,9 +365,9 @@ async fn quiet_conversations_go_and_scrolling_back_fetches_them_again() {
         "{pages} pages of ten for {gone_from_done} conversations"
     );
 
-    // Fetched again for their rows, the conversations opened before open as cold ones, for the
-    // quota of any (`messages.get` in full for one message, 60 units, `threads.get` for more,
-    // 120), and are as they were.
+    // The conversations opened before were fetched again for their rows alone, so each opens as
+    // a cold one does and spends the same quota: 60 units for one message (`messages.get` in
+    // full), 120 for more (`threads.get`). Each is as it was.
     for ((id, cold), before) in opened.iter().zip(before) {
         assert!(!store.bodies_stored(id).await.expect("reads"));
         let spent = units(&harness).await;
@@ -423,7 +425,7 @@ async fn a_quiet_conversation_something_keeps_loses_its_bodies_and_keeps_its_row
     };
     let before = [&starred, &reminded].map(rows_of);
 
-    // On screen, Done's loaded rows stay, bodies and all, as sync fetches them.
+    // On screen, Done's loaded rows stay, bodies and all, because sync fetches them.
     let done = harness.all(&ListId::Done).await;
     store.show(&ListId::Done);
     store.loaded(done.len());
@@ -435,8 +437,8 @@ async fn a_quiet_conversation_something_keeps_loses_its_bodies_and_keeps_its_row
             && store.bodies_stored(&reminded).await.expect("reads")
     );
 
-    // Off screen, the rest of Done goes, but for the conversations with a change or a reminder:
-    // they keep their rows and need no bodies.
+    // Off screen, the rest of Done goes, except the conversations with a change or a reminder.
+    // Those keep their rows and need no bodies.
     store.show(&ListId::Inbox);
     store.evict(&DAY).await.expect("evicts");
     let left = stored(dir);
@@ -469,7 +471,8 @@ async fn past_the_budget_the_oldest_conversations_go_first() {
         "they fit"
     );
 
-    // The inbox's and the drafts' stay whatever the budget: half of the rest goes.
+    // The conversations in the inbox and the drafts stay whatever the budget. Half of the rest
+    // goes.
     let kept = listed(
         dir,
         &["INBOX", "SH_IMPORTANT", "SH_OTHER", "DRAFT", "SH_SCHEDULED"],
@@ -642,7 +645,7 @@ async fn eviction_never_touches_drafts_sends_the_outbox_or_local_state() {
     );
     assert_eq!(store.pending_unsubscribes().await.expect("reads").len(), 1);
 
-    // Closed, it goes too.
+    // Once closed, the conversation that was on screen goes too.
     store.reading(None).await;
     store.evict(&EVERYTHING).await.expect("evicts");
     assert!(store.thread(&open).await.expect("reads").is_none());
@@ -683,8 +686,8 @@ async fn an_evicted_conversation_is_found_locally_by_its_rows_and_online_by_gmai
         "nor its people"
     );
 
-    // Quiet, it goes whole: offline nothing finds it, online Gmail's search does, merged with
-    // the local results.
+    // Once quiet, the whole conversation goes. Offline, nothing finds it. Online, Gmail's search
+    // does, merged with the local results.
     store.evict(&EVERYTHING).await.expect("evicts");
     assert!(
         local("harbor survey").await.is_empty() && local("from:ann@example.com").await.is_empty()
@@ -768,7 +771,8 @@ async fn old_events_go_but_for_the_days_the_calendar_read() {
     // The calendar showed the first of them this session.
     assert!(on(day(read)).await > 0);
 
-    // A change to an event waits to go: nothing goes, as it shows over what it changes.
+    // While a change to an event waits to go out, no event goes, because the change shows over
+    // what it changes.
     let lunch = gmail::calendar::Event {
         id: Some("e0lunch0001".into()),
         summary: Some("Lunch".into()),
@@ -832,7 +836,7 @@ async fn old_events_go_but_for_the_days_the_calendar_read() {
         "this week's stay"
     );
 
-    // Shown again, a day long past is fetched again, as a day the calendar hasn't fetched.
+    // Shown again, a day long past is fetched again like any day the calendar hasn't fetched.
     store
         .sync_events(ACCOUNT, day(fetched), &tz)
         .await
@@ -960,11 +964,12 @@ async fn a_cleared_store_gives_space_back_and_eviction_keeps_what_clearing_kept(
     );
     let store = support::open(&server, dir.path()).await;
     let cleared = kept_tables(dir.path());
-    // Its first pass, before it syncs, has nothing to evict and leaves what clearing kept.
+    // Before the store syncs, its first pass has nothing to evict and leaves what clearing kept.
     assert_eq!(store.evict(&EVERYTHING).await.expect("evicts").threads, 0);
     assert_eq!(kept_tables(dir.path()), cleared);
 
-    // Synced again, a pass keeps the drafted conversation's bodies and what Gmail doesn't have.
+    // Once the store has synced again, a pass keeps the bodies of the drafted conversation and
+    // what Gmail doesn't have.
     while store.sync().await.expect("syncs").backfilling {}
     store.load_bodies(&replied).await.expect("fetches");
     store.load_bodies(&reminded).await.expect("fetches");
@@ -1023,8 +1028,9 @@ async fn a_file_from_before_eviction_is_rebuilt_once_to_give_space_back() {
 /// Where a store's bytes are, from SQLite's own accounting (`dbstat`), grouped by what they hold.
 #[derive(Debug, Default)]
 struct Usage {
-    /// The database file and its WAL.
+    /// The database file's size in bytes.
     file: u64,
+    /// Its WAL's size in bytes.
     wal: u64,
     /// Pages in use, by group: bodies, messages, search, lists, attachments, calendar, other.
     groups: BTreeMap<&'static str, u64>,
@@ -1159,8 +1165,8 @@ struct Templates {
 }
 
 impl Templates {
-    /// The fixture's bodies, each HTML part padded with `pad` bytes of markup no one sees:
-    /// `(personal, bulk)`, for mail of real sizes.
+    /// The fixture's bodies, each HTML part padded with `pad` bytes of markup no one sees.
+    /// `pad` is `(personal, bulk)`, to make mail of real sizes.
     async fn of(harness: &Harness, pad: (usize, usize)) -> Self {
         let gmail = harness.gmail.gmail();
         let mut query = ListQuery {
@@ -1208,8 +1214,8 @@ impl Templates {
     }
 }
 
-/// `html` with `bytes` more of the inline-styled table markup email HTML is mostly made of,
-/// hidden, so it adds no text.
+/// `html` with `bytes` more of the inline-styled table markup that email HTML is mostly made of,
+/// hidden so that it adds no text.
 fn padded(html: &str, bytes: usize) -> String {
     const CELL: &str = r#"<td style="padding:0 0 16px;font-family:-apple-system,Helvetica,Arial,sans-serif;font-size:16px;line-height:24px;color:#374151"></td>"#;
     format!(
@@ -1243,7 +1249,7 @@ async fn a_busy_year() {
     year((0, 0)).await;
 }
 
-/// [`a_busy_year`] with bodies of real mail's sizes: personal mail about 15 KB of HTML and
+/// [`a_busy_year`] with bodies the sizes of real mail: personal mail about 15 KB of HTML and
 /// text, newsletters and notifications about 40 KB.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "a measurement, minutes in release"]
@@ -1252,9 +1258,9 @@ async fn a_busy_year_of_real_sized_mail() {
 }
 
 /// A year of a busy inbox on gmail-mock, delivered a day at a time with a sync after each, as
-/// Exo running every day would see it: per day 25 new conversations and 25 replies in the inbox,
-/// 20 newsletters, 50 notifications that skip the inbox (20 of them follow-ups), and 15 sent
-/// replies; the inbox is cleared each day (Mark Done), and 3 conversations older than a month
+/// Exo running every day would see it. Each day brings 25 new conversations and 25 replies in the
+/// inbox, 20 newsletters, 50 notifications that skip the inbox (20 of them follow-ups), and 15
+/// sent replies. Each day the inbox is cleared (Mark Done) and 3 conversations older than a month
 /// are opened. Prints where the bytes are every 30 days, then what rebuilding a file of that
 /// size for `auto_vacuum` takes, what the default eviction does, and what opening an evicted
 /// conversation costs. `pad` pads the bodies ([`Templates::of`]).
@@ -1348,7 +1354,7 @@ async fn year(pad: (usize, usize)) {
             deliver(json!({ "from": "GitHub <notifications@github.example>", "html": html, "text": text, "threadId": rng.pick(&open), "labelIds": ["CATEGORY_UPDATES"] })).await;
         }
         harness.sync_all().await;
-        // Inbox zero: everything but today's is done.
+        // Reach inbox zero by marking everything but today's done.
         let inbox = harness
             .store
             .list(&ListId::Inbox, None, 2000)
@@ -1406,8 +1412,8 @@ async fn year(pad: (usize, usize)) {
         .expect("evicts");
     println!("again: {again:?} in {:.1?}", clock.elapsed());
 
-    // Scrolling All Mail back past where it now ends fetches what went, from where it ends, and
-    // opening such a conversation is opening a cold one.
+    // Scrolling All Mail back past its new end fetches what went, starting from that end. Opening
+    // such a conversation is opening a cold one.
     let shown = harness.all(&ListId::All).await.len();
     let (units_before, clock) = (units(&harness).await, Instant::now());
     harness
@@ -1443,8 +1449,8 @@ async fn year(pad: (usize, usize)) {
     );
 }
 
-/// Times what an older Exo's file of the store's size goes through once: a copy without
-/// `auto_vacuum` rebuilt with it.
+/// Times the rebuild that a file from an older Exo goes through once, on a file the size of the
+/// store's. It copies the store without `auto_vacuum` and rebuilds the copy with it.
 fn rebuild(dir: &Path) {
     let copy = dir.join("rebuild.sqlite3");
     {
@@ -1471,7 +1477,7 @@ fn rebuild(dir: &Path) {
     }
 }
 
-/// The conversations stored for their rows alone, with their newest message's date.
+/// The conversations stored for their rows alone, each with the date of its newest message.
 fn unrendered(dir: &Path) -> BTreeMap<String, i64> {
     rows(dir, "SELECT thread_id, max(internal_date) FROM messages WHERE thread_id IN (SELECT m.thread_id FROM messages m WHERE NOT EXISTS (SELECT 1 FROM bodies b WHERE b.message_id = m.id)) GROUP BY thread_id")
         .into_iter()
@@ -1506,7 +1512,8 @@ async fn the_pre_render_fetches_the_newest_conversations_eviction_keeps() {
         "newest first"
     );
 
-    // Nothing eviction would let go of: none quieter than its age, none past its budget.
+    // It pre-renders nothing eviction would let go of: none quieter than its age, none past its
+    // budget.
     assert_eq!(
         store
             .prerender(
@@ -1553,7 +1560,8 @@ async fn the_pre_render_fetches_nothing_eviction_let_go_of() {
         .cloned()
         .collect();
     let newest_gone = gone.iter().map(|id| before[id].0).max().expect("some went");
-    // Room again (a bigger budget, say), the conversations that went stay as they are.
+    // Even once there's room again, say from a bigger budget, the conversations that went stay as
+    // they are.
     store
         .prerender(&by_budget(u64::MAX), 1000)
         .await

@@ -16,7 +16,7 @@ use parley::fontique::{
 /// The `@font-face` rules for message bodies, each drawn in one of Exo's fonts:
 /// `(family, weight, italic, font)`.
 ///
-/// Bodies use `Exo Sans Email`, which maps 700 to the true Bold; the quoting ellipsis uses the
+/// Bodies use `Exo Sans Email`, which maps 700 to the true Bold. The quoting ellipsis uses the
 /// UI's `Exo Sans`, whose 700 is the Semibold. A browser engine laying a body out (printing)
 /// declares the same faces.
 pub const EMAIL_FACES: &[(&str, u16, bool, &exo_fonts::Font)] = &[
@@ -53,7 +53,7 @@ const MAC_GENERICS: &[(GenericFamily, &str)] = &[
 
 /// A font collection shared by every message view: the email faces plus the system's fonts.
 ///
-/// Building it scans the system fonts once; [`Fonts::context`] hands out cheap handles onto the
+/// Building it scans the system fonts once. [`Fonts::context`] hands out cheap handles onto the
 /// same collection.
 #[derive(Clone)]
 pub struct Fonts {
@@ -101,9 +101,9 @@ impl Fonts {
             }
         }
         // Mathematical alphanumerics (`𝓇𝒶𝓌`) are common-script characters, which take the
-        // script of the text around them; CoreText's cascade doesn't cover them, and Chromium
-        // draws them with STIX Two Math (as exo-ui's fallback chain does). Last, so nothing the
-        // cascade had moves.
+        // script of the text around them. CoreText's cascade doesn't cover them, and Chromium
+        // draws them with STIX Two Math (as exo-ui's fallback chain does). It goes last, so
+        // nothing the cascade had moves.
         if let Some(math) = collection.family_id(MATH_FONT) {
             for script in [Script::COMMON, Script::from_bytes(*b"Latn")] {
                 let key = FallbackKey::new(script, None);

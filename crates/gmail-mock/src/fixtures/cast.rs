@@ -91,7 +91,7 @@ pub fn me() -> &'static Person {
     &PEOPLE[0]
 }
 
-/// A person by script handle. Panics on unknown handles: scripts are static data.
+/// A person by script handle. Panics on unknown handles, because scripts are static data.
 pub fn get(key: &str) -> &'static Person {
     PEOPLE
         .iter()

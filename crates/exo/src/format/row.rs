@@ -14,8 +14,8 @@ const MAX_SUBJECT: usize = 60;
 /// Nor shorter than this.
 const MIN_SUBJECT: usize = 10;
 
-/// Where a search result's highlights start and end while it's cut: characters of their own, as
-/// wide as any the width table doesn't have.
+/// Where a search result's highlights start and end while it's cut. They're characters of their
+/// own, as wide as any character the width table doesn't have.
 const MARK_START: char = '\u{e550}';
 const MARK_END: char = '\u{e551}';
 /// The same, to [`marked`] a subject with.
@@ -23,9 +23,9 @@ pub const MARKERS: [&str; 2] = ["\u{e550}", "\u{e551}"];
 /// The tags a search result's excerpt comes in, which it's measured with.
 const TAGS: [&str; 2] = ["<b>", "</b>"];
 
-/// `text` with each of `marks` (byte ranges, in order) between `open` and `close`: a search
-/// result's subject as it's cut ([`MARKERS`]), or its excerpt as it's measured (the `<b>` tags it
-/// came in).
+/// `text` with each of `marks` (byte ranges, in order) between `open` and `close`. Used for a
+/// search result's subject as it's cut ([`MARKERS`]), or its excerpt as it's measured (the `<b>`
+/// tags it came in).
 pub fn marked(text: &str, marks: &[Range<usize>], [open, close]: [&str; 2]) -> String {
     let mut out = String::with_capacity(text.len());
     let mut done = 0;
@@ -43,8 +43,8 @@ pub fn marked(text: &str, marks: &[Range<usize>], [open, close]: [&str; 2]) -> S
     out
 }
 
-/// `Snippet.highlight`: a cut text's highlights, the markers taken out; a highlight followed by a
-/// space, `@` or `.` and another runs on through both.
+/// A cut text with its markers taken out, and the ranges they highlighted. A highlight followed
+/// by a space, `@` or `.` and then another highlight runs on through both.
 pub fn unmark(text: &str) -> (String, Vec<Range<usize>>) {
     let mut plain = String::with_capacity(text.len());
     let mut marks: Vec<Range<usize>> = Vec::new();
@@ -86,16 +86,16 @@ fn labels_width(labels: &[String]) -> f64 {
 }
 
 /// The subject as shown in a row whose middle column is `center_width` px wide, ending in `…`
-/// when cut. A search result's comes [`marked`] with [`MARK_START`]/[`MARK_END`] around its
-/// highlights, which count as characters; [`unmark`] it to show it.
+/// when cut. A search result's subject comes [`marked`] with [`MARK_START`]/[`MARK_END`] around
+/// its highlights, which count as characters. Call [`unmark`] on it to show it.
 pub fn subject(subject: &str, center_width: f64, labels: &[String]) -> String {
     let text = subject.trim();
     let available = center_width - 24.0 - labels_width(labels);
     let length = max_characters(text, available).clamp(MIN_SUBJECT, MAX_SUBJECT);
     let strict = width(split_utf16(text, length).0) + 6.0 > available;
     let mut cut = measure::truncate(text, length, strict);
-    // Compared with the text as it came, whitespace untrimmed: a subject with a double space gets
-    // an ellipsis even when nothing was cut.
+    // Compared with the text as it came, with whitespace untrimmed, so a subject with a double
+    // space gets an ellipsis even when nothing was cut.
     if utf16_len(&cut) != utf16_len(text) {
         cut.push('…');
     }
@@ -104,8 +104,8 @@ pub fn subject(subject: &str, center_width: f64, labels: &[String]) -> String {
 
 /// The snippet as shown after `shown_subject` (as [`subject`] gave it), and whether it was cut
 /// (an ellipsis follows). `None` when not even three characters fit. A search result's
-/// highlights (`marks`) are measured as the `<b>` tags it came in and cut as markers; [`unmark`] it
-/// to show it.
+/// highlights (`marks`) are measured as the `<b>` tags they came in and cut as markers. Call
+/// [`unmark`] on the result to show it.
 pub fn snippet(
     snippet: &str,
     marks: &[Range<usize>],
@@ -137,7 +137,7 @@ pub fn snippet(
     Some((cut, truncated))
 }
 
-/// `Snippet.clean`: the snippet up to the first quoted reply, signature rule or footer.
+/// The snippet up to the first quoted reply, signature rule or footer.
 pub fn clean_snippet(snippet: &str) -> String {
     static CUTS: LazyLock<[Regex; 4]> = LazyLock::new(|| {
         [
@@ -166,9 +166,9 @@ pub struct Participant {
 }
 
 /// The from column's text: one person's full name, or first names. Given the column's
-/// `column_width`, more than two people show as the first and last always, the ones a search
-/// asked for (`searched`, its address and name words) too, and as many of the latest others as
-/// fit, with ` .. ` standing for the rest; without one (draft recipients), everyone is listed.
+/// `column_width`, more than two people always show the first and the last, and the ones a search
+/// asked for (`searched`, its address and name words). As many of the latest others as fit show
+/// too, with ` .. ` standing for the rest. Without a width (draft recipients), everyone is listed.
 pub fn participants(
     people: &[Participant],
     column_width: Option<f64>,

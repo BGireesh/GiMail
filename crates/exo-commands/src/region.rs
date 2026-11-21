@@ -118,7 +118,9 @@ pub const CONVERSATION: &[Region] = &[
     Region::ActionPane,
 ];
 
-/// Where ⌘K opens the palette: everywhere but the shortcuts sheet, dialogs, alerts and dropdowns.
+/// Where ⌘K opens the palette, or closes it from the palette itself. It's off in every other
+/// region, among them the shortcuts sheet, dialogs, alerts, dropdowns, account setup, the source
+/// and attachment viewers, the colour pickers and Share Availability.
 pub(crate) const PALETTE_TOGGLE: &[Region] = &[
     Region::ThreadListHeader,
     Region::ThreadList,

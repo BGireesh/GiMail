@@ -6,12 +6,13 @@
 //! through [`Inline`]) or, for a new message, in a pane of its own
 //! ([`crate::Mail::show_compose_pane`]). Edits are saved within a second
 //! ([`crate::Mail::compose_tick`]) to the store, which mirrors them to a Gmail draft. Sending
-//! holds the draft for 20 s: the toast's Undo takes it back; hovering it buys 30 s more;
-//! Instant Send sends at once.
+//! holds the draft for 20 s. During the hold, the toast's Undo takes the draft back, hovering the
+//! toast buys 30 s more, and Instant Send sends at once.
 //!
-//! Send later picks a time Send then schedules the draft for ([`schedule`]), and Remind me a
-//! reminder the message's thread gets at Send, which Undo takes back ([`reminder`]). Left out,
-//! as for an account without them: AI, sharing and every other server feature.
+//! Send later picks a time, and Send then schedules the draft for it ([`schedule`]). Remind me
+//! picks a reminder that the message's thread gets at Send, and Undo takes the reminder back
+//! ([`reminder`]). Compose leaves out AI, sharing and every other server feature, as for an
+//! account without them.
 
 mod assistant;
 pub(crate) mod auto_bcc;
@@ -83,13 +84,12 @@ pub(crate) enum Action {
     /// `⌘⇧O/C/B/F/S` in a draft, or a click on a field: focus it.
     Focus(Field),
     /// A click on a reply's subject, Enter on it, or the palette's `Change Subject`: the reply
-    /// becomes a new message, popped out. A new message's
-    /// subject is only focused.
+    /// becomes a new message, popped out. On a new message, the subject is only focused.
     EditSubject,
     /// The palette's `Reply All, Change Subject` with no draft open: a Reply All of the focused
     /// message as a new message.
     ReplyAllEditSubject,
-    /// A click on From's address, or Enter on it: its list opens or closes.
+    /// A click on From's address, or Enter on it: the From list opens or closes.
     FromToggle,
     /// ↓ / ↑ (and `j`/`n`, `k`/`p`) in the From list.
     FromMove(isize),
@@ -101,29 +101,32 @@ pub(crate) enum Action {
     Format(exo_editor::FormatCommand),
     /// ⌥⇧` in the body with Backtick as Escape on: a backtick.
     TypeBacktick,
-    /// The body's caret came onto a detected date saying this: its day in the right pane.
+    /// The body's caret came onto a detected date that says this, so the right pane shows that
+    /// date's day.
     DateActive(String),
-    /// ⌘⇧– (-1) or ⌘⇧= (1) with the caret on a date: it says a day earlier or later.
+    /// ⌘⇧– (-1) or ⌘⇧= (1) with the caret on a date: the date then says a day earlier or later.
     ShiftDate(i64),
     /// ↓ / ↑ in the `;` picker.
     SnippetMove(isize),
     /// Enter or Tab in the `;` picker (the highlighted snippet), or a press on a row.
     SnippetPick(Option<usize>),
-    /// Escape in the `;` picker: it closes, the text stays.
+    /// Escape in the `;` picker: it closes and the text stays.
     SnippetClose,
-    /// The footer's `{ }`: `Use Snippet Inline`'s `;` in the body.
+    /// The footer's `{ }`: a `;` in the body, as `Use Snippet Inline` types.
     SnippetInline,
-    /// ⌘⇧A, the footer's calendar: Share Availability's menu at the caret, or closed.
+    /// ⌘⇧A or the footer's calendar: the Share Availability menu opens at the caret (`true`) or
+    /// closes.
     AvailabilityMenu(bool),
     /// Enter, Tab or a click on the menu's `Insert free times`.
     AvailabilityPick,
-    /// A press outside the menu: it closes, and what was typed into it goes.
+    /// A press outside the menu: the menu closes, and the text typed into it is removed.
     AvailabilityDismiss,
-    /// The `You can now hit ⌘ shift A…` tooltip's close icon: it doesn't show again.
+    /// The close icon on the `You can now hit ⌘ shift A…` tooltip: the tooltip doesn't show
+    /// again.
     DismissAvailabilityTip,
     /// `⌘Enter` / `⌘⇧Enter`.
     Send { mark_done: bool },
-    /// A click on Send (⌘⇧ held: and mark done), which also hints at `⌘Enter`.
+    /// A click on Send, which also hints at `⌘Enter`. With ⌘⇧ held, it marks done too.
     ClickSend { mark_done: bool },
     /// `⌘⇧,`, the trash icon.
     Discard,
@@ -133,13 +136,13 @@ pub(crate) enum Action {
     Tab(isize),
     /// Enter, `,` or `;` in a recipient field: the typed text becomes a chip.
     Commit,
-    /// Backspace in an empty recipient field: select the last chip, or remove the selected.
+    /// Backspace in an empty recipient field: select the last chip, or remove the selected ones.
     Backspace,
     /// ⌘⇧P: pop the focused draft out, or back in.
     Pop,
     /// A click on the header's pop button: [`Action::Pop`], which also hints at ⌘⇧P.
     ClickPop,
-    /// Escape: the pop-out closes, its draft kept.
+    /// Escape: the pop-out closes and its draft is kept.
     ClosePopout,
     /// A click on the pop-out's cross: [`Action::ClosePopout`], which also hints at Escape.
     ClickClosePopout,
@@ -147,7 +150,7 @@ pub(crate) enum Action {
     NewPoppedOut,
     /// ⇧R, ⇧A (⇧Enter), ⇧F: a reply, reply all or forward, popped out.
     ReplyPoppedOut(DraftAction),
-    /// ⌘D: the keyboard between the pop-out and the rest of the app.
+    /// ⌘D: the keyboard moves between the pop-out and the rest of the app.
     CycleFocus,
     /// `Include Original Attachment(s)`: a reply takes the files of the message it answers.
     IncludeOriginals,
@@ -165,7 +168,7 @@ pub(crate) enum Action {
     PickSuggestion(usize),
     /// `Remove Suggestion` on a suggestion.
     RemoveSuggestion(usize),
-    /// Dragged chips `chips` of `from` dropped into `into` at `at`.
+    /// The chips `chips`, dragged from `from` and dropped into `into` at `at`.
     DropChips {
         from: draft::List,
         chips: Vec<usize>,
@@ -180,7 +183,7 @@ pub(crate) enum Action {
     MoveSelection(isize),
     /// The `…`: reveal the quote and signature.
     RevealQuote,
-    /// A click on the `…`: it reveals, and a hint says the keys.
+    /// A click on the `…`: it reveals the quote, and a hint names the keys.
     ClickRevealQuote,
     /// Backspace on the `…`: drop the quote and signature.
     DeleteQuote,
@@ -206,8 +209,8 @@ pub(crate) enum Action {
     Alert(usize),
     /// ← / → / Tab in an alert.
     AlertSelect(isize),
-    /// Escape or the back gutter in the new-message pane without the keyboard: back to where it
-    /// was opened from.
+    /// Escape or the back gutter in the new-message pane without the keyboard: back to where the
+    /// pane was opened from.
     LeavePane,
     /// A click on a failed or waiting send's status, by its message: `RecoverDraft`.
     Recover(String),
@@ -221,11 +224,11 @@ pub(crate) enum Action {
     DiscardSending(String),
     /// ⌘⇧L, the palette's `Send Later`, the action pane's Send later: the picker.
     SendLater,
-    /// ⌘⇧H, the palette's `Remind Me`, the action pane's Remind button: Remind me's picker for
+    /// ⌘⇧H, the palette's `Remind Me`, the action pane's Remind button: the Remind me picker for
     /// the draft.
     RemindMe,
-    /// A Send later row for `draft`: its time (`None`: Unschedule, `now`), `if no reply`, and
-    /// the row to remember as `last used`.
+    /// A Send later row for `draft`, with its time (`None` for Unschedule and for `now`),
+    /// `if no reply`, and the row to remember as `last used`.
     Schedule {
         draft: String,
         at: Option<Timestamp>,
@@ -233,16 +236,17 @@ pub(crate) enum Action {
         remember: Option<exo_store::PreviousSchedule>,
     },
     /// `RecoverDraft`'s `Reschedule` or `Edit Message` on a scheduled send: it's taken back to
-    /// edit, its time kept.
+    /// edit and keeps its time.
     EditScheduled(String),
     /// `RecoverDraft`'s `Discard` on a scheduled send.
     DiscardScheduled(String),
-    /// The `Reminder set` toast's Undo on a reminder the follow-up hint set for a message just
-    /// sent as this draft.
+    /// The Undo in the `Reminder set` toast, on a reminder that the follow-up hint set for a
+    /// message just sent as this draft.
     UnremindSent(String),
     /// ⌘⇧I in a draft: Instant Intro's next step.
     InstantIntro,
-    /// ⌘⇧I on a conversation: its draft's next Instant Intro step, or a Reply All taking the first.
+    /// ⌘⇧I on a conversation: the next Instant Intro step in its draft, or a Reply All that
+    /// takes the first step.
     InstantIntroReply,
     /// A key on the recipient list's chips.
     Chip(chips::Key),
@@ -250,9 +254,9 @@ pub(crate) enum Action {
     Assistant(assistant::Key),
     /// `Use Emoji`: `:hello` in the body, opening the picker.
     UseEmoji,
-    /// `Remove External Recipients` and the rest: everyone of that group off the draft.
+    /// `Remove External Recipients` and the rest: everyone in that group comes off the draft.
     RemoveRecipients(assistant::Person),
-    /// ⌘/ in a draft: popped out (unless it is), and search opened empty.
+    /// ⌘/ in a draft: the draft pops out (unless it already is), and search opens empty.
     PopAndSearch,
     /// `Compose to {email}`: a new message to the contact pane's person.
     ComposeTo(Address),
@@ -273,12 +277,12 @@ struct Sending {
     done: Option<crate::account::UndoToken>,
     /// When the hold ends, as last asked for.
     until: Timestamp,
-    /// Gmail has the message: the toast reads `Message sent.`.
+    /// Gmail has the message, so the toast reads `Message sent.`.
     acked: bool,
     undoing: bool,
-    /// When the hover last held it longer.
+    /// When the hover last held the send longer.
     held_at: f64,
-    /// Scheduled for its Send later time: no Instant Send, no hover hold.
+    /// Scheduled for its Send later time, so there's no Instant Send and no hover hold.
     scheduled: bool,
 }
 
@@ -325,12 +329,12 @@ pub(crate) struct Alert {
     text: String,
     actions: Vec<&'static str>,
     selected: usize,
-    /// The action Escape takes: the last, but for `Save Snippet?`'s Cancel.
+    /// The action Escape takes. It's the last one, except in `Save Snippet?`, where it's Cancel.
     escape: usize,
     /// The draft it's about.
     draft: String,
     then: AlertThen,
-    /// Its text has the follow-up hint's `H` keycap.
+    /// The alert's text has the follow-up hint's `H` keycap.
     key: bool,
 }
 
@@ -396,7 +400,7 @@ pub(crate) struct Compose {
     pane: Option<(String, Option<String>)>,
     /// The popped-out draft.
     popped: Option<String>,
-    /// How many files of the message the focused reply answers it doesn't have.
+    /// How many of the answered message's files the focused reply doesn't have.
     missing_originals: usize,
     sends: Vec<Sending>,
     discarded: Option<Discarded>,
@@ -423,13 +427,13 @@ pub(crate) struct Compose {
     in_thread: sent::ShownSends,
     /// A discarded snippet the toast's Undo brings back.
     discarded_snippet: Option<(u64, exo_store::Snippet)>,
-    /// The focused draft's recipients as of the last frame, to tell one being added.
+    /// The focused draft's recipients as of the last frame, to tell when one is added.
     recipients_seen: Option<(String, Vec<String>)>,
     /// The recipient the focused draft got last, for the contact pane to show.
     just_added: Option<Address>,
     /// The follow-up hint holding its send while it's open.
     follow_up: Option<reminder::FollowUp>,
-    /// The threads the drafts sent this session went into, the latest last (a few).
+    /// The threads that drafts sent this session went into (a few), the latest last.
     sent_threads: Vec<(String, String)>,
     /// The account's `Send + Mark Done` (`sendAndDone`), as of this frame.
     send_and_done: bool,
@@ -439,12 +443,12 @@ pub(crate) struct Compose {
     intro_pending: Option<String>,
     /// The drafts' images loading.
     images: images::Loads,
-    /// The pointer rests over the contact pane (or the pop-out, once it slid for it): the
-    /// pop-out slides out of the pane's way.
+    /// The pointer rests over the contact pane (or over the pop-out, once the pop-out slid for
+    /// the pane), so the pop-out slides out of the pane's way.
     still_over_right_pane: bool,
-    /// The pop-out's card as last drawn: the wheel over it is its own.
+    /// The pop-out's card as last drawn, so the wheel over the card goes to the pop-out.
     popout_card: Option<egui::Rect>,
-    /// The command palette has the keyboard this frame: no draft takes it back.
+    /// The command palette has the keyboard this frame, so no draft takes it back.
     pub(crate) palette_open: bool,
     /// Share Availability's `You can now hit ⌘ shift A…` may show on a reply this frame.
     availability_tip: bool,
@@ -505,7 +509,7 @@ impl Compose {
         self.drafts.iter_mut().find(|open| open.id == id)
     }
 
-    /// Who called off the scheduled sends of the drafts open, by a reply.
+    /// Who called off the scheduled sends of the open drafts by replying.
     pub fn unscheduled_by(&self) -> Vec<String> {
         self.drafts
             .iter()
@@ -545,7 +549,7 @@ impl Compose {
     }
 
     /// The new message's last recipient, To through Bcc, while its pane shows (`Some(None)`
-    /// with none yet); while chips are selected, the one at the selection's edge.
+    /// with none yet). While chips are selected, it's the chip at the selection's edge.
     pub fn pane_recipient(&self) -> Option<Option<&exo_store::Address>> {
         let (id, _) = self.pane.as_ref()?;
         let open = self.drafts.iter().find(|open| &open.id == id)?;
@@ -562,9 +566,9 @@ impl Compose {
         )
     }
 
-    /// Whom the contact pane is to show for the focused draft, when it isn't the new-message
-    /// pane's (which [`Self::pane_recipient`] has): the chip at the selection's edge, else the
-    /// recipient just added, taken.
+    /// Whom the contact pane is to show for the focused draft, when that draft isn't the
+    /// new-message pane's ([`Self::pane_recipient`] covers that one). It's the chip at the
+    /// selection's edge, else the recipient just added, which this takes.
     pub fn shown_recipient(&mut self) -> Option<Address> {
         let added = self.just_added.take();
         let open = self
@@ -578,8 +582,8 @@ impl Compose {
         self.popped.as_deref()
     }
 
-    /// The drafts of `thread`, each under the message it answers (the last one when that isn't
-    /// shown): for [`crate::thread::ThreadView`] to make room for them.
+    /// The drafts of `thread`, each under the message it answers (or under the last message when
+    /// that one isn't shown), for [`crate::thread::ThreadView`] to make room for.
     pub fn inline<'a>(
         &'a mut self,
         thread: &'a ThreadDetail,
@@ -653,7 +657,7 @@ impl Compose {
         team: &[String],
     ) {
         if self.pane.is_some() && self.focus.is_none() && self.alert.is_none() {
-            // The new-message pane without the keyboard: Escape leaves it.
+            // In the new-message pane without the keyboard, Escape leaves the pane.
             commands.add(
                 Command::shortcut("BACK", commands::Action::Compose(Action::LeavePane))
                     .keys(["esc", "backspace"])
@@ -925,7 +929,7 @@ pub(crate) fn register_shortcuts(commands: &mut Commands<commands::Action>, cx: 
         )
         .aliases(["Change Alias", "Change Aliases"]),
     );
-    // ⌘⇧S starts a Reply All on its subject; the palette's row makes it a new message.
+    // ⌘⇧S starts a Reply All on its subject. The palette's row makes it a new message.
     commands.add(
         Command::new(
             "REPLY_ALL_CHANGE_SUBJECT",
@@ -971,7 +975,7 @@ pub(crate) fn register_compose_to(
     );
 }
 
-/// Leaves a draft: an unmodified draft is discarded silently; any other is saved, if it
+/// Leaves a draft. An unmodified draft is discarded silently, and any other is saved if it
 /// changed.
 fn clean_up(
     open: &mut Open,
@@ -988,7 +992,7 @@ fn clean_up(
     }
 }
 
-/// Saves `open` if it differs from what the store has: a touch that changed nothing, such as
+/// Saves `open` if it differs from what the store has, so a touch that changed nothing, such as
 /// Tab past an empty recipient input, saves nothing.
 fn save_changes(
     open: &mut Open,
@@ -1003,9 +1007,9 @@ fn save_changes(
     }
 }
 
-/// Saves `open` now, dated by the system's clock in `local`'s time zone; `sending` when it's
-/// saved to be sent, which Gmail gets even unchanged since it dates the message. A snippet
-/// never goes to Gmail: Done saves it to the settings.
+/// Saves `open` now, dated by the system's clock in `local`'s time zone. `sending` says it's
+/// saved to be sent, which Gmail gets even when unchanged, since the save dates the message. A
+/// snippet never goes to Gmail, because Done saves it to the settings.
 fn save(
     open: &mut Open,
     account: &crate::account::Account,
@@ -1029,7 +1033,7 @@ fn save(
             thread: open.thread.as_deref().map(exo_store::ThreadId::new),
             adopted: open.adopt.take(),
             record: open.record.clone(),
-            // The account adds the attachments, writes it and says whether it has them all.
+            // The account adds the attachments, writes `raw` and says whether it has them all.
             raw: String::new(),
             complete: false,
             sending,
@@ -1063,7 +1067,7 @@ pub(crate) struct Inline<'a> {
 }
 
 impl<'a> Inline<'a> {
-    /// A draft is popped out: the thread makes room for it.
+    /// Whether a draft is popped out, for the thread to make room for it.
     pub fn popped_out(&self) -> bool {
         self.popped.is_some()
     }
@@ -1101,7 +1105,7 @@ impl<'a> Inline<'a> {
     }
 
     /// The form context for the draft at `at`, in a thread whose message column spans `column`,
-    /// in the message card `card`; it borrows nothing of `self`.
+    /// in the message card `card`. It borrows nothing of `self`.
     fn context(
         &self,
         at: usize,
@@ -1153,8 +1157,9 @@ impl<'a> Inline<'a> {
         form::SEPARATOR + form::height(ui, &mut self.drafts[at], width, &cx)
     }
 
-    /// Draws the draft under `message` in `form` (its separator's top and its width) inside the
-    /// message's `card`, in a message column spanning `column`. Returns what it asked for.
+    /// Draws the draft under `message` in `form` (the top of its separator, and its width) inside
+    /// the message's `card`, in a message column spanning `column`. Returns what the draft asked
+    /// for.
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
@@ -1222,9 +1227,9 @@ fn anchor(open: &Open, shown: &[&MessageDetail]) -> Option<String> {
         .or_else(|| shown.last().map(|message| message.id.clone()))
 }
 
-/// The draft record of a draft written elsewhere (Gmail web), from its message
-/// (`adopt`): its HTML is the body, quote and all, as a revealed quote is, and its files are
-/// its own (the first save fetches them, since it replaces the message they're in).
+/// The draft record of a draft written elsewhere (Gmail web), from its message (`adopt`). The
+/// message's HTML is the body, quote and all, as with a revealed quote. Its files are its own,
+/// and the first save fetches them, since that save replaces the message they're in.
 fn adopted(message: &MessageDetail, thread: &ThreadDetail) -> Open {
     let address = |contact: &exo_store::Contact| Address {
         name: contact.name.clone(),
@@ -1292,8 +1297,8 @@ fn adopted(message: &MessageDetail, thread: &ThreadDetail) -> Open {
     open
 }
 
-/// The quoted body of `message`: its render's `<body>` contents and attributes, sanitized;
-/// the raw HTML sanitized when it hasn't been rendered.
+/// The quoted body of `message`, which is the `<body>` contents and attributes of its render,
+/// sanitized, or its raw HTML sanitized when it hasn't been rendered.
 fn quoted_body(message: &MessageDetail, facts: Option<&crate::body::Facts>) -> factory::QuotedBody {
     match facts {
         Some(facts) => factory::QuotedBody {
@@ -1373,7 +1378,7 @@ impl crate::Mail {
             Action::OpenAutoBccExclusion(email) => self.open_auto_bcc_exclusion(&email),
             Action::ExcludeFromAutoBcc(entry) => self.exclude_from_auto_bcc(entry),
             Action::NoteToSelf => {
-                // Note to self: to the default alias named `Me`, subject selected.
+                // Note to self goes to the default alias, named `Me`, with the subject selected.
                 let from = self.compose_account().default_from();
                 let fields = Fields {
                     to: vec![Address {
@@ -1537,7 +1542,7 @@ impl crate::Mail {
                         | Field::PopClose => open.state.field = field,
                         other => open.state.expand(other),
                     }
-                    // Focusing From opens its list; ⌘⇧F there moves it on.
+                    // Focusing From opens its list. ⌘⇧F in From moves the highlight on.
                     if field == Field::From {
                         let cycle = if was == Field::From {
                             Action::FromMove(1)
@@ -1560,8 +1565,8 @@ impl crate::Mail {
                 let paths = picker::pick_files(&[]);
                 self.compose_attach(&paths, now);
             }
-            // Insert Image picks from the image types; one picked goes in the body, more go on the
-            // draft, as dropped files do.
+            // Insert Image picks from the image types. One image picked goes in the body, and more
+            // go on the draft, as dropped files do.
             Action::InsertImage => {
                 let paths = picker::pick_files(&[
                     "jpg", "jpeg", "jif", "jfif", "gif", "png", "bmp", "webp",
@@ -1629,8 +1634,8 @@ impl crate::Mail {
                 let Some(open) = self.compose.focused_mut() else {
                     return;
                 };
-                // Chips dropped into a reply's Bcc hint at ⌘⇧I, the recipients counted before the
-                // drop.
+                // Chips dropped into a reply's Bcc hint at ⌘⇧I. The recipients are counted before
+                // the drop.
                 let hint = into == draft::List::Bcc
                     && open.record.in_reply_to.is_some()
                     && open.recipients().count() > 1;
@@ -1839,9 +1844,9 @@ impl crate::Mail {
         self.compose.drafts.push(open);
     }
 
-    /// Change Subject: Gmail threads by subject, so a reply whose subject is to change
-    /// becomes a new message: the reply is discarded and its copy, unthreaded, pops out with its
-    /// subject selected. A new message's subject is only focused.
+    /// Carries out Change Subject. Gmail threads by subject, so a reply whose subject is to change
+    /// becomes a new message. The reply is discarded, and an unthreaded copy of it pops out with
+    /// its subject selected. On a new message, the subject is only focused.
     fn edit_reply_subject(&mut self, now: f64) {
         let Some(id) = self.compose.focus.clone() else {
             return;
@@ -1910,8 +1915,8 @@ impl crate::Mail {
         self.open_new(open, Some(Field::Subject));
     }
 
-    /// A reply, reply all or forward of the open (or highlighted) conversation's focused
-    /// message; an existing draft on that message is reused.
+    /// A reply, reply all or forward of the focused message in the open (or highlighted)
+    /// conversation. An existing draft on that message is reused.
     fn compose_reply(&mut self, action: DraftAction, field: Option<Field>) {
         let thread = match &self.thread {
             Some(thread) => thread.id().to_owned(),
@@ -1978,8 +1983,8 @@ impl crate::Mail {
             .or_else(|| shown.iter().find(|message| message.is_unread()))
             .or_else(|| shown.last())
             .copied();
-        // Its quote needs its body, rendered: the reply waits for it, and without Gmail to fetch
-        // it from, doesn't start.
+        // The reply's quote needs the message's body, rendered, so the reply waits for the body.
+        // Offline, with no Gmail to fetch the body from, the reply doesn't start.
         if message.is_some_and(|message| self.snapshot.bodiless.contains(&message.id)) {
             if !self.snapshot.connection.is_online() {
                 self.compose.pending = None;
@@ -2073,8 +2078,8 @@ impl crate::Mail {
         };
         let thread = detail.id.as_str().to_owned();
         if self.compose.loaded.as_deref() != Some(thread.as_str()) {
-            // A draft written elsewhere is taken up with its body: until that's in, the thread
-            // loads again.
+            // A draft written elsewhere is taken up with its body, so until the body is in, the
+            // thread loads again.
             let waiting = detail
                 .messages
                 .iter()
@@ -2161,7 +2166,7 @@ impl crate::Mail {
         self.create_pending_reply();
     }
 
-    /// Opens a draft-only thread: its draft in the new-message pane.
+    /// Opens a draft-only thread by showing its draft in the new-message pane.
     pub(crate) fn open_draft_thread(&mut self, thread: &str) -> bool {
         let Some(stored) = self.snapshot.drafts.iter().find(|draft| {
             draft
@@ -2200,7 +2205,7 @@ impl crate::Mail {
         }
     }
 
-    /// The thread is closing: its drafts are saved or dropped.
+    /// Saves or drops the drafts of `thread`, which is closing.
     pub(crate) fn compose_close_thread(&mut self, thread: &str) {
         self.compose
             .close_thread_drafts(thread, &self.account, &self.snapshot.aliases, &self.now);
@@ -2208,8 +2213,8 @@ impl crate::Mail {
         self.compose.pending = None;
     }
 
-    /// Escape in a draft: an unmodified draft goes; otherwise the form keeps it and the
-    /// keyboard goes back to the thread.
+    /// Escape in a draft. An unmodified draft goes. Any other stays in its form, and the keyboard
+    /// goes back to the thread.
     fn compose_escape(&mut self) {
         if self.compose.focused().is_some_and(Open::is_snippet) {
             self.escape_snippet();
@@ -2257,7 +2262,7 @@ impl crate::Mail {
         }
     }
 
-    /// Discard, with its toast: the draft goes (from Gmail too), and Undo brings it back where
+    /// Discard, with its toast. The draft goes (from Gmail too), and Undo brings it back where
     /// it was.
     fn compose_discard(&mut self) {
         if self.compose.focused().is_some_and(Open::is_snippet) {
@@ -2298,9 +2303,9 @@ impl crate::Mail {
         );
     }
 
-    /// Puts a draft back where it was (after an undo), with the keyboard. Into the pane or a
-    /// thread, it takes the place of a snippet being edited once `Save Snippet?` has asked, so
-    /// the snippet's changes are never dropped unasked.
+    /// Puts a draft back where it was (after an undo), with the keyboard. When the draft goes
+    /// into the pane or a thread, it takes the place of a snippet being edited only once
+    /// `Save Snippet?` has asked, so the snippet's changes are never dropped unasked.
     fn reopen(&mut self, open: Open, surface: Surface) {
         if surface != Surface::Popout && self.snippet_unsaved() {
             self.ask_leaving_snippet(Box::new(move |mail| mail.reopen(open, surface)));
@@ -2327,7 +2332,7 @@ impl crate::Mail {
                 {
                     self.open_thread(thread.clone());
                 }
-                // Loading the thread opens its stored drafts; this one is ours already.
+                // Loading the thread opens its stored drafts, but compose has this one already.
                 self.compose.loaded = thread.clone();
                 self.compose.drafts.push(open);
                 if let (Some(view), Some(anchor)) = (&mut self.thread, anchor) {
@@ -2390,7 +2395,7 @@ impl crate::Mail {
         } else {
             Surface::Inline
         };
-        // A send a reply called off goes now: its time goes with the old job.
+        // A send that a reply called off goes now. Its time is dropped with the old job.
         if open.unscheduled_by.take().is_some() {
             open.record.send_later = None;
         }
@@ -2408,7 +2413,7 @@ impl crate::Mail {
         save(&mut open, &self.account, &aliases, &self.now, true);
         let until = match scheduled {
             Some(at) => {
-                // Held for its time; its thread shows Gmail's copy as scheduled.
+                // Held for its time. Its thread shows Gmail's copy as scheduled.
                 self.account.schedule_draft(&open.id);
                 at
             }
@@ -2436,8 +2441,8 @@ impl crate::Mail {
             view.reveal_sent(&shown);
         }
         // Outside the new-message pane, a send marks its conversation done when asked
-        // (`Send & Mark Done`, ⌘⇧) or with `Send + Mark Done` on; one that's only this draft has
-        // nothing to mark.
+        // (`Send & Mark Done`, ⌘⇧) or with `Send + Mark Done` on. A conversation that's only this
+        // draft has nothing to mark.
         let mark_done =
             surface != Surface::Pane && (mark_done || self.account.settings().send_and_done);
         let thread = open
@@ -2472,7 +2477,7 @@ impl crate::Mail {
         self.follow_up_hint(&id, reminded, now);
     }
 
-    /// Marks `thread` done as part of a send, without a toast of its own; the conversation
+    /// Marks `thread` done as part of a send, without a toast of its own. The conversation
     /// leaves the list as `e` would take it, Auto Advance and all. Returns the undo token.
     fn mark_done_with_send(&mut self, thread: &str, now: f64) -> crate::account::UndoToken {
         let token = self.account.undo_token();
@@ -2559,7 +2564,8 @@ impl crate::Mail {
         let signature_on_replies = settings.include_signature_on_replies();
         let online = self.snapshot.connection.is_online();
         for open in &mut self.compose.drafts {
-            // No date detection in a snippet's body; where its date tooltip keeps clear of.
+            // A snippet's body detects no dates. Whether this draft or another is popped out sets
+            // how far the date tooltip keeps from the window's edges.
             let popped_out = self.compose.popped.as_deref() == Some(open.id.as_str());
             let another_popped_out = self.compose.popped.is_some() && !popped_out;
             open.editor.set_settings(exo_editor::Settings {
@@ -2601,8 +2607,9 @@ impl crate::Mail {
         }
         let showing = self.commands.toast_tag();
         let hovered = self.commands.toast_hovered();
-        // A scheduled send's toast is its only way back here; once it's gone, the send waits in
-        // the store, and its thread shows it. One a reply called off is a draft again.
+        // A scheduled send's toast is its only way back here. Once the toast is gone, the send
+        // waits in the store, and its thread shows it. A scheduled send that a reply called off
+        // is a draft again.
         let unscheduled: Vec<&str> = self
             .snapshot
             .drafts
@@ -2679,16 +2686,16 @@ impl crate::Mail {
         wait
     }
 
-    /// Saves every open draft's latest changes at once, rather than within the second: quitting
-    /// does, before the account sends what it holds, and so does leaving the account for
+    /// Saves every open draft's latest changes at once, rather than within the second. Quitting
+    /// saves this way before the account sends what it holds, and so does leaving the account for
     /// another.
     pub fn save_drafts(&mut self) {
         let now = self.ctx.input(|input| input.time);
         self.compose_save_changes(now, false);
     }
 
-    /// After the frame is drawn: a press anywhere but the focused draft's form takes the
-    /// keyboard from it (the draft is saved and stays open).
+    /// Runs after the frame is drawn. A press anywhere but the focused draft's form takes the
+    /// keyboard from the draft, which is saved and stays open.
     pub(crate) fn compose_blur_on_press(&mut self, ctx: &egui::Context, content: egui::Rect) {
         let pressed = ctx.input(|input| input.pointer.any_pressed());
         let inside = std::mem::take(&mut self.compose.pressed_inside);
@@ -2724,9 +2731,9 @@ impl crate::Mail {
         });
     }
 
-    /// The include-attachments hint: someone who wasn't on the message a reply answers was just
-    /// added to it, and that message has files the reply hasn't: the hint offers `Include
-    /// Original Attachment(s)`.
+    /// The include-attachments hint. When someone who wasn't on the message a reply answers was
+    /// just added to the reply, and that message has files the reply hasn't, the hint offers
+    /// `Include Original Attachment(s)`.
     fn include_attachments_hint(&mut self) {
         let Some(open) = self.compose.focused() else {
             self.compose.recipients_seen = None;
@@ -2912,7 +2919,7 @@ impl crate::Mail {
                     .position(|sending| sending.open.id == id)
                 {
                     let sending = self.compose.sends.remove(at);
-                    // Each snippet used in it counts a send in its analytics.
+                    // Each snippet used in the message counts a send in the snippet's analytics.
                     self.snippets_sent(&sending.open.applied_snippets, &thread, &message);
                     if showing == Some(sending.tag) && !sending.undoing {
                         self.commands
@@ -2999,7 +3006,7 @@ impl crate::Mail {
             Event::DraftFailed(DraftFailure::Send { id, reason }) => {
                 // Gmail's copy shows in the thread instead, as a failed draft.
                 self.compose.in_thread.forget(&id);
-                // Only a send of this session's has an observer to say so at once.
+                // Only a send from this session has an observer to say so at once.
                 let Some(at) = self
                     .compose
                     .sends
@@ -3009,12 +3016,12 @@ impl crate::Mail {
                     return;
                 };
                 match crate::format::failure::alert(reason) {
-                    // Its See Message takes the send from there.
+                    // The alert's See Message takes the send from there.
                     Some(text) => {
                         self.commands.hide_toast();
                         self.show_failure_alert(text.into(), &id, true);
                     }
-                    // Nothing says so but the failed draft. Its toast, if still up, goes with
+                    // Only the failed draft says so. The send's toast, if still up, goes with
                     // the send it would hold or speed up.
                     None => {
                         let sending = self.compose.sends.remove(at);
@@ -3041,7 +3048,7 @@ impl crate::Mail {
         self.compose.alert = Some(Alert::new(Some("Sorry!"), text, actions, draft, then));
     }
 
-    /// The focused draft's files' names, in order (for tests).
+    /// The names of the focused draft's files, in order (for tests).
     pub fn compose_attachments(&self) -> Vec<String> {
         self.compose
             .focused()
@@ -3168,7 +3175,7 @@ impl crate::Mail {
         };
         let width = crate::thread::content_width(rect, rem, window_width, popped_out);
         let height = form::height(ui, open, width, &cx);
-        // A snippet's pane is titled for it, its name above the card.
+        // A snippet's pane is titled for the snippet, with its name above the card.
         let (title, above) = if open.is_snippet() {
             (snippet_editor::pane_title(open), 36.0)
         } else {
@@ -3263,12 +3270,12 @@ impl crate::Mail {
         self.compose_paste(html, Some(text));
     }
 
-    /// Files dropped on the window go to the focused draft (or the new-message pane's): one
-    /// image into its body, anything else on it (Exo isn't told where a drop lands, so an image
-    /// dropped on the footer still goes in the body). A paste in a body of files, or of an image
-    /// (a screenshot), puts each in as dropped alone: images in the body, other files on the
-    /// draft, their names not typed. HTML that's just images (an image copied from a page) pastes
-    /// as its image; other HTML is the editor's.
+    /// Files dropped on the window go to the focused draft (or the new-message pane's). One image
+    /// goes into the body, and anything else goes on the draft. Exo isn't told where a drop lands,
+    /// so an image dropped on the footer still goes in the body. Pasting files, or an image (a
+    /// screenshot), into a body puts each in as if dropped alone: images in the body and other
+    /// files on the draft, without their names typed. HTML that's just images (an image copied
+    /// from a page) pastes as its image. Other HTML is left to the editor.
     fn compose_file_events(&mut self, ctx: &egui::Context) {
         let now = ctx.input(|input| input.time);
         if self.compose_paste_attachments(ctx, now) {
@@ -3293,7 +3300,7 @@ impl crate::Mail {
         if !pasting {
             return;
         }
-        // The clipboard's plain text takes its `:shortcode:`s as emoji.
+        // The `:shortcode:`s in the clipboard's plain text become emoji.
         ctx.input_mut(|input| {
             for event in &mut input.events {
                 if let egui::Event::Paste(text) = event {
@@ -3323,7 +3330,7 @@ impl crate::Mail {
         }
     }
 
-    /// Files added as if dropped: one image goes in the body, anything else on the draft.
+    /// Adds files as if dropped. One image goes in the body, and anything else goes on the draft.
     fn compose_add_files(&mut self, paths: &[std::path::PathBuf], now: f64) {
         match paths {
             [path] if files::is_inline_image(&path.to_string_lossy()) => {
@@ -3386,7 +3393,7 @@ impl crate::Mail {
         }
     }
 
-    /// Shows `notice` over draft `id`: `Sorry!` unless it says otherwise, with OK.
+    /// Shows `notice` over draft `id`, with OK, titled `Sorry!` unless the notice has a title.
     fn compose_alert_notice(&mut self, id: &str, notice: files::Notice) {
         let then = AlertThen::Ok { focus_from: false };
         self.compose.alert = Some(Alert::new(
@@ -3418,9 +3425,9 @@ impl crate::Mail {
         true
     }
 
-    /// Each frame: the drafts' images loading, and the `data:` images pasted into their bodies
-    /// kept as inline attachments (or the paste taken back when they'd make the message too large
-    /// for Gmail).
+    /// Runs each frame. It loads the drafts' images and keeps the `data:` images pasted into their
+    /// bodies as inline attachments, or takes the paste back when the images would make the
+    /// message too large for Gmail.
     pub(crate) fn compose_images(&mut self, ctx: &egui::Context) {
         let now = ctx.input(|input| input.time);
         let aliases = self.snapshot.aliases.clone();
@@ -3469,9 +3476,9 @@ impl crate::Mail {
         images.update(drafts, &sources);
     }
 
-    /// A click on a card of the focused draft: the file as kept beside the account's database,
-    /// or for a forward's file not fetched yet, the original message's part, opens the way a
-    /// message's attachment does.
+    /// A click on a card of the focused draft opens its file the way a message's attachment
+    /// opens. The file is the copy kept beside the account's database, or, for a forward's file
+    /// not fetched yet, the original message's part.
     fn open_draft_file(&mut self, uuid: &str, preview: bool) {
         let Some(attachment) = self
             .compose
@@ -3489,8 +3496,8 @@ impl crate::Mail {
         self.open_draft_attachment(attachment, preview);
     }
 
-    /// A draft's (or a snippet's) file opens, previewed unless asked not to: from the draft
-    /// files, or Gmail's part when it isn't kept there yet.
+    /// Opens a draft's (or a snippet's) file, previewed unless asked not to. The file comes from
+    /// the draft files, or from Gmail's part when it isn't kept there yet.
     pub(crate) fn open_draft_attachment(
         &mut self,
         attachment: exo_store::DraftAttachment,
@@ -3553,7 +3560,7 @@ impl crate::Mail {
         }
     }
 
-    /// A `mailto:` link was clicked: a new message to it.
+    /// Opens a new message to a clicked `mailto:` link.
     pub(crate) fn compose_mailto(&mut self, url: &str, pop_out: bool) {
         match mailto::fields(url) {
             // Shift-click pops it out.
@@ -3563,8 +3570,8 @@ impl crate::Mail {
         }
     }
 
-    /// ⌘V outside a text field: a new draft from the clipboard, the copied message's recipients
-    /// and subject too when it's the message Exo last copied.
+    /// ⌘V outside a text field: a new draft from the clipboard. When the clipboard holds the
+    /// message Exo last copied, the draft takes that message's recipients and subject too.
     pub(crate) fn compose_paste(&mut self, html: Option<String>, text: Option<String>) {
         let copied = self
             .copied_message
@@ -3587,9 +3594,9 @@ impl crate::Mail {
     }
 }
 
-/// A paste: egui's, which egui-winit makes of ⌘V only while the clipboard has text, or the ⌘V
-/// key itself, which is all that reaches egui of a paste of nothing but an image or files (the
-/// keyboard's, and Edit ▸ Paste's).
+/// A paste: egui's paste event, which egui-winit makes of ⌘V only while the clipboard has text,
+/// or the ⌘V key itself. The key is all that reaches egui when a paste (from the keyboard, or
+/// from Edit ▸ Paste) holds nothing but an image or files.
 fn is_paste(event: &egui::Event) -> bool {
     match event {
         egui::Event::Paste(_) => true,

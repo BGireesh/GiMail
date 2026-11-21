@@ -121,7 +121,7 @@ pub struct Event {
     pub kind: Option<String>,
     /// ETag.
     pub etag: Option<String>,
-    /// Event ID; instances of recurring events are `{id}_{start}`.
+    /// Event ID. Instances of recurring events are `{id}_{start}`.
     pub id: Option<String>,
     /// `confirmed`, `tentative` or `cancelled`.
     pub status: Option<String>,
@@ -223,7 +223,7 @@ pub struct EventDateTime {
 }
 
 impl EventDateTime {
-    /// The instant this denotes; all-day dates are midnight in `tz`.
+    /// The instant this denotes. All-day dates are midnight in `tz`.
     #[must_use]
     pub fn timestamp(&self, tz: &jiff::tz::TimeZone) -> Option<jiff::Timestamp> {
         if let Some(date_time) = &self.date_time {
@@ -429,7 +429,7 @@ pub struct EventsQuery {
     pub max_results: Option<u32>,
     /// Page token.
     pub page_token: Option<String>,
-    /// Incremental sync token; a 410 means start over.
+    /// Incremental sync token. A 410 means start over.
     pub sync_token: Option<String>,
     /// Include cancelled events.
     pub show_deleted: bool,
@@ -521,8 +521,8 @@ impl<'a> Calendar<'a> {
         .json(event)
     }
 
-    /// `events.patch`: changes only the fields set in `event` (with `conferenceData`, as
-    /// [`Calendar::insert_event`] sends it).
+    /// `events.patch`: changes only the fields set in `event`. An event with `conferenceData` is
+    /// sent the way [`Calendar::insert_event`] sends it.
     pub fn patch_event(
         &self,
         calendar_id: &str,

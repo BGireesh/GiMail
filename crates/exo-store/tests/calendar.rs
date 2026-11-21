@@ -1,6 +1,7 @@
-//! The calendar cache against gmail-mock: the calendar list, a window of events, a window
-//! fetched again after the calendar changed, and the changes queued for Calendar: shown at once,
-//! held, taken back, sent, postponed offline and across a restart, and given up when refused.
+//! The calendar cache against gmail-mock. It covers the calendar list, a window of events, a
+//! window fetched again after the calendar changed, and the changes queued for Calendar, which
+//! are shown at once, held, taken back, sent, postponed offline and across a restart, and given
+//! up when refused.
 
 mod support;
 
@@ -776,7 +777,7 @@ async fn an_event_whose_creation_answer_was_lost_is_made_once_and_not_a_failure(
         end: Some(friday_at(16)),
         ..Event::default()
     };
-    // Calendar makes it, but the answer is lost; the retry finds its id taken.
+    // Calendar makes it, but the answer is lost, so the retry finds its id taken.
     harness.fault(serde_json::json!({"method": "POST", "path": "/calendar/v3/calendars/", "status": 503, "after": true})).await;
     harness
         .store
@@ -910,7 +911,7 @@ async fn a_guests_calendar_is_read_through_whichever_account_can() {
         "2026-11-15T05:00:00Z".parse().expect("time"),
         "2026-11-22T05:00:00Z".parse().expect("time"),
     );
-    // Someone at the calendar account's workspace: only it sees their calendar.
+    // Someone at the calendar account's workspace, whose calendar only that account sees.
     let neighbour = "bea@example.com";
     assert_eq!(
         harness
@@ -933,7 +934,7 @@ async fn a_guests_calendar_is_read_through_whichever_account_can() {
         Some(Vec::new()),
         "listed through the calendar account"
     );
-    // A colleague of the mail account's still comes through it.
+    // A colleague of the mail account's still comes through the mail account.
     let colleague = harness
         .store
         .attendee_events("priya@brightmoor.co", from, to)
@@ -978,7 +979,7 @@ async fn a_calendar_account_lists_beside_the_mail_account_and_its_calendars_go_t
         "the holidays both list show once, from the mail account"
     );
 
-    // Its primary calendar's events come through its own grant.
+    // The events on the calendar account's primary calendar come through its own grant.
     let wednesday = date(2026, 11, 18)..date(2026, 11, 19);
     harness
         .store
@@ -992,7 +993,7 @@ async fn a_calendar_account_lists_beside_the_mail_account_and_its_calendars_go_t
         .expect("reads");
     assert_eq!(titles(&events), ["Dentist"]);
 
-    // A new event on it goes to its calendar, not the mail account's.
+    // A new event on the calendar account goes to its calendar, not the mail account's.
     let lunch = Event {
         id: Some("e0lunch0personal1".into()),
         summary: Some("Lunch".into()),
@@ -1034,7 +1035,8 @@ async fn a_calendar_account_lists_beside_the_mail_account_and_its_calendars_go_t
         "the mail account's calendar never heard of it"
     );
 
-    // Signed out, its calendars leave the list, and a change to one waits for it.
+    // Once the calendar account signs out, its calendars leave the list, and a change to one of
+    // them waits for the account.
     harness
         .store
         .remove_calendar_account(PERSONAL, false)

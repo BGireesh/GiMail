@@ -64,7 +64,7 @@ pub fn attachment_badge_color(filename: &str, mime_type: &str) -> Color32 {
 }
 
 /// The top of a card's bottom row, which holds its type badge and its download icon or progress
-/// bar: 16px tall, 12px from the card's bottom.
+/// bar. The row is 16px tall, 12px from the card's bottom.
 pub fn attachment_bottom_row(card: Rect) -> f32 {
     card.bottom() - 12.0 - 16.0
 }
@@ -84,8 +84,8 @@ pub fn attachment_badge_width(painter: &egui::Painter, filename: &str, card_widt
     (text + 12.0).min(card_width - 36.0)
 }
 
-/// Paints the card for `filename` in `card`, `hover` (0–1) into its hover shadow: the
-/// background, the name without its extension and the type badge.
+/// Paints the card for `filename` in `card`, `hover` (0–1) of the way into its hover shadow. It
+/// paints the background, the name without its extension and the type badge.
 pub fn paint_attachment_card(ui: &Ui, card: Rect, filename: &str, mime_type: &str, hover: f32) {
     let palette = crate::palette(ui.ctx());
     let painter = ui.painter();
@@ -152,9 +152,10 @@ pub fn paint_attachment_card(ui: &Ui, card: Rect, filename: &str, mime_type: &st
     }
 }
 
-/// The progress bar, in place of the download icon while the file downloads or uploads, `progress`
-/// (0–100) of the way: a 4px white track from 6px past the type badge to the card's padding, its
-/// bottom on the bottom row's, filled at least a tenth (`min-width: 10%`) in `#72c0ea`.
+/// The progress bar, in place of the download icon while the file downloads or uploads,
+/// `progress` (0–100) of the way. It's a 4px white track from 6px past the type badge to the
+/// card's padding, with its bottom on the bottom row's, filled at least a tenth
+/// (`min-width: 10%`) in `#72c0ea`.
 pub fn paint_attachment_progress(ui: &Ui, card: Rect, filename: &str, progress: f32) {
     let painter = ui.painter();
     let bottom = attachment_bottom_row(card);
@@ -187,7 +188,7 @@ pub fn paint_attachment_progress(ui: &Ui, card: Rect, filename: &str, progress: 
     );
 }
 
-/// A small attachment card: 184×28 with `padding: 6px`, 4px corners, the cards of a search result's
+/// A small attachment card, 184×28 with `padding: 6px` and 4px corners, as in a search result's
 /// strip and an event's files.
 pub const SMALL_CARD_SIZE: Vec2 = Vec2::new(184.0, 28.0);
 /// A small card's name: 12px/16px, `top: 1px`.
@@ -206,8 +207,8 @@ pub fn small_card_download(card: Rect) -> Rect {
     )
 }
 
-/// A small card (`SmallAttachmentCard`): `#dce2ea` (`#555b64` in Carbon), the file's type in
-/// its color on a white pill, then its name without the extension, cut with an ellipsis.
+/// A small card (`SmallAttachmentCard`), filled `#dce2ea` (`#555b64` in Carbon), with the file's
+/// type in its color on a white pill, then its name without the extension, cut with an ellipsis.
 pub struct SmallAttachmentCard<'a> {
     /// The file's name.
     pub filename: &'a str,
@@ -215,7 +216,7 @@ pub struct SmallAttachmentCard<'a> {
     pub mime_type: &'a str,
     /// The hover's shadow, 0–1 (`transition: box-shadow 250ms`).
     pub hover: f32,
-    /// The pointer is on it: the download glyph shows at its right, at `.4`.
+    /// Whether the pointer is on it, which shows the download glyph at its right, at `.4`.
     pub hovered: bool,
     /// …and on the glyph, at `.6`.
     pub download_hovered: bool,

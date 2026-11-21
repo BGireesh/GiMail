@@ -5,7 +5,7 @@ use exo_store::{Label, LabelKind, ListId, SplitInbox};
 
 use crate::mailbox::{EXO_LABEL_PREFIX, FOREIGN_STATE_LABEL_PREFIX};
 
-/// The name a view's header and the window title show; `splits` are the account's.
+/// The name a view's header and the window title show. `splits` are the account's.
 pub fn name<'a>(
     list: &ListId,
     labels: &'a [Label],
@@ -36,7 +36,8 @@ pub fn name<'a>(
     }
 }
 
-/// The inbox views: the tab bar with counts and Add Split, and Inbox Zero when empty.
+/// Whether `list` is one of the inbox views, which have the tab bar with counts and Add Split,
+/// and Inbox Zero when empty.
 pub fn is_inbox(list: &ListId) -> bool {
     crate::splits::is_inbox_view(list)
 }
@@ -81,7 +82,7 @@ const fn go_to(
 /// The system views before the user's labels, in the palette's order: Important and Other
 /// unless the inbox is unified, All Mail spliced in after them, then Gmail's labels as
 /// `labels.list` orders them. Snippets don't exist in Exo yet. `g i` and `g o` aren't bound
-/// here: they go home and to Other whatever the rows are.
+/// here, because they go home and to Other whatever the rows are.
 pub fn system_go_tos(unified: bool) -> Vec<GoTo> {
     let important_other = [
         go_to(
@@ -173,7 +174,7 @@ pub fn system_go_tos(unified: bool) -> Vec<GoTo> {
         .collect()
 }
 
-/// The system views listed after the user's labels, in the palette's order: Scheduled has no
+/// The system views listed after the user's labels, in the palette's order. Scheduled has no
 /// `g` key.
 pub fn late_go_tos() -> [GoTo; 4] {
     [
@@ -205,9 +206,9 @@ pub fn late_go_tos() -> [GoTo; 4] {
     ]
 }
 
-/// The user's labels, which show as chips and can be gone to or added: every user label but the
-/// `[Superhuman]/…` and Exo's own state labels, in Gmail's order. Hiding a label from Gmail's
-/// label list doesn't hide it here.
+/// The user's labels, which show as chips and can be gone to or added. That's every user label
+/// but the `[Superhuman]/…` and Exo's own state labels, in Gmail's order. Hiding a label from
+/// Gmail's label list doesn't hide it here.
 pub fn user_labels(labels: &[Label]) -> impl Iterator<Item = &Label> {
     labels.iter().filter(|label| {
         label.kind == LabelKind::User
@@ -217,12 +218,13 @@ pub fn user_labels(labels: &[Label]) -> impl Iterator<Item = &Label> {
 }
 
 /// The user's labels as the palette lists them to go to, move to or add, and the folder drawer
-/// lists them: [`user_labels`] without Auto Labels (`[News]`), which show only as chips.
+/// lists them. That's [`user_labels`] without Auto Labels (`[News]`), which show only as chips.
 pub fn listed_labels(labels: &[Label]) -> impl Iterator<Item = &Label> {
     user_labels(labels).filter(|label| !crate::mailbox::is_auto_label(&label.name))
 }
 
-/// A label's slug, its `go to` row's id: lowercase, with whitespace, `&`, `(` and `)` as `-`.
+/// A label's slug, which is its `go to` row's id: the name lowercased, with whitespace, `&`, `(`
+/// and `)` as `-`.
 pub fn slug(name: &str) -> String {
     name.chars()
         .map(|c| {

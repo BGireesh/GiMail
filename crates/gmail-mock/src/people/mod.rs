@@ -14,6 +14,6 @@ pub struct Directory {
     pub contacts: Vec<Person>,
     pub other_contacts: Vec<Person>,
     pub directory: Vec<Person>,
-    /// Bumped on changes; sync tokens carry it.
+    /// Bumped on changes, and sync tokens carry it.
     pub revision: u64,
 }

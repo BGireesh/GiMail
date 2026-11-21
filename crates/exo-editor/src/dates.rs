@@ -1,10 +1,10 @@
-//! Dates in the body: each date phrase of a line keeps to one line (`white-space: nowrap`) with a
-//! hairline under it, and while the caret is on one, `Previous Day` / `Next Day` show under it,
+//! Dates in the body. Each date phrase in a line keeps to one line (`white-space: nowrap`) and has
+//! a hairline under it. While the caret is on a date, `Previous Day` / `Next Day` show under it,
 //! the calendar pane shows its day, and ⌘⇧– and ⌘⇧= move it a day.
 //!
-//! Exo finds them from each block's text as it lays the block out, rather than keeping them in
-//! the document, as autocorrect's marks are kept: nothing reaches the saved or sent HTML. What
-//! day one means, and what it says a day later, is the app's to work out ([`ActiveDate::text`]);
+//! Exo finds dates in each block's text as it lays the block out, rather than keeping them in the
+//! document the way autocorrect's marks are kept, so nothing reaches the saved or sent HTML. The
+//! app works out what day a date means and what it says a day later ([`ActiveDate::text`]), and
 //! [`Editor::shift_date`] writes it.
 
 use std::ops::Range;
@@ -25,9 +25,9 @@ pub struct ActiveDate {
     pub text: String,
 }
 
-/// The dates in `block`, as character ranges: the text nodes (runs of text) joined with spaces
-/// are searched, and a date counts only if it lies within one of them, not one whose element is
-/// a link.
+/// The dates in `block`, as character ranges. The search runs over the block's text nodes (runs of
+/// text) joined with spaces, and a date counts only if it lies within one text node whose element
+/// isn't a link.
 pub(crate) fn detect(block: &Block) -> Vec<Range<usize>> {
     let Content::Inline(runs) = &block.content else {
         return Vec::new();
@@ -69,10 +69,11 @@ pub(crate) fn detect(block: &Block) -> Vec<Range<usize>> {
 }
 
 impl Editor {
-    /// The detected date the caret is on: with the caret collapsed in it, or up to three characters
-    /// past it in the text after it, unless a `:`, ` @` or ` ;` comes between. The caret at a
-    /// date's start is the text before it's, where Chromium puts a caret between two text nodes, so
-    /// a date after text on its line isn't on at its start.
+    /// The detected date the caret is on. The caret is on a date when it's collapsed in the date,
+    /// or up to three characters past it in the text after it, unless a `:`, ` @` or ` ;` comes
+    /// between. A caret at a date's start belongs to the text before it, which is where Chromium
+    /// puts a caret between two text nodes, so a caret at the start of a date that follows text on
+    /// its line isn't on the date.
     pub fn active_date(&self) -> Option<ActiveDate> {
         if self.settings.skip_dates || !self.selection.is_collapsed() {
             return None;
@@ -88,8 +89,8 @@ impl Editor {
             if at_start || (range.start < caret.offset && caret.offset <= range.end) {
                 return true;
             }
-            // The text after it, in the same text node: one run of text holds the date's last
-            // character and what's up to the caret.
+            // The text after the date must be in the same text node, so one run of text holds the
+            // date's last character and everything up to the caret.
             let after = range.end..caret.offset;
             let Some(between) = chars
                 .get(after.clone())
@@ -110,8 +111,8 @@ impl Editor {
         })
     }
 
-    /// Rewrites the date the caret is on to say `text`, the caret at its end. Not an undo step of
-    /// its own: Squire sees it as typing.
+    /// Rewrites the date the caret is on to say `text`, leaving the caret at its end. It isn't an
+    /// undo step of its own, because it counts as typing.
     pub fn shift_date(&mut self, date: &ActiveDate, text: &str) {
         if self.active_date().as_ref() != Some(date) {
             return;
@@ -139,7 +140,7 @@ fn same_run(block: &Block, from: usize, to: usize) -> bool {
     })
 }
 
-/// Whether `text` has `ch` right after whitespace (`/\s@/`, `/\s;/`).
+/// Whether `text` has `ch` right after whitespace.
 fn space_then(text: &str, ch: char) -> bool {
     let chars: Vec<char> = text.chars().collect();
     chars

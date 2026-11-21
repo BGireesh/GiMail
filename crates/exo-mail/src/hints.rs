@@ -1,14 +1,14 @@
 //! HTML presentational attributes Blitz doesn't map to CSS yet (`cellpadding`, `cellspacing`,
 //! `valign`, `<font>`, `background`), which email HTML leans on. Browsers apply them as author
-//! rules with zero specificity that come before every stylesheet; the rules written here are
+//! rules with zero specificity that come before every stylesheet. The rules written here are
 //! `:where()` rules placed first in the document, which is the same.
 
 use std::{collections::HashSet, fmt::Write as _};
 
 use crate::dom::{self, Style};
 
-/// How many value-specific rules a body gets. Mail uses a handful of distinct values; a hostile
-/// one could use thousands, and Blitz matches every rule against every element.
+/// How many value-specific rules a body gets. Mail uses a handful of distinct values, but a
+/// hostile one could use thousands, and Blitz matches every rule against every element.
 const MAX_RULES: usize = 256;
 
 /// The rules for every presentational attribute in `html` (the first [`MAX_RULES`] values).

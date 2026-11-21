@@ -80,7 +80,7 @@ fn a_conversation_opened_offline_fills_in_once_gmail_answers() {
         [thread.messages[0].id.clone()],
         "its body a placeholder"
     );
-    // A reply would quote nothing: it doesn't start.
+    // A reply would quote nothing, so it doesn't start.
     app.key(Key::R);
     assert_eq!(
         app.mail().thread_drafts(),
@@ -88,7 +88,7 @@ fn a_conversation_opened_offline_fills_in_once_gmail_answers() {
         "no reply without the body it quotes"
     );
 
-    // Gmail answers again: the body comes in without the conversation opening again.
+    // Gmail answers again, and the body comes in without the conversation opening again.
     app.reconnect();
     app.sync();
     let snapshot = app.mail().account().snapshot();

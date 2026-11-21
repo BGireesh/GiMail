@@ -1,9 +1,9 @@
-//! The image resizer: over a focused image, a handle at each corner and, on an image wider than
-//! 130px, `Small` and `Best Fit`, in a tooltip box exactly over the image.
+//! The image resizer. Over a focused image, it shows a handle at each corner and, on an image wider
+//! than 130px, `Small` and `Best Fit`, in a tooltip box exactly over the image.
 //!
-//! The handles are 8px squares (their 1px border included) centred on the image's corners, the
-//! buttons 31px tall in the UA's 13.333px Arial, 8px inside the image's top right corner and 10px
-//! apart.
+//! The handles are 8px squares (their 1px border included) centred on the image's corners. The
+//! buttons are 31px tall in the UA's 13.333px Arial, 8px inside the image's top right corner and
+//! 10px apart.
 
 use egui::{Color32, CornerRadius, CursorIcon, Id, Pos2, Rect, Sense, Ui, pos2, vec2};
 use exo_ui::{BoxShadow, Family, Font, TextStyle};
@@ -94,9 +94,11 @@ const BUTTONS_FROM: f32 = 130.0;
 struct Parts {
     handles: [(Handle, Rect); 4],
     buttons: Vec<(Fit, &'static str, Rect)>,
-    /// The image's top is scrolled out of view: no buttons, no top handles, no shadow.
+    /// Whether the image's top is scrolled out of view, which hides the buttons, the top handles
+    /// and the shadow.
     hide_top: bool,
-    /// Its bottom is: no bottom handles, no shadow.
+    /// Whether the image's bottom is scrolled out of view, which hides the bottom handles and the
+    /// shadow.
     hide_bottom: bool,
 }
 
@@ -191,8 +193,8 @@ pub(super) fn paint_shadow(ui: &Ui, image: Rect) {
 }
 
 impl Editor {
-    /// The resizer over the focused image of an editor at `origin`: its handles drag the width
-    /// (an undo step before and after the drag), its buttons set Small or Best Fit.
+    /// Shows the resizer over the focused image of an editor at `origin`. Its handles drag the
+    /// width (with an undo step before and after the drag), and its buttons set Small or Best Fit.
     pub(super) fn resizer(&mut self, ui: &Ui, origin: Pos2, id: Id) {
         let Some(at) = self.focused_image() else {
             self.view.resize = None;
@@ -231,7 +233,8 @@ impl Editor {
                         (self.view.resize, response.interact_pointer_pos())
                 {
                     let width = match drag.handle {
-                        // `inverse`: the drop of the bottom edge, in width at the image's ratio.
+                        // The width before, plus how far the pointer is below the bottom edge the
+                        // image had then, turned into width at the image's ratio.
                         Handle::BottomLeft => {
                             drag.before.width()
                                 + (pointer.y - drag.before.height() - image.top())

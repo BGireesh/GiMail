@@ -1,4 +1,4 @@
-//! Failed drafts: a send Gmail won't take stays in its thread as a failed draft, with its
+//! Failed drafts. A send Gmail won't take stays in its thread as a failed draft, with its
 //! reason, until it's edited, sent again or discarded, across restarts.
 
 mod support;
@@ -132,8 +132,9 @@ fn sending_fault(status: u16, message: &str, reason: &str) -> Value {
     json!({"method": "POST", "path": SEND, "status": status, "message": message, "reason": reason, "times": 100})
 }
 
-/// Gmail's rate-limit answer to a send, retry `after` from now as Gmail writes it into the
-/// message: the account's (`sending` false) or its sending limit's, which says `(Mail sending)`.
+/// Gmail's rate-limit answer to a send, with a retry `after` from now written into the message
+/// as Gmail writes it. It's the account's limit (`sending` false) or its sending limit, whose
+/// message says `(Mail sending)`.
 fn rate_limit(after: SignedDuration, sending: bool) -> Value {
     let at = Timestamp::now().checked_add(after).expect("in range");
     let limit = if sending { " (Mail sending)" } else { "" };
@@ -269,7 +270,7 @@ async fn a_send_gmail_refuses_is_a_failed_draft_until_edited() {
         "still failed after a relaunch"
     );
 
-    // Edit Message: a draft again, its row and thread with it.
+    // Edit Message makes it a draft again, in its row and thread too.
     harness
         .store
         .recover_draft("draft00000000000001")
@@ -338,7 +339,7 @@ async fn a_send_while_google_has_signed_the_account_out_fails_as_logged_out() {
             reason: SendFailure::LoggedOut
         }]
     );
-    // Signed in again: it doesn't go by itself.
+    // Once the account is signed in again, the draft doesn't go by itself.
     harness.clear_faults().await;
     harness.store.push_drafts().await.expect("pushes");
     assert_eq!(
@@ -362,7 +363,7 @@ async fn a_held_send_whose_message_cant_be_written_while_signed_out_fails_once_d
         .await
         .expect("saves");
     harness.store.push_drafts().await.expect("pushes");
-    // Its last edit, then Send; Google signs the account out before Gmail has either.
+    // Its last edit, then Send. Google signs the account out before Gmail has either.
     let mut edited = draft("draft00000000000004", "draft00000000000004@exo");
     edited.record.body = "<div>Here it is, finally</div>".into();
     edited.raw = edited.raw.replace("Here it is", "Here it is, finally");
@@ -381,7 +382,7 @@ async fn a_held_send_whose_message_cant_be_written_while_signed_out_fails_once_d
     let report = harness.store.push_drafts().await.expect("pushes");
     assert!(report.failed.is_empty(), "held, it waits: {report:?}");
     // Closing the account (quitting, or the sign-out itself) ends the hold and pushes at once,
-    // the save's backoff notwithstanding.
+    // despite the save's backoff.
     harness
         .store
         .send_draft("draft00000000000004", Timestamp::now())

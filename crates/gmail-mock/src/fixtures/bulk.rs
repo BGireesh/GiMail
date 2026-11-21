@@ -173,7 +173,7 @@ fn at(now: &Zoned, days: i64, hour: i8, minute: i8) -> Zoned {
 }
 
 /// A one-message bulk thread. Recent mail sits in the inbox (mostly unread, the newest
-/// always); older mail was archived.
+/// always). Older mail was archived.
 fn deliver(
     brand: &Brand,
     when: Zoned,
@@ -184,7 +184,7 @@ fn deliver(
 ) -> Thread {
     let age_days = (now.date() - when.date()).get_days();
     let recent = i64::from(age_days) < inbox_days;
-    // Deterministic per message: anything from today is unread, older ones about half.
+    // Deterministic per message. Anything from today is unread, and about half of older mail is.
     let unread = recent && (age_days == 0 || super::compose::fnv(&subject) % 2 == 0);
     Thread {
         subject,

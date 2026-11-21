@@ -17,8 +17,8 @@ fn active(body: &str, offset: usize) -> Option<String> {
 #[test]
 fn the_caret_is_on_a_date_in_it_or_just_after_it() {
     let body = "<div>see you tomorrow at noon</div>";
-    // `see you |tomorrow`: the caret between two text nodes is the first's (Chromium's upstream
-    // position), so not on the date.
+    // In `see you |tomorrow`, the caret between two text nodes belongs to the first (Chromium's
+    // upstream position), so it isn't on the date.
     assert_eq!(active(body, 8), None);
     assert_eq!(active(body, 9).as_deref(), Some("tomorrow"));
     assert_eq!(active(body, 16).as_deref(), Some("tomorrow"), "at its end");
@@ -49,7 +49,7 @@ fn a_colon_or_a_trigger_after_the_date_takes_the_caret_off_it() {
 
 #[test]
 fn dates_are_found_within_one_text_node_and_not_in_links() {
-    // `<b>next</b> Friday`: `next  Friday` spans two text nodes, so nothing is wrapped.
+    // In `<b>next</b> Friday`, `next  Friday` spans two text nodes, so nothing is wrapped.
     assert_eq!(active("<div><b>next</b> Friday</div>", 10), None);
     assert_eq!(active("<div>next <b>Friday</b></div>", 8), None);
     assert_eq!(
@@ -80,7 +80,7 @@ fn a_selection_or_a_snippet_has_no_active_date() {
         skip_dates: true,
         ..Settings::default()
     });
-    assert_eq!(editor.active_date(), None, "`skipDateDetection`");
+    assert_eq!(editor.active_date(), None, "date detection off");
 }
 
 #[test]
@@ -102,15 +102,15 @@ fn shifting_rewrites_the_date_in_its_marks_and_leaves_the_caret_after_it() {
         editor.active_date().map(|date| date.text).as_deref(),
         Some("Thursday")
     );
-    // As Squire's, the change isn't a step of its own: undo goes back to before the last one.
+    // The change isn't a step of its own, so undo goes back to before the last one.
     editor.type_text("x");
     editor.undo();
     assert_eq!(editor.document().blocks[0].text(), "see you tomorrow then");
 }
 
-/// Where the date tooltip's left edge lands for `tomorrow` at the start of a body flush with the
-/// window's left (centred under it, it would start left of the window), and for one at the end of
-/// a line flush with the window's right, with `settings`.
+/// Where the left edge of the date tooltip lands, with `settings`, for `tomorrow` at the start of a
+/// body flush with the window's left and for one at the end of a line flush with the window's
+/// right. Centred under the first date, the tooltip would start left of the window.
 fn tooltip_sides(settings: Settings) -> (f32, f32) {
     use egui::{Rect, UiBuilder, pos2, vec2};
     let side = |body: &str, offset: usize| {

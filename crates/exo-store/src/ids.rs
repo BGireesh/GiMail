@@ -42,7 +42,7 @@ impl From<&str> for ThreadId {
 /// A thread list, as threads are routed into them.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum ListId {
-    /// The Inbox: [`Important`](Self::Important) and [`Other`](Self::Other) together.
+    /// The Inbox, which is [`Important`](Self::Important) and [`Other`](Self::Other) together.
     Inbox,
     /// Inbox threads with an important message (`SH_IMPORTANT`).
     Important,
@@ -110,7 +110,8 @@ pub(crate) mod labels {
     pub const EXO_REMINDER_UNREAD: &str = "[Exo]/ru";
 }
 
-/// A list filter: one at a time narrows the list on screen to the threads in another list.
+/// A list filter. One at a time, a filter narrows the list on screen to the threads in another
+/// list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum Filter {
     /// `UNREAD`.
@@ -119,7 +120,7 @@ pub enum Filter {
     Starred,
     /// Important (`SH_IMPORTANT`).
     Important,
-    /// The last message is the user's: awaiting a reply (`SH_NO_REPLY`).
+    /// Threads awaiting a reply, whose last message is the user's (`SH_NO_REPLY`).
     NoReply,
 }
 
@@ -157,8 +158,8 @@ impl ListId {
         }
     }
 
-    /// The membership rows a listing reads. The Inbox is Important plus Other; reading the
-    /// `INBOX` rows instead would include threads a split takes out of Important/Other.
+    /// The membership rows a listing reads. The Inbox is Important plus Other. Reading the
+    /// `INBOX` rows instead would include threads that a split takes out of Important and Other.
     pub(crate) fn members(&self) -> Vec<&str> {
         match self {
             Self::Inbox => vec![labels::SH_IMPORTANT, labels::SH_OTHER],

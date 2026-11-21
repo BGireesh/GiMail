@@ -1,6 +1,6 @@
 //! Reading a conversation end to end on gmail-mock: Open Links & Attachments (`⌘O`), replies
 //! that quote a selection, the Bcc reply-all warning, the palette's Google apps rows and View
-//! Raw Email Data (`|`). Links never reach a browser: the tests read what the app asked egui to
+//! Raw Email Data (`|`). Links never reach a browser. The tests read what the app asked egui to
 //! open.
 
 mod support;
@@ -91,7 +91,7 @@ fn press_opening(app: &mut Fixture, key: Key, modifiers: Modifiers) -> Option<St
     opened
 }
 
-/// Opens the palette, types `query` and runs the first row; returns the URL it opened.
+/// Opens the palette, types `query` and runs the first row. Returns the URL it opened.
 fn palette_opening(app: &mut Fixture, query: &str) -> Option<String> {
     app.press(Key::K, CMD);
     app.type_text(query);
@@ -261,8 +261,8 @@ fn cmd_o_in_the_list_reads_the_conversation_for_its_links() {
 #[test]
 fn cmd_o_in_all_mail_lists_an_archived_conversations_links() {
     let mut app = start("reading-open-archived");
-    // Outside the inbox lists, whose first conversations sync keeps bodies for: when its bodies
-    // aren't stored, the list fetches them (`Store::load_bodies`).
+    // Sync keeps bodies for the first conversations of the inbox lists, and this one is outside
+    // them. When its bodies aren't stored, the list fetches them (`Store::load_bodies`).
     deliver_with(&mut app, &offsite(), &[]);
     app.key(Key::G);
     app.key(Key::A);
@@ -326,7 +326,7 @@ fn a_reply_quotes_the_text_selected_in_the_focused_message() {
     app.sync();
     cursor_to(&mut app, "Deck");
     app.key(Key::Enter);
-    // The body's first line: the first point down the column where the cursor is the I-beam.
+    // The body's first line is the first point down the column where the cursor is the I-beam.
     let x = 260.0;
     let line = (140..400)
         .step_by(4)

@@ -4,8 +4,8 @@
  * `.styleQuotedContent .sh-quoted-content`) and to signatures, which are restyled even in
  * marketing mail. The `:is()` groups have the specificity of a two-class selector.
  *
- * Exo's classes are `exo-`. Senders' signatures can carry `sh-preserve-*` classes, so those keep a
- * signature's own color, face, size and line height here too; Exo itself marks only
+ * Exo's classes are prefixed `exo-`. Senders' signatures can carry `sh-preserve-*` classes, so
+ * those keep a signature's own color, face, size and line height here too. Exo itself marks only
  * `exo-preserve-color` and `exo-preserve-font-family`.
  */
 
@@ -73,7 +73,7 @@ div.ShadowHTML, div.ShadowBody, div.ShadowWrapper { --exo-original-color: #000; 
 :is(.styleUnquotedContent .unquoted-content, .styleQuotedContent .sh-quoted-content, .sh-signature) .sh-preserve-font-size h6 { font-size: 13px; position: relative; top: 0; font-style: italic; }
 :is(.styleUnquotedContent .unquoted-content, .styleQuotedContent .sh-quoted-content, .sh-signature) .sh-preserve-font-size h6 * { font-size: 13px; }
 
-/* Near-black text is drawn at 90% black, backgrounds are dropped. */
+/* Near-black text is drawn at 90% black, and backgrounds are dropped. */
 :is(.styleUnquotedContent .unquoted-content, .styleQuotedContent .sh-quoted-content, .sh-signature) .exo-color-black:not(.exo-preserve-color, .sh-preserve-color) {
   color: rgba(0, 0, 0, .9) !important;
   background-color: transparent !important;
@@ -128,7 +128,7 @@ div.ShadowHTML, div.ShadowBody, div.ShadowWrapper { --exo-original-color: #000; 
   color: hsla(0, 0%, 100%, .6) !important;
 }
 :is(.styleUnquotedContent .unquoted-content, .styleQuotedContent .sh-quoted-content, .sh-signature) blockquote:not([style*="border:none"]) a { opacity: .8 !important; }
-/* Blitz ignores opacity on inline boxes; for the usual link color the same 80% goes into the
+/* Blitz ignores opacity on inline boxes, so for the usual link color the same 80% goes into the
  * color instead. */
 :is(.styleUnquotedContent .unquoted-content, .styleQuotedContent .sh-quoted-content, .sh-signature) blockquote:not([style*="border:none"]) a[href]:not(.exo-preserve-color, .sh-preserve-color) {
   color: rgba(84, 172, 220, .8) !important;

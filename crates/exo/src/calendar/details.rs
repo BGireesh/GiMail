@@ -1,7 +1,7 @@
 //! The event details popover: the event's colour and title with a menu, then When, Where, Who,
 //! the description, the calendar, the organizer and Private rows, and the RSVP bar.
 //!
-//! Everything shown comes from the event, which anyone who can invite the user writes: the
+//! Everything shown comes from the event, which anyone who can invite the user can write. So the
 //! description goes through exo-mail's sanitizer, and links open only as web links
 //! (`format::urls::web`).
 
@@ -34,7 +34,7 @@ const SUMMARY: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 16.0, 20
 const SUMMARY_BOX: Vec2 = vec2(INDICATOR_AT.x + INDICATOR + 3.0 + 6.0, HEADER_TOP + 1.0);
 const SUMMARY_PADDING: Vec2 = vec2(8.0, 2.0);
 const SUMMARY_WIDTH: f32 = WIDTH - 2.0 * PADDING_X - 50.0;
-/// The menu button: a 25px circle at `top: 14px; right: 15px`, Classic's legacy dots at
+/// The menu button: a 25px circle at `top: 14px; right: 15px`, with Classic's legacy dots at
 /// `left: 5px; top: 11px`.
 const MENU: f32 = 25.0;
 const MENU_RIGHT: f32 = 15.0;
@@ -42,8 +42,8 @@ const MENU_ICON_AT: Vec2 = vec2(5.0, 11.0);
 /// The menu's list hangs 8px under the button, 18px left of it.
 const MENU_LIST_OFFSET: Vec2 = vec2(-18.0, 8.0);
 
-/// A row: a 16px icon 4px down, then the value (`padding: 4px 8px; top: 1px`) in 12px/16px; rows
-/// 8px apart, the last 20px above the bottom.
+/// A row is a 16px icon 4px down, then the value (`padding: 4px 8px; top: 1px`) in 12px/16px.
+/// Rows are 8px apart, and the last is 20px above the bottom.
 const GUEST_BOTTOM: f32 = 20.0;
 const ROW_TEXT: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 12.0, 16.0);
 const ICON: f32 = 16.0;
@@ -56,8 +56,9 @@ const RULE_TOP: f32 = 8.0;
 const VALUE_WIDTH: f32 = WIDTH - VALUE_LEFT - PADDING_X - 8.0;
 const ROW_GAP: f32 = 8.0;
 const LAST_GAP: f32 = 20.0;
-/// Who's guests: 24px lines 32px apart, `margin-left: 1px`; a 20px avatar 2px down; the name 10px
-/// after it, `padding: 4px 0`; the answer badge 12px at (12, 9).
+/// The Who row's guests are 24px lines 32px apart, with `margin-left: 1px`. Each has a 20px avatar
+/// 2px down, the name 10px after the avatar (`padding: 4px 0`), and the answer badge, 12px at
+/// (12, 9).
 const GUEST: f32 = 32.0;
 const GUEST_LEFT: f32 = VALUE_LEFT + 1.0;
 const AVATAR: f32 = 20.0;
@@ -69,14 +70,14 @@ const CREATOR: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 10.0, 16
 const JOIN: TextStyle = TextStyle::new(Font::new(Family::Sans, 600), 12.0, 15.0);
 const JOIN_HEIGHT: f32 = 27.0;
 const JOIN_PADDING: [f32; 2] = [7.0, 10.0];
-/// The attachments: two columns 8px apart of small cards, 28px tall with `padding: 6px`, the name
-/// 8px after the type.
+/// The attachments: small cards in two columns 8px apart, each 28px tall with `padding: 6px` and
+/// the name 8px after the type.
 const FILE_HEIGHT: f32 = 28.0;
 const FILE_GAP: f32 = 8.0;
 const FILE_TYPE: TextStyle = TextStyle::new(Font::new(Family::Sans, 700), 9.0, 16.0);
 
-/// The RSVP bar: `padding: 16px 20px 16px 50px`, a 1px top border; `RSVP` in 12px bold 34px
-/// before 26px buttons (14px bold uppercase, `padding: 0 12px`, 16px apart, `top: 1px`), all
+/// The RSVP bar has `padding: 16px 20px 16px 50px` and a 1px top border. `RSVP` in 12px bold sits
+/// 34px before 26px buttons (14px bold uppercase, `padding: 0 12px`, 16px apart, `top: 1px`), all
 /// centred in the bar.
 const RSVP_HEIGHT: f32 = 1.0 + 16.0 + 26.0 + 16.0;
 const RSVP_LEFT: f32 = 50.0;
@@ -98,7 +99,7 @@ const RSVP_SELECTED: Color32 = Color32::from_rgb(84, 172, 220);
 /// The menu's items, top to bottom.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MenuItem {
-    /// `Edit`: the event's form.
+    /// `Edit`, which opens the event's form.
     Edit,
     /// `Delete`.
     Delete,
@@ -119,9 +120,9 @@ pub enum DetailsAction {
     Menu(MenuItem),
     /// A link in the event, already checked to be a web link.
     Open(String),
-    /// The title or a row, clicked: the form, that field focused.
+    /// The title or a row was clicked, which opens the form with that field focused.
     Edit(Field),
-    /// When's date or rule, clicked: the form on the start's date.
+    /// When's date or rule was clicked, which opens the form on the start's date.
     EditDate,
     /// A copy tooltip's text, clicked.
     Copy(String),
@@ -172,16 +173,17 @@ pub struct Shown<'a> {
     /// I can answer (`RSVP` bar).
     pub can_respond: bool,
     pub menu: &'a [MenuItem],
-    /// I can change it: the title and rows open the form.
+    /// I can change it, so the title and rows open the form.
     pub editable: bool,
-    /// A series' line under When: its rule in words.
+    /// A series' line under When, with its rule in words.
     pub rule: Option<String>,
-    /// A guest's event: 20px more under the rows (`padding-bottom: 20px`).
+    /// A guest's event, which takes 20px more under the rows (`padding-bottom: 20px`).
     pub guest: bool,
 }
 
 impl Details {
-    /// Details of event `key`, placed against `anchor`; `pane` for the right pane's day view.
+    /// Details of event `key`, placed against `anchor`, with `pane` set for the right pane's day
+    /// view.
     pub fn new(key: String, anchor: Rect, pane: bool) -> Self {
         Self {
             key,
@@ -209,7 +211,8 @@ impl Details {
         self.menu = None;
     }
 
-    /// Whether a release of the pointer this frame, outside the popover and its menu, closes it.
+    /// Whether the pointer was released this frame outside the popover and its menu, which closes
+    /// the popover.
     pub fn dismissed(&mut self, ui: &Ui, popup: Rect) -> bool {
         let fresh = std::mem::take(&mut self.fresh);
         let (released, at) =
@@ -222,7 +225,7 @@ impl Details {
             })
     }
 
-    /// Paints the popover on its own layer over everything but menus; `area` is the window.
+    /// Paints the popover on its own layer over everything but menus. `area` is the window.
     /// Returns what was asked for and where the popover is.
     pub fn show(&mut self, ui: &Ui, area: Rect, shown: &Shown<'_>) -> (Vec<DetailsAction>, Rect) {
         let ctx = ui.ctx().clone();
@@ -360,7 +363,7 @@ impl Details {
                 // Header.
                 let indicator =
                     Rect::from_min_size(popup.min + INDICATOR_AT, Vec2::splat(INDICATOR));
-                // The colour square: Snow's fill in Carbon too.
+                // The colour square keeps Snow's fill in Carbon too.
                 painter.rect_filled(
                     indicator,
                     CornerRadius::same(2),
@@ -464,7 +467,7 @@ impl Details {
             ui.painter()
                 .circle_filled(button.center(), MENU / 2.0, popup::fill(palette.theme));
         }
-        // The dots: black at `.2`, Carbon's white.
+        // The dots are black at `.2` (white in Carbon).
         let name = "legacy/DEPRECATED_ellipses";
         let size = exo_ui::icon_size(ui.ctx(), name).unwrap_or(Vec2::splat(ICON));
         exo_ui::paint_icon(
@@ -520,8 +523,8 @@ impl Details {
     }
 }
 
-/// `0 0 .5px rgba(0,0,0,.1), 0 2px 6px rgba(0,0,0,.15), 0 0 6px rgba(0,0,0,.1)` (Carbon white),
-/// the menu button's hover shadow, at `opacity` of its way in (`transition: box-shadow 150ms`).
+/// The menu button's hover shadow at `opacity` of the way in (`transition: box-shadow 150ms`):
+/// `0 0 .5px rgba(0,0,0,.1), 0 2px 6px rgba(0,0,0,.15), 0 0 6px rgba(0,0,0,.1)` (Carbon white).
 fn menu_shadows(palette: &exo_ui::Palette, opacity: f32) -> [BoxShadow; 3] {
     let black = |alpha: f32| palette.ink(alpha * opacity, alpha * opacity);
     [
@@ -531,7 +534,7 @@ fn menu_shadows(palette: &exo_ui::Palette, opacity: f32) -> [BoxShadow; 3] {
     ]
 }
 
-/// The RSVP bar at `bar`; returns the answer clicked unless it's the current one.
+/// The RSVP bar at `bar`. Returns the answer clicked, unless it's the current one.
 fn rsvp_bar(ui: &Ui, bar: Rect, current: Option<Rsvp>) -> Option<Rsvp> {
     let palette = exo_ui::palette(ui.ctx());
     let carbon = palette.theme == exo_ui::Theme::Carbon;
@@ -582,8 +585,9 @@ fn rsvp_bar(ui: &Ui, bar: Rect, current: Option<Rsvp>) -> Option<Rsvp> {
             )
             .on_hover_cursor(egui::CursorIcon::PointingHand);
         let selected = current == Some(answer);
-        // `transition: all 150ms ease`: pressed or selected, the blue fill and text; hovered
-        // otherwise, `box-shadow: 0 0 8px rgba(0, 0, 0, .2)` (Carbon's `.5`).
+        // `transition: all 150ms ease`. Pressed or selected, a button takes the blue fill and
+        // text. Otherwise, hovered, it takes `box-shadow: 0 0 8px rgba(0, 0, 0, .2)` (Carbon's
+        // `.5`).
         let ease = |on: bool, salt: &str| {
             motion::transition(
                 ui.ctx(),
@@ -640,14 +644,14 @@ fn rsvp_bar(ui: &Ui, bar: Rect, current: Option<Rsvp>) -> Option<Rsvp> {
 enum Row {
     /// The times, and a series' rule on a line of its own.
     When(String, Option<String>),
-    /// The call's link, its copy text, and its join button's label; or, while Calendar makes the
-    /// call, its message alone.
+    /// The call's link, its copy text, and its join button's label.
     Conference {
         label: String,
         uri: String,
         copy: String,
         join: &'static str,
     },
+    /// While Calendar makes the call, the conference row has its message alone.
     ConferencePending,
     Where(Vec<Run>),
     Who(Vec<Guest>),
@@ -698,7 +702,7 @@ pub(crate) struct Run {
 
 impl Row {
     /// Whether `at` (from the value's top left) is on When's start date or its rule line,
-    /// which open the form on the start's date; the times open it on the start's time.
+    /// which open the form on the start's date. The times open it on the start's time.
     fn on_date(&self, ctx: &egui::Context, at: Vec2) -> bool {
         let Row::When(text, _) = self else {
             return false;
@@ -782,8 +786,8 @@ impl Row {
         lines.max(1) as f32 * ROW_TEXT.line_height + VALUE_PADDING_Y
     }
 
-    /// Paints the row with its top at `origin.y` (`origin.x` the card's left); returns a link
-    /// clicked.
+    /// Paints the row with its top at `origin.y`, where `origin.x` is the card's left. Returns a
+    /// link clicked.
     fn paint(
         &self,
         ui: &Ui,
@@ -804,7 +808,7 @@ impl Row {
             );
         }
         let text = origin + vec2(VALUE_LEFT, VALUE_TOP);
-        // The values: Classic's black (Carbon's white) at `.75`.
+        // The values are Classic's black (Carbon's white) at `.75`.
         let color = palette.ink(0.75, 0.75);
         match self {
             Row::When(value, _) | Row::Calendar(value) => {
@@ -828,7 +832,7 @@ impl Row {
                     }
                 }
                 for (index, line) in lines.iter().enumerate() {
-                    // The font has no three-per-em space (U+2004): a third of an em, as
+                    // The font has no three-per-em space (U+2004), so it's a third of an em, as
                     // Chromium's fallback spaces it.
                     let mut x = left;
                     for (part, segment) in line.split('\u{2004}').enumerate() {
@@ -1081,7 +1085,7 @@ impl Row {
     }
 }
 
-/// `runs` laid out `width` wide; with each section's link, by section.
+/// `runs` laid out `width` wide, and the link of each section, by section.
 fn layout_runs(
     ctx: &egui::Context,
     runs: &[Run],
@@ -1108,7 +1112,7 @@ fn layout_runs(
 }
 
 /// Paints `runs` wrapped `width` wide at `at`, links in the link colour and underlined when
-/// hovered; returns a link clicked, if it's a web link.
+/// hovered. Returns a link clicked, if it's a web link.
 fn paint_runs(
     ui: &Ui,
     painter: &egui::Painter,
@@ -1126,7 +1130,7 @@ fn paint_runs(
         palette.ink(0.75, 0.75),
         palette.link_text_primary,
     );
-    // Each run's characters, in order: egui lays out a glyph per character.
+    // Each run's characters, in order, since egui lays out a glyph per character.
     let mut ends = Vec::new();
     let mut count = 0;
     for run in runs {
@@ -1348,8 +1352,8 @@ fn rows(shown: &Shown<'_>) -> Vec<Row> {
     rows
 }
 
-/// The guests: the organizer, then accepted, declined, tentative and unanswered, each by name;
-/// rooms aren't guests.
+/// The guests: the organizer, then accepted, declined, tentative and unanswered, each group by
+/// name. Rooms aren't guests.
 fn guests(source: &ApiEvent) -> Vec<Guest> {
     let mut guests: Vec<(u8, String, Guest)> = source
         .attendees
@@ -1408,8 +1412,8 @@ fn guests(source: &ApiEvent) -> Vec<Guest> {
     guests.into_iter().map(|(_, _, guest)| guest).collect()
 }
 
-/// The When row: `Thu, Nov 19 · 2:00 PM – 3:00 PM`, the end's date when it's another day,
-/// `(all day)` for one all-day day, ` (recurring)` for a series.
+/// The When row: `Thu, Nov 19 · 2:00 PM – 3:00 PM`, with the end's date when it's another day,
+/// `(all day)` for a single all-day day, and ` (recurring)` for a series.
 fn when(event: &Event, recurring: bool, now: &Zoned) -> String {
     let (start, end) = (&event.start, &event.end);
     // An all-day event's last day is the day before its end.
@@ -1458,7 +1462,8 @@ fn when(event: &Event, recurring: bool, now: &Zoned) -> String {
 struct Conference {
     /// The entry point's label (`meet.google.com/abc-defg-hij`).
     label: String,
-    /// Its link (a Meet link as this account, `authuser`), and as Calendar has it.
+    /// Its link (a Meet link opens as this account, with `authuser`), and the link as Calendar has
+    /// it.
     uri: String,
     raw: String,
     /// The tooltip's text.
@@ -1466,7 +1471,7 @@ struct Conference {
     join: &'static str,
 }
 
-/// The event's call (a video entry point first), if it has `conferenceData`; only links Exo would
+/// The event's call (a video entry point first), if it has `conferenceData`. Only links Exo would
 /// open count.
 fn conference(source: &ApiEvent, me: &str) -> Option<Conference> {
     let data = source.conference_data.as_ref()?;

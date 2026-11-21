@@ -1,6 +1,6 @@
 //! The accounts' Google profile photos as the app last fetched them: one file per account,
 //! named by its address, in `profile-pictures/` in the state folder. The folder is device-wide,
-//! so clearing an account's mail leaves it, and signing out deletes the account's.
+//! so clearing an account's mail leaves the account's photo, and signing out deletes it.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -22,7 +22,7 @@ impl ProfilePictures {
         }
     }
 
-    /// `email`'s photo, `None` without one.
+    /// `email`'s photo, or `None` without one.
     pub(crate) fn get(&self, email: &str) -> Result<Option<Vec<u8>>, Error> {
         let path = self.dir.join(email);
         match std::fs::read(&path) {
@@ -32,8 +32,8 @@ impl ProfilePictures {
         }
     }
 
-    /// Saves `photo` as `email`'s through a temporary file, so a crash never leaves half of
-    /// one; `None` deletes it.
+    /// Saves `photo` as `email`'s photo through a temporary file, so a crash never leaves half of
+    /// one. `None` deletes it.
     pub(crate) fn set(&self, email: &str, photo: Option<&[u8]>) -> Result<(), Error> {
         let path = self.dir.join(email);
         let failed = |source| Error::ProfilePicture {

@@ -1,13 +1,13 @@
-//! Squire's undo stack: whole-document snapshots taken at boundaries.
+//! The editor's undo stack, made of whole-document snapshots taken at boundaries.
 //!
-//! Squire records the document (with the selection) *before* a boundary action: Enter, Space,
+//! The stack records the document (with the selection) *before* a boundary action: Enter, Space,
 //! Backspace, typing over a selection, a format or block change, a paste. Plain typing between
 //! boundaries records nothing, so it undoes in one step. `in_undo_state` is true right after a
 //! snapshot or an undo, false as soon as the document changes. Undo first snapshots the current
 //! state if it changed since the last snapshot, so redo can come back to it.
 //!
 //! Every snapshot is kept, with no limit, so each shares the blocks that didn't change
-//! with the one before it: a keystroke in a long draft keeps one block, not the whole draft.
+//! with the one before it. A keystroke in a long draft keeps one block, not the whole draft.
 
 use std::sync::Arc;
 
@@ -81,15 +81,15 @@ pub(crate) struct UndoStack {
 }
 
 impl UndoStack {
-    /// Starts over with `document` as the only state: the stack cleared, then the first record.
+    /// Starts over with `document` as the only state, clearing the stack and then recording it.
     pub(crate) fn reset(&mut self, document: &Document, selection: Selection) {
         self.stack = vec![Snapshot::new(document, selection, None)];
         self.index = 0;
         self.in_undo_state = true;
     }
 
-    /// Records the state before a boundary action. With `replace` the latest entry is overwritten;
-    /// without it nothing happens while already in an undo state.
+    /// Records the state before a boundary action. With `replace`, the latest entry is overwritten.
+    /// Without it, nothing happens while already in an undo state.
     pub(crate) fn record(&mut self, document: &Document, selection: Selection, replace: bool) {
         if self.in_undo_state && !replace {
             return;
@@ -121,7 +121,7 @@ impl UndoStack {
         }
     }
 
-    /// Steps back: the state to restore and the marks of the change undone.
+    /// Steps back, returning the state to restore and the marks of the change undone.
     pub(crate) fn undo(
         &mut self,
         document: &Document,
@@ -141,7 +141,7 @@ impl UndoStack {
         ))
     }
 
-    /// Steps forward again: the state to restore and the marks of the change redone.
+    /// Steps forward again, returning the state to restore and the marks of the change redone.
     pub(crate) fn redo(&mut self) -> Option<(Document, Selection, Vec<UndoMark>)> {
         if self.index + 1 >= self.stack.len() || !self.in_undo_state {
             return None;

@@ -17,7 +17,7 @@ use crate::format::{
     names::{NameFormat, Person, display_name},
 };
 
-/// The card's text: 14px/24px; the row names bold, `min-width: 92px`.
+/// The card's text is 14px/24px, and the row names are bold with `min-width: 92px`.
 const TEXT: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 14.0, 24.0);
 const BOLD: TextStyle = TextStyle::new(Font::new(Family::Sans, 700), 14.0, 24.0);
 const QUESTION: f32 = 92.0;
@@ -108,7 +108,7 @@ impl Response {
 pub enum CardAction {
     /// A link: the location's map or number, the video call, a file.
     Open(String),
-    /// An answer other than the current one; `NeedsAction` adds the event to the calendar.
+    /// An answer other than the current one. `NeedsAction` adds the event to the calendar.
     Respond(Response),
     /// `Show more` / `Show Less`.
     ToggleAbout,
@@ -117,7 +117,7 @@ pub enum CardAction {
 /// The video call an invite's description links to.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Meeting {
-    /// `Meet` or `Teams`: the row's label.
+    /// The row's label, `Meet` or `Teams`.
     pub label: &'static str,
     pub url: String,
 }
@@ -136,7 +136,7 @@ pub struct Invite {
     /// `UID`, which the event on the calendar shares.
     pub uid: String,
     pub summary: String,
-    /// The description, its `<url>`s made links and Teams' join lines too.
+    /// The description, with its `<url>`s and Teams' join lines made links.
     pub description: String,
     pub location: String,
     pub start: Timestamp,
@@ -145,7 +145,7 @@ pub struct Invite {
     pub request: bool,
     /// `STATUS:CANCELLED` or `METHOD:CANCEL`.
     pub cancelled: bool,
-    /// `METHOD:COUNTER`: a guest proposes the time it gives (RFC 5546 §3.2.7).
+    /// `METHOD:COUNTER`, where a guest proposes the time it gives (RFC 5546 §3.2.7).
     pub counter: bool,
     /// It repeats (`RRULE`, `EXRULE`, `RDATE` or `EXDATE`).
     pub recurring: bool,
@@ -157,17 +157,16 @@ pub struct Invite {
     pub organizer: Option<(String, String)>,
     pub meeting: Option<Meeting>,
     pub files: Vec<File>,
-    /// A guest's note: the one attendee's `X-RESPONSE-COMMENT`, else the event's
-    /// `COMMENT`; empty without one.
+    /// A guest's note: the one attendee's `X-RESPONSE-COMMENT`, else the event's `COMMENT`.
+    /// Empty without one.
     pub note: String,
-    /// What I answered here, over the `.ics`'s answer.
+    /// What I answered here, which overrides the answer in the `.ics`.
     pub saved: Option<Response>,
 }
 
 impl Invite {
-    /// Who I am on the invite: `me` (the mail account) when it's
-    /// invited, else the first of my other calendar accounts, `accounts`, that is; `me` when
-    /// none is.
+    /// Who I am on the invite: `me` (the mail account) when it's invited, else the first of my
+    /// other calendar accounts in `accounts` that is, else `me`.
     pub fn calendar_account<'a>(&'a self, me: &'a str, accounts: &[String]) -> &'a str {
         if self
             .attendees
@@ -196,8 +195,7 @@ impl Invite {
                 .any(|(_, email, _)| email.eq_ignore_ascii_case(me))
     }
 
-    /// Whether `Add To Calendar` shows instead: not a series, an answer or a
-    /// cancellation.
+    /// Whether `Add To Calendar` shows instead: not for a series, an answer or a cancellation.
     pub fn can_add_to_calendar(&self, me: &str) -> bool {
         !self.can_respond(me) && !self.recurring && !self.is_response(me) && !self.cancelled
     }
@@ -222,8 +220,8 @@ impl Invite {
         }
     }
 
-    /// A guest's answer to an invitation: one attendee, not me, who
-    /// answered; or a guest's proposal (`METHOD:COUNTER`).
+    /// Whether this is a guest's answer to an invitation (one attendee, not me, who answered) or a
+    /// guest's proposal (`METHOD:COUNTER`).
     fn is_response(&self, me: &str) -> bool {
         let [(_, email, response)] = self.attendees.as_slice() else {
             return false;
@@ -231,8 +229,8 @@ impl Invite {
         !email.eq_ignore_ascii_case(me) && (self.counter || *response != Response::NeedsAction)
     }
 
-    /// The description as About shows it: Calendar's boilerplate dropped,
-    /// a long title first; `None` when there's nothing.
+    /// The description as About shows it, with Calendar's boilerplate dropped and a long title
+    /// first. `None` when there's nothing.
     fn about(&self) -> Option<String> {
         let summary = self.summary.trim();
         let long = summary.chars().count() > LONG_SUMMARY;
@@ -391,7 +389,7 @@ pub fn parse(ics: &str) -> Option<Invite> {
 }
 
 /// A content line's upper-cased name, its parameters (upper-cased names, values unquoted and
-/// RFC 6868's `^n`, `^'` and `^^` decoded) and its value (RFC 5545 §3.1): the first `:` outside
+/// RFC 6868's `^n`, `^'` and `^^` decoded) and its value (RFC 5545 §3.1). The first `:` outside
 /// a quoted parameter value starts the value.
 fn content_line(line: &str) -> Option<(String, HashMap<String, String>, &str)> {
     let mut quoted = false;
@@ -703,7 +701,8 @@ struct Row {
 enum Value {
     /// Lines of pieces, each line breaking where text breaks, indented by its first number.
     Text(Vec<(f32, Vec<Piece>)>),
-    /// When: breaks only after ` at`, `,` and `– ` (`white-space: nowrap` with `<wbr>`s).
+    /// When's text, which breaks only after ` at`, `,` and `– ` (`white-space: nowrap` with
+    /// `<wbr>`s).
     When(String),
     Rsvp(Option<Response>),
     AddToCalendar(bool),
@@ -760,8 +759,7 @@ fn rows(invite: &Invite, context: &Context) -> Vec<Row> {
             if at > 0 {
                 who.push(Piece::text(", "));
             }
-            // The mail account is `Me`; another calendar account of mine goes
-            // by its name.
+            // The mail account is `Me`. Another calendar account of mine goes by its name.
             let is_me = email.eq_ignore_ascii_case(context.user);
             let text = display_name(
                 &Person::new(name.clone(), email.clone()),
@@ -834,8 +832,8 @@ fn rows(invite: &Invite, context: &Context) -> Vec<Row> {
     rows
 }
 
-/// Where's pieces: nothing for a Teams call the video row has; Teams' own words as they are;
-/// a phone number to call; the location's links; else a map search.
+/// The Where row's pieces: nothing for a Teams call the video row has; Teams' own words as they
+/// are; a phone number to call; the location's links; else a map search.
 fn location(invite: &Invite) -> Option<Vec<Piece>> {
     let location = &invite.location;
     if location.is_empty() {
@@ -940,7 +938,7 @@ fn wrap_in(
     lines
 }
 
-/// When's lines, each a list of pieces: the time splits at ` at`, `,` and `– `, and a line breaks
+/// When's lines, each a list of pieces. The time splits at ` at`, `,` and `– `, and a line breaks
 /// only between pieces, each shaped on its own (no kerning across them).
 fn when_lines(ctx: &egui::Context, when: &str, width: f32) -> Vec<Vec<String>> {
     static SPLIT: LazyLock<Regex> =
@@ -969,7 +967,7 @@ fn when_lines(ctx: &egui::Context, when: &str, width: f32) -> Vec<Vec<String>> {
     lines
 }
 
-/// A row's value's height in a value column `width` wide.
+/// The height of a row's value in a value column `width` wide.
 fn value_height(ctx: &egui::Context, value: &Value, width: f32) -> f32 {
     let lines = |lines: &[(f32, Vec<Piece>)]| {
         lines
@@ -1020,7 +1018,7 @@ pub(super) fn height(ui: &Ui, invite: &Invite, context: &Context, width: f32) ->
 }
 
 /// The guest's note above the card: the notification's, else the `.ics`'s, read as HTML's text
-/// with its spaces collapsed (`white-space: normal`). Present, if empty, for a note of only markup.
+/// with its spaces collapsed (`white-space: normal`). A note of only markup is present but empty.
 pub(super) fn note(invite: &Invite, calendar: Option<&exo_mail::CalendarData>) -> Option<String> {
     let note = calendar
         .and_then(|calendar| calendar.response_comment.as_deref())
@@ -1034,7 +1032,7 @@ pub(super) fn note(invite: &Invite, calendar: Option<&exo_mail::CalendarData>) -
     })
 }
 
-/// The note's lines in a column `width` wide, its URLs links (`Linkify`).
+/// The note's lines in a column `width` wide, with its URLs made links.
 fn note_lines(ctx: &egui::Context, note: &str, width: f32) -> Vec<Vec<(Piece, f32)>> {
     if note.is_empty() {
         return Vec::new();
@@ -1058,8 +1056,8 @@ pub(super) fn note_height(ctx: &egui::Context, note: &str, width: f32) -> f32 {
     note_lines(ctx, note, width).len() as f32 * NOTE.line_height + NOTE_BOTTOM
 }
 
-/// Paints the note from `top` (the body area's top) across the column; returns the link
-/// clicked. Black in Snow (it inherits the pane's), white at .9 in Carbon.
+/// Paints the note from `top` (the body area's top) across the column and returns the link
+/// clicked. The note is black in Snow (inherited from the pane) and white at .9 in Carbon.
 pub(super) fn show_note(
     ui: &Ui,
     left: f32,
@@ -1115,7 +1113,7 @@ pub(super) struct Shown {
     pub names: super::message::Named,
 }
 
-/// Paints the card at `top` (the body area's top) across the column, `focused` the button with
+/// Paints the card at `top` (the body area's top) across the column. `focused` is the button with
 /// the keyboard.
 #[expect(
     clippy::too_many_arguments,
@@ -1227,8 +1225,9 @@ pub(super) fn show(
                             {
                                 shown.clicked = Some(CardAction::Open(url.clone()));
                             }
-                            // A contact name's box is its text's 17px content area, 3px down the line
-                            // (a name's words, with the spaces between them).
+                            // A contact name's box is the 17px content area of its text, 3px
+                            // down the line. The boxes cover the name's words and the spaces
+                            // between them.
                             if let Some(contact) = piece.contact {
                                 shown.names.push((
                                     Rect::from_min_size(pos2(x, y + 3.0), vec2(advance, 17.0)),
@@ -1393,7 +1392,8 @@ fn paint_status(ui: &Ui, photo: Rect, status: &str) {
     }
 }
 
-/// One RSVP button with its row's line box at `at`: returns its box and whether it was clicked.
+/// One RSVP button, with its row's line box at `at`. Returns the button's box and whether it was
+/// clicked.
 fn rsvp_button(
     ui: &Ui,
     palette: &Palette,
@@ -1435,9 +1435,9 @@ fn rsvp_button(
     (button, response.clicked())
 }
 
-/// Paints an RSVP button's box at `rect` and returns its label's color. Hovered, focused and the
-/// current answer fill with the link blue; hovered ones cast a gray shadow and focused ones glow,
-/// unless they're the answer, which only glows when focused, and takes a blue label.
+/// Paints an RSVP button's box at `rect` and returns its label's color. Hovered and focused
+/// buttons and the current answer fill with the link blue. Hovered buttons cast a gray shadow and
+/// focused ones glow, except the answer, which only glows when focused and takes a blue label.
 fn paint_rsvp_button(
     painter: &egui::Painter,
     palette: &Palette,

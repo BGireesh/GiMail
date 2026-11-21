@@ -1,7 +1,7 @@
-//! Gmail's per-user quota, enforced when the mock is given one ([`Config::quota`]): every Gmail
-//! call costs its method's units ([`gmail::quota::units`]), and one that would take the last
-//! minute's spending past the quota is refused with a 429 saying when to retry, in the message
-//! as Gmail writes it and in a `Retry-After` header. Refused calls cost nothing.
+//! Gmail's per-user quota, enforced when the mock is given one ([`Config::quota`]). Every Gmail
+//! call costs its method's units ([`gmail::quota::units`]). A call that would take the last
+//! minute's spending past the quota is refused with a 429 saying when to retry, both in the
+//! message as Gmail writes it and in a `Retry-After` header. Refused calls cost nothing.
 //!
 //! [`Config::quota`]: crate::Config::quota
 
@@ -24,7 +24,7 @@ const WINDOW: Duration = Duration::from_secs(60);
 /// What the account has spent, and what was refused.
 #[derive(Debug)]
 pub struct Meter {
-    /// Units allowed in any minute; `None` allows anything (and still counts).
+    /// Units allowed in any minute. `None` allows anything (and still counts).
     per_minute: Option<u32>,
     /// What was charged in the last minute: when, and how many units.
     recent: VecDeque<(Instant, u32)>,
@@ -144,7 +144,7 @@ mod tests {
             meter.charge("threads.get", 120, start + Duration::from_secs(10)),
             Ok(())
         );
-        // 240 spent: a third full read would make 360.
+        // 240 are spent, so a third full read would make 360.
         assert_eq!(
             meter.charge("threads.get", 120, start + Duration::from_secs(20)),
             Err(Duration::from_secs(40))

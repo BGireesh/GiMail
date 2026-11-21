@@ -1,6 +1,6 @@
-//! Calendar accounts: other Google accounts a mail account signs in for their calendars alone,
-//! against gmail-mock (a `login_hint` signs in another address there, with calendars of its
-//! own).
+//! Calendar accounts, the other Google accounts a mail account signs in for their calendars
+//! alone, tested against gmail-mock. There, a `login_hint` signs in another address, with
+//! calendars of its own.
 
 mod support;
 
@@ -31,7 +31,7 @@ fn picking(url: &Url, email: &str) -> Url {
 async fn a_calendar_account_asks_for_calendar_alone_and_its_grant_is_the_mail_accounts() {
     let harness = Harness::new().await;
     harness.sign_in().await;
-    // Its Gmail isn't asked about: a calendar account needs no mailbox.
+    // Its Gmail isn't asked about, because a calendar account needs no mailbox.
     harness.fault(serde_json::json!({ "path": "/gmail/v1/users/me/profile", "status": 400, "message": "Mail service not enabled" })).await;
     let (open, page) = browser(|url| picking(url, PERSONAL));
     let email = harness

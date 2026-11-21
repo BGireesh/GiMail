@@ -1,5 +1,5 @@
-//! The account's bulk actions: queued and run one at a time on the account's runtime, straight
-//! against Gmail (exo-store's `Store::bulk`), each undoable while it waits (which cancels it),
+//! The account's bulk actions, queued and run one at a time on the account's runtime, straight
+//! against Gmail (exo-store's `Store::bulk`). Each is undoable while it waits (which cancels it),
 //! while it runs (which stops it and puts back what it did) and after.
 
 use std::{
@@ -25,7 +25,7 @@ pub enum Status {
     Undoing,
     /// Put back, or cancelled before it started.
     Undone,
-    /// Gmail failed it; what it changed by then can still be put back.
+    /// Gmail failed it. What it changed by then can still be put back.
     Failed,
 }
 
@@ -34,19 +34,19 @@ pub enum Status {
 pub struct Summary {
     /// The toast's undo token, which also names it.
     pub token: UndoToken,
-    /// What it does: `Mark Done`.
+    /// What it does, such as `Mark Done`.
     pub name: &'static str,
     /// What it's on, as the Bulk Actions dialog shows it.
     pub query: Option<String>,
     /// Where it is.
     pub status: Status,
-    /// Its work is under way, not waiting: what the footer reports.
+    /// Whether its work is under way rather than waiting, which is what the footer reports.
     pub active: bool,
     /// The loaded rows it's for, which show `Pending:` while it waits or runs.
     pub threads: Arc<HashSet<String>>,
     /// Threads changed (or put back, while undoing) so far.
     pub done: usize,
-    /// Of how many: none until they're all found.
+    /// Out of how many. None until they're all found.
     pub total: usize,
 }
 
@@ -93,8 +93,8 @@ enum Work {
 }
 
 impl Jobs {
-    /// Starts the task that runs `store`'s bulk actions, on the current runtime, again after a
-    /// panic as `restarts` says; `repaint` asks for frames as they move on.
+    /// Starts the task that runs `store`'s bulk actions on the current runtime, and starts it
+    /// again after a panic as `restarts` says. `repaint` asks for frames as they move on.
     pub(crate) fn start(
         store: Store,
         repaint: Repaint,
@@ -121,7 +121,7 @@ impl Jobs {
             .expect("bulk jobs lock is never poisoned")
     }
 
-    /// Queues `request`; [`Jobs::undo`] with `token` undoes it.
+    /// Queues `request`. [`Jobs::undo`] with `token` undoes it.
     pub fn submit(&self, token: UndoToken, request: Request) {
         let Request {
             name,
@@ -184,7 +184,7 @@ impl Jobs {
             .collect()
     }
 
-    /// No bulk action is waiting or under way.
+    /// Whether no bulk action is waiting or under way.
     pub fn is_idle(&self) -> bool {
         self.lock().iter().all(|job| {
             matches!(
@@ -247,7 +247,7 @@ impl Jobs {
                 job.summary.active = false;
                 job.changed = changed;
                 job.summary.status = match (job.summary.status, ran, ok) {
-                    // Undone while it ran: the next round puts back what it did.
+                    // Undone while it ran, so the next round puts back what it did.
                     (Status::Undoing, true, _) => Status::Undoing,
                     (_, true, true) => Status::Done,
                     (_, false, true) => Status::Undone,

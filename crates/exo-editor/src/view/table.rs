@@ -1,15 +1,15 @@
 //! The tables the editor keeps whole (a pasted table, a table-built signature, a revealed
-//! quote's newsletter): drawn by exo-mail's Blitz body renderer, as the thread view draws a
-//! message, in the block that holds one. Its stylesheet is the editor's (the message body's), its
-//! colours tagged as the editor's content is ([`exo_mail::render_fragment`]).
+//! quote's newsletter). exo-mail's Blitz body renderer draws each one in the block that holds it,
+//! as the thread view draws a message. A table's stylesheet is the editor's (the message body's),
+//! and its colours are tagged as the editor's content is ([`exo_mail::render_fragment`]).
 //!
-//! Its images load as the body's do: each is one of [`crate::Editor::image_requests`], answered
-//! with [`crate::Editor::set_image`], whose file the table's document decodes off the UI thread.
-//! The document asks for its `<img>`s by their place in the table (`cid:exo-table-image-{n}`), so
-//! what it asks for maps back to the `<img>` whatever Blitz makes of the URL; what its CSS or a
-//! `background` asks for loads by URL, as a remote or inline image. Remote images the Images
-//! setting blocks show as empty boxes: the table is built again with them blocked. A tall
-//! table is painted in bands, those on screen.
+//! A table's images load as the body's do. Each is one of [`crate::Editor::image_requests`],
+//! answered with [`crate::Editor::set_image`], whose file the table's document decodes off the UI
+//! thread. The document asks for its `<img>`s by their place in the table
+//! (`cid:exo-table-image-{n}`), so what it asks for maps back to the `<img>` whatever Blitz makes
+//! of the URL. What its CSS or a `background` asks for loads by URL, as a remote or inline image.
+//! Remote images that the Images setting blocks show as empty boxes, because the table is built
+//! again with them blocked. A tall table is painted in bands, only where it's on screen.
 
 use std::{
     collections::HashMap,
@@ -27,7 +27,7 @@ use crate::{
     model::Element,
 };
 
-/// What a table's document loads an image by: this and its place in [`Table::images`].
+/// The prefix a table's document loads an image by, followed by its place in [`Table::images`].
 const IMAGE_URL: &str = "cid:exo-table-image-";
 
 thread_local! {
@@ -46,8 +46,8 @@ pub(crate) fn key(html: &str) -> u64 {
 /// The height of a painted band, in CSS px.
 const BAND: f32 = 1024.0;
 
-/// What a table's document has asked to load and not had: an `<img>` by its place in
-/// [`Table::images`], else (CSS, `background`) the image the URL names.
+/// What a table's document has asked to load and not yet had. An `<img>` is asked for by its place
+/// in [`Table::images`], and anything else (CSS, `background`) by the image its URL names.
 #[derive(Default)]
 struct Requests(Mutex<Vec<(Asked, Done)>>);
 
@@ -74,7 +74,7 @@ impl Fetch for Requests {
     }
 }
 
-/// What a band was painted at: the table's generation, and the width, phase and scale's bits.
+/// What a band was painted at: the table's generation, and the bits of the width, phase and scale.
 type Painted = (u64, u32, u32, u32);
 
 /// One table, laid out and painted.
@@ -85,7 +85,7 @@ struct Table {
     /// (with an empty `<img>`).
     images: Vec<(ImageSource, Element)>,
     theme: Theme,
-    /// Built with its remote images blocked.
+    /// Whether it was built with its remote images blocked.
     blocked: bool,
     /// The width and scale it was last laid out at, and its height there.
     laid_out: Option<(f32, f32, f32)>,
@@ -93,7 +93,7 @@ struct Table {
     generation: u64,
     /// Its painted bands by index.
     bands: HashMap<u32, (TextureHandle, Painted)>,
-    /// Laid out in the editor's latest layout.
+    /// Whether the editor's latest layout laid it out.
     used: bool,
 }
 
@@ -105,7 +105,8 @@ impl Table {
                 return;
             };
             images.push((source.clone(), image.clone()));
-            // A blocked one keeps its URL, for the view to draw blocked; `data:` loads itself.
+            // A blocked image keeps its URL, for the view to draw it blocked, and a `data:` image
+            // loads itself.
             match source {
                 ImageSource::Remote(_) if blocked => {}
                 ImageSource::Data(_) => {}
@@ -163,8 +164,8 @@ pub(crate) struct Tables {
 }
 
 impl Tables {
-    /// The [`key`] of the table `html` makes, and its box in a block `width` wide at `scale`, in
-    /// `theme`, built and laid out as needed.
+    /// The [`key`] of the table `html` makes, and its box in a block `width` wide at `scale` in
+    /// `theme`. The table is built and laid out as needed.
     pub(crate) fn lay_out(
         &mut self,
         html: &str,
@@ -241,7 +242,7 @@ impl Tables {
                     match source.and_then(|source| pictures.get(&source.key())) {
                         Some(State::Loaded { file, .. }) => ready.push((done, file.clone())),
                         None | Some(State::Pending) => pending.push((asked, done)),
-                        // Blocked (the table is built again) or broken: it never loads.
+                        // A blocked image (the table is built again) or a broken one never loads.
                         Some(State::Blocked | State::Broken) => {}
                     }
                 }
@@ -274,9 +275,9 @@ impl Tables {
         changed
     }
 
-    /// Paints the bands of table `key` (`width` wide, `phase` px right of the whole pixel its
-    /// textures go on) that `shown` (CSS px from its top) reaches and aren't up to date; those
-    /// further than a band from it are dropped.
+    /// Paints the bands of table `key` that `shown` reaches and that aren't up to date. The table
+    /// is `width` wide, `phase` px right of the whole pixel its textures go on, and `shown` is in
+    /// CSS px from its top. Bands further than a band from `shown` are dropped.
     pub(crate) fn paint(
         &mut self,
         key: u64,
@@ -343,7 +344,7 @@ impl Tables {
         }
     }
 
-    /// Table `key`'s painted bands: each one's top (CSS px from the table's) and texture.
+    /// The painted bands of table `key`, as each one's top (CSS px from the table's) and texture.
     pub(crate) fn bands(&self, key: u64) -> impl Iterator<Item = (f32, &TextureHandle)> {
         self.tables.get(&key).into_iter().flat_map(|table| {
             table

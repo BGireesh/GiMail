@@ -1,11 +1,11 @@
 //! The status bar: one 32px banner across the bottom of the window, under everything else, which
 //! shrinks by its height while it shows.
 //!
-//! `padding: 4px 2rem 4px 3.5rem` (44px on the left at ≤1152px); a bold uppercase title padded
-//! 24px on its right, then the description, both Exo Sans 12px/24px nudged down 1px, white; the
-//! description padded 32px on its right and faded out over its last 7%
-//! (`mask-image: linear-gradient(90deg, #000 93%, transparent)`); links white and underlined;
-//! keycaps in a row of their own. The background eases between colors over .25s.
+//! The bar has `padding: 4px 2rem 4px 3.5rem` (44px on the left at ≤1152px). It holds a bold
+//! uppercase title padded 24px on its right, then the description, both white Exo Sans 12px/24px
+//! nudged down 1px. The description is padded 32px on its right and fades out over its last 7%
+//! (`mask-image: linear-gradient(90deg, #000 93%, transparent)`). Links are white and underlined,
+//! and keycaps sit in a row of their own. The background eases between colors over .25s.
 
 use egui::{
     Color32, CursorIcon, Mesh, Pos2, Rect, Sense, Ui, Vec2, epaint::RectShape, pos2,
@@ -23,11 +23,11 @@ const DESCRIPTION: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 12.0
 /// The line's top: `padding-top: 4px`, then `top: 1px`.
 const LINE_TOP: f32 = 5.0;
 /// A description with keycaps is 26px tall, which the bar's `align-items: center` puts 1px
-/// higher, its text with it; the caps sit at its top plus their `margin-top: 1px` (measured).
+/// higher, along with its text. The caps sit at its top plus their `margin-top: 1px` (measured).
 const KEYED_LINE_TOP: f32 = 4.0;
 const KEYCAP_TOP: f32 = 5.0;
-/// A cap's `max-height`; its label sits on the description's 24px line, 2px up: its baseline 14px
-/// below the cap's top (measured).
+/// A cap's `max-height`. Its label sits on the description's 24px line, 2px up, with its baseline
+/// 14px below the cap's top (measured).
 const KEYCAP_HEIGHT: f32 = 19.0;
 const KEYCAP_BASELINE: f32 = 14.0;
 
@@ -38,8 +38,8 @@ const FADE_FROM: f32 = 0.93;
 /// The underline: 1px, a pixel below the baseline (measured).
 const UNDERLINE_GAP: f32 = 1.0;
 /// How far the underline stays from a descender it would cross, before and after the glyph's
-/// bitmap (`text-decoration-skip-ink: auto`; Blink dilates the glyph's intercept by the line's
-/// thickness, and the bitmap's right edge carries half a point of padding; measured).
+/// bitmap (`text-decoration-skip-ink: auto`, measured). Blink dilates the glyph's intercept by
+/// the line's thickness, and the bitmap's right edge carries half a point of padding.
 const SKIP_BEFORE: f32 = 1.0;
 const SKIP_AFTER: f32 = 0.5;
 
@@ -77,7 +77,7 @@ pub enum MessageBarRun<'a> {
 }
 
 impl<'a> MessageBarRun<'a> {
-    /// What the run says; keycaps say their labels, one after the other.
+    /// What the run says. Keycaps say their labels, one after the other.
     pub fn text(&self) -> std::borrow::Cow<'a, str> {
         match *self {
             Self::Text(text) | Self::Link(text, _) => text.into(),
@@ -86,7 +86,7 @@ impl<'a> MessageBarRun<'a> {
     }
 }
 
-/// A stretch of the description between keycaps: one anonymous flex item of the description's
+/// A stretch of the description between keycaps, one anonymous flex item of the description's
 /// `display: flex` (a space at its start stays, measured).
 enum Item<'a> {
     Runs(Vec<(&'a str, Option<&'a str>)>),
@@ -259,8 +259,8 @@ fn items<'a>(ctx: &egui::Context, description: &[MessageBarRun<'a>]) -> Vec<Item
     items
 }
 
-/// The underline under `text`, as spans from its start: all of it, less around each descender
-/// that reaches down into it.
+/// The underline under `text`, as spans from its start. It covers all of the text, less around
+/// each descender that reaches down into it.
 fn underline(ctx: &egui::Context, text: &str) -> Vec<(f32, f32)> {
     let galley = layout(
         ctx,
@@ -282,7 +282,8 @@ fn underline(ctx: &egui::Context, text: &str) -> Vec<(f32, f32)> {
     spans
 }
 
-/// The mask's fade over a solid background: the background, transparent to opaque across `rect`.
+/// The mask's fade over a solid background, which is the background going from transparent to
+/// opaque across `rect`.
 fn fade(painter: &egui::Painter, rect: Rect, fill: Color32) {
     if rect.width() <= 0.0 {
         return;

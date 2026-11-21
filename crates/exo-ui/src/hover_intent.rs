@@ -1,6 +1,6 @@
-//! Hover intent: a target counts as hovered once the pointer, polled every `interval` from when it
-//! came onto the target, moved less than 7px (across plus down) between two polls. A pointer
-//! sweeping across a target never settles on it.
+//! Hover intent. A target counts as hovered once the pointer has moved less than 7px (across plus
+//! down) between two polls, which run every `interval` from when the pointer came onto the
+//! target. A pointer sweeping across a target never settles on it.
 
 use egui::{Context, Pos2};
 

@@ -100,8 +100,8 @@ impl Line {
     }
 }
 
-/// The system folders in the drawer's order. Scheduled, which has no `g` key, always shows; so do
-/// Reminders and Snippets; Muted once mute has been used.
+/// The system folders in the drawer's order. Scheduled, which has no `g` key, always shows, and so
+/// do Reminders and Snippets. Muted shows once mute has been used.
 fn folders(muted: bool) -> Vec<Line> {
     let folder = |list: ListId, key: Option<&'static str>| Line::Folder {
         name: lists::name(&list, &[], &[]),
@@ -211,7 +211,7 @@ pub enum Action {
     Show(Place, Option<Hint>),
     /// Close the drawer.
     Close,
-    /// Open the Accounts palette: the account row's click, Enter or →.
+    /// Open the Accounts palette, from a click, Enter or → on the account row.
     SwitchAccounts,
 }
 
@@ -233,10 +233,10 @@ pub struct View<'a> {
     pub email: &'a str,
     /// The account's color.
     pub color: Color32,
-    /// The Inbox's count, shown on its row while hovered: Important's while Important and
-    /// Other are on.
+    /// The Inbox's count, shown on its row while hovered. It's Important's count while Important
+    /// and Other are on.
     pub inbox: Option<ListCount>,
-    /// Important and Other are on: the Inbox's row says so.
+    /// Whether Important and Other are on, which the Inbox's row says.
     pub important_other: bool,
 }
 
@@ -245,20 +245,20 @@ pub struct Folders {
     open: bool,
     /// The highlighted item.
     cursor: usize,
-    /// The highlight jumps rather than slides to the next position (a hover moved it).
+    /// Whether the highlight jumps rather than slides to the next position (a hover moved it).
     jump: bool,
-    /// The pointer moved over the drawer since the keyboard last moved the cursor: hovered
-    /// folders show their keys and count.
+    /// Whether the pointer moved over the drawer since the keyboard last moved the cursor, in
+    /// which case hovered folders show their keys and count.
     mousing: bool,
-    /// Every label is listed (`Load More` was chosen).
+    /// Whether every label is listed (`Load More` was chosen).
     all: bool,
     scroll: f32,
     /// The scroll area's visible height, from the last frame.
     viewport: f32,
-    /// The cursor moved by key: scroll it into view.
+    /// Whether the cursor moved by key, so it scrolls into view.
     reveal: bool,
     last_pointer: Option<Pos2>,
-    /// The pointer was over the drawer last frame.
+    /// Whether the pointer was over the drawer last frame.
     inside: bool,
 }
 
@@ -280,7 +280,7 @@ impl Default for Folders {
 }
 
 impl Folders {
-    /// Whether it's open: it has the keyboard, and clicks outside it close it.
+    /// Whether it's open, in which case it has the keyboard and clicks outside it close it.
     pub fn is_open(&self) -> bool {
         self.open
     }
@@ -290,7 +290,8 @@ impl Folders {
         self.all
     }
 
-    /// Opens on `current`'s item (the first folder for the inbox views or a list it hasn't).
+    /// Opens on the item for `current` (the first folder for the inbox views or a list the drawer
+    /// doesn't have).
     pub fn open(&mut self, lines: &[Line], current: &Place) {
         let current = match current {
             Place::List(list) if lists::is_inbox(list) => &Place::List(ListId::Inbox),
@@ -351,7 +352,7 @@ impl Folders {
         self.cursor = cursor;
     }
 
-    /// What choosing item `index` does: opens its list, or lists every label.
+    /// Chooses item `index`, which opens its list or lists every label.
     fn choose(&mut self, lines: &[Line], index: usize, clicked: bool) -> Option<Action> {
         let Some(item) = index.checked_sub(1) else {
             return Some(Action::SwitchAccounts);
@@ -428,19 +429,19 @@ impl Folders {
             action = Some(Action::Close);
         }
         ui.multiply_opacity(shown);
-        // The rail stays on top: the drawer slides out from under it, and its shadow doesn't
-        // reach over it.
+        // The rail stays on top. The drawer slides out from under it, and the drawer's shadow
+        // doesn't reach over it.
         ui.shrink_clip_rect(Rect::from_min_max(
             pos2(page.left() + LEFT, page.top()),
             page.max,
         ));
         let painter = ui.painter().clone();
-        // `clip-path: inset(0 -30px -30px -30px)`: no shadow above the drawer.
+        // `clip-path: inset(0 -30px -30px -30px)`, so no shadow shows above the drawer.
         let shadow_painter = painter.with_clip_rect(Rect::from_min_max(
             pos2(page.left(), drawer.top()),
             page.max,
         ));
-        // The drawer's shadow: `0 0 30px 0 rgba(0, 0, 0, .1), 0 0 .5px 0 rgba(0, 0, 0, .05)`;
+        // The drawer's shadow: `0 0 30px 0 rgba(0, 0, 0, .1), 0 0 .5px 0 rgba(0, 0, 0, .05)`, or
         // `0 0 30px 0 #000` in Carbon.
         let shadows: &[BoxShadow] = match exo_ui::theme(&ctx) {
             Theme::Snow => &[
@@ -476,7 +477,7 @@ impl Folders {
             Rect::from_min_max(pos2(drawer.left(), drawer.top() + SCROLL_TOP), drawer.max);
         self.viewport = list_area.height();
 
-        // Lay the lines out: each one's top, from the top of the scroll content.
+        // Lay the lines out, finding each one's top from the top of the scroll content.
         let mut layout = Vec::with_capacity(lines.len() + 1);
         let mut top = 0.0;
         let mut previous_nested = false;
@@ -836,8 +837,8 @@ fn paint_important_other(painter: &Painter, at: Pos2, palette: &exo_ui::Palette)
         IMPORTANT_OTHER.format(palette.ink(0.5, 0.5)),
         IMPORTANT_OTHER.format(palette.ink(0.25, 0.25)),
     );
-    // The dot's leading space collapses into the one before it, its trailing one swallows
-    // `Other`'s; its margins go either side.
+    // The dot's leading space collapses into the one before it, and its trailing one swallows
+    // `Other`'s. Its margins go either side.
     let mut job = LayoutJob::default();
     job.append("Important ", 0.0, color.clone());
     job.append("• ", 1.0, dot);
@@ -857,8 +858,8 @@ fn keycap_colors(ctx: &egui::Context, opacity: f32) -> KeycapColors {
     }
 }
 
-/// The Inbox's count, its right edge at `right`: 75px past the keys' left edge, or clear of
-/// them by 8px while hovered. The row clips it.
+/// The Inbox's count, its right edge at `right`. That's 75px past the keys' left edge, or clear
+/// of them by 8px while hovered. The row clips it.
 fn paint_count(
     painter: &Painter,
     ctx: &egui::Context,

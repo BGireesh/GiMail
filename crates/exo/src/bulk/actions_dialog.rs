@@ -23,7 +23,7 @@ const HIGHLIGHT_INSET: f32 = 16.0;
 /// The footer: `padding-top: 20px` above a 20px line.
 const FOOTER_PADDING: f32 = 20.0;
 const FOOTER_HEIGHT: f32 = 41.0;
-/// The columns' share of the row (`flex: 0 0 20%`, `10%` after a 4px margin, `17%`); the query
+/// The columns' share of the row (`flex: 0 0 20%`, `10%` after a 4px margin, `17%`). The query
 /// takes the rest.
 const NAME: f32 = 0.20;
 const COUNT: f32 = 0.10;
@@ -43,7 +43,7 @@ pub(crate) struct State {
 /// Something done in the dialog.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Event {
-    /// A row was clicked (or Enter on it): its Cancel or Undo.
+    /// A row was clicked (or Enter was pressed on it), for its Cancel or Undo.
     Row(usize),
     /// ↓/J/Tab (1) or ↑/K/⇧Tab (-1).
     Move(isize),
@@ -54,7 +54,7 @@ pub enum Event {
 }
 
 impl State {
-    /// Applies `event` over `rows` rows; returns what's left for the app.
+    /// Applies `event` over `rows` rows. Returns what's left for the app.
     pub(crate) fn handle(&mut self, event: Event, rows: usize) -> Option<Event> {
         match event {
             Event::Move(delta) if rows > 0 => {

@@ -1,4 +1,4 @@
-//! HTML in and out: draft bodies read back byte for byte.
+//! HTML in and out. Draft bodies read back byte for byte.
 
 use exo_editor::{ContainerKind, Content, Editor, Piece, html};
 
@@ -139,8 +139,8 @@ fn plain_paste_makes_a_line_per_line() {
     editor.type_text("ab");
     editor.set_selection(exo_editor::Selection::caret(exo_editor::Pos::new(0, 1)));
     editor.paste_text("one\ntwo");
-    // A paste gives each pasted line its trailing `<br>`; joining the line's start keeps the first
-    // one's, and joining the line's end drops the last one's.
+    // A paste gives each pasted line its trailing `<br>`. The first pasted line keeps its `<br>`
+    // when it joins the start of the line, and the last drops its `<br>` when it joins the end.
     assert_eq!(
         editor.html(),
         r#"<div class="">aone<br></div><div>twob</div>"#
@@ -148,8 +148,9 @@ fn plain_paste_makes_a_line_per_line() {
 }
 
 #[test]
-fn sending_links_bare_urls_as_linkify_does() {
-    // `Linkify.text` writes the address as a browser's `URL` prints it: a bare host gets its `/`.
+fn sending_links_bare_urls_as_a_browser_prints_them() {
+    // Sending writes a linked address the way a browser's `URL` prints it, so a bare host gets
+    // its `/`.
     let editor = Editor::from_html(
         r#"<div>see http://x.com, or Y.com/ü.</div><div><a href="http://y.com">http://y.com</a></div>"#,
     );

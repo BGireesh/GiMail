@@ -1,6 +1,6 @@
-//! Share Availability from a draft: ⌘⇧A and the footer's calendar open a menu at the caret, whose
-//! one row, `Insert free times`, opens the week to pick times; Insert writes them where the draft's
-//! caret was, or into a new Reply All or message.
+//! Share Availability from a draft. ⌘⇧A and the footer's calendar open a menu at the caret. Its
+//! one row, `Insert free times`, opens the week to pick times, and Insert writes them where the
+//! draft's caret was, or into a new Reply All or message.
 
 use egui::{Color32, CornerRadius, Id, Rect, Sense, Ui, pos2, vec2};
 use exo_editor::{Editor, Pos, Selection};
@@ -16,7 +16,7 @@ pub(super) const ROW: &str = "Insert free times";
 /// Typing this many characters past the last one that matched a row closes the menu.
 const MISSES: usize = 5;
 
-/// The open menu: what's typed since it opened filters its rows.
+/// The open menu. What's typed since it opened filters its rows.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Menu {
     /// Where the caret was when it opened.
@@ -55,9 +55,9 @@ impl Menu {
     }
 }
 
-/// Follows the editor this frame: what was typed at the caret is the query. Returns whether the
-/// menu stays open: not once the caret leaves the query or something is selected, nor five
-/// characters past the last that matched a row.
+/// Follows the editor this frame, taking what was typed at the caret as the query. Returns
+/// whether the menu stays open. It closes once the caret leaves the query or something is
+/// selected, or five characters past the last one that matched a row.
 pub(super) fn follow(editor: &Editor, menu: &mut Menu, changed: bool) -> bool {
     let selection = editor.selection();
     let caret = selection.focus;
@@ -90,13 +90,13 @@ pub(super) fn follow(editor: &Editor, menu: &mut Menu, changed: bool) -> bool {
     menu.misses < MISSES
 }
 
-/// The row's text: 13px/24px, in 32px rows padded `4px 12px`; the box 272px
-/// with `padding-top: 4px`.
+/// The row's text: 13px/24px, in 32px rows padded `4px 12px`. The box is 272px wide, with
+/// `padding-top: 4px`.
 const TEXT: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 13.0, 24.0);
 const WIDTH: f32 = 272.0;
 
-/// The menu under the caret at `caret` (the row's text where the caret is). Returns whether
-/// its row was clicked, and where the menu is.
+/// The menu under the caret at `caret`, with the row's text starting where the caret is. Returns
+/// whether its row was clicked, and where the menu is.
 pub(super) fn show(ui: &Ui, caret: Rect, id: Id) -> (bool, Rect) {
     let ctx = ui.ctx().clone();
     let palette = exo_ui::palette(&ctx);
@@ -162,8 +162,9 @@ pub(super) fn show(ui: &Ui, caret: Rect, id: Id) -> (bool, Rect) {
     (clicked, card)
 }
 
-/// Writes `html` into `open` where its caret is: as the whole body when it's empty, the caret then
-/// at its end; else after a line break unless the caret's line is empty, with one after it.
+/// Writes `html` into `open` where its caret is. When the body is empty, `html` becomes the whole
+/// body and the caret goes to its end. Otherwise `html` goes after a line break, unless the
+/// caret's line is empty, and gets a line break after it.
 pub(super) fn insert_at_caret(open: &mut Open, html: &str) {
     insert(&mut open.editor, html);
     open.touch(0.0);
@@ -189,8 +190,8 @@ fn insert(editor: &mut Editor, html: &str) {
 }
 
 impl crate::Mail {
-    /// The From and recipients of what `target` replies with: the draft's, or a Reply All's to the
-    /// open conversation's last message.
+    /// The From and recipients of what `target` replies with. They're the draft's, or those of a
+    /// Reply All to the open conversation's last message.
     pub(crate) fn compose_reply_fields(&self, target: &Target) -> (Option<Address>, Vec<Address>) {
         match target {
             Target::Draft(id) => self
@@ -246,8 +247,8 @@ impl crate::Mail {
             .map(|open| open.id.clone())
     }
 
-    /// Share Availability's Insert: `html` into the draft, a new Reply All in the conversation, or
-    /// a new message; the draft then has the keyboard.
+    /// Share Availability's Insert. Writes `html` into the draft, a new Reply All in the
+    /// conversation, or a new message, and the draft then has the keyboard.
     pub(crate) fn compose_insert_availability(&mut self, target: &Target, html: &str) {
         match target {
             Target::Draft(id) if self.compose.drafts.iter().any(|open| open.id == *id) => {
@@ -281,8 +282,8 @@ impl crate::Mail {
         }
     }
 
-    /// ⌘⇧A or the footer's calendar in the focused draft: its menu, at the caret; or it closes,
-    /// keeping what was typed into it.
+    /// ⌘⇧A or the footer's calendar in the focused draft. Opens the draft's menu at the caret, or
+    /// closes it and keeps what was typed into it.
     pub(super) fn compose_availability_menu(&mut self, open: bool) {
         if let Some(draft) = self.compose.focused_mut() {
             if open {
@@ -296,9 +297,10 @@ impl crate::Mail {
         }
     }
 
-    /// Whether a reply's calendar icon may show `You can now hit ⌘ shift A…` (the form checks the
-    /// draft and its other icons): online, not dismissed, no hint tooltip up, the palette without
-    /// the keyboard, and the account joined over seven days ago.
+    /// Whether a reply's calendar icon may show `You can now hit ⌘ shift A…`. It may when Exo is
+    /// online, the tip wasn't dismissed, no hint tooltip is up, the palette doesn't have the
+    /// keyboard, and the account joined over seven days ago. The form checks the draft and its
+    /// other icons.
     pub(super) fn availability_tip_due(&self) -> bool {
         let week_ago = self.now.checked_sub(jiff::Span::new().days(7)).ok();
         let joined = self
@@ -334,7 +336,7 @@ impl crate::Mail {
         }
     }
 
-    /// The menu's `Insert free times`: the query typed into the menu goes, and the week opens to
+    /// The menu's `Insert free times`. Removes the query typed into the menu and opens the week to
     /// pick times for the focused draft.
     pub(super) fn compose_availability_pick(&mut self) {
         self.compose_availability_dismiss();
@@ -369,7 +371,8 @@ mod tests {
             &mut editor,
             "Does  Fri Nov 20 work?<br>- tomorrow (Nov 18): 1:00–1:30 pm <br>",
         );
-        // `<br>`s break lines in the caret's block, as Squire inserts them; spaces collapse.
+        // `<br>`s break lines in the caret's block rather than starting blocks, and spaces
+        // collapse.
         let blocks: Vec<String> = editor
             .document()
             .blocks

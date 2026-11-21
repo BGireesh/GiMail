@@ -3,12 +3,13 @@
  * match a message body, for both themes (`.Theme-light` / `.Theme-dark`, also tagged
  * `Theme-snow` / `Theme-carbon`).
  *
- * This sheet precedes the message's own CSS, and the restyle sheet (`restyle.css`) follows it;
- * their specificity and `!important` flags decide which wins. The `@media (max-resolution: 1dppx)`
+ * This sheet precedes the message's own CSS, and the restyle sheet (`restyle.css`) follows it.
+ * Their specificity and `!important` flags decide which wins. The `@media (max-resolution: 1dppx)`
  * rules are keyed on `.at-1x`, which the view sets on 1× displays (layout itself always happens
  * at 1×).
  *
- * Exo's classes are `exo-`; `sh-preserve-color` arrives in senders' signatures (`restyle.css`).
+ * Exo's classes are prefixed `exo-`, and `sh-preserve-color` arrives in senders' signatures
+ * (`restyle.css`).
  */
 
 .exo-date:focus, a:not(.exo-preserve-color, .sh-preserve-color):focus {
@@ -21,9 +22,9 @@
 
 .ShadowHTML { user-select: text; outline: none; overflow-x: auto; overflow-y: hidden; word-break: break-word; }
 .ShadowBody { width: inherit !important; }
-/* Chromium sets a variable font's optical size to the font size (`font-optical-sizing: auto`);
- * Blitz uses the font's default, which for San Francisco is the tight Display cut (28). 17 is
- * where Chromium lands for text up to 17px, i.e. most body text, since SF clamps there; larger
+/* Chromium sets a variable font's optical size to the font size (`font-optical-sizing: auto`),
+ * but Blitz uses the font's default, which for San Francisco is the tight Display cut (28). 17 is
+ * where Chromium lands for text up to 17px, i.e. most body text, since SF clamps there. Larger
  * inline font sizes get their own rule (`hints.rs`). */
 .ShadowBody { font-variation-settings: "opsz" 17; }
 * { text-shadow: none !important; }
@@ -112,8 +113,8 @@ hr { border: 0; height: 0; border-top: 1px solid #ededed; border-bottom: 1px sol
 /* Detected dates: a hairline under the text (personal mail), a grey underline (marketing).
  * The hairline goes 3px above the bottom of the span's content area. Blitz can't position an
  * `::after` against an inline box, so it's an underline 2px below the baseline, which is the same
- * place in the 14px/24px restyled line. Its color marks it
- * for the painter, which thins it to the 0.5px Blitz can't draw at 1× (see `view.rs`). */
+ * place in the 14px/24px restyled line. Its color marks it for the painter, which thins it to the
+ * 0.5px Blitz can't draw at 1× (see `view.rs`). */
 .exo-date { background-color: transparent; white-space: nowrap; }
 :not(.isMarketing) .exo-date {
   position: relative;
@@ -131,13 +132,12 @@ tt, code, kbd, samp { font-family: "Exo Mono Email", monospace; }
 
 .Superhuman-invisible { display: none !important; }
 .Superhuman-visible { display: initial !important; opacity: 1 !important; }
-/* Remote images blocked by the Images setting (`img[src^="https://media-blocked"]`; Exo marks them
- * `data-exo-blocked`, `view.rs`). Chromium draws an `::after` box with a 1px border over the broken
- * image's padding box; Blitz draws no `::after` on an image, so the box is the image's own
- * background, and the border an inset shadow, which takes no room. The white is an image, which
- * restyle.css's `background-color: transparent` on near-black elements leaves alone, as it leaves
- * the `::after`. Classic Carbon keeps the white box, with a white border in marketing mail
- * (`.Theme-carbon:not(.Theme-dark).isMarketing`). */
+/* Remote images blocked by the Images setting, which Exo marks `data-exo-blocked` in `view.rs`.
+ * Chromium draws an `::after` box with a 1px border over the broken image's padding box. Blitz
+ * draws no `::after` on an image, so the box is the image's own background, and the border an
+ * inset shadow, which takes no room. The white is an image, which restyle.css's
+ * `background-color: transparent` on near-black elements leaves alone, as it leaves the
+ * `::after`. Classic Carbon keeps the white box, with a white border in marketing mail. */
 img[data-exo-blocked] {
   position: relative;
   visibility: visible !important;

@@ -1,5 +1,6 @@
-//! Inline triggers: the text before the caret that opens a dropdown. The editor finds them; the
-//! caller resolves them (emoji search, snippets, contacts) and calls [`crate::Editor::replace`].
+//! Inline triggers, the text before the caret that opens a dropdown. The editor finds them, and
+//! the caller resolves them (emoji search, snippets, contacts) and calls
+//! [`crate::Editor::replace`].
 
 use std::sync::LazyLock;
 
@@ -14,7 +15,7 @@ pub enum TriggerKind {
     Emoji,
     /// `;intro` (snippets).
     Snippet,
-    /// `+ali`, `@ali`, `-ali` or `−ali` (contacts; the character is which).
+    /// `+ali`, `@ali`, `-ali` or `−ali` (contacts, with the character that was typed).
     Contact(char),
 }
 
@@ -62,9 +63,9 @@ pub fn is_trigger_char(ch: char) -> bool {
     matches!(ch, ':' | ';' | '+' | '@' | '-' | '\u{2212}')
 }
 
-/// The trigger at the end of `before` (a block's text, or a field's, up to the caret): its kind,
-/// the character offset of the trigger character, and the query. The subject field runs it on
-/// its value too.
+/// The trigger at the end of `before`, which is a block's or a field's text up to the caret.
+/// Returns its kind, the character offset of the trigger character, and the query. The subject
+/// field runs it on its value too.
 pub fn find(before: &str) -> Option<(TriggerKind, usize, String)> {
     let offset = |byte: usize| before[..byte].chars().count();
     if let Some(group) = EMOJI.captures(before).and_then(|captures| captures.get(1)) {

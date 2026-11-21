@@ -1,5 +1,5 @@
-//! The settings menu: a `Settings` title over a scrolling list of sections, in the right pane
-//! above its footer. Rows have no hover style; a click on a row's label runs it.
+//! The settings menu, a `Settings` title over a scrolling list of sections in the right pane
+//! above its footer. Rows have no hover style, and a click on a row's label runs it.
 //!
 //! The menu's sections and rows, in order, and what Exo does with each (rows that can't work are
 //! left out):
@@ -55,15 +55,16 @@ const TITLE: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 16.0, 20.0
 const HEADER: TextStyle = TextStyle::new(Font::new(Family::Sans, 700), 12.0, 16.0);
 const HEADER_ABOVE: f32 = 20.0;
 const HEADER_BELOW: f32 = 8.0;
-/// A row's label: 12px/16px, `top: 1px`; rows `padding: 0 0 8px`, the last one 0.
+/// A row's label: 12px/16px, `top: 1px`. Rows have `padding: 0 0 8px`, except the last, which
+/// has 0.
 const LABEL: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 12.0, 16.0);
 const LINE: f32 = 16.0;
 const ROW_GAP: f32 = 8.0;
-/// A toggle's tooltip: its box 14px left of the row (a 6px offset and the tooltip's 8px
-/// padding), at most 289px wide.
+/// A toggle's tooltip has its box 14px left of the row (a 6px offset and the tooltip's 8px
+/// padding), and is at most 289px wide.
 const TOOLTIP_GAP: f32 = 14.0;
 const TOOLTIP_WIDTH: f32 = 289.0 - 16.0 - 14.0;
-/// `Backtick as Escape`'s tooltip, wider than the others, its keys separate
+/// The tooltip of `Backtick as Escape`, which is wider than the others, with its keys as separate
 /// caps with spaces between them.
 const BACKTICK_TOOLTIP: LinesTooltip<'static> = {
     use TooltipPart::{Keys, Text};
@@ -102,7 +103,8 @@ const SIGN_OUT: &str = "Sign Out";
 const ADVANCED: &str = "Advanced";
 const OPEN_AT_LOGIN: &str = "Open at Login";
 const WARN_BEFORE_QUITTING: &str = "Warn Before Quitting";
-/// The `Advanced` section's rows of Exo's own: each slider's state, `None` to leave the row out.
+/// Exo's own rows in the `Advanced` section, as each slider's state, or `None` to leave the row
+/// out.
 #[derive(Debug, Clone, Copy)]
 pub struct ExoRows {
     /// `Open at Login`, shown where Exo can be a login item.
@@ -115,8 +117,8 @@ pub struct ExoRows {
 #[derive(Debug)]
 pub struct Scroll {
     offset: f32,
-    /// The line over the footer: on when the menu opens, then on
-    /// after each scroll unless it reached the end.
+    /// Whether the line over the footer shows. It's on when the menu opens, then on after each
+    /// scroll unless the scroll reached the end.
     shadow: bool,
 }
 
@@ -230,7 +232,7 @@ const SECTIONS: &[Section] = &[
 /// Draws the menu in `pane` (the right pane's inside) above its footer, scrolled to `scroll`,
 /// and returns the row clicked. At Inbox Zero (`zero`) the right pane is gone and the menu sits
 /// in the footer, with no line over the footer, in white over the blurred photo.
-/// `settings` are the account's, for the toggles; `exos` are Exo's own rows.
+/// `settings` are the account's, for the toggles, and `exos` are Exo's own rows.
 pub fn show(
     ui: &mut Ui,
     pane: Rect,
@@ -242,8 +244,8 @@ pub fn show(
 ) -> Option<Action> {
     let ctx = ui.ctx().clone();
     let tokens = palette(&ctx);
-    // The title and section headers: black at .8, white at .85 in Carbon; rows at .6. At Inbox
-    // Zero, white at .7, the title's too, and the section headers at .85.
+    // The title and section headers are black at .8, or white at .85 in Carbon, and rows are at
+    // .6. At Inbox Zero the rows and the title are white at .7, and the section headers at .85.
     let white = |alpha: f32| Color32::from_white_alpha((alpha * 255.0).round() as u8);
     let (heading, strong, subdued) = if zero {
         (white(0.7), white(0.85), white(0.7))
@@ -359,8 +361,8 @@ pub fn show(
         y += LINE + HEADER_BELOW;
         let count = rows.len();
         for (index, (title, action, toggle)) in rows.into_iter().enumerate() {
-            // The label spans the row (`flex: 1 0 auto`); a button's click is on the
-            // label, a toggle's on the whole row, its bottom padding too.
+            // The label spans the row (`flex: 1 0 auto`). A button takes clicks on the label,
+            // and a toggle on the whole row, its bottom padding included.
             let label = Rect::from_min_size(pos2(left, y + NUDGE), vec2(width, LINE));
             let gap = if toggle.is_some() && index + 1 < count {
                 ROW_GAP
@@ -494,8 +496,8 @@ pub(crate) fn footer_shadow(ui: &Ui, pane: Rect, rem: f32, on: bool) {
 mod tests {
     use super::*;
 
-    /// The menu at 400×1300 (all of it, unscrolled), with `Open at Login` off and `Warn Before
-    /// Quitting` as `warn` has it, after a click at `at`; the action clicked.
+    /// Clicks at `at` on the menu at 400×1300 (all of it, unscrolled), with `Open at Login` off
+    /// and `Warn Before Quitting` as `warn` has it, and returns the action clicked.
     fn click_with(at: egui::Pos2, warn: Option<bool>) -> Option<Action> {
         let ctx = egui::Context::default();
         exo_ui::install(&ctx).expect("the system fonts load");
@@ -565,8 +567,8 @@ mod tests {
 
     #[test]
     fn the_calendar_rows_open_calendar_settings_and_notifications() {
-        // `Calendar` after `My Account`, whose last row is Achievements: its header at 440, its
-        // rows from 464, 24px apart.
+        // `Calendar` comes after `My Account`, whose last row is Achievements. Its header is at
+        // 440, and its rows run from 464, 24px apart.
         assert_eq!(
             click(pos2(32.0 + 5.0, 472.0)),
             Some(Action::CalendarSettings),
@@ -580,7 +582,7 @@ mod tests {
 
     #[test]
     fn quick_tips_follows_shortcuts() {
-        // `Learn Exo` after `General`: its header at 248, its rows from 272.
+        // `Learn Exo` comes after `General`, with its header at 248 and its rows from 272.
         assert_eq!(click(pos2(32.0 + 5.0, 280.0)), Some(Action::Shortcuts));
         assert_eq!(
             click(pos2(400.0 - 32.0 - 10.0, 304.0)),
@@ -618,7 +620,8 @@ mod tests {
 
     #[test]
     fn writing_follows_triage_and_its_toggle_flips_from_anywhere_on_its_row() {
-        // `Writing` after `Triage`: its header at 688, its rows from 712, Emoji first.
+        // `Writing` comes after `Triage`, with its header at 688 and its rows from 712, Emoji
+        // first.
         let flip = Some(Action::Flip {
             setting: Toggle::HyphenToBulletList,
             palette: false,
@@ -637,7 +640,7 @@ mod tests {
 
     #[test]
     fn workflow_starts_with_auto_advance() {
-        // `Workflow` after `Writing`: its header at 788, its rows from 812.
+        // `Workflow` comes after `Writing`, with its header at 788 and its rows from 812.
         assert_eq!(
             click(pos2(32.0 + 5.0, 820.0)),
             Some(Action::Open(Dialog::AutoAdvance))
@@ -674,8 +677,8 @@ mod tests {
 
     #[test]
     fn advanced_toggles_flip_from_anywhere_on_their_rows_and_open_at_login_comes_last() {
-        // `Advanced` after `Workflow`: its header at 984, its rows from 1008, Backtick as Escape
-        // first.
+        // `Advanced` comes after `Workflow`, with its header at 984 and its rows from 1008,
+        // Backtick as Escape first.
         let flip = |setting| {
             Some(Action::Flip {
                 setting,

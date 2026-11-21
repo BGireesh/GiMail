@@ -1,5 +1,5 @@
 //! What the connection says as Gmail goes away and comes back, rate limits the account or says
-//! it has no mail: the offline bar's states.
+//! it has no mail. These are the offline bar's states.
 
 mod support;
 
@@ -50,8 +50,8 @@ async fn gmail_going_away_and_coming_back() {
     store.check_connection().await;
     assert_eq!(outage(&store), None);
 
-    // Gone again at once: back only a while after it last came back, even though a sync gets
-    // through.
+    // Gmail goes away again at once, so it's back only a while after it last came back, even
+    // though a sync gets through.
     harness.server.disconnect().await;
     assert!(store.sync().await.is_err());
     assert_eq!(outage(&store), Some(Outage::Gmail));
@@ -166,7 +166,7 @@ async fn a_pause_longer_than_a_call_waits_shows_at_once() {
         .await;
     assert!(harness.store.sync().await.is_err());
     assert_eq!(outage(&harness.store), Some(Outage::Throttled));
-    // The check waits for Gmail too: it fails without asking.
+    // The check waits for Gmail too, so it fails without asking.
     harness.store.check_connection().await;
     assert_eq!(outage(&harness.store), Some(Outage::Throttled));
 }

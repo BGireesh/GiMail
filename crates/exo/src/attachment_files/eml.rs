@@ -125,7 +125,7 @@ pub(crate) fn parse(bytes: &[u8]) -> Option<Eml> {
     })
 }
 
-/// `html` with every `cid:{cid}` (any case) as `url`.
+/// `html` with every `cid:{cid}` (in any case) replaced by `url`.
 fn replace_cid(html: &str, cid: &str, url: &str) -> String {
     let needle = format!("cid:{cid}").to_lowercase();
     let lower = html.to_lowercase();

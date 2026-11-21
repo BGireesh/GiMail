@@ -2,20 +2,20 @@
 //!
 //! Exo decides which messages are new mail from its own sync ([`exo_store::Arrival`]):
 //! - mail in the inbox, from someone else (not the account or one of its aliases);
-//! - Important's only, while Important and Other are on (the dialog's `If Important • Other is on,
-//!   notify for Important only`);
+//! - only mail in Important, while Important and Other are on (the dialog's `If Important • Other
+//!   is on, notify for Important only`);
 //! - not when the thread is muted, the message has been read (unless a reminder brought the
 //!   thread back), or notifications are off on this device or for the account.
 //!
-//! What it shows: the sender as the title, the snippet as macOS's subtitle and the subject as
-//! the body, with the default sound. A click opens the conversation.
+//! A notification shows the sender as the title, the snippet as macOS's subtitle and the subject
+//! as the body, with the default sound. A click opens the conversation.
 
 use exo_store::{Arrival, DeviceSettings, Settings};
 
 use super::{Click, Notice, Open};
 
-/// Whether `arrival` notifies, with the account's `settings` and this `device`'s. `reminder`:
-/// a reminder brought the thread back, which notifies though it's read.
+/// Whether `arrival` notifies, given the account's `settings` and this `device`'s. `reminder`
+/// says a reminder brought the thread back, which notifies even though it's read.
 pub fn notifies(
     arrival: &Arrival,
     settings: &Settings,
@@ -31,9 +31,9 @@ pub fn notifies(
         && (settings.unified_inbox || arrival.important)
 }
 
-/// Which of a round's `arrivals` (oldest first) notify, after a sync `gap`: those that pass
-/// [`notifies`], or after a gap only the newest of them, so a device that was away gets only
-/// the newest waiting one.
+/// Which of a round's `arrivals` (oldest first) notify. They're the ones that pass [`notifies`],
+/// or only the newest of them after a sync `gap`, so a device that was away gets only the newest
+/// waiting one.
 pub fn notifying<'a>(
     arrivals: &'a [Arrival],
     settings: &Settings,

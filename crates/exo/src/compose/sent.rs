@@ -1,6 +1,7 @@
-//! A reply being sent, shown in its thread at once: the outgoing message shows as a sent one
-//! the moment Send is pressed, dated when it goes out, from what it sends, until Gmail's copy is
-//! in the thread, which then takes its place (its focus and expansion with it).
+//! A reply being sent, shown in its thread at once. The outgoing message shows as a sent one the
+//! moment Send is pressed, dated when it goes out and built from what it sends. It stays until
+//! Gmail's copy is in the thread, and Gmail's copy then takes its place, with its focus and
+//! expansion.
 
 use std::sync::Arc;
 
@@ -59,13 +60,14 @@ impl ShownSends {
             .map(|shown| shown.draft.as_str())
     }
 
-    /// The send of `draft` was taken back, or failed: its message goes.
+    /// The send of `draft` was taken back or failed, so its message goes.
     pub fn forget(&mut self, draft: &str) {
         self.shown.retain(|shown| shown.draft != draft);
     }
 
-    /// Gmail sent `draft` as `message`: Gmail's copy replaces it once the thread has it, if the
-    /// thread is on screen (`showing`); otherwise it goes now.
+    /// Gmail sent `draft` as `message`. If the thread is on screen (`showing`), Gmail's copy
+    /// replaces the shown message once the thread has the copy. Otherwise the shown message goes
+    /// now.
     pub fn sent(&mut self, draft: &str, message: &str, showing: Option<&str>) {
         let on_screen = |shown: &Shown| showing == Some(shown.thread.as_str());
         self.shown
@@ -75,7 +77,7 @@ impl ShownSends {
         }
     }
 
-    /// Thread `thread` closed: messages already sent go (Gmail's copy shows from now on).
+    /// Thread `thread` closed, so messages already sent go, and Gmail's copy shows from now on.
     pub fn close(&mut self, thread: &str) {
         self.shown
             .retain(|shown| shown.thread != thread || shown.sent_as.is_none());

@@ -1,6 +1,6 @@
-//! The Images dialog: which remote images message bodies load. A line of explanation, three
-//! radio buttons, then how to show a message's blocked images. Choosing one applies it at once;
-//! there's no Save.
+//! The Images dialog, which picks the remote images that message bodies load. It has a line of
+//! explanation, three radio buttons, then how to show a message's blocked images. Choosing one
+//! applies it at once, and there's no Save.
 
 use egui::{Color32, Context, CursorIcon, Rect, Sense, Ui, pos2, vec2};
 use exo_store::RemoteContentBlocking;
@@ -36,7 +36,7 @@ const CHOICES: [(&str, RemoteContentBlocking); 3] = [
     ("Block all remote images", RemoteContentBlocking::All),
 ];
 
-/// Draws the dialog over `area` with `current` checked; a click on another choice sets it.
+/// Draws the dialog over `area` with `current` checked. A click on another choice sets it.
 pub fn dialog(
     ctx: &Context,
     area: Rect,

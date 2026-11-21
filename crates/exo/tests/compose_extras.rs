@@ -69,7 +69,7 @@ fn instant_intro_moves_the_introducer_to_bcc_and_thanks_them() {
         app.mail().hint_text().as_deref(),
         Some("Not quite right? Hit ⌘ shift I again!")
     );
-    // Again: Priya instead, Tom back.
+    // A second press moves Priya to Bcc instead and brings Tom back.
     app.press(Key::I, COMMAND.plus(Modifiers::SHIFT));
     app.settle();
     let [to, _, bcc] = recipients(&app);
@@ -88,7 +88,7 @@ fn instant_intro_uses_the_line_saved_in_its_dialog() {
     let mut app = start("intro-settings");
     palette(&mut app, "instant intro settings");
     assert!(app.mail().settings_dialog_open());
-    // The line is in the input: replace it, and Enter saves.
+    // The line is in the input. Replace it, and Enter saves.
     app.press(Key::A, COMMAND);
     app.type_text("Merci {first_name}!");
     app.key(Key::Enter);
@@ -124,7 +124,8 @@ fn auto_bcc_rides_along_unless_everyone_is_excluded() {
     app.key(Key::Escape);
     app.key(Key::Escape);
     app.settle();
-    // A reply to Tom and Priya, both at the excluded domain: it comes out again.
+    // A reply to Tom and Priya, who are both at the excluded domain, so the address comes out
+    // again.
     open_intro(&mut app);
     app.key(Key::A);
     app.settle();
@@ -157,7 +158,8 @@ fn chips_edit_in_place_move_between_fields_and_undo() {
     app.type_text("bob@example.com");
     app.key(Key::Enter);
     app.settle();
-    // ← selects Bob; Enter edits him in place; the text is all selected, so typing replaces it.
+    // ← selects Bob, and Enter edits him in place. The text is all selected, so typing replaces
+    // it.
     app.key(Key::ArrowLeft);
     app.key(Key::Enter);
     app.settle();
@@ -169,7 +171,7 @@ fn chips_edit_in_place_move_between_fields_and_undo() {
     app.key(Key::Enter);
     app.settle();
     assert_eq!(recipients(&app)[0], ["ann@example.com", "cy@example.com"]);
-    // Cy is selected after the edit: ⌥↓ moves him to Cc.
+    // Cy is selected after the edit, so ⌥↓ moves him to Cc.
     app.press(Key::ArrowDown, Modifiers::ALT);
     app.settle();
     assert_eq!(
@@ -201,7 +203,8 @@ fn emoji_by_name_and_the_tone_hint() {
     app.key(Key::Enter);
     app.settle();
     assert_eq!(body(&app), "Ship it 🚀");
-    // `:name:` takes the emoji named exactly that; the first one with tones sets `NONE` and hints.
+    // `:name:` takes the emoji named exactly that. The first emoji with tones sets `NONE` and
+    // shows a hint.
     app.type_text(" :wave");
     app.settle();
     app.press(Key::Semicolon, Modifiers::SHIFT);

@@ -1,11 +1,11 @@
 //! Bodies. Backfill, history, search and the contact pane fetch threads for their rows
-//! ([`fetch_rows`](super::fetch_rows)); a message's body, attachments and every header come
-//! after: in the background for the threads the app shows first (the first
-//! [`ON_SCREEN_AHEAD`] of the list on screen and of every inbox list), a page each sync round
-//! ([`Lane::Sync`]); for the thread the list's cursor rests on ([`Store::prefetch`],
-//! [`Lane::Show`]); for the rest that eviction would keep, a hundred at a time
-//! ([`Store::prerender`], [`Lane::Sync`]); and for any other thread, when it's opened
-//! ([`Store::load_bodies`], [`Lane::Act`]).
+//! ([`fetch_rows`](super::fetch_rows)), and a message's body, attachments and every header come
+//! after. The threads the app shows first (the first [`ON_SCREEN_AHEAD`] of the list on screen
+//! and of every inbox list) get them in the background, a page each sync round
+//! ([`Lane::Sync`]). The thread the list's cursor rests on gets them before it's opened
+//! ([`Store::prefetch`], [`Lane::Show`]). The rest that eviction would keep get them a hundred
+//! at a time ([`Store::prerender`], [`Lane::Sync`]). Any other thread gets them when it's
+//! opened ([`Store::load_bodies`], [`Lane::Act`]).
 
 use std::collections::HashSet;
 
@@ -29,7 +29,8 @@ use crate::store::{Inner, Store, reindex};
 const PAGE: usize = 10;
 /// Threads fetched at once.
 const CONCURRENCY: usize = 5;
-/// Tries for an opened thread's bodies, and the cursor's: someone is waiting for them.
+/// Tries for the bodies of an opened thread and of the cursor's thread, because someone is
+/// waiting for them.
 const OPEN_ATTEMPTS: u32 = 2;
 /// The conversations with a message stored without its body ([`bodiless`]) whose newest
 /// message is newer than `?1` (epoch milliseconds), newest first, `?2` of them.
@@ -41,8 +42,9 @@ const BODY_BYTES: &str = "SELECT coalesce(sum(coalesce(octet_length(html), 0) + 
 const WANTING: &str = "SELECT top.thread_id FROM (SELECT thread_id, sort FROM list_ids WHERE list_id = ?1 ORDER BY sort DESC LIMIT ?2) AS top WHERE EXISTS (SELECT 1 FROM messages m WHERE m.thread_id = top.thread_id AND NOT EXISTS (SELECT 1 FROM bodies b WHERE b.message_id = m.id) AND NOT EXISTS (SELECT 1 FROM drafts d WHERE d.message_id = m.id AND d.failure IS NULL AND (d.send_at IS NULL OR json_extract(d.record, '$.send_later') IS NULL))) ORDER BY top.sort DESC";
 
 impl Inner {
-    /// Fetches the bodies of [`PAGE`] of the threads the app shows first that lack some, the
-    /// list on screen's first. Returns whether more remain. The caller holds the sync lock.
+    /// Fetches the bodies of [`PAGE`] of the threads the app shows first that lack some,
+    /// starting with the list on screen. Returns whether more remain. The caller holds the sync
+    /// lock.
     pub(super) async fn body_page(&self) -> Result<bool> {
         let mut db = self.db.clone();
         let skipped = self
@@ -93,14 +95,14 @@ impl Inner {
                     provider::save_bodies(write.exec(), &messages).await?;
                     reindex(write.exec(), &thread, &router).await?;
                 }
-                // Not something retrying soon fixes: it waits to be opened.
+                // Retrying soon won't fix this, so the thread waits to be opened.
                 Err(failure @ (Failure::Transient(_) | Failure::Permanent(_))) => {
                     log::warn!(
                         "fetching the bodies of thread {thread}: {}",
                         failure.message()
                     );
                 }
-                // Offline, throttled or signed out: so is the rest of the round.
+                // Offline, throttled or signed out. The rest of the round would be too.
                 Err(failure) => {
                     halted = Some(failure);
                     continue;
@@ -108,8 +110,8 @@ impl Inner {
             }
             tried.push(thread);
         }
-        // One still without some (a message gone since, say) waits to be opened rather than
-        // being fetched again every round.
+        // A thread still missing some bodies (because a message is gone since, say) waits to be
+        // opened rather than being fetched again every round.
         let mut stuck = Vec::new();
         for thread in tried {
             if !bodiless(write.exec(), &thread).await?.is_empty() {
@@ -176,8 +178,9 @@ impl Store {
         bodiless(&mut db, thread.as_str()).await
     }
 
-    /// Fetches the bodies `thread` lacks (it was stored for its rows alone), ahead of
-    /// everything but other user actions, for opening it. Does nothing when they're stored.
+    /// Fetches the bodies `thread` lacks because it was stored for its rows alone, so it can be
+    /// opened. The calls go ahead of everything but other user actions. Does nothing when the
+    /// bodies are stored.
     ///
     /// # Errors
     /// [`Error::Offline`](crate::Error::Offline) and the like when Gmail can't be reached.
@@ -188,7 +191,7 @@ impl Store {
     }
 
     /// [`load_bodies`](Self::load_bodies) for the thread the list's cursor rests on, ahead of
-    /// its opening: after the user's own calls, with what's on screen.
+    /// its opening. Its calls go after the user's own, along with what's on screen.
     ///
     /// # Errors
     /// As [`load_bodies`](Self::load_bodies).
@@ -199,9 +202,9 @@ impl Store {
     }
 
     /// Fetches the bodies of up to `limit` conversations stored for their rows alone, one at a
-    /// time, newest first, as `eviction` would keep them: none quieter than its age or than the
-    /// conversations it let go of, and none once the bodies take nine tenths of its budget, where
-    /// eviction stops. Returns how many it fetched.
+    /// time, newest first, and only those `eviction` would keep. It skips conversations quieter
+    /// than the eviction's age or than the conversations it let go of, and stops once the bodies
+    /// take nine tenths of its budget, where eviction stops. Returns how many it fetched.
     ///
     /// # Errors
     /// [`Error::Offline`](crate::Error::Offline) and the like when Gmail can't be reached, and on
@@ -244,11 +247,11 @@ impl Store {
                 break;
             }
             let _sync = inner.sync.lock().await;
-            // Nothing on screen changes, but for the conversation open.
+            // Nothing on screen changes, except for the open conversation.
             let open = inner.reading.lock().await.as_deref() == Some(thread.as_str());
             match inner.fetch_missing(&thread, Lane::Sync, open).await {
                 Ok(()) => fetched += 1,
-                // Gmail wouldn't give it: it waits to be opened.
+                // Gmail wouldn't give it, so it waits to be opened.
                 Err(error @ Error::Gmail(_)) => {
                     log::warn!("pre-rendering thread {thread}: {error}");
                     inner
@@ -265,8 +268,9 @@ impl Store {
 }
 
 impl Inner {
-    /// Fetches the bodies `thread` lacks in `lane`, telling the store's subscribers when
-    /// `notify`. The store must have bootstrapped, or the caller not hold the sync lock.
+    /// Fetches the bodies `thread` lacks in `lane`, and tells the store's subscribers when
+    /// `notify` is set. Either the store must have bootstrapped, or the caller must not hold the
+    /// sync lock.
     async fn fetch_missing(&self, thread: &str, lane: Lane, notify: bool) -> Result<()> {
         self.bootstrapped().await?;
         let mut db = self.db.clone();
@@ -291,9 +295,9 @@ impl Inner {
     }
 }
 
-/// The messages of `thread` stored without their body, but for Exo's own drafts': compose
-/// shows those from their record, so a draft's save stores its message's row alone. A failed or
-/// scheduled draft's counts: the thread shows it as a message.
+/// The messages of `thread` stored without their body, except for Exo's own drafts. Compose
+/// shows those from their record, so saving a draft stores only its message's row. A failed or
+/// scheduled draft's message counts, because the thread shows it as a message.
 async fn bodiless(exec: &mut dyn Executor, thread: &str) -> Result<Vec<String>> {
     let ids: Vec<String> = MessageRow::filter_by_thread_id(thread)
         .select(MessageRow::fields().id())
@@ -319,8 +323,9 @@ async fn bodiless(exec: &mut dyn Executor, thread: &str) -> Result<Vec<String>> 
         .collect())
 }
 
-/// Fetches `thread`'s `missing` bodies the cheapest way: the one message alone
-/// (`messages.get`, half a thread's units), or else the whole thread. Nothing when it's gone.
+/// Fetches the `missing` bodies of `thread` the cheapest way: the one message alone
+/// (`messages.get`, half a thread's units), or else the whole thread. Returns nothing when the
+/// thread is gone.
 async fn fetch_bodies(
     api: &Api,
     lane: Lane,

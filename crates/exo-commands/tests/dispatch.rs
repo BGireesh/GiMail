@@ -181,7 +181,7 @@ fn a_toast_brought_back_by_hovering_settles() {
         .state_mut()
         .commands
         .toast(Toast::new("Marked as Done.").undo(Action::Undo));
-    // 8.5s in: fading out.
+    // 8.5s in, the toast is fading out.
     harness.run_steps(34);
     harness.hover_at(Pos2::new(238.0, 744.0));
     harness.run_steps(4);
@@ -218,7 +218,7 @@ fn question_mark_closes_the_sheet_without_typing_into_it() {
     );
 }
 
-/// Compose binds `;` (snippets) and `:` (emoji) while its editor has the keyboard; the key runs
+/// Compose binds `;` (snippets) and `:` (emoji) while its editor has the keyboard. The key runs
 /// the command and the editor never types it.
 #[test]
 fn a_handled_key_never_reaches_a_focused_text_field() {

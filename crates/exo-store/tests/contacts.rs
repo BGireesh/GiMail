@@ -1,4 +1,4 @@
-//! A contact's latest conversations: read from local mail, filled from Gmail's search.
+//! A contact's latest conversations, read from local mail and filled in from Gmail's search.
 
 mod support;
 
@@ -18,8 +18,8 @@ fn search(email: &str) -> ListQuery {
     }
 }
 
-/// Of the contacts of `list`'s threads, the one whose conversations Gmail has the most of, and
-/// how many.
+/// Among the contacts of the threads in `list`, the one Gmail has the most conversations with,
+/// and how many it has.
 async fn busiest_contact(harness: &Harness, list: &ListId) -> (String, usize) {
     let mut best = (String::new(), 0);
     for thread in harness.all(list).await {
@@ -41,7 +41,7 @@ fn ids(threads: &[RecentThread]) -> BTreeSet<String> {
         .collect()
 }
 
-/// The newest of `email`'s conversations Gmail lists, newest first.
+/// The newest conversations with `email` that Gmail lists, newest first.
 async fn newest_from_gmail(harness: &Harness, email: &str) -> Vec<String> {
     let page = harness
         .gmail
@@ -68,7 +68,7 @@ fn listed(threads: &[RecentThread]) -> Vec<String> {
 #[tokio::test]
 async fn local_mail_lists_the_newest_and_gmail_fills_in_older_ones() {
     let harness = Harness::start().await;
-    // Only the inbox is stored: the newest conversations, but not all five.
+    // Only the inbox is stored, which holds the newest conversations but not all five.
     harness.store.backfill(&ListId::Inbox, 100).await.unwrap();
     let (email, total) = busiest_contact(&harness, &ListId::Inbox).await;
     assert!(

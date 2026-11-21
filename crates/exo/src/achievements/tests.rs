@@ -17,7 +17,8 @@ fn marking_done_celebrates_the_levels_and_milestones_it_crosses_once() {
         })
     );
     assert!(is_new(Card::MarkedDone, &seen));
-    // 260 is a milestone of its own, past 100's level (with 100's step to the next).
+    // 260 is a milestone of its own. It's past the level at 100, so it takes that level's step
+    // to the next.
     assert_eq!(
         mark_done(&mut statistics, &mut seen, 210),
         Some(Reached {
@@ -26,7 +27,7 @@ fn marking_done_celebrates_the_levels_and_milestones_it_crosses_once() {
             next: 200
         })
     );
-    // Past 5,000, every 2,500.
+    // Past 5,000, a level comes every 2,500.
     statistics.archived_all_time = 7_400;
     assert_eq!(
         mark_done(&mut statistics, &mut seen, 200),
@@ -70,7 +71,7 @@ fn sends_celebrate_their_levels_and_numbers_and_count_weeks() {
         (statistics.sends_this_week, statistics.sends_week_max),
         (26, 26)
     );
-    // The next week, last week's count is last week's.
+    // In the next week, the week before's count becomes last week's.
     sent(&mut statistics, &mut seen, day("2026-11-23"));
     assert_eq!(sends_last_week(&statistics, day("2026-11-25")), 26);
     assert_eq!(sends_last_week(&statistics, day("2026-12-01")), 1);
@@ -130,7 +131,7 @@ fn inbox_zero_counts_days_and_the_weekly_streak() {
         ),
         (1, 1, 1)
     );
-    // The same day counts nothing more; the next day counts a day, not a week.
+    // The same day counts nothing more. The next day counts a day, not a week.
     assert!(!would_count(&statistics, day("2026-11-17")));
     let hit = hit_inbox_zero(&mut statistics, &mut seen, day("2026-11-18"));
     assert_eq!(
@@ -144,7 +145,7 @@ fn inbox_zero_counts_days_and_the_weekly_streak() {
             })
         }
     );
-    // The next week continues the streak; a week missed starts it again.
+    // The next week continues the streak. A missed week starts it again.
     let hit = hit_inbox_zero(&mut statistics, &mut seen, day("2026-11-23"));
     assert!(
         hit.week

@@ -1,5 +1,5 @@
-//! Writes of provider truth: what Gmail says threads and messages are. The outbox overlay is
-//! never written here; it's applied on read and when list membership is recomputed.
+//! Writes of provider truth, meaning what Gmail says threads and messages are. The outbox overlay
+//! is never written here. It's applied on read and when list membership is recomputed.
 //!
 //! Label writes only move forward in `historyId`, so history, backfill and the outbox can store
 //! what they fetched in any order and the newest copy wins.
@@ -15,14 +15,15 @@ use crate::parse::{Parsed, parse};
 use crate::sync::Rows;
 use crate::view::ThreadView;
 
-/// Stores a thread fetched for its rows, unless the local copy is newer: the messages it holds
-/// in full are stored whole, the rest as rows alone. Messages Gmail no longer lists are
+/// Stores a thread fetched for its rows, unless the local copy is newer. The messages it holds
+/// in full are stored whole, and the rest as rows alone. Messages Gmail no longer lists are
 /// deleted. Returns the thread id when something was written.
 pub(crate) async fn save_rows(exec: &mut dyn Executor, rows: &Rows) -> Result<Option<String>> {
     store_thread(exec, &rows.thread, |id| rows.full.contains(id)).await
 }
 
-/// Stores `thread`, the messages `full` holds as fetched in full and the rest as rows alone.
+/// Stores `thread`, with the messages that `full` picks as fetched in full and the rest as rows
+/// alone.
 async fn store_thread(
     exec: &mut dyn Executor,
     thread: &gmail::Thread,
@@ -60,9 +61,9 @@ async fn store_thread(
     Ok(Some(id))
 }
 
-/// Adds what a row alone lacks to the stored messages among `messages` (fetched in full) that
-/// lack it: body, attachments, every header. Their labels move forward as usual; nothing else
-/// changes, so a copy older than what history stored since can't undo it.
+/// Adds what a row alone lacks (body, attachments, every header) to the stored messages among
+/// `messages` (fetched in full) that lack it. Their labels move forward as usual. Nothing else
+/// changes, so a copy older than what history has stored since can't undo history's writes.
 pub(crate) async fn save_bodies(
     exec: &mut dyn Executor,
     messages: &[gmail::Message],
@@ -126,7 +127,8 @@ pub(crate) async fn set_labels(
 /// without the thread flickering back until the next history sync.
 pub(crate) async fn apply_step(exec: &mut dyn Executor, thread: &str, step: &Step) -> Result<()> {
     let rows = MessageRow::filter_by_thread_id(thread).exec(exec).await?;
-    // Which drafts are Exo's doesn't matter here: every message's labels are written back.
+    // Which drafts are Exo's doesn't matter here, because every message's labels are written
+    // back.
     let mut view = ThreadView::new(thread.to_owned(), rows, &[], &BTreeSet::new());
     view.apply(step);
     for message in view.all_messages() {
@@ -159,13 +161,14 @@ async fn upsert_message(exec: &mut dyn Executor, parsed: Parsed, stored: bool) -
                 .await?
                 .is_none()
         {
-            // Every header, not just the row's; the rest of the row is the same.
+            // Write every header, not just the row's. The rest of the row is the same.
             MessageRow::update_by_id(&message.id)
                 .headers(message.headers)
                 .has_attachments(message.has_attachments)
                 .exec(exec)
                 .await?;
-            // An evicted body's message kept its attachment rows: these have Gmail's ids now.
+            // A message whose body was evicted kept its attachment rows. They're replaced,
+            // because the new rows have Gmail's ids now.
             AttachmentRow::filter(AttachmentRow::fields().message_id().eq(&message.id))
                 .delete()
                 .exec(exec)
@@ -206,8 +209,8 @@ async fn upsert_message(exec: &mut dyn Executor, parsed: Parsed, stored: bool) -
     }
 }
 
-/// A message's attachment rows and body, which queues its conversation `thread` for the body's
-/// visible text (`crate::text`).
+/// Inserts a message's attachment rows and body, which queues its conversation `thread` for
+/// working out the body's visible text (`crate::text`).
 async fn insert_parts(
     exec: &mut dyn Executor,
     thread: &str,

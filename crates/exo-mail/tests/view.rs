@@ -66,7 +66,7 @@ fn tells_text_link_boxes_and_nothing_apart() {
     // The I-beam over text, the arrow past its end (Chromium's `cursor: auto`).
     assert_eq!(view.hit(10.0, 12.0), Some(Hit::Text));
     assert_eq!(view.hit(300.0, 12.0), None);
-    // A padded link is a link all over its box; a padded cell around a link isn't.
+    // A padded link is a link all over its box, but a padded cell around a link isn't.
     assert_eq!(
         view.hit(4.0, 30.0),
         link("https://example.com/button"),
@@ -110,11 +110,12 @@ fn selects_text() {
     assert_eq!(view.selected_text(), None);
 }
 
-/// A double click selects a word between Unicode word boundaries, as Chromium's ICU does (an
-/// apostrophe or a decimal point joins, a hyphen or a comma doesn't, a space is a word of its own),
-/// and a triple click the paragraph with its line break. Both start at the caret the click puts
-/// down, so the right half of a word's last letter takes the space after it. On this body that's
-/// `Don't`, `mail`, `,`, `3.14`, the space after `mail`, and `"Don't e-mail Bob, 3.14 now.\n"`.
+/// A double click selects a word between Unicode word boundaries, as Chromium's ICU does, and a
+/// triple click the paragraph with its line break. An apostrophe or a decimal point joins a word,
+/// a hyphen or a comma doesn't, and a space is a word of its own. Both start at the caret the click
+/// puts down, so the right half of a word's last letter takes the space after it. On this body
+/// that's `Don't`, `mail`, `,`, `3.14`, the space after `mail`, and
+/// `"Don't e-mail Bob, 3.14 now.\n"`.
 #[test]
 fn double_and_triple_clicks_select_words_and_paragraphs() {
     let body =
@@ -150,7 +151,7 @@ fn double_and_triple_clicks_select_words_and_paragraphs() {
 
 #[test]
 fn paints_tall_bodies_in_bands() {
-    // Marketing mail keeps its colors; 6000 CSS px is three bands at 2×.
+    // Marketing mail keeps its colors. 6000 CSS px is three bands at 2×.
     let body = rendered("<div align=\"center\" style=\"height:6000px;background:#00ff00\">x</div>");
     assert!(body.unquoted_is_marketing);
     let mut view = BodyView::new(&body, ViewOptions::default(), &fonts(), None);
@@ -222,7 +223,7 @@ fn loads_images_through_the_fetch_hook() {
 
 #[test]
 fn shrinks_slightly_wide_mail_to_fit() {
-    // 700px of table in a 640px column: it's zoomed to 640/700.
+    // 700px of table in a 640px column is zoomed to 640/700.
     let body = rendered(
         "<table width=\"700\" align=\"center\" style=\"height:70px\"><tr><td>x</td></tr></table>",
     );
@@ -258,7 +259,7 @@ fn fetches_only_web_and_attachment_urls() {
 
 #[test]
 fn too_wide_mail_scrolls_sideways_with_a_scrollbar_below_it() {
-    // A sale mail's 1200px table in a 640px column: wider than what gets shrunk.
+    // A sale mail's 1200px table in a 640px column is wider than what gets shrunk.
     let wide = rendered(
         "<table width=\"1200\" cellpadding=\"0\" cellspacing=\"0\" style=\"height:70px\"><tr>\
          <td width=\"1000\">x</td><td width=\"200\" style=\"background:#0000ff\"></td></tr></table>",
@@ -354,7 +355,7 @@ fn plays_animated_gifs_frame_by_frame() {
     view.layout(100.0, 2.0);
     assert_eq!(view.animations(), [[0.0, 0.0, 20.0, 20.0]]);
     assert_eq!(image_color(&mut view), RED);
-    // The clock starts when the image first shows; nothing moves off screen.
+    // The clock starts when the image first shows. Nothing moves off screen.
     let start = view.animate(ms(1000), 0.0..100.0);
     assert!(start.changed.is_empty());
     assert_eq!(start.next, Some(ms(1050)));
@@ -435,9 +436,9 @@ fn bounds_the_selection() {
 }
 
 /// Drags across a body of blocks, paragraphs, a list and a table, in window coordinates with the
-/// body's origin at (364.625, 161): a drag after a double or triple click extends by words or
-/// paragraphs, keeping the one clicked, and the text has a newline between blocks, a blank line
-/// after a paragraph, and tabs between table cells.
+/// body's origin at (364.625, 161). A drag after a double or triple click extends by words or
+/// paragraphs, keeping the one clicked. The text has a newline between blocks, a blank line after
+/// a paragraph, and tabs between table cells.
 #[test]
 fn drags_extend_by_the_clicks_granularity_and_copy_blocks_as_lines() {
     let body = rendered(
@@ -487,8 +488,9 @@ fn drags_extend_by_the_clicks_granularity_and_copy_blocks_as_lines() {
 }
 
 /// Link text breaks at the `<wbr>`s the pipeline puts after `.`, `@` and `/`, as Chromium lays them
-/// out (a zero width space): this body's first line shows as `Questions go to atencionalcliente@` /
-/// `parquewarner.com at any time.` The break isn't text: copying and find-in-page don't see it.
+/// out (a zero width space). This body's first line shows as
+/// `Questions go to atencionalcliente@` / `parquewarner.com at any time.` The break isn't text, so
+/// copying and find-in-page don't see it.
 #[test]
 fn link_text_breaks_at_word_break_opportunities() {
     let body = rendered(
@@ -532,9 +534,8 @@ fn rightmost(image: &exo_mail::Image, y: u32, matches: impl Fn(&[u8]) -> bool) -
 }
 
 /// Chromium paints a selected line break as a box a space wide after the line's text where the
-/// selection runs on past it into the next block, and not where the selection ends
-/// (`body-newline.eml`). The selection is Classic's: macOS's highlight in Snow, rgba(106, 134,
-/// 173, .996) in Carbon.
+/// selection runs on past it into the next block, and not where the selection ends. The selection
+/// is Classic's: macOS's highlight in Snow, rgba(106, 134, 173, .996) in Carbon.
 #[test]
 fn a_selection_paints_the_line_breaks_it_runs_past() {
     let select = |theme| {
@@ -558,8 +559,8 @@ fn a_selection_paints_the_line_breaks_it_runs_past() {
             .max()
             .expect("painted")
     };
-    // A space is 3.6px at 14px: 7 device pixels past the first block's text (whose last glyph's
-    // side bearing adds one or two), none past the end.
+    // A space is 3.6px at 14px, so the highlight runs 7 device pixels past the first block's text
+    // (whose last glyph's side bearing adds one or two), and none past the end.
     let past = |rows: std::iter::StepBy<std::ops::Range<u32>>| {
         end(rows.clone(), &highlight) - end(rows, &ink)
     };
@@ -579,8 +580,7 @@ fn a_selection_paints_the_line_breaks_it_runs_past() {
 }
 
 /// Underlines skip the ink of the glyphs that cross them, as Chromium's `text-decoration-skip-ink:
-/// auto` does (`body-skip-ink.eml`): under a run of `g`s, the line's row is cut around each
-/// descender.
+/// auto` does. Under a run of `g`s, the line's row is cut around each descender.
 #[test]
 fn underlines_skip_descenders() {
     let underline = |text: &str| {

@@ -84,7 +84,7 @@ pub struct ApiError {
 pub struct ErrorItem {
     /// Human-readable message.
     pub message: String,
-    /// Usually `global`; absent on some validation errors.
+    /// Usually `global`, and absent on some validation errors.
     pub domain: Option<String>,
     /// Machine-readable reason, e.g. `notFound`, `invalidArgument`, `authError`.
     pub reason: String,

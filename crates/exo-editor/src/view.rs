@@ -5,10 +5,10 @@
 //! indent 40px and keep 16px above and below the outermost list (margins collapse as CSS collapses
 //! them); quotes pad 1.25em with a 1px bar; indents are 40px.
 //!
-//! An inline image is laid out as one wide glyph: a space in its own section, sized so its
-//! advance is the image's width, so egui wraps lines around it as it wraps words. Its height
-//! then grows its line box as Chromium's does: the image sits on the baseline, and the line is
-//! as tall as the image above it and the text's leading and descent below. A table the
+//! An inline image is laid out as one wide glyph, a space in its own section sized so its advance
+//! is the image's width, so egui wraps lines around it as it wraps words. Its height then grows
+//! its line box as Chromium's does. The image sits on the baseline, and the line is as tall as the
+//! image above it plus the text's leading and descent below. A table the
 //! editor keeps whole is such a glyph too, as wide as its block and as tall as Blitz lays the
 //! table out ([`table`]).
 
@@ -40,7 +40,7 @@ use crate::{
     undo::UndoMark,
 };
 
-/// `ol, ul { margin: 16px 0 }`; nested lists have none.
+/// `ol, ul { margin: 16px 0 }`, which nested lists don't have.
 const LIST_MARGIN: f32 = 16.0;
 /// The UA's `padding-inline-start` for lists.
 const LIST_INDENT: f32 = 40.0;
@@ -73,9 +73,9 @@ pub struct BodyText {
 }
 
 impl BodyText {
-    /// Compose's: 14px, forced 24px lines, the content area the ascent and descent at 14px
-    /// (12 + 5) centred with the odd pixel of leading below (`y = line top + 3`, `height 17`),
-    /// the placeholder at `.45`.
+    /// Compose's: 14px in forced 24px lines, with the content area (the ascent and descent at
+    /// 14px, 12 + 5) centred and the odd pixel of leading below (`y = line top + 3`, `height 17`),
+    /// and the placeholder at `.45`.
     pub const COMPOSE: Self = Self {
         style: TextStyle::new(Font::new(Family::SansEmail, 400), 14.0, 24.0),
         content_top: 3.0,
@@ -83,8 +83,8 @@ impl BodyText {
         placeholder_opacity: 0.45,
     };
 
-    /// 12px in 20px lines, as the Out of Office Reply's message sets it: the content area 2px
-    /// down and 15px tall, the placeholder black at `.55`.
+    /// 12px in 20px lines, as the Out of Office Reply's message sets it, with the content area 2px
+    /// down and 15px tall and the placeholder black at `.55`.
     pub const SMALL: Self = Self {
         style: TextStyle::new(Font::new(Family::SansEmail, 400), 12.0, 20.0),
         content_top: 2.0,
@@ -92,9 +92,9 @@ impl BodyText {
         placeholder_opacity: 0.55,
     };
 
-    /// A code block's (`pre`): `pre { font-family: "Exo Mono Email"; font-size: 14px;
-    /// letter-spacing: -0.02em; line-height: 20px }` (the email CSS), the content area 1px down
-    /// and 17px tall.
+    /// A code block's (`pre`), from the email CSS's `pre { font-family: "Exo Mono Email";
+    /// font-size: 14px; letter-spacing: -0.02em; line-height: 20px }`, with the content area 1px
+    /// down and 17px tall.
     pub const CODE: Self = Self {
         style: TextStyle::new(Font::new(Family::MonoEmail, 400), 14.0, 20.0).letter_spacing(-0.28),
         content_top: 1.0,
@@ -116,7 +116,7 @@ impl Default for BodyText {
 /// How the widget looks and sizes itself, beyond the theme.
 #[derive(Clone, Debug, Default)]
 pub struct EditorStyle {
-    /// Shown while the body is empty (`Say hello`, `Write a note`, …); `None` for none.
+    /// Shown while the body is empty (`Say hello`, `Write a note`, …), or `None` for none.
     pub placeholder: Option<String>,
     /// The least height the widget takes.
     pub min_height: f32,
@@ -136,11 +136,11 @@ pub struct EditorResponse {
     pub undone: Vec<UndoMark>,
     /// Marks of changes redone this frame.
     pub redone: Vec<UndoMark>,
-    /// Escape the editor didn't need (no dropdown, ghost text or toolbar to close): the compose
-    /// form's to handle.
+    /// Escape the editor didn't need (no dropdown, ghost text or toolbar to close), for the compose
+    /// form to handle.
     pub escaped: bool,
-    /// ↓ or → at the very end of the body: the compose form moves on to the quote's `…` when it
-    /// shows one.
+    /// ↓ or → at the very end of the body, where the compose form moves on to the quote's `…` when
+    /// it shows one.
     pub past_end: bool,
     /// A toolbar button clicked this frame (for its hint).
     pub toolbar: Option<crate::ToolbarAction>,
@@ -150,11 +150,11 @@ pub struct EditorResponse {
     pub context_menu: Option<ContextMenu>,
     /// A word autocorrect's pill learned (`Learned "{word}"`).
     pub learned: Option<String>,
-    /// The detected date the caret is on, while the editor has the keyboard: the app shows its day
+    /// The detected date the caret is on, while the editor has the keyboard. The app shows its day
     /// and moves it with ⌘⇧– and ⌘⇧= ([`Editor::shift_date`]).
     pub date: Option<crate::ActiveDate>,
-    /// Text the Mac's drag let go on the editor went in ([`exo_ui::text_drag`]): it takes the
-    /// keyboard, as a click would give it.
+    /// Whether text the Mac's drag let go on the editor went in ([`exo_ui::text_drag`]), so the
+    /// editor takes the keyboard, as a click would give it.
     pub dropped: bool,
 }
 
@@ -169,7 +169,7 @@ pub struct ContextMenu {
     pub misspelling: Option<Misspelling>,
     /// The selected text, once the click has selected the word under it.
     pub selection: String,
-    /// Where the selection's first line of text starts on screen: its baseline's left end, which
+    /// Where the selection's first line of text starts on screen, at its baseline's left end, which
     /// Look Up's popover lines its own text up with.
     pub selection_baseline: Pos2,
     /// The selection's text size, for Look Up.
@@ -179,9 +179,9 @@ pub struct ContextMenu {
 /// What a key did beyond editing.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum KeyEffect {
-    /// ⌘Z undid a change; its marks.
+    /// ⌘Z undid a change, with its marks.
     Undone(Vec<UndoMark>),
-    /// ⌘⇧Z or ⌘Y redid one; its marks.
+    /// ⌘⇧Z or ⌘Y redid one, with its marks.
     Redone(Vec<UndoMark>),
     /// Escape had nothing to close in the editor.
     Escaped,
@@ -233,8 +233,8 @@ pub(crate) struct ViewState {
     text_drag: Option<drag::TextDrag>,
     /// Where text another drag has over the editor would go.
     drag_over: Option<Pos>,
-    /// The selection the pointer last made by words (a double click, and its drag): dropped,
-    /// it's put in smartly.
+    /// The selection the pointer last made by words (a double click, and its drag), which is put
+    /// in smartly when dropped.
     word_selection: Option<Selection>,
 }
 
@@ -329,7 +329,7 @@ struct Placed {
     offset: usize,
     /// Its content box, from the block's text origin (`left`, `top`).
     rect: Rect,
-    /// Its column of its line box (its padding box across, the line box down), where a
+    /// The column it takes in its line box (its padding box across, the line box down), where a
     /// selection paints its tint rather than the text's highlight.
     column: Rect,
     /// Its pixels' key ([`ImageSource::key`]).
@@ -362,7 +362,7 @@ enum Marker {
 /// The theme's colours for user content.
 struct Colors {
     text: Color32,
-    /// A quote's text: `blockquote:not([style*="border:none"])` in `.sh-unquoted-content`.
+    /// A quote's text, in a `blockquote:not([style*="border:none"])`.
     quote_text: Color32,
     quote: Color32,
     bar: Color32,
@@ -377,8 +377,8 @@ impl Colors {
     fn of(ctx: &egui::Context) -> Self {
         let palette = exo_ui::palette(ctx);
         match exo_ui::theme(ctx) {
-            // `.sh-color-black`: rgba(0,0,0,.9); the quote bar rgb(237,237,237); `::selection`
-            // #b4d5fe; the prediction rgba(0,0,0,.45).
+            // The text is rgba(0,0,0,.9), the quote bar rgb(237,237,237), `::selection` #b4d5fe
+            // and the prediction rgba(0,0,0,.45).
             Theme::Snow => Self {
                 text: Color32::from_rgba_unmultiplied(0, 0, 0, 230),
                 quote_text: Color32::from_rgba_unmultiplied(0, 0, 0, 153),
@@ -399,7 +399,7 @@ impl Colors {
                 rule: Color32::from_rgb(0x5f, 0x61, 0x65),
                 selection: Color32::from_rgba_unmultiplied(106, 134, 173, 254),
                 // Carbon's selection over an image, `color-mix(…, transparent 50%)`, for every
-                // image: an opaque one would hide it whole.
+                // image, because an opaque one would hide the image whole.
                 image_selection: Color32::from_rgba_unmultiplied(106, 134, 173, 127),
                 ghost: Color32::from_rgba_unmultiplied(255, 255, 255, 102),
             },
@@ -420,7 +420,7 @@ impl Editor {
     }
 
     /// Whether Escape has something to close in the editor (a trigger's dropdown, ghost text,
-    /// the toolbar, the link popover); otherwise it's the compose form's.
+    /// the toolbar, the link popover). Otherwise Escape is the compose form's.
     pub fn wants_escape(&self) -> bool {
         self.trigger.is_some()
             || self.ghost.is_some()
@@ -437,8 +437,9 @@ impl Editor {
         self.ghost.is_some() || self.pill_wants_tab()
     }
 
-    /// The document's height at `width`, its left edge at `left` on screen: what [`Self::ui`]
-    /// will lay it out to (the layout is kept for it), for callers placing things below.
+    /// The document's height at `width`, with its left edge at `left` on screen, for callers
+    /// placing things below. It's what [`Self::ui`] will lay the document out to (the layout is
+    /// kept for it).
     pub fn height(&mut self, ui: &Ui, width: f32, left: f32) -> f32 {
         let colors = Colors::of(ui.ctx());
         self.layout(ui, width, &colors, left).height
@@ -454,8 +455,8 @@ impl Editor {
         let height = layout_height.max(style.min_height);
         let (rect, response) = ui.allocate_exact_size(vec2(width, height), Sense::click_and_drag());
         let response = response.on_hover_cursor(egui::CursorIcon::Text);
-        // A click on the toolbar or the link popover keeps the editor's focus, as their
-        // `mousedown`'s `preventDefault` does; egui would surrender it to the click.
+        // A click on the toolbar or the link popover keeps the editor's focus, as a cancelled
+        // `mousedown` does in a browser. Otherwise egui would surrender it to the click.
         let overlays = std::mem::take(&mut self.view.toolbar.rects);
         if !response.has_focus()
             && ui.memory(|memory| memory.had_focus_last_frame(response.id))
@@ -496,10 +497,11 @@ impl Editor {
         if response.has_focus() || focused {
             self.keyboard(ui, &mut out);
         } else {
-            // A composition ends with focus: its commit or cancel goes to whatever has it now.
+            // A composition ends with focus, so its commit or cancel goes to whatever has focus
+            // now.
             self.view.preedit = None;
         }
-        // Input may have changed the document: lay out again before painting.
+        // Input may have changed the document, so lay out again before painting.
         self.layout(ui, width, &colors, rect.min.x);
         if self.update_spelling(response.has_focus()) {
             ui.ctx().request_repaint();
@@ -527,7 +529,8 @@ impl Editor {
         self.paint_text_drag(ui, rect.min, colors.text);
         if response.has_focus() {
             self.resizer(ui, rect.min, id);
-            // A resize changed the document: what's laid out next frame is what it painted.
+            // A resize changed the document, so what's laid out next frame is what the resize
+            // painted.
             self.layout(ui, width, &colors, rect.min.x);
         }
         out.caret = self.caret_rect(rect.min, ui.pixels_per_point());
@@ -541,7 +544,7 @@ impl Editor {
         );
         let selection = toolbar::anchor(&text_boxes);
         out.toolbar = self.show_toolbar(ui, selection, response.has_focus());
-        // Without it, a caret in a link shows the link popover under the link.
+        // Without the toolbar, a caret in a link shows the link popover under the link.
         let link = if response.has_focus() && !self.view.toolbar.visible {
             self.popover_link()
         } else {
@@ -717,7 +720,7 @@ impl Editor {
                 colors.bar,
             );
         }
-        // Selection, under the text; a focused image shows the resizer instead.
+        // The selection goes under the text, and a focused image shows the resizer instead.
         let focused_image = self.focused_image();
         if !self.selection.is_collapsed() && focused_image.is_none() {
             for (highlight, _) in self.selection_rects(rect.min) {
@@ -845,10 +848,10 @@ impl Editor {
         }
     }
 
-    /// The caret's box on screen, for an editor whose top left is `origin`: Chromium's caret
-    /// rect, the font's content area in the line box (ascent + descent, 17px, 3px down), 1px
-    /// wide on a whole device pixel. Beside an image with no text on either side, the caret is
-    /// the image's box side, its whole line box tall.
+    /// The caret's box on screen, for an editor whose top left is `origin`. It's Chromium's caret
+    /// rect, the font's content area in the line box (ascent + descent, 17px, 3px down), 1px wide
+    /// on a whole device pixel. Beside an image with no text on either side, the caret is the side
+    /// of the image's box, as tall as the whole line box.
     fn caret_rect(&self, origin: Pos2, pixels_per_point: f32) -> Rect {
         self.caret_rect_at(origin, pixels_per_point, self.selection.focus)
     }
@@ -872,11 +875,11 @@ impl Editor {
         )
     }
 
-    /// Whether the caret at `pos` is an image's box side (Chromium's caret beside an atomic
-    /// inline): an image on one side and no text on either.
+    /// Whether the caret at `pos` is the side of an image's box (Chromium's caret beside an atomic
+    /// inline), which it is with an image on one side and no text on either.
     fn caret_on_image_side(&self, pos: Pos) -> bool {
         let block = &self.doc.blocks[pos.block];
-        // A kept table is a block-level atom: the caret is its box's side.
+        // A kept table is a block-level atom, so the caret is the side of its box.
         if matches!(block.content, Content::Raw { .. }) {
             return true;
         }
@@ -894,7 +897,7 @@ impl Editor {
         !text(&before) && !text(&after) && (image(&before) || image(&after))
     }
 
-    /// The box of the line position `pos` is at: zero wide, a line box tall.
+    /// The box of the line position `pos` is at, zero wide and a line box tall.
     fn char_rect(&self, origin: Pos2, pos: Pos) -> Rect {
         self.line_at(origin, pos).0
     }
@@ -908,8 +911,7 @@ impl Editor {
         let Some(view) = layout.blocks.get(pos.block) else {
             return (Rect::NOTHING, 0.0);
         };
-        // The caret goes before ghost text (`span.sh-autocomplete-prediction` after it), after a
-        // composition.
+        // The caret goes before ghost text, after a composition.
         let ghost = self.ghost.is_some()
             && self.view.preedit.is_none()
             && view.insert.is_some_and(|(at, _)| at == pos.offset);
@@ -936,7 +938,7 @@ impl Editor {
         )
     }
 
-    /// The image at `at`'s box on screen, for an editor at `origin`.
+    /// The box of the image at `at` on screen, for an editor at `origin`.
     pub(crate) fn image_rect(&self, origin: Pos2, at: Pos) -> Option<Rect> {
         let view = self.view.layout.as_ref()?.blocks.get(at.block)?;
         let placed = view
@@ -964,8 +966,6 @@ impl Editor {
         })
     }
 
-    /// Paints block `index`'s images (laid out in `view`, its text origin at `top_left`), and the
-    /// selection's tint over those selected, if `tint`.
     /// The keys of the images whose boxes are in `clip`, for an editor at `origin`.
     fn images_on_screen(&self, origin: Pos2, clip: Rect) -> std::collections::HashSet<String> {
         let Some(layout) = &self.view.layout else {
@@ -987,6 +987,8 @@ impl Editor {
             .collect()
     }
 
+    /// Paints block `index`'s images (laid out in `view`, its text origin at `top_left`), and the
+    /// selection's tint over those selected, if `tint`.
     fn paint_images(
         &self,
         painter: &egui::Painter,
@@ -1051,7 +1053,7 @@ impl Editor {
                     );
                 }
             }
-            // Chromium tints a selected image's column of its line box, over the image.
+            // Chromium tints the column a selected image takes in its line box, over the image.
             let at = Pos::new(index, placed.offset);
             if tint && at >= start && at < end {
                 let column = exo_ui::pixel_snap(placed.column.translate(top_left.to_vec2()));
@@ -1091,15 +1093,15 @@ impl Editor {
         }
     }
 
-    /// The selection's highlight boxes: per line, the selected text's span in a full line box,
-    /// plus a space's width past the end of each line the selection continues past; each with how
-    /// far its line's text is moved down for its images.
+    /// The selection's highlight boxes. Each line gets the selected text's span in a full line
+    /// box, plus a space's width past its end when the selection continues past it. Each box comes
+    /// with how far its line's text is moved down for its images.
     fn selection_rects(&self, origin: Pos2) -> Vec<(Rect, f32)> {
         self.range_rects(origin, self.selection.start(), self.selection.end())
     }
 
-    /// The text's boxes from `start` to `end`: the font's content area in each line box (the body's
-    /// 17px, 3px down).
+    /// The text's boxes from `start` to `end`, which are the font's content area in each line box
+    /// (the body's 17px, 3px down).
     fn text_boxes(&self, origin: Pos2, start: Pos, end: Pos) -> Vec<Rect> {
         let body = self.view.body;
         self.range_rects(origin, start, end)
@@ -1156,8 +1158,8 @@ impl Editor {
                     view.document_offset(row_end),
                 );
                 let (s, e) = (from.max(a), to.min(b));
-                // Past a hard line end the selection paints the line break as a space; past a
-                // soft wrap it paints nothing more.
+                // Past a hard line end, the selection paints the line break as a space. Past a
+                // soft wrap, it paints nothing more.
                 let last_row = row_index + 1 == view.galley.rows.len();
                 let continues =
                     (to > b || index < end.block) && (last_row || row.ends_with_newline);
@@ -1172,8 +1174,9 @@ impl Editor {
                 }
                 let line = view.lines[row_index];
                 let y = top + line.top;
-                // Chromium paints the whole line box, its edges on whole CSS pixels, inside the
-                // block; an image's column gets the image's tint instead ([`Self::paint_images`]).
+                // Chromium paints the whole line box inside the block, with its edges on whole CSS
+                // pixels. An image's column gets the image's tint instead
+                // ([`Self::paint_images`]).
                 let right = (left + x1).min(origin.x + layout.width);
                 let mut from_x = left + x0;
                 for placed in view
@@ -1224,7 +1227,7 @@ impl Editor {
         }
         let x = local.x - view.left + view.phase;
         let y = (local.y - view.top).clamp(0.0, view.height - 1.0);
-        // The galley's rows are a plain line apart; find the line box `y` is in.
+        // The galley's rows are a plain line apart, so find the line box `y` is in.
         let line = view.text.line();
         let row = view
             .lines
@@ -1350,12 +1353,13 @@ impl Editor {
         }
     }
 
-    /// A right-click at `point`, for an editor at `origin`: a click outside the selection selects
+    /// A right-click at `point`, for an editor at `origin`. A click outside the selection selects
     /// the word under it, or puts the caret there off a word, as a Mac's does
-    /// (`SelectClosestWordOrLinkFromMouseEvent`), then the menu is the app's to show.
+    /// (`SelectClosestWordOrLinkFromMouseEvent`). Then the app shows the menu.
     fn right_click(&mut self, ui: &Ui, origin: Pos2, point: Pos2) {
         let pos = self.hit(origin, point);
-        // The character under the pointer: before the caret position when left of it.
+        // The character under the pointer is the one before the caret position when the pointer
+        // is left of that position.
         let before = pos.offset > 0 && point.x < self.char_rect(origin, pos).min.x;
         let under = Pos::new(pos.block, pos.offset - usize::from(before));
         let over_selection = self.selection.start() <= under
@@ -1512,7 +1516,7 @@ impl Editor {
         }
     }
 
-    /// The selection as a copy writes it in HTML: bare list items in their lists.
+    /// The selection as a copy writes it in HTML, with bare list items in their lists.
     pub(crate) fn selection_markup(&self) -> String {
         let blocks = self
             .doc
@@ -1526,11 +1530,12 @@ impl Editor {
         out
     }
 
-    /// Handles a key press as the widget does when it has focus: what a keystroke script (or a
-    /// test) drives the editor with. Text keys go through [`Editor::type_text`].
+    /// Handles a key press as the widget does when it has focus. A keystroke script (or a test)
+    /// drives the editor with it. Text keys go through [`Editor::type_text`].
     pub fn press(&mut self, key: Key, modifiers: Modifiers) -> Option<KeyEffect> {
         // A modifier pressed on its own (egui reports Shift, ⌘ and the rest as keys) does
-        // nothing, as in a browser: it mustn't forget the caret's column before Shift+↓.
+        // nothing, as in a browser. It mustn't make the editor forget the caret's column before
+        // Shift+↓.
         if matches!(
             key,
             Key::ShiftLeft
@@ -1814,7 +1819,7 @@ impl Editor {
         if y > layout.height {
             return self.doc.end();
         }
-        // Skip margins between blocks: land in the nearest line box.
+        // Skip margins between blocks by landing in the nearest line box.
         let target_y = layout
             .blocks
             .iter()
@@ -1949,7 +1954,7 @@ struct Face {
     metrics: LineMetrics,
     /// A space's advance per px of font size, which sizes an image's glyph.
     space_em: f32,
-    /// Where egui puts the face's baseline in a row: every face's glyphs go there.
+    /// Where egui puts the face's baseline in a row, which is where every face's glyphs go.
     baseline: f32,
 }
 
@@ -2023,8 +2028,8 @@ fn image_boxes(block: &Block, pictures: &Pictures, container: f32) -> Vec<ImageB
         .collect()
 }
 
-/// Each galley row's line box, grown for its images (CSS 2.1 section 10.8): the strut's line box,
-/// and each image's box from the baseline, the line as tall as both reach.
+/// Each galley row's line box, grown for its images (CSS 2.1 section 10.8). It spans the strut's
+/// line box and each image's box from the baseline, as tall as both reach.
 fn line_boxes(
     galley: &Galley,
     images: &[(usize, ImageBox)],
@@ -2035,7 +2040,8 @@ fn line_boxes(
     let (mut start, mut top) = (0, 0.0);
     for row in &galley.rows {
         let end = start + row.char_count_including_newline().0;
-        // A `display: block` image alone on its row is a block box: no strut, no line around it.
+        // A `display: block` image alone on its row is a block box, with no strut and no line
+        // around it.
         let alone = row.char_count_excluding_newline().0 == 1
             && images
                 .iter()
@@ -2071,10 +2077,10 @@ fn line_boxes(
     out
 }
 
-/// Where each image lands: where the pen is at its glyph, on its line's baseline. The pen is
-/// the sum of the advances before it in its row (each row is painted from the text's origin):
-/// egui puts a glyph on the whole pixel left of it, which would put an image up to a pixel left
-/// of where Chromium draws it.
+/// Where each image lands, which is where the pen is at its glyph, on its line's baseline. The pen
+/// is the sum of the advances before the glyph in its row (each row is painted from the text's
+/// origin). egui puts a glyph on the whole pixel left of the pen, which would put an image up to a
+/// pixel left of where Chromium draws it.
 fn place_images(
     block: &Block,
     galley: &Galley,
@@ -2083,7 +2089,7 @@ fn place_images(
     lines: &[LineBox],
     metrics: LineMetrics,
 ) -> Vec<Placed> {
-    // Each image's pixels' key; a kept table's are its own.
+    // The key of each image's pixels. A kept table's key is its own.
     let keys: Vec<Option<String>> = match &block.content {
         Content::Raw { .. } => vec![None],
         _ => block
@@ -2137,7 +2143,7 @@ fn place_images(
         .collect()
 }
 
-/// `px` as Chromium's layout holds a length: to the nearest 1/64 px (`LayoutUnit`), which puts
+/// `px` as Chromium's layout holds a length, to the nearest 1/64 px (`LayoutUnit`), which puts
 /// what follows text (an image, a button's edge) where Chromium snaps it.
 fn layout_unit(px: f32) -> f32 {
     (px * 64.0).round() / 64.0
@@ -2375,10 +2381,10 @@ fn lay_out(
     }
 }
 
-/// Puts every glyph on the body's baseline (where egui would hang an italic run higher than the
-/// text around it; `exo_ui::align_baselines`) and every wrapped row at the text's sub-pixel
-/// phase: only the first row carries the phase `exo_ui::paint_job` lays text out at, so later
-/// rows would start half a pixel off.
+/// Puts every glyph on the body's baseline, where egui would hang an italic run higher than the
+/// text around it (`exo_ui::align_baselines`), and every wrapped row at the text's sub-pixel
+/// phase. Only the first row carries the phase `exo_ui::paint_job` lays text out at, so later
+/// rows would otherwise start half a pixel off.
 fn align_rows(galley: &mut Arc<Galley>, baseline: f32, phase: f32) {
     exo_ui::align_baselines(galley, baseline);
     if galley.rows.len() > 1 && phase != 0.0 {
@@ -2435,7 +2441,8 @@ fn row_jobs(job: &LayoutJob, galley: &Galley, phase: f32, body: &BodyText) -> Ve
     out
 }
 
-/// A container's vertical margin: 16px for a list not inside another list, a code block's.
+/// A container's vertical margin, which is 16px for a list not inside another list, or a code
+/// block's.
 fn container_margin(block: &Block, container: &crate::model::Container) -> f32 {
     match container.element.container_kind() {
         ContainerKind::Code => return CODE_MARGIN,
@@ -2453,8 +2460,8 @@ fn container_margin(block: &Block, container: &crate::model::Container) -> f32 {
     if nested { 0.0 } else { LIST_MARGIN }
 }
 
-/// A list item's marker: from its `list-style-type`, else by nesting (`ul ul` circle, deeper
-/// square); numbers count the items before it in its list.
+/// A list item's marker, from its `list-style-type` or else by nesting (`ul ul` circle, deeper
+/// square). Numbers count the items before it in its list.
 fn list_marker(
     block: &Block,
     ordinals: &mut std::collections::HashMap<u32, u32>,
@@ -2541,8 +2548,8 @@ fn roman(mut n: u32) -> String {
     out
 }
 
-/// Paints a list marker in the first line box at `line_top_left` (the item's text start):
-/// Chromium's shapes for disc, circle and square, text for numbers.
+/// Paints a list marker in the first line box at `line_top_left` (the item's text start), using
+/// Chromium's shapes for disc, circle and square, and text for numbers.
 fn paint_marker(
     painter: &egui::Painter,
     marker: &Marker,
@@ -2566,9 +2573,9 @@ fn paint_marker(
             );
         }
         shape => {
-            // `ListMarker::RelativeSymbolMarkerRect`: a (ascent·2/3 + 1)/2 = 4px bullet whose box
-            // ends 11.375px before the text and sits 2px above the baseline at every nesting
-            // level, on whole device pixels.
+            // As in `ListMarker::RelativeSymbolMarkerRect`, a (ascent·2/3 + 1)/2 = 4px bullet
+            // whose box ends 11.375px before the text and sits 2px above the baseline at every
+            // nesting level, on whole device pixels.
             let pixels = painter.pixels_per_point();
             let left = ((line_top_left.x - 15.375) * pixels).round() / pixels;
             let rect = Rect::from_min_size(pos2(left, baseline - 6.0), Vec2::splat(4.0));
@@ -2660,10 +2667,10 @@ struct BlockJob {
     images: Vec<(usize, usize)>,
 }
 
-/// One block's text as an egui job, with `splice` (IME or ghost text) inserted at its offset,
-/// and each image (`images`, in order) a space whose advance is the image's width (a space
-/// `space_em` px of font size wide), transparent, in a line box of the text's. A line doesn't
-/// break inside one of its `dates` (`.sh-date { white-space: nowrap }`).
+/// One block's text as an egui job, with `splice` (IME or ghost text) inserted at its offset. Each
+/// image (`images`, in order) becomes a transparent space whose advance is the image's width (a
+/// space is `space_em` px of font size wide), in a line box of the text's. A line doesn't break
+/// inside one of its `dates` (`white-space: nowrap`).
 #[expect(
     clippy::too_many_arguments,
     reason = "the layout's inputs, each its own"
@@ -2693,8 +2700,8 @@ fn block_job(
         }],
         Content::Rule => Vec::new(),
     };
-    // Spaces a browser would collapse are `&nbsp;`s, which egui mustn't break a line at; a
-    // code block's are all plain.
+    // Spaces a browser would collapse are `&nbsp;`s, which egui mustn't break a line at. A
+    // code block's spaces are all plain.
     let mut spaces = if block.in_code() {
         vec![false; runs.iter().map(|run| run.piece.len()).sum()]
     } else {

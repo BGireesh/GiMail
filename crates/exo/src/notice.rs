@@ -1,8 +1,8 @@
 //! Alerts that only tell you something, with one button: ⌘K's `Version Info`, which ⌘C copies,
-//! a deep link Exo doesn't know's `Update Required`, and the alerts of ⌘K's `Check for Updates`
+//! `Update Required` for a deep link Exo doesn't know, and the alerts of ⌘K's `Check for Updates`
 //! (also the `upgrade` deep link's), which say how the updater's check goes
-//! ([`crate::update`]). Enter, ⌘Enter, Space and Escape close them; nothing else gets through
-//! while one is up. Also ⌘K's `Open Source Attribution`, which opens Exo's notices.
+//! ([`crate::update`]). Enter, ⌘Enter, Space and Escape close them, and nothing else gets
+//! through while one is up. Also ⌘K's `Open Source Attribution`, which opens Exo's notices.
 
 use egui::{Color32, Rect, pos2};
 use exo_commands::{Command, Commands, Hint, Region};
@@ -18,8 +18,8 @@ const SUBTEXT_INK: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 128);
 const SUBTEXT_BELOW_TEXT: f32 = 16.0;
 /// `Update Required`'s `<strong>`s.
 const STRONG: TextStyle = TextStyle::new(Font::new(Family::Sans, 700), 14.0, 20.0);
-/// `Update Required`'s text, its `<strong>`s marked, a line each as Chromium breaks them at the
-/// alert's 300px.
+/// The text of `Update Required`, with its `<strong>`s marked, a line each as Chromium breaks
+/// them at the alert's 300px.
 const UPDATE_REQUIRED: [&[(&str, bool)]; 3] = [
     &[
         ("To see this feature, hit ", false),
@@ -53,7 +53,7 @@ pub enum Notice {
 pub enum Action {
     /// ⌘K's `Version Info`.
     VersionInfo,
-    /// ⌘K's `Open Source Attribution`: Exo's third-party notices.
+    /// ⌘K's `Open Source Attribution`, which opens Exo's third-party notices.
     OpenSourceAttribution,
     /// ⌘K's `Check for Updates`, and the `upgrade` deep link.
     CheckForUpdates,
@@ -91,8 +91,8 @@ impl Notice {
     }
 }
 
-/// `Version Info`, `Open Source Attribution` and, when Exo updates itself, `Check for Updates`;
-/// and the open alert's keys.
+/// Registers `Version Info`, `Open Source Attribution` and, when Exo updates itself,
+/// `Check for Updates`, and the open alert's keys.
 pub(crate) fn register(
     commands: &mut Commands<commands::Action>,
     open: Option<Notice>,
@@ -138,8 +138,8 @@ pub(crate) fn register(
     }
 }
 
-/// Where Exo's third-party notices are: in `Exo.app`'s resources (`fastlane build`), else the
-/// checkout's.
+/// Where Exo's third-party notices are, which is in `Exo.app`'s resources (`fastlane build`), or
+/// else in the checkout.
 fn notices() -> std::path::PathBuf {
     let bundled = std::env::current_exe().ok().and_then(|exe| {
         Some(
@@ -191,7 +191,7 @@ impl crate::Mail {
         }
     }
 
-    /// The alert on screen, if any: the updater's check's, over any other.
+    /// The alert on screen, if any, with the updater's check's alert over any other.
     pub fn notice(&self) -> Option<Notice> {
         self.updates
             .as_ref()
@@ -200,7 +200,7 @@ impl crate::Mail {
             .or(self.notice)
     }
 
-    /// Checks for updates with `updates` (`None`: Exo doesn't update itself, and ⌘K has no
+    /// Checks for updates with `updates` (`None` when Exo doesn't update itself, and ⌘K has no
     /// `Check for Updates`).
     pub fn set_updates(&mut self, updates: Option<update::Updates>) {
         self.updates = updates;

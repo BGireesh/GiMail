@@ -1,6 +1,6 @@
 //! Back and forward through where the user has been: ⌘[ or ⌘← goes back, ⌘] or ⌘→ forward, and
 //! Backspace in the list goes back. The history has a place for each list shown and each
-//! conversation opened, up to 50; going back to one shows that list, with that conversation open
+//! conversation opened, up to 50. Going back to one shows that list, with that conversation open
 //! or none. Escape from a conversation goes back to the list it was opened from rather than
 //! adding the list again, so forward opens the conversation again.
 //!
@@ -29,9 +29,9 @@ pub(crate) struct History {
 }
 
 impl History {
-    /// `place` is on screen. A new one goes after the current place, dropping those ahead of it,
-    /// except a conversation's list after it, which goes back to where the conversation was
-    /// opened (and the conversations after it, from J and K).
+    /// `place` is on screen. A new one goes after the current place, dropping those ahead of it.
+    /// The exception is a conversation's list right after that conversation (or the ones J and K
+    /// went on to from it), which goes back to where the conversation was opened.
     pub(crate) fn visit(&mut self, place: Place) {
         if self.places.get(self.current) == Some(&place) {
             return;
@@ -123,7 +123,7 @@ impl crate::Mail {
         }
     }
 
-    /// Backspace in the list: back, as ⌘[ goes.
+    /// Backspace in the list goes back, as ⌘[ does.
     pub(crate) fn history_back(&mut self) {
         if let Some(place) = self.history.back() {
             self.go_to(place);
@@ -137,7 +137,7 @@ impl crate::Mail {
         }
     }
 
-    /// Shows `place`: its list, with its conversation open or none.
+    /// Shows `place`, which is its list with its conversation open or none.
     pub(crate) fn go_to(&mut self, place: Place) {
         if place.list != self.list {
             self.close_thread();

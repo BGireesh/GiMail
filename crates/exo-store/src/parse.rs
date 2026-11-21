@@ -15,9 +15,10 @@ pub(crate) struct Parsed {
     pub body: Option<BodyRow>,
 }
 
-/// Flattens a message fetched with `format=full`, or when not `full`, with `format=metadata`:
-/// its row alone, from the headers Gmail sent, with no body or attachments. `None` for a chat
-/// message (Exo ignores chats), or without an id or thread id.
+/// Flattens a message fetched with `format=full`. When not `full`, the message was fetched with
+/// `format=metadata`, and this returns its row alone, built from the headers Gmail sent, with no
+/// body or attachments. `None` for a chat message (Exo ignores chats), or for one without an id
+/// or thread id.
 pub(crate) fn parse(message: &Message, full: bool) -> Option<Parsed> {
     if message.label_ids.iter().any(|label| label == CHAT) {
         return None;
@@ -32,7 +33,7 @@ pub(crate) fn parse(message: &Message, full: bool) -> Option<Parsed> {
     let mut attachments = Vec::new();
     let mut calendar = false;
     let (mut html, mut text) = (Vec::new(), Vec::new());
-    // A message fetched for its row comes with headers alone: no parts to walk.
+    // A message fetched for its row comes with headers alone, so there are no parts to walk.
     for part in payload.walk().filter(|_| full) {
         let mime_type = part.mime_type.as_deref().unwrap_or_default();
         calendar |= mime_type.eq_ignore_ascii_case("text/calendar");
@@ -45,9 +46,9 @@ pub(crate) fn parse(message: &Message, full: bool) -> Option<Parsed> {
                 .starts_with("attachment")
         });
         let attachment_id = body.and_then(|body| body.attachment_id.clone());
-        // Any part with a name or an attachment id is a file: inline images often come without a
-        // name. A big HTML or text body Gmail moved out of the message (sync puts it back) is the
-        // body, not a file.
+        // Any part with a name or an attachment id is a file, because inline images often come
+        // without a name. A big HTML or text body that Gmail moved out of the message (sync puts
+        // it back) is the body, not a file.
         let is_body = !as_attachment
             && (mime_type.eq_ignore_ascii_case("text/html")
                 || mime_type.eq_ignore_ascii_case("text/plain"));
@@ -82,7 +83,7 @@ pub(crate) fn parse(message: &Message, full: bool) -> Option<Parsed> {
         }
     }
     // A file is inline when the HTML shows it (`cid:` + its Content-ID) or it's a Gmail emoji,
-    // whatever its Content-Disposition says: senders often mark the images they show as
+    // whatever its Content-Disposition says, because senders often mark the images they show as
     // attachments.
     let shown = shown_content_ids(&html);
     for attachment in &mut attachments {
@@ -139,8 +140,8 @@ pub(crate) fn parse(message: &Message, full: bool) -> Option<Parsed> {
     })
 }
 
-/// The Content-IDs the HTML references: what follows each `cid:` up to a quote, a parenthesis
-/// or whitespace.
+/// The Content-IDs the HTML references. Each is what follows a `cid:`, up to a quote, a
+/// parenthesis or whitespace.
 fn shown_content_ids(html: &[String]) -> Vec<&str> {
     html.iter()
         .flat_map(|html| html.split("cid:").skip(1))

@@ -9,7 +9,7 @@ use jiff::Timestamp;
 
 use crate::format::{names::Person, row::Participant};
 
-/// The `[Superhuman]/…` state labels (`[Superhuman]/Muted`, …); never shown as chips.
+/// The `[Superhuman]/…` state labels (`[Superhuman]/Muted`, …), which never show as chips.
 pub(crate) const FOREIGN_STATE_LABEL_PREFIX: &str = "[Superhuman]";
 /// Exo's own hidden labels (exo-store's `[Exo]/Muted`).
 pub(crate) const EXO_LABEL_PREFIX: &str = "[Exo]";
@@ -27,15 +27,15 @@ const TRASH_CHIP: &str = "Trash";
 pub struct ThreadSummary {
     /// The Gmail thread id.
     pub id: String,
-    /// Who the row names, in order, me already dropped: the senders, the recipients in Sent, or
-    /// with drafts, the last draft's recipients.
+    /// Who the row names, in order, with me already dropped: the senders, the recipients in
+    /// Sent, or with drafts, the last draft's recipients.
     pub participants: Vec<Participant>,
-    /// The participants are recipients (Sent, or a draft): all of them are listed, with no
-    /// ` .. ` for the ones that don't fit.
+    /// Whether the participants are recipients (Sent, or a draft), in which case all of them are
+    /// listed, with no ` .. ` for the ones that don't fit.
     pub recipients: bool,
     /// How many drafts the row shows: Exo's own, and in Drafts, any.
     pub drafts: usize,
-    /// Every message the row shows is a draft (a new message being written).
+    /// Whether every message the row shows is a draft (a new message being written).
     pub draft_only: bool,
     /// The first message's subject, or `-`.
     pub subject: String,
@@ -45,32 +45,33 @@ pub struct ThreadSummary {
     pub labels: Vec<String>,
     /// Every Gmail label id on the thread, for the commands that toggle them.
     pub label_ids: Vec<String>,
-    /// The thread's date in this list; rows sort and date by it.
+    /// The thread's date in this list. Rows sort and date by it.
     pub received: Timestamp,
-    /// Some message is unread.
+    /// Whether some message is unread.
     pub unread: bool,
-    /// Some message is starred.
+    /// Whether some message is starred.
     pub starred: bool,
-    /// Not routed to the inbox: non-inbox lists mark it with a check.
+    /// Whether it's not routed to the inbox, which non-inbox lists mark with a check.
     pub done: bool,
-    /// Muted: the mute label, and no newer message added you as a recipient.
+    /// Whether it's muted, which means it has the mute label and no newer message added you as a
+    /// recipient.
     pub muted: bool,
     /// The icon in the row's metadata.
     pub attachment: Attachments,
     /// Whom the contact pane shows while this row has the cursor.
     pub contact: Option<Person>,
-    /// The mutations that take the thread out of this list: its row slides out when one is
+    /// The mutations that take the thread out of this list. Its row slides out when one is
     /// applied.
     pub removed_by: Vec<Mutation>,
     /// Its messages, drafts included (a search result shows ` (N)` past one).
     pub messages: usize,
-    /// A search result's matched words: where `subject` and `snippet` are bold.
+    /// A search result's matched words, which mark where `subject` and `snippet` are bold.
     pub search: Option<SearchMarks>,
-    /// It has a failed draft, for this reason: the row says so instead of its date.
+    /// Why its draft failed, if it has a failed one. The row says so instead of its date.
     pub failure: Option<SendFailure>,
-    /// A send of its is held or waiting to go: offline, the row says when it will go.
+    /// Whether a send of its is held or waiting to go. Offline, the row says when it will go.
     pub sending: bool,
-    /// Its earliest scheduled send, and whether Gmail has each: the row says when it goes instead
+    /// Its earliest scheduled send, and whether Gmail has each. The row says when it goes instead
     /// of its date.
     pub scheduled: Option<(jiff::Timestamp, bool)>,
     /// Its reminder, while the row shows it.
@@ -80,12 +81,12 @@ pub struct ThreadSummary {
 }
 
 impl ThreadSummary {
-    /// A reminder is set.
+    /// Whether a reminder is set.
     pub fn has_reminder(&self) -> bool {
         matches!(self.reminder, Some(ReminderStatus::Set { .. }))
     }
 
-    /// Back from a reminder and not read since.
+    /// Whether it's back from a reminder and not read since.
     pub fn reminder_unread(&self) -> bool {
         matches!(
             self.reminder,
@@ -134,7 +135,7 @@ impl ThreadSummary {
             received: thread.date,
             unread: thread.unread,
             starred: thread.starred,
-            // Spam doesn't count as done: no check on its rows.
+            // Spam doesn't count as done, so its rows have no check.
             done: thread.done && !thread.labels.iter().any(|label| label == SPAM),
             muted: thread.muted,
             attachment: thread.attachments,
@@ -185,7 +186,7 @@ impl ThreadSummary {
         row
     }
 
-    /// Has the Gmail label `id`.
+    /// Whether it has the Gmail label `id`.
     pub fn has_label(&self, id: &str) -> bool {
         self.label_ids.iter().any(|label| label == id)
     }
@@ -214,8 +215,8 @@ impl Chips {
         )
     }
 
-    /// A search result's chips: Trash shows, and the labels the query asks for (`queried`, ids)
-    /// don't.
+    /// A search result's chips, where Trash shows and the labels the query asks for (`queried`,
+    /// ids) don't.
     pub fn for_search(&self, ids: &[String], muted: bool, queried: &[String]) -> Vec<String> {
         let shown: Vec<String> = ids
             .iter()
@@ -230,7 +231,7 @@ impl Chips {
         lead_with_muted(chips, muted && !queried.iter().any(|id| id == "SH_MUTED"))
     }
 
-    /// The open thread's header chips: like a row's, without leaving out the label being viewed.
+    /// The open thread's header chips, which are like a row's but keep the label being viewed.
     pub fn header_chips(&self, ids: &[String], muted: bool) -> Vec<String> {
         self.for_thread(ids, muted, &ListId::Inbox)
     }
@@ -242,7 +243,7 @@ impl Chips {
         lead_with_muted(self.sorted(ids, list), muted && *list != ListId::Muted)
     }
 
-    /// `ids`' chips in `list` as (sort name, shown name), in order.
+    /// The chips of `ids` in `list` as (sort name, shown name), in order.
     fn sorted<'a>(&'a self, ids: &[String], list: &ListId) -> Vec<(&'a str, &'a str)> {
         let mut chips: Vec<(&str, &str)> = ids
             .iter()

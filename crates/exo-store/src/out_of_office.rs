@@ -32,7 +32,7 @@ use crate::error::Result;
 use crate::quota::Lane;
 use crate::store::Store;
 
-/// How far ahead events are looked at: 35 days.
+/// How far ahead Exo looks at events (35 days).
 pub const OUT_OF_OFFICE_LOOKAHEAD: SignedDuration = SignedDuration::from_hours(35 * 24);
 /// The words a summary marks an out-of-office event with.
 const WORDS: [&str; 8] = [
@@ -45,19 +45,19 @@ const WORDS: [&str; 8] = [
     "vacation",
     "annual leave",
 ];
-/// An out-of-office event lasts at least this long: 8 hours.
+/// The shortest an out-of-office event can be (8 hours).
 const LONG_EVENT: SignedDuration = SignedDuration::from_hours(8);
 
-/// `outOfOfficeResponder`: the account's copy of Gmail's vacation responder.
+/// The account's copy of Gmail's vacation responder (`outOfOfficeResponder`).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct OutOfOfficeResponder {
     /// `google`.
     pub google: GoogleResponder,
-    /// `startTime`: when replies start, epoch milliseconds.
+    /// When replies start, in epoch milliseconds (`startTime`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub start_time: Option<i64>,
-    /// `endTime`: when they stop, epoch milliseconds; none for no last day.
+    /// When replies stop, in epoch milliseconds (`endTime`), or none for no last day.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub end_time: Option<i64>,
 }
@@ -66,8 +66,8 @@ pub struct OutOfOfficeResponder {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct GoogleResponder {
-    /// `enabledAutoReplyAt`: when the copy was last written with the reply on, an ISO timestamp,
-    /// or empty while it's off.
+    /// When the copy was last written with the reply on, as an ISO timestamp, or empty while the
+    /// reply is off (`enabledAutoReplyAt`).
     pub enabled_auto_reply_at: String,
     /// `responseSubject`.
     pub response_subject: String,
@@ -101,7 +101,7 @@ impl OutOfOfficeResponder {
     }
 
     /// The copy to keep after reading Gmail's `settings` at `now`, if `copy` no longer matches
-    /// them: a plain-text body (one set in Gmail's plain-text mode) stands in for the HTML one.
+    /// them. A plain-text body (one set in Gmail's plain-text mode) stands in for the HTML one.
     /// `None` when nothing changed.
     pub fn synced(
         settings: &VacationSettings,
@@ -123,12 +123,13 @@ impl OutOfOfficeResponder {
         Some(Self::of(&settings, now))
     }
 
-    /// The reply is on (`enabledAutoReplyAt` is set).
+    /// Whether the reply is on (`enabledAutoReplyAt` is set).
     pub fn is_enabled(&self) -> bool {
         !self.google.enabled_auto_reply_at.is_empty()
     }
 
-    /// Replies are going out at `now`: on, started, and not ended.
+    /// Whether replies are going out at `now`, meaning the reply is on, has started, and hasn't
+    /// ended.
     pub fn is_out_of_office(&self, now: Timestamp) -> bool {
         let now = now.as_millisecond();
         self.is_enabled()
@@ -137,7 +138,8 @@ impl OutOfOfficeResponder {
     }
 }
 
-/// Whether Gmail's `settings` differ from `copy`: nothing differs from nothing.
+/// Whether Gmail's `settings` differ from `copy`. Empty settings don't differ from a missing or
+/// empty copy.
 fn differs(settings: &VacationSettings, copy: Option<&OutOfOfficeResponder>) -> bool {
     let empty = *settings == VacationSettings::default();
     if empty && copy.is_none_or(|copy| *copy == OutOfOfficeResponder::default()) {
@@ -164,15 +166,15 @@ fn differs(settings: &VacationSettings, copy: Option<&OutOfOfficeResponder>) -> 
         || plain.is_some_and(|plain| google.is_none_or(|google| plain != google.response_body_html))
 }
 
-/// `outOfOfficeEventDetectionV2`: the user's out-of-office events coming up, and whether they
-/// asked not to be offered a reply for them.
+/// The user's out-of-office events coming up, and whether they asked not to be offered a reply
+/// for them (`outOfOfficeEventDetectionV2`).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct OutOfOfficeEventDetection {
     /// `events`, by event id.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub events: BTreeMap<String, DetectedEvent>,
-    /// `optedOutAt`: when `Don't show this again` was checked, an ISO timestamp.
+    /// When `Don't show this again` was checked, as an ISO timestamp (`optedOutAt`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub opted_out_at: Option<String>,
 }
@@ -181,18 +183,18 @@ pub struct OutOfOfficeEventDetection {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct DetectedEvent {
-    /// `id`: the event's.
+    /// The event's id (`id`).
     pub id: String,
     /// `startTime`.
     pub start_time: EventTime,
     /// `endTime`.
     pub end_time: EventTime,
-    /// `nudgedAt`: when the nudge was shown for it, an ISO timestamp.
+    /// When the nudge was shown for the event, as an ISO timestamp (`nudgedAt`).
     pub nudged_at: Option<String>,
 }
 
-/// An event's start or end: `date` for an all-day one (`2026-11-26`), `datetime` (an ISO
-/// timestamp) for the rest.
+/// An event's start or end, as a `date` for an all-day event (`2026-11-26`) or a `datetime` (an
+/// ISO timestamp) for the rest.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EventTime {
     /// `date`.
@@ -218,7 +220,7 @@ impl EventTime {
         })
     }
 
-    /// The instant it starts at in `tz`: a date's local midnight.
+    /// The instant it starts at in `tz`, which for a date is its local midnight.
     fn start(&self, tz: &TimeZone) -> Option<Timestamp> {
         match (&self.datetime, &self.date) {
             (Some(at), _) => at.parse().ok(),
@@ -232,8 +234,9 @@ impl EventTime {
         }
     }
 
-    /// The last instant it covers as an end in `tz`: a timed end on a local midnight is the
-    /// second before; an all-day end (exclusive) the day before's last millisecond.
+    /// The last instant it covers as an end in `tz`. For a timed end on a local midnight, that's
+    /// the second before. For an all-day end, which is exclusive, it's the last millisecond of
+    /// the day before.
     fn inclusive_end(&self, tz: &TimeZone) -> Option<Timestamp> {
         match (&self.datetime, &self.date) {
             (Some(at), _) => {
@@ -257,29 +260,30 @@ impl EventTime {
         }
     }
 
-    /// The instant pruning compares with now: `datetime`, else `date`'s UTC midnight.
+    /// The instant pruning compares with now, which is `datetime`, or else UTC midnight on
+    /// `date`.
     fn as_written(&self) -> Option<Timestamp> {
         self.start(&TimeZone::UTC)
     }
 }
 
-/// Out-of-office days to offer a reply for: consecutive events merged.
+/// Out-of-office days to offer a reply for, with consecutive events merged.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OutOfOfficeDays {
-    /// When the first starts.
+    /// When the first event starts.
     pub start: Timestamp,
-    /// The last instant the last covers.
+    /// The last instant the last event covers.
     pub end: Timestamp,
-    /// The events.
+    /// The events' ids.
     pub ids: Vec<String>,
 }
 
 impl OutOfOfficeEventDetection {
-    /// The events to keep after Calendar listed `events` (the user's primary calendar, from now
-    /// to [`OUT_OF_OFFICE_LOOKAHEAD`] ahead) for `me` at `now`: the user's out-of-office events,
-    /// with when each was offered, plus those offered that Calendar no longer lists; less those
-    /// offered over a week ago or already started. `None` when that's what's kept already, or
-    /// after opting out.
+    /// The events to keep for `me` at `now`, after Calendar listed `events` (the user's primary
+    /// calendar, from now to [`OUT_OF_OFFICE_LOOKAHEAD`] ahead). They're the user's out-of-office
+    /// events, with when each was offered, plus those offered that Calendar no longer lists.
+    /// Events offered over a week ago are left out, and so are those not offered that have
+    /// already started. `None` when that's what's kept already, or after opting out.
     pub fn detected(
         &self,
         events: &[Event],
@@ -333,10 +337,10 @@ impl OutOfOfficeEventDetection {
         Some(found)
     }
 
-    /// The days to offer a reply for at `now` in `tz`, if any: the earliest event yet to start
-    /// and not offered, starting by the end of the seventh day from today, merged with each
-    /// following one that starts at most a day after it ends, or on the Monday after a Friday it
-    /// ends.
+    /// The days to offer a reply for at `now`, in its time zone, if any. They begin with the
+    /// earliest event that is yet to start and not offered, if it starts by the end of the seventh
+    /// day from today. Each following event is merged in while it starts at most a day after the
+    /// merged days end, or on the Monday after a Friday they end.
     pub fn upcoming(&self, now: &Zoned) -> Option<OutOfOfficeDays> {
         let tz = now.time_zone();
         let mut candidates: Vec<(Timestamp, Timestamp, &str)> = self
@@ -392,8 +396,9 @@ impl OutOfOfficeEventDetection {
         days
     }
 
-    /// Whether the nudge may show at `now` for `days`: not opted out, and no nudge in the last
-    /// day nor more than one in the last week. When it may, marks `days`' events offered.
+    /// Whether the nudge may show at `now` for `days`. It may when the user hasn't opted out, no
+    /// nudge showed in the last day, and no more than one showed in the last week. When it may,
+    /// this marks the events in `days` as offered.
     pub fn nudge(&mut self, days: &OutOfOfficeDays, now: Timestamp) -> bool {
         if !self.may_nudge(days, now) {
             return false;
@@ -407,7 +412,7 @@ impl OutOfOfficeEventDetection {
     }
 
     /// [`nudge`](Self::nudge) for an out-of-office event the user just made in Exo, which the
-    /// calendar hasn't listed yet: it's kept, offered at `now`.
+    /// calendar hasn't listed yet. The event is kept, marked as offered at `now`.
     pub fn nudge_created(&mut self, days: &OutOfOfficeDays, now: Timestamp) -> bool {
         if !self.may_nudge(days, now) {
             return false;
@@ -450,8 +455,9 @@ impl OutOfOfficeEventDetection {
 }
 
 impl OutOfOfficeDays {
-    /// The days `event`, which `me` just made, is out of office for, if it starts within a week
-    /// of `now`: its start, and its end, a second earlier when that's a local midnight.
+    /// The out-of-office days of `event`, which `me` just made, if it starts within a week of
+    /// `now`. They run from its start to its end, and the end moves a second earlier when it's a
+    /// local midnight.
     pub fn created(event: &Event, me: &str, now: &Zoned) -> Option<Self> {
         if !is_owners_out_of_office(event, me) {
             return None;
@@ -473,9 +479,10 @@ impl OutOfOfficeDays {
     }
 }
 
-/// Whether `event` is the user's own out-of-office event: theirs to organize, not recurring,
-/// and out of office: an `outOfOffice` event or a summary saying so, at least 8 hours long.
-/// (Whether an invitee accepted doesn't come into it: the organizer is the user.)
+/// Whether `event` is the user's own out-of-office event. That means the user organizes it, it
+/// doesn't recur, it's at least 8 hours long, and it's out of office, either as an `outOfOffice`
+/// event or with a summary that says so. (Whether an invitee accepted doesn't come into it,
+/// since the organizer is the user.)
 fn is_owners_out_of_office(event: &Event, me: &str) -> bool {
     let organizes = event.organizer.as_ref().is_none_or(|organizer| {
         organizer.is_self == Some(true)

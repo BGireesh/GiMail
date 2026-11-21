@@ -2,7 +2,7 @@
 //! or `2 weeks` becomes up to three dated suggestions, each with its label. Jump to Date and the
 //! calendar's When field use it.
 //!
-//! It is a small grammar engine: every word gets every reading its prefix allows, every rule
+//! It is a small grammar engine. Every word gets every reading its prefix allows, every rule
 //! that can take those readings yields a parse, and each parse is scored for how plausible its
 //! date and time are. Its answers, quirks included, hang on every step being exact, down to the
 //! setter arithmetic of JavaScript's `Date` (`date`).
@@ -68,7 +68,7 @@ pub struct Suggestion {
     /// What the picker shows: `tomorrow at 3 pm`, `on Friday`, `in 2 weeks`.
     pub label: String,
     pub start: Timestamp,
-    /// The calendar's: when it ends, after a typed or default duration.
+    /// For the calendar, when it ends, after a typed or default duration.
     pub end: Option<Timestamp>,
     /// A calendar suggestion for whole days (`all day`, `2 days`).
     pub all_day: bool,
@@ -81,9 +81,10 @@ pub struct Suggestion {
 pub struct ZoneTime {
     /// How the label names the zone: `PST`, `in London`.
     pub label: String,
-    /// The zone; `None` reads as this one.
+    /// The zone, where `None` reads as this one.
     pub tz: Option<TimeZone>,
-    /// The start and end read with this zone's clock: their wall time here is the typed time there.
+    /// The start and end read with this zone's clock, so their wall time here is the typed time
+    /// there.
     pub start: Timestamp,
     pub end: Timestamp,
 }
@@ -200,7 +201,7 @@ impl Engine<'_> {
         for rule in grammar::rules(self.calendar(), self.options.month_first) {
             for tokens in grammar::parses(rule, &words, &vocabulary) {
                 let mut parsed = interpret::interpret(self, rule.interpreter, tokens)?;
-                // In this order: the products round differently in another.
+                // In this order, because the products round differently in another.
                 parsed.confidence *= rule.confidence;
                 parsed.confidence *= self.date_confidence(&parsed.date);
                 parsed.confidence *= token_confidence(&parsed.tokens);

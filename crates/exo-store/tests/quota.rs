@@ -1,6 +1,6 @@
-//! Pacing under Gmail's per-user quota, against a mock that enforces one: a first sync that
-//! would run into it within a second never does, and what the user does doesn't wait for the
-//! backfill.
+//! Pacing under Gmail's per-user quota, against a mock that enforces one. A first sync that
+//! would run into the quota within a second never does, and what the user does doesn't wait for
+//! the backfill.
 
 mod support;
 
@@ -12,7 +12,7 @@ use serde_json::Value;
 use support::Harness;
 use tokio::time::Instant;
 
-/// Gmail's own, about half of the fixtures' first sync (10,800 units).
+/// Gmail's own quota, about half of what the fixtures' first sync takes (10,800 units).
 const PER_MINUTE: u32 = 6_000;
 
 async fn start(paced: bool) -> Harness {
@@ -81,7 +81,8 @@ async fn a_paced_first_sync_never_does_and_a_triage_goes_first() {
     sync.abort();
     let quota = spent(&harness).await;
     assert_eq!(quota["refused"], 0, "{quota}");
-    // No more than a full bucket (45 % of the quota) and its refill since (90 % a minute).
+    // It spent no more than a full bucket (45 % of the quota) plus the bucket's refill since
+    // (90 % a minute).
     let most = f64::from(PER_MINUTE) * (0.45 + 0.9 * started.elapsed().as_secs_f64() / 60.0);
     assert!(
         quota["units"].as_f64().unwrap() <= most,

@@ -5,8 +5,8 @@ use egui::{Pos2, Rect, Sense, Ui, Vec2, pos2, vec2};
 use exo_ui::{Family, Font, IconButton, TextStyle};
 use jiff::{ToSpan, civil::Date};
 
-/// The month: 280px wide; its caption `padding-left: 14px` around 16px/24px text, whose line box
-/// lands on the month's top.
+/// The month is 280px wide. Its caption has `padding-left: 14px` around 16px/24px text, whose
+/// line box lands on the month's top.
 pub const WIDTH: f32 = 280.0;
 const CAPTION: TextStyle =
     TextStyle::new(Font::new(Family::Sans, 400), 16.0, 24.0).letter_spacing(0.18);
@@ -17,15 +17,15 @@ const NAV: f32 = 24.0;
 const NAV_TOP: f32 = -2.0;
 const NAV_RIGHT: f32 = 6.0;
 const NAV_GAP: f32 = 4.0;
-/// The weekday row starts 48px down (the grid, under the 24px caption), 32px tall; each week is
-/// 28px; a column 40px.
+/// The weekday row starts 48px down (the grid, under the 24px caption) and is 32px tall. Each
+/// week is 28px tall, and each column 40px wide.
 const WEEKDAYS_TOP: f32 = 48.0;
 const WEEKDAY_HEIGHT: f32 = 32.0;
 const WEEK: f32 = 28.0;
 const COLUMN: f32 = 40.0;
-/// 12px/16px text: weekdays `padding-top: 8px; top: 1px`, days in a 24px circle at (8, 2)
-/// (`top: 2px`), `padding-top: 3px` and the line centred in the 21px left, 2.5px, which
-/// Chromium paints on the pixel below.
+/// 12px/16px text. The weekdays have `padding-top: 8px; top: 1px`. Each day sits in a 24px circle
+/// at (8, 2) (`top: 2px`) with `padding-top: 3px`, and its line is centred in the 21px left, 2.5px
+/// down, which Chromium paints on the pixel below.
 const TEXT: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 12.0, 16.0);
 const WEEKDAY_TEXT_TOP: f32 = 8.0 + 1.0;
 const DAY_BUTTON: f32 = 24.0;
@@ -45,7 +45,7 @@ pub enum MonthAction {
 }
 
 /// Paints the month holding `month` with its top left at `origin`, `selected` on the accent and
-/// `today` on its fill (today's wins). Weeks start on Sunday, or with `monday` on Monday.
+/// `today` on its fill (today's fill wins). Weeks start on Sunday, or with `monday` on Monday.
 pub fn show(
     ui: &Ui,
     origin: Pos2,
@@ -131,8 +131,8 @@ pub fn show(
                 Sense::click(),
             )
             .on_hover_cursor(egui::CursorIcon::PointingHand);
-        // Today and the selected day: white text (Carbon `#27292d`) on `#aeb1dd` (Carbon
-        // `#a0a4d9`) and `#929dac`, Classic literals.
+        // Today and the selected day have white text (Carbon `#27292d`) on `#aeb1dd` (Carbon
+        // `#a0a4d9`) and `#929dac`, which are Classic literals.
         let (fill, mut color) = if day == today {
             let fill = match palette.theme {
                 exo_ui::Theme::Snow => egui::Color32::from_rgb(0xae, 0xb1, 0xdd),

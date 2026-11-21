@@ -1,5 +1,6 @@
-//! What the open conversation prints ([`crate::print`]): each message as the view shows it now,
-//! with the same participants, dates, snippets and statuses, and the markers between them.
+//! What the open conversation prints ([`crate::print`]). Each message prints as the view shows it
+//! now, with the same participants, dates, snippets and statuses, and so do the markers between
+//! them.
 
 use egui::{Color32, Context, LayerId};
 use exo_store::{Contact, MessageDetail, ThreadDetail};
@@ -18,7 +19,7 @@ use crate::{
 const PAPERCLIP: f32 = 19.0 + 8.0;
 
 impl ThreadView {
-    /// The conversation as it prints on `page`, titled `title`; `None` before it has loaded.
+    /// The conversation as it prints on `page`, titled `title`. `None` before it has loaded.
     /// `ctx` measures the collapsed rows' text, to cut their snippets where the screen would at
     /// the page's width.
     pub(crate) fn printout(

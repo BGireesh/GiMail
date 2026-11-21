@@ -23,10 +23,10 @@ pub struct Render {
     pub visible_text: String,
     /// The first 200 characters of `visible_text`.
     pub snippet: String,
-    /// Read-receipt pixels that were removed; non-empty means "Email tracking blocked" unless
+    /// Read-receipt pixels that were removed. Non-empty means "Email tracking blocked" unless
     /// the Images setting shows all images, which loads them ([`crate::load_read_receipts`]).
     pub read_status_urls: Vec<String>,
-    /// Something in the body loads from the network, which blocking remote content stops
+    /// Something in the body loads from the network, which blocking remote content stops, so
     /// ⌘K Show Images is offered for it.
     pub has_remote_images: bool,
     /// Every link, in document order (for "Open Link", ⌘O).

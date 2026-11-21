@@ -14,7 +14,8 @@ use crate::body::Bodies;
 /// The header's padding: `24px 4rem 20px`.
 pub(super) const PADDING_TOP: f32 = 24.0;
 const PADDING_BOTTOM: f32 = 20.0;
-/// Once the messages scroll under it: `padding-bottom: 12px` and a 1px bottom border.
+/// The bottom padding once the messages scroll under the header: `padding-bottom: 12px`, plus a
+/// 1px bottom border.
 const SCROLLED_PADDING_BOTTOM: f32 = 12.0;
 /// How far above its unscrolled bottom the scrolled header ends, its border included.
 pub(super) const SCROLLED_INSET: f32 = PADDING_BOTTOM - SCROLLED_PADDING_BOTTOM - 1.0;
@@ -23,14 +24,14 @@ pub(super) const SUBJECT_LINE: f32 = 32.0;
 const SUBJECT: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 21.0, SUBJECT_LINE);
 const SUBJECT_NUDGE: f32 = 3.0;
 const SUBJECT_MARGIN: f32 = 12.0;
-/// The actions, floated right: five 24px buttons, `margin: 11px -4px -3px 0` around their
-/// 16px height, so only the subject's first line (which starts above its 24px margin box) stops
-/// at it.
+/// The actions, floated right: five 24px buttons with `margin: 11px -4px -3px 0` around their
+/// 16px height. Their margin box is 24px tall, so only the subject's first line starts beside it
+/// and stops at it.
 const ACTIONS_WIDTH: f32 = 120.0;
 /// The status line: 12px/16px bold, `padding: 8px 0 1px; margin-bottom: 3px`.
 const STATUS: TextStyle = TextStyle::new(Font::new(Family::Sans, 700), 12.0, 16.0);
 const STATUS_HEIGHT: f32 = 8.0 + 16.0 + 1.0 + 3.0;
-/// Chips sit on the subject's line box, below its top (measured).
+/// Chips sit on the subject's line box, below the line box's top (measured).
 const CHIP_TOP: f32 = 11.0;
 /// The space after each label chip.
 const CHIP_MARGIN: f32 = 6.0;
@@ -60,8 +61,7 @@ pub(super) enum Control {
 }
 
 impl Control {
-    /// Where the actions' tab indices start: after the status line's 1, if it's
-    /// there.
+    /// Where the actions' tab indices start. They come after the status line's 1, if there is one.
     pub(super) fn tab_start(controls: &[Self]) -> u8 {
         if controls.contains(&Self::Status) {
             2
@@ -70,7 +70,7 @@ impl Control {
         }
     }
 
-    /// Its tab index: the status line's is 1, the actions' `start + 2…4`.
+    /// The control's tab index. The status line's is 1 and the actions' are `start + 2…4`.
     pub(super) fn tab_index(self, start: u8) -> u8 {
         match self {
             Self::Status => 1,
@@ -80,7 +80,7 @@ impl Control {
         }
     }
 
-    /// What clicking it does, the status line saying `status`.
+    /// What clicking the control does when the status line says `status`.
     pub(super) fn action(self, status: Option<&Status>) -> Action {
         match self {
             Self::Status => match status {
@@ -211,8 +211,8 @@ fn arrange(ui: &Ui, layout: &Layout, detail: &ThreadDetail, chips: &[String]) ->
     }
 }
 
-/// The subject's box (its glyphs' 26px on each of its
-/// lines), for its copy tooltip; none without a subject.
+/// The box around the subject's glyphs (26px on each line), for the subject's copy tooltip. None
+/// without a subject.
 pub(super) fn subject_rect(
     ui: &Ui,
     layout: &Layout,
@@ -261,8 +261,8 @@ pub(super) fn height(
 }
 
 /// Paints the header over the messages' top and handles its clicks. Once the messages have
-/// scrolled under it, it gets a background and a bottom border. `typing`: one of
-/// its drafts has the keyboard; `focus`: the control the keyboard is on.
+/// scrolled under it, it gets a background and a bottom border. `typing` says one of the thread's
+/// drafts has the keyboard, and `focus` is the control the keyboard is on.
 #[expect(
     clippy::too_many_arguments,
     reason = "one header, drawn from the thread view's state; a struct would only rename them"
@@ -286,8 +286,8 @@ pub(super) fn show(
     let top = layout.header.top();
     if scrolled {
         let bottom = top + height - SCROLLED_INSET;
-        // Over a widened column the background and its border run the column's width too, under
-        // the header's own.
+        // Over a widened column the background and its border run the column's width too,
+        // painted under the header's own.
         let spans = if layout.is_wide() {
             vec![layout.column.x_range(), layout.header.x_range()]
         } else {
@@ -316,8 +316,8 @@ pub(super) fn show(
     let done = detail.labels.iter().all(|label| label != "INBOX");
     let reminded = matches!(detail.reminder, Some(exo_store::ReminderStatus::Set { .. }));
     // The legacy glyphs, 11px down: the 16×14 check, the 14px clock and command, the 16px
-    // chevrons. A done thread's check is `#8892b9` 2 units wide, `#5f74aa` hovered; a reminded
-    // thread's clock the bolder one in `#e0bfe0`, `#cd7acf` hovered.
+    // chevrons. A done thread's check is `#8892b9` and 2 units wide, `#5f74aa` when hovered. A
+    // reminded thread's clock is the bolder one in `#e0bfe0`, `#cd7acf` when hovered.
     let remind = if reminded {
         crate::inbox::REMIND_SET_ICON
     } else {
@@ -372,13 +372,14 @@ pub(super) fn show(
                 .lit(lit)
                 .show(ui, id.with(icon), icon_rect.expand(4.0), icon_rect)
         };
-        // With a draft of the thread's being written, Remind Me's key is compose's ⌘⇧H.
+        // While one of the thread's drafts is being written, Remind Me's key is ⌘⇧H, as in
+        // compose.
         let remind_keys: &[&str] = if typing {
             &["⌘", "shift", "H"]
         } else {
             &["H"]
         };
-        // Their tooltips show while they have the keyboard too.
+        // The buttons' tooltips also show while the buttons have the keyboard.
         match (action == Action::Remind).then_some(detail.reminder.as_ref()) {
             Some(reminder) => {
                 let status = reminder.map(|reminder| crate::remind::status(reminder, now));
@@ -423,8 +424,8 @@ pub(super) fn show(
     }
     for (at, line) in arrangement.lines.iter().enumerate() {
         let line_top = label.top() + at as f32 * SUBJECT_LINE;
-        // A selectable subject: its selection fills the line box, which its `top: 3px` doesn't
-        // move.
+        // The subject is selectable. Its selection fills the line box, which the subject's
+        // `top: 3px` doesn't move.
         let galley = SUBJECT.single_line(painter, line.trim_end(), Color32::PLACEHOLDER, None);
         selection.add(
             painter,
@@ -495,8 +496,8 @@ pub(super) fn show(
                 let line = Rect::from_min_size(pos2(label.left(), hit.bottom()), vec2(width, 2.0));
                 painter.rect_filled(exo_ui::pixel_snap(line), 0.0, STATUS_FOCUS);
             }
-            // The tooltip's middle left on the status's middle right, 10px out, its middle 15.5px
-            // below the status's top.
+            // The tooltip's left middle sits 10px out from the status's right middle, and the
+            // tooltip's middle is 15.5px below the status's top.
             let mut anchor = response.clone();
             anchor.rect.max.y = hit.top() + 31.0;
             KeyTooltip { text, keys }.show_at_focused(
@@ -524,7 +525,7 @@ pub(super) fn show(
     actions
 }
 
-/// Previous and Next thread's legacy chevrons.
+/// The legacy chevrons for Previous and Next thread.
 const CHEVRON_UP: &str = "legacy/DEPRECATED_actionChevronUp";
 const CHEVRON_DOWN: &str = "legacy/DEPRECATED_actionChevronDown";
 
@@ -618,14 +619,12 @@ fn action_tooltip(ui: &Ui, response: &egui::Response, action: &Action, done: boo
     tooltip.show_at_focused(ui, response, placement, focused, None);
 }
 
-/// A new message's header: one line, no status, and a 4px
-/// `margin-bottom`.
+/// The height of a new message's header: one line, no status, and a 4px `margin-bottom`.
 pub(super) fn title_height() -> f32 {
     PADDING_TOP + SUBJECT_LINE + PADDING_BOTTOM + 4.0
 }
 
-/// The back button: `top: 25px; left: 2rem`, a 32px button
-/// with a 16px arrow in it.
+/// The back button: `top: 25px; left: 2rem`, a 32px button with a 16px arrow in it.
 pub(super) fn back_button_rect(layout: &Layout) -> Rect {
     Rect::from_min_size(
         pos2(
@@ -636,15 +635,16 @@ pub(super) fn back_button_rect(layout: &Layout) -> Rect {
     )
 }
 
-/// The back button in the gutter, and the gutter's soft
-/// gradient while the pointer is over it; `focused` while the gutter has the keyboard.
+/// The back button in the gutter, and the gutter's soft gradient while the pointer is over the
+/// gutter. `focused` is whether the gutter has the keyboard.
 pub(super) fn back_button(ui: &Ui, layout: &Layout, hovered: bool, focused: bool) -> bool {
     let palette = exo_ui::palette(ui.ctx());
     let painter = ui.painter();
     let pane = layout.action_pane;
-    // The gutter's gradient: the accent at 20%, 10% at 35.1%, then nothing (Carbon: `rgba(13, 13,
-    // 28, …)` at 15% and 10%), 75% of the left pane's width at most its clickable's, fading over
-    // 100ms; gone below 864px of thread pane or 20px of clickable.
+    // The gutter's gradient: the accent at 20% opacity, 10% at 35.1% of the way, then nothing (in
+    // Carbon, `rgba(13, 13, 28, …)` at 15% and 10%). It covers 75% of the left pane's width, at
+    // most the gutter's clickable width, and fades over 100ms. It's gone below 864px of thread
+    // pane or 20px of clickable width.
     let opacity = motion::transition(
         ui.ctx(),
         ui.id().with("back-gutter"),
@@ -681,9 +681,9 @@ pub(super) fn back_button(ui: &Ui, layout: &Layout, hovered: bool, focused: bool
         painter.add(Shape::mesh(mesh));
     }
     if pane.width() < 1.0 {
-        // Beside a popped-out draft the gutter has no room: its 32px button spills out of it,
-        // 8px in and 25px down, a caret in it, with the button's tooltip and click but not its
-        // raised circle.
+        // Beside a popped-out draft the gutter has no room, so its 32px button spills out of it,
+        // 8px in and 25px down. The button holds a caret and keeps its tooltip and click, but not
+        // its raised circle.
         let rect = Rect::from_min_size(
             pos2(pane.left() + 8.0, pane.top() + 25.0),
             Vec2::splat(32.0),
@@ -743,9 +743,10 @@ pub(super) fn back_button(ui: &Ui, layout: &Layout, hovered: bool, focused: bool
         0.15,
         motion::CubicBezier::EASE,
     );
-    // With the keyboard on the gutter, in Classic: `0 0 6px 0 #aeb1dd, 0 2px 12px 0
-    // rgba(174,177,221,.5)` instead of the hover's shadows. The button has no background
-    // (`background: none`), and a shadow doesn't paint under its box: the pane shows inside.
+    // With the keyboard on the gutter, the button's shadows in Classic are
+    // `0 0 6px 0 #aeb1dd, 0 2px 12px 0 rgba(174,177,221,.5)` instead of the hover's. The button
+    // has no background (`background: none`), and a shadow doesn't paint under its box, so the
+    // pane shows inside.
     let lit = motion::transition(
         ui.ctx(),
         ui.id().with("back-button-focus"),
@@ -786,8 +787,9 @@ pub(super) fn back_button(ui: &Ui, layout: &Layout, hovered: bool, focused: bool
                 BoxShadow::new([0.0, 0.0], 6.0, 0.0, glow(0.45)),
                 BoxShadow::new([0.0, 0.0], 0.5, 0.0, glow(0.4)),
             ],
-            // In Carbon, over the button itself; over the rest of the gutter, the gutter's own
-            // shadows (its inset highlight left out).
+            // In Carbon, these are the shadows over the button itself. Over the rest of the
+            // gutter, the button takes the gutter's own shadows, without the gutter's inset
+            // highlight.
             exo_ui::Theme::Carbon if on_button => [
                 BoxShadow::new([0.0, 0.0], 6.0, 0.0, ink(0.2)),
                 BoxShadow::new([0.0, 0.0], 6.0, 0.0, ink(0.25)),

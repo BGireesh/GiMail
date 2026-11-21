@@ -11,11 +11,11 @@ use crate::{Mail, commands, splits};
 /// What the mail on screen asks of the app.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Request {
-    /// Sign this account out: forget its grant and delete what Exo keeps of it. The user was
-    /// asked, or it has nothing unsent.
+    /// Sign this account out, forgetting its grant and deleting what Exo keeps of it. The user
+    /// was asked, or it has nothing unsent.
     SignOut(String),
-    /// Sign this account, not the one on screen, out, asking first when it has changes Gmail
-    /// doesn't have yet.
+    /// Sign out this account, which isn't the one on screen, asking first when it has changes
+    /// Gmail doesn't have yet.
     CheckSignOut(String),
     /// Show this account's mail, or the sign-in screen when Google signed it out.
     Switch(String),
@@ -44,7 +44,7 @@ pub enum Request {
 pub enum Action {
     /// `Sign Out` of the account on screen.
     SignOut,
-    /// `Switch Accounts`: the Accounts palette.
+    /// `Switch Accounts`, which opens the Accounts palette.
     OpenSwitcher,
     /// Switch to the account in this place in the list (ctrl+1…9, a row of the palette).
     Switch(usize),
@@ -68,7 +68,7 @@ pub(crate) const COLORS: [(&str, Color32); 12] = [
     ("honey", Color32::from_rgb(0xf5, 0xd2, 0xaa)),
 ];
 
-/// An account's default color: the sum of the address's UTF-16 units picks one of twelve.
+/// An account's default color, one of twelve picked by the sum of the address's UTF-16 units.
 pub(crate) fn default_color(email: &str) -> Color32 {
     COLORS[default_index(email)].1
 }
@@ -78,7 +78,7 @@ fn default_index(email: &str) -> usize {
     sum as usize % COLORS.len()
 }
 
-/// The color `account` shows in: the one picked for it, else its default.
+/// The color `account` shows in, which is the one picked for it or else its default.
 pub(crate) fn color(account: &exo_auth::Account) -> Color32 {
     let picked = account
         .color
@@ -95,7 +95,8 @@ pub(crate) fn color_name(email: &str, account: Option<&exo_auth::Account>) -> &'
     picked.unwrap_or(&COLORS[default_index(email)]).0
 }
 
-/// The letter an account's placeholder avatar shows: the address's first, upper-cased.
+/// The letter an account's placeholder avatar shows, which is the address's first letter,
+/// upper-cased.
 pub(crate) fn initial(email: &str) -> String {
     email
         .chars()
@@ -158,7 +159,7 @@ pub(crate) fn register(commands: &mut Commands<commands::Action>, os: egui::os::
             .follow("SIGNATURE_SETTINGS")
             .multiple(),
     );
-    // All nine are taken: a key past the last account does nothing.
+    // All nine are taken, and a key past the last account does nothing.
     for n in 1..=9 {
         commands.add(
             Command::shortcut(format!("SWITCH_ACCOUNT_{n}"), act(Action::Switch(n - 1)))
@@ -173,10 +174,10 @@ pub(crate) fn register(commands: &mut Commands<commands::Action>, os: egui::os::
     commands.add(Command::shortcut("ADD_ACCOUNT_KEY", act(Action::Add)).key(add));
 }
 
-/// The Accounts palette: no input, a row per
-/// account in the list's order with its avatar, a tick on the one on screen and its ctrl+N for
-/// the first nine, and `Add Account` under them. A row's avatar is the account's profile photo
-/// as soon as it's loaded, its initial on its color until then or without one.
+/// The Accounts palette: no input, a row per account in the list's order with its avatar, a tick
+/// on the one on screen and its ctrl+N for the first nine, and `Add Account` under them. A row's
+/// avatar is the account's profile photo as soon as it's loaded, and its initial on its color
+/// until then or without one.
 fn switcher(
     ctx: &egui::Context,
     accounts: &[exo_auth::Account],
@@ -230,8 +231,8 @@ impl Mail {
         &self.accounts
     }
 
-    /// When the account on screen first signed in to Exo on this Mac, Exo's join date; `None`
-    /// when the device's list doesn't say.
+    /// When the account on screen first signed in to Exo on this Mac, which is Exo's join date.
+    /// `None` when the device's list doesn't say.
     pub(crate) fn joined(&self) -> Option<jiff::Timestamp> {
         self.accounts
             .iter()
@@ -268,7 +269,8 @@ impl Mail {
     }
 
     /// What the Accounts dialog asked for. Signing out of the account on screen asks it what
-    /// it hasn't sent, as the palette's `Sign Out` does; the app counts another account's.
+    /// it hasn't sent, as the palette's `Sign Out` does. For another account, the app counts
+    /// what it hasn't sent.
     pub(crate) fn account_settings_event(&mut self, event: crate::settings::AccountEvent) {
         use crate::settings::AccountEvent;
         self.request = Some(match event {
@@ -282,15 +284,15 @@ impl Mail {
         });
     }
 
-    /// `Sign Out`, from the palette or the settings menu: asks the account what Gmail doesn't
+    /// `Sign Out`, from the palette or the settings menu. Asks the account what Gmail doesn't
     /// have yet, and [`Mail::sign_out_unsent`] goes on from its answer.
     pub(crate) fn sign_out(&mut self) {
         self.signing_out = true;
         self.account.ask_unsent();
     }
 
-    /// The account's answer to [`Mail::sign_out`]: confirm when something isn't sent yet, else
-    /// ask the app to sign out.
+    /// Takes the account's answer to [`Mail::sign_out`]. Confirms when something isn't sent yet,
+    /// and otherwise asks the app to sign out.
     pub(crate) fn sign_out_unsent(&mut self, unsent: Unsent) {
         if !std::mem::take(&mut self.signing_out) {
             return;
@@ -302,8 +304,8 @@ impl Mail {
         }
     }
 
-    /// Asks before signing `email`, another account, out: `unsent` is what it hasn't sent,
-    /// counted by the app. Returns whether there was anything to ask about.
+    /// Asks before signing out `email`, another account. `unsent` is what it hasn't sent, as
+    /// the app counted it. Returns whether there was anything to ask about.
     pub(crate) fn confirm_sign_out(&mut self, email: String, unsent: Unsent) -> bool {
         let Some(text) = confirm_text(unsent) else {
             return false;
@@ -341,7 +343,8 @@ mod tests {
 
     #[test]
     fn account_colors_hash_the_address_unless_one_was_picked() {
-        // `a` is 97: 97 % 12 = 1, orchid; `maya@brightmoor.co` sums to 1829: 5, shell.
+        // `a` is 97, and 97 % 12 = 1 (orchid). `maya@brightmoor.co` sums to 1829, which gives 5
+        // (shell).
         assert_eq!(default_color("a"), Color32::from_rgb(0xe4, 0xcd, 0xe0));
         let maya = exo_auth::Account {
             email: "maya@brightmoor.co".into(),

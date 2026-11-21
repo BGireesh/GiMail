@@ -1,4 +1,4 @@
-//! Which part of the open thread has the keyboard: the focus regions under the thread pane. ↑
+//! Which part of the open thread has the keyboard, among the focus regions under the thread pane. ↑
 //! from the first message reaches the header's controls, ← the back gutter, and ↓ past the last
 //! message the Show New Messages bar.
 
@@ -13,8 +13,8 @@ pub(crate) enum Zone {
     Messages,
     /// The header, with the control at this place in its tab order focused, or none.
     Header(Option<usize>),
-    /// The back gutter; `from_header` when it took the keyboard from the header, where → goes
-    /// back to.
+    /// The back gutter. `from_header` is set when it took the keyboard from the header, which →
+    /// then goes back to.
     ActionPane { from_header: bool },
     /// The Show New Messages bar.
     NewMessages,
@@ -29,7 +29,7 @@ pub enum HeaderKey {
     Up,
     /// ↓ / N: from the actions to the status line, else to the messages.
     Down,
-    /// ← / →: the previous or next control, not wrapping; ← with none focused goes to the back
+    /// ← / →: the previous or next control, not wrapping. ← with none focused goes to the back
     /// gutter.
     Step(isize),
     /// Enter: clicks the focused control.
@@ -63,8 +63,8 @@ impl ThreadView {
         self.header_controls().get(at).copied()
     }
 
-    /// Gives the header the keyboard: the control whose tab index it last focused,
-    /// else the one with tab index 1 (the status line), else none.
+    /// Gives the header the keyboard, focusing the control whose tab index it last focused, else
+    /// the one with tab index 1 (the status line), else none.
     fn enter_header(&mut self) {
         let controls = self.header_controls();
         let start = Control::tab_start(&controls);
@@ -89,7 +89,7 @@ impl ThreadView {
         let control = focused.and_then(|at| controls.get(at).copied());
         match key {
             HeaderKey::Escape => self.zone = Zone::Messages,
-            // ↑ from the status line: the actions take the keyboard on Done, and the tab index to
+            // ↑ from the status line gives the actions the keyboard, on Done, and the tab index to
             // come back to becomes 1.
             HeaderKey::Up if control == Some(Control::Status) => {
                 self.zone = Zone::Header(
@@ -132,8 +132,8 @@ impl ThreadView {
         }
     }
 
-    /// ← in the messages, pressed: scrolls a widened column left, and at its left
-    /// edge gives the back gutter the keyboard. Held (`repeat`), it only scrolls.
+    /// ← pressed in the messages. It scrolls a widened column left, and at the column's left edge
+    /// gives the back gutter the keyboard. Held (`repeat`), it only scrolls.
     pub fn left(&mut self, repeat: bool) {
         if !self.scroll_sideways(-1)
             && !repeat
@@ -143,7 +143,7 @@ impl ThreadView {
         }
     }
 
-    /// Enter on the Show New Messages bar.
+    /// Whether the Show New Messages bar has the keyboard, so that Enter shows the new messages.
     pub fn new_messages_focused(&self) -> bool {
         self.zone == Zone::NewMessages
     }
@@ -153,8 +153,9 @@ impl ThreadView {
         self.zone = Zone::Messages;
     }
 
-    /// ↑ / ↓ past the first or last message, not held: the header, or
-    /// the Show New Messages bar if there is one. Returns whether the keyboard moved.
+    /// ↑ past the first message, not held, goes to the header, and ↓ past the last goes to the Show
+    /// New Messages bar if there is one. ↑ on the bar goes back to the message. Returns whether the
+    /// press was at an edge, so that the keyboard doesn't move on to another message.
     pub(super) fn arrow_out(&mut self, delta: isize, at: usize) -> bool {
         if delta < 0 && self.zone == Zone::NewMessages {
             // Back onto the message it left from, unless that's the only one.

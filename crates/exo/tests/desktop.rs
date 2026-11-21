@@ -11,14 +11,14 @@ use support::{Fixture, start};
 
 const COMMAND: Modifiers = Modifiers::MAC_CMD.plus(Modifiers::COMMAND);
 
-/// The fixture running as a Mac app, its window placed from a folder of its own; and the
+/// The fixture running as a Mac app, with its window placed from a folder of its own, and the
 /// launcher that stands in for the Dock and other launches.
 fn start_desktop(name: &str) -> (Fixture, Launcher) {
     open_desktop(name, Opening::Shown, None)
 }
 
-/// [`start_desktop`], the window opening as `opening` has it, from `saved` (`window.json`) if
-/// given.
+/// [`start_desktop`], with the window opening as `opening` says and placed from `saved`
+/// (`window.json`) if given.
 fn open_desktop(name: &str, opening: Opening, saved: Option<&str>) -> (Fixture, Launcher) {
     let mut app = start(name);
     let launcher = Launcher::default();
@@ -96,7 +96,8 @@ fn a_launch_at_login_opens_the_window_in_the_dock_and_it_comes_back_in_full_scre
             && asked.contains(&ViewportCommand::Minimized(true)),
         "in the Dock: {asked:?}"
     );
-    // As eframe has it once the window is in the Dock, built out of full screen.
+    // What eframe reports once the window is in the Dock. A window opening there is built out of
+    // full screen, so it isn't in full screen yet.
     viewport(&mut app).minimized = Some(true);
     viewport(&mut app).fullscreen = Some(false);
     viewport(&mut app).occluded = Some(true);
@@ -106,7 +107,7 @@ fn a_launch_at_login_opens_the_window_in_the_dock_and_it_comes_back_in_full_scre
         "it stays there"
     );
 
-    // Its window in the Dock clicked.
+    // Its window is clicked in the Dock.
     viewport(&mut app).occluded = Some(false);
     app.harness.run_steps(1);
     let asked = commands(&app);
@@ -233,7 +234,7 @@ fn closing_saves_what_was_typed_in_the_last_second() {
     app.key(Key::Tab);
     app.type_text("Hi there");
     app.wait(1.5);
-    // A key, then closing before the once-a-second save comes round; a hidden window has no
+    // A key, then closing before the once-a-second save comes round. A hidden window has no
     // more frames to save it on.
     app.harness
         .input_mut()
@@ -308,11 +309,11 @@ fn hand_over(app: &mut Fixture) {
 #[test]
 fn a_clicked_menu_item_sends_its_keystroke_to_what_has_the_keyboard() {
     let (mut app, launcher) = start_desktop("menu-select-all");
-    // Edit ▸ Select All, in the list: every conversation, as ⌘A.
+    // Edit ▸ Select All, in the list, selects every conversation, as ⌘A does.
     launcher.keystroke(exo::desktop::menu::Keystroke::SelectAll);
     hand_over(&mut app);
     assert!(app.mail().inbox().is_selecting(), "selected");
-    // Its ⌘ is held for that frame only: the next frame's hook lets go of it.
+    // Its ⌘ is held for that frame only, and the next frame's hook lets go of it.
     assert!(app.harness.ctx.input(|input| input.modifiers.command));
     hand_over(&mut app);
     assert!(!app.harness.ctx.input(|input| input.modifiers.command));
@@ -328,7 +329,7 @@ fn text_macos_inserts_with_no_key_goes_into_the_draft() {
     app.type_text("Lunch");
     app.key(Key::Tab);
     app.type_text("Pizza ");
-    // Emoji & Symbols' pick.
+    // A pick from Emoji & Symbols.
     launcher.text("🍕".to_owned());
     hand_over(&mut app);
     assert!(

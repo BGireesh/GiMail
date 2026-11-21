@@ -14,7 +14,7 @@ use crate::{
 };
 
 impl crate::Mail {
-    /// The search bar is open.
+    /// Whether the search bar is open.
     pub fn is_searching(&self) -> bool {
         self.search.is_some()
     }
@@ -29,7 +29,7 @@ impl crate::Mail {
         Some(self.search.as_ref()?.text())
     }
 
-    /// The search bar has the keyboard.
+    /// Whether the search bar has the keyboard.
     pub fn search_bar_focused(&self) -> bool {
         self.search.as_ref().is_some_and(Search::bar_focused)
     }
@@ -64,7 +64,7 @@ impl crate::Mail {
         self.search_enter(None, now);
     }
 
-    /// Enters search mode with the view's search in the bar, or with `run`, that search run at once
+    /// Enters search mode with the view's search in the bar. With `run`, that search runs at once
     /// (a contact's name clicked, keeping the contact).
     pub(crate) fn search_enter(&mut self, run: Option<&str>, now: f64) {
         self.close_thread();
@@ -111,7 +111,7 @@ impl crate::Mail {
         self.search_effects(effects, now);
     }
 
-    /// Leaves search: back to the list, its cursor where it was.
+    /// Leaves search, back to the list with its cursor where it was.
     pub(crate) fn search_exit(&mut self, now: f64) {
         if self.search.take().is_none() {
             return;
@@ -124,10 +124,10 @@ impl crate::Mail {
         self.inbox.restore(&[], cursor, now);
     }
 
-    /// The bar takes the keyboard back from the results: the results lose their cursor, remembered
-    /// for coming back to the same search, and the contact pane keeps whom it showed. Given it by a
-    /// key (`/`, Escape, ↑ on the first row), the bar's text is selected, so what's typed next
-    /// replaces it; a click leaves the caret where it lands.
+    /// The bar takes the keyboard back from the results. The results lose their cursor, which is
+    /// remembered for coming back to the same search, and the contact pane keeps whom it showed.
+    /// When a key gives the bar the keyboard (`/`, Escape, ↑ on the first row), the bar's text is
+    /// selected, so what's typed next replaces it. A click leaves the caret where it lands.
     pub(crate) fn search_focus_bar(&mut self, select: bool) {
         let cursor = self
             .inbox
@@ -250,8 +250,8 @@ impl crate::Mail {
         {
             self.inbox.set_threads(results.threads.clone());
             self.search_rows_from = Some(results.clone());
-            // While the bar has the keyboard the results have no cursor, however they change;
-            // focusing the list below gives them one.
+            // While the bar has the keyboard the results have no cursor, however they change.
+            // Focusing the list below gives them one.
             if self.search.as_ref().is_some_and(Search::bar_focused) {
                 self.inbox.clear_cursor();
             }
@@ -310,7 +310,7 @@ impl crate::Mail {
         }
     }
 
-    /// The search header over the list view, and what its clicks do; with no search to show,
+    /// The search header over the list view, and what its clicks do. With no search to show,
     /// the hint where the list would be.
     pub(crate) fn search_show(
         &mut self,
@@ -354,8 +354,9 @@ impl crate::Mail {
         self.search_effects(effects, now);
     }
 
-    /// Whom the right pane shows while searching outside a thread: someone a suggestion named,
-    /// else the results' cursor's contact. `None` with nobody to show (the pane shows Tips).
+    /// Whom the right pane shows while searching outside a thread, which is someone a suggestion
+    /// named, or else the contact of the results' cursor. `None` with nobody to show (the pane
+    /// shows Tips).
     pub(crate) fn search_pane_person(&self) -> Option<Option<Person>> {
         let search = self.search.as_ref()?;
         if let Some(person) = &search.contact {

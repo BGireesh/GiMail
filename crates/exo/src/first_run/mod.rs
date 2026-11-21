@@ -17,8 +17,7 @@ use exo_ui::{ALERT_TEXT, ALERT_TEXT_INK};
 
 use crate::commands;
 
-/// More conversations than this, or more than the store has, and setup ends in Get Me To Zero
-/// (`ca.QOe`).
+/// With more conversations than this, or more than the store has, setup ends in Get Me To Zero.
 const GET_ME_TO_ZERO_OVER: usize = 10;
 /// The welcome alert at the end of the flow. Its text is a `354px` box, so the first line doesn't
 /// wrap at the alert's 300px.
@@ -48,7 +47,7 @@ pub(crate) struct Press {
 }
 
 /// Takes this frame's Tab, Enter, Space, arrows and Escape (with no ⌘, ⌃ or ⌥) before anything
-/// else sees them: account setup answers them, on the way down and up.
+/// else sees them, because account setup answers them on the way down and up.
 fn take_keys(ctx: &egui::Context) -> Vec<Press> {
     let mut taken = Vec::new();
     ctx.input_mut(|input| {
@@ -105,7 +104,8 @@ pub(crate) struct State {
     welcome: bool,
 }
 
-/// The flow's keys: the welcome's action (its screens take theirs, `take_keys`).
+/// Registers the flow's keys, which is the welcome's action. The flow's screens take their own
+/// keys in `take_keys`.
 pub(crate) fn register(commands: &mut Commands<commands::Action>, state: &State) {
     let act = commands::Action::FirstRun;
     if state.welcome {
@@ -118,8 +118,8 @@ pub(crate) fn register(commands: &mut Commands<commands::Action>, state: &State)
 }
 
 impl crate::Mail {
-    /// Starts the first run once the welcome splash has given way (and at every launch after):
-    /// account setup again if it was left half done, else the flow if it's due.
+    /// Starts the first run once the welcome splash has given way, and at every launch after. It
+    /// reopens account setup if that was left half done, or else starts the flow if it's due.
     pub(crate) fn maybe_start_first_run(&mut self) {
         if self.account.device_settings().account_setup_pending {
             self.open_account_setup();
@@ -131,7 +131,7 @@ impl crate::Mail {
         }
     }
 
-    /// Opens account setup, as the flow does; public for screenshots and tests.
+    /// Opens account setup, as the flow does. Public for screenshots and tests.
     pub fn open_account_setup(&mut self) {
         self.account
             .update_device_settings(|device| device.account_setup_pending = true);
@@ -143,7 +143,7 @@ impl crate::Mail {
             labels: &labels,
             me: &me,
         };
-        // A Calendar split, off, if the account has none.
+        // Adds a Calendar split, turned off, if the account has none.
         if !self
             .account
             .settings()
@@ -166,7 +166,7 @@ impl crate::Mail {
         self.first_run.preview = None;
     }
 
-    /// The flow covers the window, or its alert is up: its keys are the only ones.
+    /// Whether the flow covers the window or its alert is up, so that its keys are the only ones.
     pub fn first_run_covers(&self) -> bool {
         self.first_run.setup.is_some() || self.first_run.welcome
     }
@@ -185,7 +185,7 @@ impl crate::Mail {
         self.first_run.snow.then_some(exo_store::Theme::Snow)
     }
 
-    /// Nothing of the flow is being worked out. For screenshots and tests.
+    /// Whether nothing in the flow is still being worked out. For screenshots and tests.
     pub(crate) fn first_run_idle(&self) -> bool {
         self.first_run.preview.is_none()
             && self.first_run.count.is_none()
@@ -240,8 +240,8 @@ impl crate::Mail {
         }
     }
 
-    /// Once a frame, before anything draws: the keys the flow's screens take, the preview's work,
-    /// and the inbox count setup ends on.
+    /// Runs once a frame, before anything draws. It handles the keys the flow's screens take, the
+    /// preview's work, and the inbox count that setup ends on.
     pub(crate) fn first_run_frame(&mut self) {
         if self.first_run.setup.is_some() {
             let now = self.ctx.input(|input| input.time);
@@ -363,8 +363,8 @@ impl crate::Mail {
         }
     }
 
-    /// The loading screen is done: the split step if a split takes some of the inbox, its three on,
-    /// else the end of setup.
+    /// The loading screen is done. If a split takes some of the inbox, this shows the split step
+    /// with its three splits on, and otherwise it ends setup.
     fn setup_loaded(&mut self) {
         let now = self.ctx.input(|input| input.time);
         let Some(setup) = &mut self.first_run.setup else {
@@ -417,7 +417,7 @@ impl crate::Mail {
         setup.step = setup::Step::Splits(splits);
     }
 
-    /// A row's toggle: no toast, the split turned on or off where it is.
+    /// A row's toggle, which turns the split on or off where it is, with no toast.
     fn toggle_setup_split(&mut self, index: usize) {
         let now = self.ctx.input(|input| input.time);
         let Some(id) = self
@@ -457,15 +457,15 @@ impl crate::Mail {
         }
     }
 
-    /// `Continue with this setup`: every other split setup could have offered is turned off, and
-    /// Important and Other on.
+    /// `Continue with this setup`. Every other split that setup could have offered is turned off,
+    /// and Important and Other is turned on.
     fn continue_setup(&mut self) {
         let Some(splits) = self.first_run.setup.as_ref().and_then(setup::Setup::splits) else {
             return;
         };
         let shown: Vec<String> = splits.rows.iter().map(|row| row.id.clone()).collect();
-        // The splits setup could offer: on, with a definition, not VIP or Team (or News without
-        // senders).
+        // The splits that setup could offer are the ones that are on, have a definition, and
+        // aren't VIP, Team, shared or News.
         let others: Vec<SplitInbox> = self
             .account
             .settings()
@@ -498,7 +498,7 @@ impl crate::Mail {
                 .update_settings(|settings| settings.replace_split(&split.id, off));
         }
         if self.account.settings().unified_inbox {
-            // Important and Other on, which shows Important.
+            // Turning Important and Other on shows Important.
             self.account
                 .update_settings(exo_store::Settings::toggle_important_other);
             let now = self.ctx.input(|input| input.time);
@@ -519,7 +519,7 @@ impl crate::Mail {
         let (sender, receiver) = mpsc::channel();
         let ctx = self.ctx.clone();
         self.account.loader().run(
-            // Every inbox conversation, the splits' too.
+            // Counts every inbox conversation, including the splits'.
             |store| async move {
                 store
                     .count(&ListId::Label("INBOX".to_owned()))
@@ -537,7 +537,7 @@ impl crate::Mail {
 
     /// `Welcome to Exo`, over `page` dimmed.
     fn show_welcome_alert(&mut self, ui: &mut Ui, page: Rect) {
-        // The overlay: the page dimmed to half, nothing behind it clickable.
+        // The overlay dims the page to half and leaves nothing behind it clickable.
         ui.painter()
             .rect_filled(page, 0.0, egui::Color32::from_black_alpha(128));
         let _ = ui.interact(

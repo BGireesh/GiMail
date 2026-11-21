@@ -3,7 +3,8 @@
 
 use crate::{Editor, Format, LinkAction};
 
-/// A formatting command with a key: the body's keymap and its help-sheet copy.
+/// A formatting command with a key. The commands make up the body's keymap and the copy for its
+/// help sheet.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum FormatCommand {
     /// ⌘B.
@@ -12,9 +13,9 @@ pub enum FormatCommand {
     Italic,
     /// ⌘U.
     Underline,
-    /// ⌘K: the link input, or removing the link the selection is in.
+    /// ⌘K, which opens the link input or removes the link the selection is in.
     Hyperlink,
-    /// ⌘O: the colour subformatter.
+    /// ⌘O, which opens the colour subformatter.
     Color,
     /// ⌘⇧X.
     Strikethrough,
@@ -71,7 +72,7 @@ impl FormatCommand {
         }
     }
 
-    /// The help sheet's label for it (its "format" section).
+    /// Its label in the help sheet's "format" section.
     pub const fn title(self) -> &'static str {
         match self {
             Self::Bold => "Bold",
@@ -109,9 +110,9 @@ impl FormatCommand {
         }
     }
 
-    /// Whether the editor takes the key now, so the app registers it only then: ⌘K only with a
-    /// selection or in a link (otherwise it opens the palette), Tab and Shift+Tab only in a list
-    /// (otherwise they move focus).
+    /// Whether the editor takes the key now, so the app registers it only then. ⌘K applies only
+    /// with a selection or in a link (otherwise it opens the palette), and Tab and Shift+Tab only
+    /// in a list (otherwise they move focus).
     pub fn applies(self, editor: &Editor) -> bool {
         match self {
             Self::Hyperlink => editor.link_action() != LinkAction::None,

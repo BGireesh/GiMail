@@ -17,8 +17,8 @@ pub(super) struct Zone {
     pub label: String,
 }
 
-/// A token names a zone that doesn't exist (`gmt+1`, kept as typed): the whole parse comes back
-/// empty.
+/// A token names a zone that doesn't exist (`gmt+1`, kept as typed), so the whole parse comes
+/// back empty.
 #[derive(Debug)]
 pub(super) struct InvalidZone;
 
@@ -86,7 +86,7 @@ fn tables() -> &'static Tables {
     })
 }
 
-/// A zone's last segment as a name: `Europe/London` is `london`, `America/Port-au-Prince`
+/// A zone's last segment as a name: `Europe/London` is `london`, and `America/Port-au-Prince` is
 /// `port_au-prince` (only the first `-` becomes `_`).
 fn segment(zone: &str) -> String {
     zone.rsplit('/')
@@ -106,7 +106,7 @@ pub(super) fn starting_with(word: &str) -> Option<&'static [String]> {
     tables().by_first_word.get(word).map(Vec::as_slice)
 }
 
-/// A place's name, not an abbreviation: `time` after it is dropped (`london time`).
+/// A place's name, not an abbreviation, so `time` after it is dropped (`london time`).
 pub(super) fn is_place(name: &str) -> bool {
     tables().places.contains(name)
 }

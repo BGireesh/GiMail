@@ -1,4 +1,4 @@
-//! Where a day's timed events go in its column: events that overlap nest as a forest, each child
+//! Where a day's timed events go in its column. Events that overlap nest as a forest, each child
 //! indented from its parent, and each block's top and height follow its times at 44px an hour.
 
 use jiff::{SignedDuration, Timestamp, Zoned};
@@ -44,8 +44,8 @@ struct Node {
     width: f32,
 }
 
-/// Lays out `events` (start, end) in the column of the day starting at `day_start` (local
-/// midnight; `day_start`'s zone gives each top its wall-clock time).
+/// Lays out `events` (start, end) in the column of the day starting at `day_start`, which is
+/// local midnight. The zone of `day_start` gives each top its wall-clock time.
 pub fn day_layout(events: &[(Timestamp, Timestamp)], day_start: &Zoned) -> Vec<Placed> {
     let mut nodes: Vec<Node> = events
         .iter()
@@ -105,8 +105,8 @@ fn sort_by_render(nodes: &mut [Node], mut rest: Vec<usize>) -> Vec<usize> {
     out
 }
 
-/// The forest: in render order, each event adopts the later events that start inside it after
-/// its previous child ends.
+/// Builds the forest. In render order, each event adopts the later events that start inside it
+/// after its previous child ends.
 fn make_tree(nodes: &mut [Node]) -> Vec<usize> {
     let mut by_time = sort_by_time(nodes);
     let render = sort_by_render(nodes, by_time.clone());
@@ -189,8 +189,8 @@ fn depth(nodes: &[Node], node: usize) -> usize {
     })
 }
 
-/// Tight indentation: a child that starts half an hour or more after its parent tucks in under
-/// it, unless something follows an ancestor too soon.
+/// Whether `node` takes tight indentation. A child that starts half an hour or more after its
+/// parent tucks in under the parent, unless something follows an ancestor too soon.
 fn tight_indentation(nodes: &[Node], node: usize) -> bool {
     let Some(parent) = nodes[node].parent else {
         return false;
@@ -327,7 +327,7 @@ mod tests {
 
     #[test]
     fn overlapping_events_nest() {
-        // 9–11 and 9:15–10:30: the second is the first's child, indented by its width.
+        // With 9–11 and 9:15–10:30, the second is the first's child, indented by its own width.
         let placed = day_layout(&[(at(9, 0), at(11, 0)), (at(9, 15), at(10, 30))], &day());
         let by_event = |event| {
             placed
@@ -350,7 +350,7 @@ mod tests {
 
     #[test]
     fn a_short_root_with_a_longer_child_swaps() {
-        // 9–9:30 holds 9:15–12; the longer child becomes the root.
+        // 9–9:30 holds 9:15–12, so the longer child becomes the root.
         let placed = day_layout(&[(at(9, 0), at(9, 30)), (at(9, 15), at(12, 0))], &day());
         let long = placed
             .iter()

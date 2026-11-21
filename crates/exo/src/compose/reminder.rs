@@ -1,8 +1,8 @@
-//! Remind me from compose: ⌘⇧H, the palette's `Remind Me` and the action pane's Remind button
-//! open the picker in Draft mode, whose time is the draft's (`reminder`); the store gives the
-//! thread that reminder at Send. After a send, once, the follow-up hint offers the same for the
+//! Remind me from compose. ⌘⇧H, the palette's `Remind Me` and the action pane's Remind button
+//! open the picker in Draft mode, which sets the draft's time (`reminder`). The store gives the
+//! thread that reminder at Send. Once, after a send, the follow-up hint offers the same for the
 //! message just sent. Automatic Reminders put the default reminder on a draft with an external
-//! recipient, and the Remind label flourishes as one comes.
+//! recipient, and the Remind label flourishes as that reminder arrives.
 
 use std::hash::{DefaultHasher, Hash, Hasher};
 
@@ -17,7 +17,7 @@ use crate::{
     remind::{self, Target},
 };
 
-/// The follow-up hint waits for this many sends from this device (`localSendsCount > 5`).
+/// The follow-up hint waits until this device has sent more than this many messages.
 const SENDS_BEFORE_HINT: u32 = 5;
 /// While the hint is open its send is held this long past now, every
 /// [`POSTPONE_EVERY`] seconds, at most [`POSTPONES`] times (a minute).
@@ -32,8 +32,8 @@ pub(super) const HINT_AFTER: &str = "on any email you've sent, and choose a time
 
 /// The Remind label's flourish: a 2 s linear sweep.
 const FLOURISH_SECONDS: f64 = 2.0;
-/// The colour that sweeps across: `#aeb1dd` from 45% to 80% of the gradient, the label's own
-/// ink to 30% and at 100%.
+/// The colour that sweeps across: `#aeb1dd` from 45% to 80% of the gradient, with the label's
+/// own ink up to 30% and at 100%.
 const FLOURISH_BAND: Color32 = Color32::from_rgb(0xae, 0xb1, 0xdd);
 
 /// What Automatic Reminders know of an open draft, which they look at as it opens and each time
@@ -42,10 +42,11 @@ const FLOURISH_BAND: Color32 = Color32::from_rgb(0xae, 0xb1, 0xdd);
 pub(crate) struct Automatic {
     /// The participants last looked at.
     seen: Option<u64>,
-    /// The picker's `Remove Reminder` took its reminder off, so none
-    /// comes back while it's open.
+    /// The picker's `Remove Reminder` took the draft's reminder off, so none
+    /// comes back while the draft is open.
     removed: bool,
-    /// When they put its reminder on: the Remind label flourishes from then.
+    /// When Automatic Reminders put the draft's reminder on. The Remind label flourishes from
+    /// then.
     pub flourish: Option<f64>,
 }
 
@@ -69,8 +70,8 @@ fn participants(record: &DraftRecord) -> u64 {
     hasher.finish()
 }
 
-/// Whether the draft has an external recipient: some valid address in To, Cc or Bcc whose domain
-/// isn't one of `team`'s, and that isn't one of Auto Bcc's (`auto_bcc`, lowercased).
+/// Whether the draft has an external recipient, which is a valid address in To, Cc or Bcc whose
+/// domain isn't one of `team`'s and that isn't one of Auto Bcc's (`auto_bcc`, lowercased).
 fn has_external(record: &DraftRecord, team: &[String], auto_bcc: &[String]) -> bool {
     let external = |address: &Address| {
         recipients::is_valid(&address.email)
@@ -87,7 +88,8 @@ fn has_external(record: &DraftRecord, team: &[String], auto_bcc: &[String]) -> b
         .any(external)
 }
 
-/// Whether the draft is a note to self: only to `Me` at the default alias, subject `Note to self`.
+/// Whether the draft is a note to self, sent only to `Me` at the default alias with the subject
+/// `Note to self`.
 fn is_note_to_self(record: &DraftRecord, default_alias: &str) -> bool {
     matches!(record.to.as_slice(), [only] if only.email == default_alias && only.name.as_deref() == Some("Me"))
         && record.cc.is_empty()
@@ -95,8 +97,8 @@ fn is_note_to_self(record: &DraftRecord, default_alias: &str) -> bool {
         && record.subject == "Note to self"
 }
 
-/// The team's domains: the Team split's domains, else the first alias's domain, unless that's a
-/// webmail one.
+/// The team's domains. They're the Team split's domains, or else the first alias's domain unless
+/// that's a webmail one.
 pub(crate) fn team_domains(
     settings: &exo_store::Settings,
     aliases: &[exo_store::Alias],
@@ -118,10 +120,10 @@ pub(crate) fn team_domains(
     crate::splits::team_domain(first).into_iter().collect()
 }
 
-/// The flourish at `progress` (0 to 1) over a label `width` wide: its colour at `x` from the
-/// label's left. The gradient, three labels wide and repeating, slides from `150% 0` to `0 0`,
-/// so the band crosses the label left to right and the last frame, which stays, is the label's
-/// ink with a hint of the band at its end.
+/// The flourish's colour at `x` from the label's left, at `progress` (0 to 1) over a label
+/// `width` wide. The gradient is three labels wide and repeats. It slides from `150% 0` to `0 0`,
+/// so the band crosses the label left to right. The last frame, which stays, is the label's ink
+/// with a hint of the band at its end.
 pub(super) fn flourish_at(x: f32, width: f32, progress: f32, ink: Color32) -> Color32 {
     let image = 3.0 * width;
     let offset = (width - image) * 1.5 * (1.0 - progress);
@@ -138,7 +140,7 @@ pub(super) fn flourish_at(x: f32, width: f32, progress: f32, ink: Color32) -> Co
 }
 
 /// Paints `text` in `style` with its line box at `line_top_left`, as `TextStyle::paint_line`
-/// places it, its glyphs coloured by [`flourish_at`] (`-webkit-background-clip: text`).
+/// places it, with its glyphs coloured by [`flourish_at`] (`-webkit-background-clip: text`).
 pub(super) fn paint_flourish(
     painter: &Painter,
     line_top_left: Pos2,
@@ -176,8 +178,8 @@ pub(super) fn paint_flourish(
     );
 }
 
-/// How far the Remind label's flourish is at `now`, while it shows: from the time Automatic
-/// Reminders put the draft's reminder on, while it's still theirs.
+/// How far the Remind label's flourish is at `now`, while it shows. It runs from the time
+/// Automatic Reminders put the draft's reminder on, and only while that reminder is still theirs.
 pub(super) fn flourish_progress(open: &super::draft::Open, now: f64) -> Option<f32> {
     let start = open.automatic.flourish.filter(|_| {
         open.record
@@ -187,7 +189,7 @@ pub(super) fn flourish_progress(open: &super::draft::Open, now: f64) -> Option<f
     Some(((now - start) / FLOURISH_SECONDS).clamp(0.0, 1.0) as f32)
 }
 
-/// The follow-up hint holding its send: how often it has, and when last.
+/// The follow-up hint holding its send, with how often it has done so and when it last did.
 pub(super) struct FollowUp {
     pub draft: String,
     postponed: u32,
@@ -213,11 +215,12 @@ impl Mail {
         self.open_remind_me(Target::Draft(id), footer);
     }
 
-    /// Automatic Reminders, for every open draft whose participants changed since last
-    /// looked at, or that just opened. With `All messages with an external recipient`
-    /// (`EXTERNAL`): a draft with an external recipient that isn't a note to self and has no
-    /// reminder gets the default one (`in {days} days` or weekdays, at the time, `regardless` as
-    /// the dropdown says); one with none any more loses the reminder they gave it.
+    /// Runs Automatic Reminders for every open draft whose participants changed since they were
+    /// last looked at, or that just opened. With `All messages with an external recipient`
+    /// (`EXTERNAL`), a draft with an external recipient that isn't a note to self and has no
+    /// reminder gets the default one (`in {days} days` or weekdays, at the set time, `regardless`
+    /// as the dropdown says). A draft with no external recipient any more loses the reminder that
+    /// Automatic Reminders gave it.
     pub(super) fn automatic_reminders(&mut self, now: f64) {
         let settings = self.account.settings();
         let reminders = settings.reminders.clone();
@@ -275,15 +278,16 @@ impl Mail {
         }
     }
 
-    /// The picker's `Remove Reminder` took draft `id`'s reminder off: Automatic Reminders leave
-    /// it while it's open.
+    /// The picker's `Remove Reminder` took draft `id`'s reminder off, so Automatic Reminders leave
+    /// the draft alone while it's open.
     pub(crate) fn reminder_removed(&mut self, id: &str) {
         if let Some(open) = self.compose.get_mut(id) {
             open.automatic.removed = true;
         }
     }
 
-    /// Draft `id` takes `reminder` (`None`: `Remove Reminder`), saved at once.
+    /// Sets draft `id`'s reminder to `reminder` (`None` for `Remove Reminder`) and saves it at
+    /// once.
     pub(crate) fn set_draft_reminder(&mut self, id: &str, reminder: Option<DraftReminder>) {
         let aliases = self.snapshot.aliases.clone();
         let Some(open) = self.compose.get_mut(id) else {
@@ -293,9 +297,9 @@ impl Mail {
         save_changes(open, &self.account, &aliases, &self.now);
     }
 
-    /// The follow-up hint's picker picked `reminder` for the message sent as draft `id`: its
-    /// thread gets it without being marked done, and the `Reminder set: …` toast's Undo takes it
-    /// off again.
+    /// The follow-up hint's picker picked `reminder` for the message sent as draft `id`. The
+    /// message's thread gets the reminder without being marked done, and Undo on the
+    /// `Reminder set: …` toast takes it off again.
     pub(crate) fn remind_sent(&mut self, id: &str, reminder: DraftReminder) {
         let thread = self.sent_thread(id);
         self.account.remind_sent(id, thread, Some(reminder));
@@ -316,14 +320,14 @@ impl Mail {
         );
     }
 
-    /// The `Reminder set` toast's Undo, for a message just sent, which says nothing.
+    /// Undo on the `Reminder set` toast for a message just sent. It says nothing.
     pub(super) fn unremind_sent(&mut self, id: &str) {
         let thread = self.sent_thread(id);
         self.account.remind_sent(id, thread, None);
     }
 
-    /// The thread draft `id` was sent into, or will be: its held send's, the store's, or Gmail's
-    /// once sent.
+    /// The thread that draft `id` was or will be sent into. That's the thread of its held send,
+    /// the store's, or Gmail's once sent.
     fn sent_thread(&self, id: &str) -> Option<String> {
         self.compose
             .sends
@@ -347,8 +351,8 @@ impl Mail {
             })
     }
 
-    /// After a send of draft `id`: counts it, and once, after more than five from this device,
-    /// for a message sent without a reminder, opens the follow-up hint.
+    /// After a send of draft `id`, counts the send. Once, after more than five sends from this
+    /// device, it opens the follow-up hint for a message sent without a reminder.
     pub(super) fn follow_up_hint(&mut self, id: &str, reminded: bool, now: f64) {
         self.count_send(now);
         let sends = self.account.device_settings().local_sends_count;
@@ -379,8 +383,8 @@ impl Mail {
         });
     }
 
-    /// While the hint is open, its send waits: ten seconds past now every five, for a minute at
-    /// most. A scheduled send keeps its time.
+    /// While the hint is open, its send waits. Every five seconds the send is held to ten seconds
+    /// past now, for a minute at most. A scheduled send keeps its time.
     pub(super) fn postpone_for_follow_up(&mut self, now: f64) {
         let open = self
             .compose
@@ -410,7 +414,7 @@ impl Mail {
         self.ctx.request_repaint_after_secs(POSTPONE_EVERY as f32);
     }
 
-    /// `Set reminder` (or `H`): the toast goes, and the picker opens for the message just sent,
+    /// `Set reminder` (or `H`) hides the toast and opens the picker for the message just sent,
     /// with a reminder's rows.
     pub(super) fn follow_up_set_reminder(&mut self, id: String) {
         self.compose.follow_up = None;

@@ -35,7 +35,7 @@ static OPT_OUT_CONTEXT: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 /// Every link under `root`, and the best unsubscribe candidate (marked with
-/// [`UNSUBSCRIBE_CLASS`]). `user_domains` are the account's own domains: a `mailto:` to them
+/// [`UNSUBSCRIBE_CLASS`]). `user_domains` are the account's own domains, and a `mailto:` to them
 /// is never an unsubscribe link.
 pub(crate) fn find_links(
     root: &NodeRef,
@@ -77,7 +77,7 @@ pub(crate) fn find_links(
     (links, unsubscribe)
 }
 
-/// How likely a link is to unsubscribe, 1 (surely) to 4; `None` when it isn't one.
+/// How likely a link is to unsubscribe, 1 (surely) to 4, or `None` when it isn't one.
 fn unsubscribe_rank(
     link: &Link,
     user_domains: &[String],

@@ -1,6 +1,6 @@
 //! The Autocorrect dialog and the typing commands. The dialog has an intro and a `Use
-//! Autocorrect` switch, without `Languages`: macOS's spellchecker detects each paragraph's
-//! language itself.
+//! Autocorrect` switch, without `Languages`, because macOS's spellchecker detects each
+//! paragraph's language itself.
 
 use egui::{Color32, Context, CursorIcon, Rect, Sense, Ui, pos2, vec2};
 use exo_commands::{Command, Commands};
@@ -30,7 +30,7 @@ const PARAGRAPHS: [&str; 2] = [
     "Most importantly, you go faster. Autocorrect increases typing speed by 30–50%.",
 ];
 
-/// Draws the dialog over `area` with the switch `on`; a click on its row turns autocorrect the
+/// Draws the dialog over `area` with the switch `on`. A click on its row turns autocorrect the
 /// other way.
 pub fn dialog(ctx: &Context, area: Rect, open: bool, on: bool) -> DialogResponse<Option<Action>> {
     let width = exo_ui::DIALOG_WIDTH - 2.0 * 32.0;

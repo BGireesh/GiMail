@@ -174,7 +174,7 @@ fn a_file_not_kept_says_offline_that_it_isnt_available() {
     );
 }
 
-/// Where `Download all` is under the open message's first card: past the card and the gap
+/// Where `Download all` is under the open message's first card, past the card and the gap
 /// under it, where the pointer turns into a hand again.
 fn download_all(app: &mut Fixture) -> egui::Pos2 {
     let (mut on_card, mut past_card) = (false, false);
@@ -328,7 +328,7 @@ fn images_and_messages_open_in_the_viewer_and_move_with_the_arrows() {
         .expect("a card");
     app.click(card + egui::vec2(0.0, 20.0));
     assert_eq!(app.mail().previewed(), Some("lake.png"));
-    // The viewer has images and messages; the PDF goes to Quick Look.
+    // The viewer has images and messages, and the PDF goes to Quick Look.
     app.key(Key::ArrowRight);
     assert_eq!(app.mail().previewed(), Some("Room block.eml"));
     app.key(Key::ArrowRight);
@@ -406,8 +406,8 @@ fn kickoff() -> Email {
     }
 }
 
-/// Runs frames until one puts `want` on egui's output, at most two seconds' worth, the first
-/// with `events` in.
+/// Runs frames, at most two seconds' worth, until one puts `want` on egui's output. The first
+/// frame has `events` in it.
 fn output(
     app: &mut Fixture,
     events: Vec<Event>,
@@ -464,7 +464,8 @@ fn a_message_in_the_viewer_selects_copies_and_opens_its_links() {
     app.click(card + egui::vec2(0.0, 20.0));
     assert_eq!(app.mail().previewed(), Some("Northwind kickoff.eml"));
     app.wait(0.5);
-    // At 1280×800 the card's text starts 312px in; its subject's line is at 141, the body at 301.
+    // At 1280×800 the card's text starts 312px in. Its subject's line is at 141, and the body at
+    // 301.
     app.drag(pos2(312.0, 157.0), pos2(700.0, 157.0));
     assert_eq!(
         copy(&mut app).as_deref(),

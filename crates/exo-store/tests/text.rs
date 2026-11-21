@@ -1,6 +1,7 @@
-//! The search index's text (`Store::index_text_with`, `Store::index_texts`): each message's
-//! visible text, worked out by the app's function (here a stand-in for exo-mail's pipeline that
-//! cuts a body at its quote), once its body is stored and the one it replies to is too.
+//! The search index's text (`Store::index_text_with`, `Store::index_texts`). That's each
+//! message's visible text, worked out by the app's function once its body is stored and the body
+//! of the message it replies to is too. Here the function is a stand-in for exo-mail's pipeline
+//! that cuts a body at its quote.
 
 mod support;
 
@@ -13,8 +14,8 @@ use support::Harness;
 /// What the stand-in was asked: each message, and the one it was read against.
 type Asked = Arc<Mutex<Vec<(String, Option<String>)>>>;
 
-/// A stand-in for exo-mail's pipeline: a body's text up to its quote (`On … wrote:`), each
-/// message read against the one it replies to. It records what it was asked.
+/// A stand-in for exo-mail's pipeline. It keeps a body's text up to its quote (`On … wrote:`),
+/// reads each message against the one it replies to, and records what it was asked.
 fn cut_at_quotes(asked: &Asked) -> IndexText {
     let asked = asked.clone();
     Arc::new(move |sources: &[TextSource]| {
@@ -48,7 +49,7 @@ async fn found(harness: &Harness, query: &str) -> Vec<ThreadId> {
         .collect()
 }
 
-/// The message rows Gmail has of `thread`, oldest first.
+/// The messages Gmail has in `thread`, by id, oldest first.
 async fn messages(harness: &Harness, thread: &ThreadId) -> Vec<String> {
     harness
         .gmail
@@ -80,7 +81,8 @@ async fn a_minute_later(harness: &Harness) {
         .await;
 }
 
-/// A conversation in the inbox (so sync fetches its bodies): Ann asks, Maya replies quoting her.
+/// A conversation in the inbox (so sync fetches its bodies). Ann asks, then replies quoting
+/// herself.
 async fn conversation(harness: &Harness) -> ThreadId {
     let first = harness.deliver(json!({ "from": "Ann <ann@example.com>", "subject": "Lunch", "text": "Shall we try the boathouse on Friday?" })).await;
     let thread = first.thread_id.expect("a thread");
@@ -129,8 +131,8 @@ async fn the_index_holds_what_shows_above_the_quote_once_worked_out() {
     );
     assert!(asked.contains(&(first, None)));
 
-    // Local results stop where All Mail's backfill does online; offline they're all there. The
-    // excerpt is the reply's, not its quote's.
+    // Local results stop where All Mail's backfill does when online, and offline they're all
+    // there. The excerpt is the first message's, not the reply's quote of it.
     let page = harness
         .store
         .search(&mut Search::new("boathouse"), 50, false, 15)
@@ -165,7 +167,7 @@ async fn without_the_function_the_index_holds_the_whole_text() {
         "the quote is searchable"
     );
 
-    // Given it later, the bodies stored since are worked out at the next pass.
+    // Given the function later, the store works out the bodies stored since at the next pass.
     harness
         .store
         .index_text_with(cut_at_quotes(&Asked::default()));
@@ -207,7 +209,8 @@ async fn a_reply_whose_quoted_message_has_no_body_waits_for_it() {
         "the whole text meanwhile"
     );
 
-    // Opened, the first message's body comes, and the next pass works the reply out against it.
+    // Opening the thread brings the first message's body, and the next pass works the reply out
+    // against it.
     harness.store.load_bodies(&thread).await.expect("fetches");
     harness.store.index_texts().await.expect("indexes");
     assert!(!found(&harness, "walrus").await.contains(&thread));

@@ -116,12 +116,12 @@ pub(crate) fn is_read_status_pixel(image: &NodeRef) -> bool {
 }
 
 /// Whether an `<img>` with `attributes` is a read receipt, as [`is_read_status_pixel`] judges
-/// one in a message: for images outside a message's body (a draft's).
+/// one in a message. It's for images outside a message's body (a draft's).
 pub fn is_read_receipt(attributes: &[(&str, &str)]) -> bool {
     is_read_status_pixel(&dom::element("img", attributes))
 }
 
-/// `min(max(size, min-size), max-size)` from inline px values and the attribute; `None` when
+/// `min(max(size, min-size), max-size)` from inline px values and the attribute, or `None` when
 /// unknown or in other units.
 fn rendered_size(image: &NodeRef, style: &Style, axis: &str) -> Option<i64> {
     static INTEGER: LazyLock<regex::Regex> =
@@ -147,7 +147,7 @@ fn rendered_size(image: &NodeRef, style: &Style, axis: &str) -> Option<i64> {
     };
     let min = px(&format!("min-{axis}")).ok()?;
     let max = px(&format!("max-{axis}")).ok()?;
-    // lodash's `max`/`min` skip missing values and give `undefined` for none.
+    // Missing values are left out, and a bound with no values gives `None`.
     let low = [size, min].into_iter().flatten().max();
     [low, max].into_iter().flatten().min()
 }

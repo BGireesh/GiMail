@@ -1,8 +1,8 @@
 //! The window chrome drawn over the page: a tab strip with its own traffic lights (the native
 //! ones are hidden).
 //!
-//! The strip is the window's, not the page's, so zooming leaves it as it is: it's drawn at
-//! the window's own scale whatever the zoom ([`scale`]), and the page starts under it
+//! The strip is the window's, not the page's, so zooming leaves it as it is. It's drawn at the
+//! window's own scale whatever the zoom ([`scale`]), and the page starts under it
 //! ([`tab_bar_height`]).
 
 use egui::{
@@ -25,13 +25,14 @@ const TAB_BAR_HEIGHT: f32 = 41.0;
 /// on a calendar in its account's colour.
 const CALENDAR: &str = "📆";
 
-/// Where the page starts, below the strip: the strip's 41px at the window's own scale, in the
-/// zoomed page's points, rounded to whole points.
+/// Where the page starts, below the strip. That's the strip's 41px at the window's own scale, in
+/// the zoomed page's points, rounded to whole points.
 pub(crate) fn tab_bar_height(ctx: &egui::Context) -> f32 {
     (TAB_BAR_HEIGHT / ctx.zoom_factor()).round()
 }
 
-/// The strip's points to the zoomed page's: it draws at the window's own scale.
+/// Converts the strip's points to the zoomed page's, since the strip draws at the window's own
+/// scale.
 fn scale(ctx: &egui::Context) -> f32 {
     1.0 / ctx.zoom_factor()
 }
@@ -41,9 +42,9 @@ fn scale(ctx: &egui::Context) -> f32 {
 pub struct Tab<'a> {
     /// The tab's title.
     pub title: &'a str,
-    /// The tab is on the sign-in screen, which has no link to copy.
+    /// Whether the tab is on the sign-in screen, which has no link to copy.
     pub login_screen: bool,
-    /// Its account's colour, by name; none on the sign-in screen.
+    /// Its account's colour, by name. None on the sign-in screen.
     pub account_color: Option<&'a str>,
 }
 
@@ -97,9 +98,9 @@ fn drawn_id(ctx: &egui::Context) -> egui::Id {
     exo_ui::id(ctx, "chrome-drawn")
 }
 
-/// Hands the strip the window's `tabs` and the `active` one's place, for the screen on screen to
-/// draw this frame: it draws its own tab in that place. Without, a screen's strip has its tab
-/// alone.
+/// Hands the strip the window's `tabs` and the place of the `active` one, for the screen on
+/// screen to draw this frame. That screen draws its own tab in that place. Without this call, a
+/// screen's strip has its tab alone.
 pub(crate) fn set_tabs(ctx: &egui::Context, tabs: Vec<Pill>, active: usize) {
     let id = strip_id(ctx);
     ctx.data_mut(|data| data.insert_temp(id, Strip { tabs, active }));
@@ -120,7 +121,7 @@ pub(crate) fn take(ctx: &egui::Context) -> (Option<Action>, Option<Pill>) {
 pub enum Backdrop {
     /// The page, in the theme's colors.
     Page,
-    /// A photo: the sign-in screen or a full-screen alert.
+    /// A photo, behind the sign-in screen or a full-screen alert.
     Photo,
 }
 
@@ -136,7 +137,7 @@ struct Colors {
     add: Color32,
     light_border: Color32,
     blurred_fill: Color32,
-    /// The strip is Carbon's, which greys Graphite's traffic lights its own way.
+    /// Whether the strip is Carbon's, which greys the traffic lights for Graphite its own way.
     carbon: bool,
 }
 
@@ -215,12 +216,13 @@ struct Window {
     fullscreen: bool,
     maximized: bool,
     alt: bool,
-    /// macOS's accent colour is Graphite, which greys the traffic lights.
+    /// Whether macOS's accent colour is Graphite, which greys the traffic lights.
     graphite: bool,
 }
 
-/// Whether macOS's accent colour is Graphite, as read when the window last came to the front:
-/// `AppleAccentColor` is read again each time the window is focused, and it starts out focused.
+/// Whether macOS's accent colour is Graphite, as read when the window last came to the front.
+/// `AppleAccentColor` is read again each time the window is focused, and the window starts out
+/// focused.
 fn graphite(ctx: &egui::Context, focused: bool) -> bool {
     let id = exo_ui::id(ctx, "chrome-graphite");
     let (was_focused, graphite) = ctx.data(|data| data.get_temp::<(bool, bool)>(id)).unzip();
@@ -232,8 +234,8 @@ fn graphite(ctx: &egui::Context, focused: bool) -> bool {
     graphite
 }
 
-/// Draws the strip across the top of `ui`, over `backdrop`: the window's tabs ([`set_tabs`]),
-/// with `tab` for the one on screen. What's clicked is for [`take`].
+/// Draws the strip across the top of `ui`, over `backdrop`, with the window's tabs
+/// ([`set_tabs`]) and `tab` for the one on screen. What's clicked is for [`take`].
 pub fn show(ui: &mut Ui, tab: Tab<'_>, backdrop: Backdrop) {
     let id = strip_id(ui.ctx());
     let strip = ui
@@ -257,7 +259,7 @@ pub fn show(ui: &mut Ui, tab: Tab<'_>, backdrop: Backdrop) {
         .data_mut(|data| data.insert_temp(id, Drawn { action, shown }));
 }
 
-/// Draws the strip of `tabs`, `active` the one on screen.
+/// Draws the strip of `tabs`, with `active` the one on screen.
 fn draw(ui: &mut Ui, tabs: &[Tab<'_>], active: usize, backdrop: Backdrop) -> Option<Action> {
     let s = scale(ui.ctx());
     let bar = Rect::from_min_size(
@@ -275,7 +277,7 @@ fn draw(ui: &mut Ui, tabs: &[Tab<'_>], active: usize, backdrop: Backdrop) -> Opt
     });
     let colors = Colors::new(ui, backdrop);
 
-    // The whole bar moves the window; the controls drawn after it take their own clicks.
+    // The whole bar moves the window, and the controls drawn after it take their own clicks.
     fastframe_titlebar::drag(ui, bar);
     ui.painter().hline(
         bar.x_range(),
@@ -283,7 +285,7 @@ fn draw(ui: &mut Ui, tabs: &[Tab<'_>], active: usize, backdrop: Backdrop) -> Opt
         Stroke::new(s, colors.bar_border),
     );
     traffic_lights(ui, bar.min + vec2(12.0, 14.0) * s, &window, &colors, s);
-    // The strip is the window's, not the page's: find doesn't search it.
+    // The strip is the window's, not the page's, so find doesn't search it.
     let ctx = ui.ctx().clone();
     exo_ui::find::unsearchable(&ctx, || {
         tab_strip(ui, bar, tabs, active, &window, &colors, s)
@@ -382,7 +384,7 @@ fn traffic_lights(ui: &mut Ui, origin: Pos2, window: &Window, colors: &Colors, s
         let hovered = group_hovered && enabled;
 
         // Fill and border declare their transition under `:hover`, so they animate in and snap
-        // back; the glyph's opacity transition is declared on the base rule and runs both ways.
+        // back. The glyph's opacity transition is declared on the base rule and runs both ways.
         let lit = motion::transition_in(
             ui.ctx(),
             response.id.with("lit"),
@@ -410,7 +412,7 @@ fn traffic_lights(ui: &mut Ui, origin: Pos2, window: &Window, colors: &Colors, s
 
         let painter = ui.painter();
         painter.circle_filled(rect.center(), size / 2.0, fill);
-        // egui strokes a circle outward from its radius; this puts the 1px border at 5–6px.
+        // egui strokes a circle outward from its radius. This puts the 1px border at 5–6px.
         painter.circle_stroke(rect.center(), size / 2.0 - s, Stroke::new(s, border));
         if glyph_color.a() > 0 {
             let (icon, offset, glyph) = control.glyph(window);
@@ -424,7 +426,7 @@ fn traffic_lights(ui: &mut Ui, origin: Pos2, window: &Window, colors: &Colors, s
     }
 }
 
-/// CSS `brightness()`: scales the color channels, leaving alpha alone.
+/// CSS `brightness()`, which scales the color channels and leaves alpha alone.
 fn darken(color: Color32, factor: f32) -> Color32 {
     let [r, g, b, a] = color.to_array();
     let scale = |channel: u8| (f32::from(channel) * factor).round() as u8;
@@ -543,7 +545,7 @@ fn pill(
     let unzoomed = TextStyle::new(Font::new(Family::System, 400), 12.8, 22.0);
     let style = TextStyle::new(unzoomed.font, 12.8 * s, 22.0 * s);
     let content = rect.shrink2(vec2(1.0 + 12.8, 1.0) * s);
-    // The line box rounds its metrics to whole points; a zoomed strip's baseline goes where the
+    // The line box rounds its metrics to whole points. A zoomed strip's baseline goes where the
     // unzoomed one's does.
     let baseline = unzoomed.baseline(ui.ctx()) * s;
     let top = content.top() + baseline - style.baseline(ui.ctx());
@@ -598,8 +600,8 @@ fn pill(
         );
     }
     if calendar {
-        // `vertical-align: -3px`: its bottom 3px under the text's baseline; .45 opaque, .9 on
-        // the hovered or active tab.
+        // `vertical-align: -3px` puts its bottom 3px under the text's baseline. It's .45 opaque,
+        // and .9 on the hovered or active tab.
         let bottom = content.top() + baseline + 3.0 * s;
         let day = Rect::from_min_size(
             pos2(line.x, bottom - CALENDAR_DAY * s),
@@ -704,7 +706,7 @@ fn icon_button(
 fn add_button(ui: &mut Ui, rect: Rect, colors: &Colors, s: f32) -> Option<Action> {
     let response = ui.interact(rect, ui.id().with("new-tab"), Sense::click());
     // The + sits at 45% until its 24px box is hovered.
-    // Its glyph's button, over it, takes the pointer from it.
+    // The glyph's button over the box takes the pointer from the box.
     let hover = motion::transition(
         ui.ctx(),
         response.id.with("hover"),
@@ -742,8 +744,8 @@ const ACCOUNT_DOT_GAP: f32 = 6.0;
 /// The tab's 16px calendar, drawn as on a 32px canvas ([`paint_calendar_day`]).
 const CALENDAR_DAY: f32 = 16.0;
 
-/// The calendar's colours for an account's, in `accounts::COLORS`' order; `sea` when the tab
-/// has none.
+/// The calendar's colour for an account's colour, in the order of `accounts::COLORS`. `sea` when
+/// the tab has none.
 fn calendar_color(account: Option<&str>) -> Color32 {
     const CANVAS: [(&str, Color32); 12] = [
         ("thistle", Color32::from_rgb(0xbf, 0x9e, 0xfd)),
@@ -794,8 +796,8 @@ fn paint_calendar_day(painter: &egui::Painter, rect: Rect, color: Color32, day: 
     );
     let digits = day.to_string();
     let size = if digits.len() == 1 { 20.0 } else { 17.0 } * unit;
-    // With no line height, the line box's baseline is half the font's ascent less its descent
-    // below its top: the em box's middle, where the canvas puts `y`.
+    // With no line height, the line box's baseline sits half the font's ascent less its descent
+    // below its top. That's the em box's middle, where the canvas puts `y`.
     let style = TextStyle::new(Font::new(Family::System, 500), size, 0.0);
     let middle = page.top() + page.height() / 2.0 + 0.5 * unit;
     let galley = exo_ui::layout(

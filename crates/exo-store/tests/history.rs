@@ -69,7 +69,7 @@ async fn changes_made_elsewhere_are_applied() {
         .id;
     let gmail = harness.gmail.gmail();
 
-    // Archived in Gmail web: INBOX removed from every message.
+    // Archived in Gmail web, which removes INBOX from every message.
     let ids: Vec<String> = harness
         .gmail_labels(&archived)
         .await
@@ -125,7 +125,7 @@ async fn changes_made_elsewhere_are_applied() {
             .contains(starred.as_str())
     );
 
-    // Nothing new: nothing changes.
+    // With nothing new, nothing changes.
     assert_eq!(harness.store.sync().await.unwrap().changed, 0);
 }
 
@@ -159,7 +159,7 @@ async fn labels_made_elsewhere_are_picked_up() {
         )
         .await
         .unwrap();
-    // Listing labels fails past every retry: the sync fails, and the next one tries again.
+    // Listing labels fails past every retry, so the sync fails, and the next one tries again.
     harness
         .fault(json!({ "method": "GET", "path": "/gmail/v1/users/me/labels", "status": 500, "times": 5 }))
         .await;
@@ -198,7 +198,7 @@ async fn the_cursor_moves_only_after_everything_is_stored() {
     harness
         .deliver(json!({ "from": "Ana <ana@example.com>", "threadId": thread.id.as_str(), "text": "Again" }))
         .await;
-    // Fetching the new message fails past every retry: the sync fails and stores nothing.
+    // Fetching the new message fails past every retry, so the sync fails and stores nothing.
     harness
         .fault(json!({ "method": "GET", "path": "/gmail/v1/users/me/messages/", "status": 500, "times": 5 }))
         .await;
@@ -363,7 +363,7 @@ async fn history_never_overwrites_a_newer_copy() {
     gate.release();
     syncing.await.unwrap().unwrap();
 
-    // The star from history lands; the older INBOX it carried doesn't.
+    // The star from history lands, but the older INBOX it carried doesn't.
     assert!(
         !harness
             .ids(&ListId::Inbox)

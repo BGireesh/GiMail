@@ -1,6 +1,6 @@
 [package]
 name = "exo-editor"
-description = "The compose body editor: Squire's document model, editing semantics, HTML in and out, and its egui widget."
+description = "The compose body editor: its document model, editing semantics, HTML in and out, and its egui widget."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

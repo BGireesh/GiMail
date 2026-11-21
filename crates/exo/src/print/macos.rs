@@ -1,7 +1,7 @@
-//! The print view: a WKWebView that's never shown, loading the conversation's page, its fonts and
-//! what its bodies load through its own URL schemes, then printing it with an `NSPrintOperation`
-//! (WebKit lays it out and paginates it as Chromium would). Everything here runs on the main
-//! thread; loads finish there too.
+//! The print view, a WKWebView that's never shown. It loads the conversation's page, its fonts and
+//! what its bodies load through its own URL schemes, then prints the page with an
+//! `NSPrintOperation` (WebKit lays it out and paginates it as Chromium would). Everything here
+//! runs on the main thread, and loads finish there too.
 
 use std::{
     cell::{Cell, RefCell},
@@ -37,16 +37,17 @@ use objc2_web_kit::{
 use super::{Conversation, Destination, Done, Page, Resource, document};
 use crate::account::Loader;
 
-/// Moves each body's template into a shadow root on its `.Shadowbox` host, once the page is parsed.
-/// A script rather than declarative shadow DOM, which WebKit only parses from macOS 13.3. It runs
-/// in its own world: the page has no scripts.
+/// Moves each body's template into a shadow root on its `.Shadowbox` host, once the page is
+/// parsed. It's a script rather than declarative shadow DOM, which WebKit only parses from macOS
+/// 13.3. It runs in its own world because the page has no scripts.
 const SHADOW_ROOTS: &str = "for (const template of document.querySelectorAll('.Shadowbox > template')) { template.parentElement.attachShadow({ mode: 'open' }).appendChild(template.content); template.remove(); }";
-/// What the page does once loaded, before it prints: waits for its fonts (the load event has waited
-/// for images), then lays out each image that didn't load the way Chromium lays out a broken one:
-/// with both dimension attributes and no alt text, or as a block, it keeps their size; inline with
-/// alt text, or without both, it's a 16px square. A blocked one keeps `body.css`'s box; any other
-/// shows nothing. Last, it marks the bodies of three lines or fewer, which Chromium can't break
-/// with their hairline's padding kept on the last two (`print.css`).
+/// What the page does once loaded, before it prints. It waits for its fonts (the load event has
+/// waited for images), then lays out each image that didn't load the way Chromium lays out a
+/// broken one. An image with both dimension attributes keeps that size if it has no alt text or is
+/// a block. An inline image that has alt text or lacks either attribute is a 16px square. A blocked
+/// image keeps the box `body.css` gives it, and any other shows nothing. Last, it marks the bodies
+/// of three lines or fewer, which Chromium can't break while keeping the hairline's padding with
+/// the last two lines (`print.css`).
 const BEFORE_PRINT: &str = r#"
 await document.fonts.ready;
 const size = (value) => { const number = parseFloat(value); return number > 0 && !String(value).includes('%') ? number : 0; };
@@ -94,8 +95,8 @@ struct Job {
     _handler: Retained<Handler>,
 }
 
-/// The paper the print panel starts on: the default printer's, upright (`@page { size:
-/// portrait }`). Letter off the main thread.
+/// The paper the print panel starts on, which is the default printer's, upright
+/// (`@page { size: portrait }`). Off the main thread it's Letter.
 pub(super) fn default_page() -> Page {
     if MainThreadMarker::new().is_none() {
         return Page::LETTER;
@@ -118,7 +119,7 @@ pub(super) fn choose_pdf(file_name: &str, chosen: impl FnOnce(PathBuf) + 'static
     panel.setTitle(Some(&NSString::from_str("Save as PDF")));
     panel.setNameFieldStringValue(&NSString::from_str(file_name));
     // PDF files only. `allowedContentTypes` would need UTType's bindings
-    // (objc2-uniform-type-identifiers) for this one call; the extension list does the same.
+    // (objc2-uniform-type-identifiers) for this one call. The extension list does the same.
     #[expect(
         deprecated,
         reason = "the extension list needs no UTType bindings and still works"
@@ -144,7 +145,7 @@ pub(super) fn choose_pdf(file_name: &str, chosen: impl FnOnce(PathBuf) + 'static
 }
 
 /// Lays `conversation` out in a new print view and prints it to `destination` once everything it
-/// shows has loaded; `done` hears whether it printed.
+/// shows has loaded. `done` hears whether it printed.
 pub(super) fn print(
     conversation: &Conversation,
     loader: Loader,
@@ -197,7 +198,8 @@ pub(super) fn print(
         );
         scripts.addUserScript(&script);
         configuration.setUserContentController(&scripts);
-        // As wide as the page, which a body's media queries see (WebKit's are the view's).
+        // As wide as the page, which is the width a body's media queries see (WebKit's media
+        // queries see the view's).
         let frame = NSRect::new(
             NSPoint::new(0.0, 0.0),
             NSSize::new(f64::from(conversation.page.width()), 1000.0),
@@ -205,7 +207,7 @@ pub(super) fn print(
         WKWebView::initWithFrame_configuration(WKWebView::alloc(mtm), frame, &configuration)
     };
     // A window of its own that's never shown, so WebKit lays the view out.
-    // SAFETY: a borderless window holding the view; `releasedWhenClosed` is off, as Rust owns it.
+    // SAFETY: a borderless window holding the view. `releasedWhenClosed` is off, as Rust owns it.
     let window = unsafe {
         let window = NSWindow::initWithContentRect_styleMask_backing_defer(
             NSWindow::alloc(mtm),
@@ -270,7 +272,8 @@ define_class!(
                 }
                 printer.run(&view);
             });
-            // SAFETY: the script only awaits the page's fonts and hides images, in the client world.
+            // SAFETY: the script only awaits the page's fonts, lays out and hides the images that
+            // didn't load and marks the short bodies, in the client world.
             unsafe {
                 web_view.callAsyncJavaScript_arguments_inFrame_inContentWorld_completionHandler(
                     &NSString::from_str(BEFORE_PRINT),
@@ -317,8 +320,8 @@ impl Printer {
         unsafe { msg_send![super(this), init] }
     }
 
-    /// Prints the loaded `web_view`: the print panel as a sheet on Exo's window, or straight into
-    /// the PDF file.
+    /// Prints the loaded `web_view`, through the print panel as a sheet on Exo's window or straight
+    /// into the PDF file.
     fn run(&self, web_view: &WKWebView) {
         let mtm = self.mtm();
         let printing = self.ivars();
@@ -366,7 +369,7 @@ impl Printer {
             view.setFrame(web_view.bounds());
         }
         // SAFETY: the delegate answers `printOperationDidRun:success:contextInfo:` and lives in
-        // `JOBS` until it has; no context is passed.
+        // `JOBS` until it has. No context is passed.
         unsafe {
             operation.runOperationModalForWindow_delegate_didRunSelector_contextInfo(
                 &window,
@@ -439,7 +442,7 @@ define_class!(
 
         #[unsafe(method(webView:stopURLSchemeTask:))]
         fn stop(&self, _web_view: &WKWebView, task: &ProtocolObject<dyn WKURLSchemeTask>) {
-            // After this WebKit mustn't hear about the task again.
+            // After this, WebKit mustn't hear about the task again.
             TASKS.with(|tasks| {
                 tasks
                     .borrow_mut()
