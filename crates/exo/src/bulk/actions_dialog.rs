@@ -1,4 +1,4 @@
-//! The Bulk Actions dialog: this session's Get Me To Zero actions, each with its query, how many
+//! The Bulk Actions dialog: the last week's Get Me To Zero actions, each with its query, how many
 //! conversations it changed, and Cancel or Undo while it can be.
 
 use egui::{Color32, Context, CornerRadius, Rect, Sense, Ui, pos2};
@@ -175,7 +175,7 @@ fn draw(ui: &mut Ui, body: Rect, state: &State, rows: &[Summary], table: f32) ->
         ROW_TEXT.paint_line(
             &painter,
             pos2(body.left(), text_top),
-            row.name,
+            &row.name,
             ink,
             Some(NAME * width),
         );

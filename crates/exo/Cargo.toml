@@ -34,16 +34,23 @@ futures = { workspace = true }
 getrandom = { workspace = true }
 gmail = { workspace = true }
 html5ever = { workspace = true }
+icu_segmenter = { workspace = true }
 image = { workspace = true, features = ["jpeg"] }
 jiff = { workspace = true }
 log = { workspace = true }
 markup5ever_rcdom = { workspace = true }
+psl = { workspace = true }
 regex = { workspace = true }
 reqwest = { workspace = true, features = ["blocking"] }
+resvg = { workspace = true }
+ring = { workspace = true }
+rustls-pki-types = { workspace = true }
+rustls-webpki = { workspace = true }
 serde = { workspace = true }
 mail-parser = { workspace = true }
 base64 = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 unicode-normalization = { workspace = true }
@@ -98,12 +105,16 @@ objc2-foundation = { workspace = true, features = [
     "NSBundle",
     "NSData",
     "NSDate",
+    "NSDateFormatter",
     "NSDictionary",
     "NSEnumerator",
     "NSError",
     "NSFileManager",
+    "NSFormatter",
     "NSGeometry",
+    "NSLocale",
     "NSNotification",
+    "NSNumberFormatter",
     "NSObject",
     "NSOrthography",
     "NSProcessInfo",
@@ -146,6 +157,7 @@ objc2-map-kit = { workspace = true }
 [dev-dependencies]
 egui_kittest = { workspace = true, features = ["eframe"] }
 gmail-mock = { workspace = true }
+rcgen = { workspace = true }
 rusqlite = { workspace = true }
 toasty = { workspace = true }
 serde_json = { workspace = true }

@@ -358,9 +358,11 @@ impl Mail {
         let sends = self.account.device_settings().local_sends_count;
         self.account
             .update_device_settings(|device| device.local_sends_count = sends.saturating_add(1));
+        // Another alert (the Undo Send one) leaves the hint for a later send.
         if self.account.settings().has_shown_follow_up_reminder_hint
             || sends <= SENDS_BEFORE_HINT
             || reminded
+            || self.compose.alert.is_some()
         {
             return;
         }

@@ -101,6 +101,11 @@ static FILES: &[MigrationFile] = &[
         "0006_calendar_accounts.sql",
         include_str!("../migrations/0006_calendar_accounts.sql"),
     ),
+    MigrationFile::new(
+        0x5f80_3bbf_61b3_a8fc,
+        "0007_bulk_actions.sql",
+        include_str!("../migrations/0007_bulk_actions.sql"),
+    ),
 ];
 
 /// Brings `db`, the file at `path`, to this build's schema.
@@ -588,6 +593,18 @@ mod tests {
         let settings: Settings = store.settings().await.expect("reads");
         assert_eq!(settings.theme, Theme::Carbon);
 
+        // It predates the lists sync fills at start, which an up-to-date store has filled.
+        for list in &crate::sync::WARMED {
+            db::ListCursor::upsert_by_id(list.key())
+                .page_token(None::<String>)
+                .min_sort(None::<i64>)
+                .complete(true)
+                .seen(0)
+                .before(None::<i64>)
+                .exec(&mut db)
+                .await
+                .expect("writes");
+        }
         let (report, spent) = sync(&store, &server).await;
         assert_eq!(
             report,
@@ -799,6 +816,7 @@ mod tests {
                 "0004_visible_text.sql",
                 "0005_list_floors.sql",
                 "0006_calendar_accounts.sql",
+                "0007_bulk_actions.sql",
                 "9002_extra.sql"
             ]
         );
@@ -833,6 +851,7 @@ mod tests {
                 "0004_visible_text.sql",
                 "0005_list_floors.sql",
                 "0006_calendar_accounts.sql",
+                "0007_bulk_actions.sql",
                 "9002_extra.sql",
                 "9003_remind_at.sql"
             ]

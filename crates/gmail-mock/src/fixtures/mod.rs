@@ -13,7 +13,8 @@ mod rng;
 
 pub use assets::portrait_png;
 pub use calendar::personal as personal_calendars;
-pub use people::someone_else;
+pub use compose::fnv;
+pub use people::{photo_owner, someone_else};
 
 use gmail::mime::{Email, Mailbox};
 use gmail::{
@@ -146,7 +147,11 @@ pub fn world(config: &Config) -> World {
         mail,
         calendar: calendar::calendars(now),
         others: std::collections::BTreeMap::new(),
-        people: people::directory(GOOGLE_ID, account.photo.as_deref()),
+        people: people::directory(
+            GOOGLE_ID,
+            account.photo.as_deref(),
+            config.contact_photos.then_some(&origin),
+        ),
         sessions: Sessions::default(),
         faults: Vec::new(),
         quota: crate::http::quota::Meter::new(config.quota),

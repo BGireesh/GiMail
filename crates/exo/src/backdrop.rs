@@ -3,6 +3,7 @@
 //! (`photos.json`).
 
 use std::{
+    hash::{Hash, Hasher},
     path::{Path, PathBuf},
     sync::LazyLock,
 };
@@ -182,63 +183,93 @@ impl Backdrop {
         } else {
             self.paint_photo(painter, window);
         }
-        let black = |opacity: f32| Color32::from_black_alpha((opacity * 255.0).round() as u8);
+        for (edge, stops) in self.scrims(settings_open) {
+            scrim(painter, window, edge, &stops);
+        }
+        if settings_open {
+            painter.rect_filled(window, 0.0, black(SETTINGS_SHADE));
+        }
+    }
+
+    /// What the see-through cards over the backdrop show through: the backdrop over `window`, as
+    /// [`Backdrop::paint`] paints it, under the popups' black at `.2 * dim`. Under the settings
+    /// menu the cards blur the sharp photo, which their own blur all but covers.
+    pub fn behind(&self, window: Rect, settings_open: bool, dim: f32) -> exo_ui::Behind {
+        let photo = self.photo.share();
+        let at = position(self.entry.position.as_deref());
+        let scrims = self.scrims(settings_open);
+        let shade = (1.0 - if settings_open { SETTINGS_SHADE } else { 0.0 }) * (1.0 - 0.2 * dim);
+        let mut key = std::hash::DefaultHasher::new();
+        (self.entry.file.as_str(), self.photo.is_loaded()).hash(&mut key);
+        [
+            window.min.x,
+            window.min.y,
+            window.max.x,
+            window.max.y,
+            shade,
+        ]
+        .map(f32::to_bits)
+        .hash(&mut key);
+        exo_ui::Behind::new(key.finish(), move |region, [columns, rows]| {
+            let mut cells = photo.sample(window, |free| free * at, region, [columns, rows])?;
+            for (row, cells) in cells.chunks_mut(columns).enumerate() {
+                let y = region.top() + region.height() * (row as f32 + 0.5) / rows as f32;
+                let shade = scrims
+                    .iter()
+                    .map(|(edge, stops)| 1.0 - opacity_at(stops, edge.distance(window, y)))
+                    .product::<f32>()
+                    * shade;
+                for channel in cells.iter_mut().flatten() {
+                    *channel *= shade;
+                }
+            }
+            Some(cells)
+        })
+    }
+
+    /// The photo's scrims: the black's opacity at distances from the top and bottom edges,
+    /// transparent past the last.
+    fn scrims(&self, settings_open: bool) -> [(Edge, Vec<(f32, f32)>); 2] {
         match (self.entry.top_scrim, self.entry.bottom_scrim) {
             // `linear-gradient(to bottom, rgba(0,0,0,.5) 0, rgba(0,0,0,.05) 176px, transparent
-            // 216px), linear-gradient(to top, rgba(0,0,0,.6) 0, rgba(0,0,0,.06) 176px,
-            // transparent 216px)`.
-            (None, None) => {
-                scrim(
-                    painter,
-                    window,
-                    Edge::Top,
-                    &[
-                        (0.0, black(0.5)),
-                        (176.0, black(0.05)),
-                        (216.0, Color32::TRANSPARENT),
-                    ],
-                );
-                scrim(
-                    painter,
-                    window,
-                    Edge::Bottom,
-                    &[
-                        (0.0, black(0.6)),
-                        (176.0, black(0.06)),
-                        (216.0, Color32::TRANSPARENT),
-                    ],
-                );
-            }
+            // 216px), linear-gradient(to top, rgba(0,0,0,.6) 0, rgba(0,0,0,.06) 176px, transparent
+            // 216px)`.
+            (None, None) => [
+                (Edge::Top, vec![(0.0, 0.5), (176.0, 0.05), (216.0, 0.0)]),
+                (Edge::Bottom, vec![(0.0, 0.6), (176.0, 0.06), (216.0, 0.0)]),
+            ],
             // A photo's own scrims, 50% at the top and 60% at the bottom unless it says:
             // `rgba(0,0,0,{o}%) 0px, rgba(0,0,0,{o/10}%) 264px, transparent 324px`, the bottom one
             // to 636px with the settings open.
-            (top, bottom) => {
-                for (edge, opacity, extent) in [
-                    (Edge::Top, top.unwrap_or(50.0), 264.0),
-                    (
-                        Edge::Bottom,
-                        bottom.unwrap_or(60.0),
-                        if settings_open { 636.0 } else { 264.0 },
-                    ),
-                ] {
-                    let opacity = opacity / 100.0;
-                    scrim(
-                        painter,
-                        window,
-                        edge,
-                        &[
-                            (0.0, black(opacity)),
-                            (extent, black(opacity / 10.0)),
-                            (extent + 60.0, Color32::TRANSPARENT),
-                        ],
-                    );
-                }
-            }
-        }
-        if settings_open {
-            painter.rect_filled(window, 0.0, black(0.5));
+            (top, bottom) => [
+                (Edge::Top, top.unwrap_or(50.0), 264.0),
+                (
+                    Edge::Bottom,
+                    bottom.unwrap_or(60.0),
+                    if settings_open { 636.0 } else { 264.0 },
+                ),
+            ]
+            .map(|(edge, opacity, extent)| {
+                let opacity = opacity / 100.0;
+                (
+                    edge,
+                    vec![
+                        (0.0, opacity),
+                        (extent, opacity / 10.0),
+                        (extent + 60.0, 0.0),
+                    ],
+                )
+            }),
         }
     }
+}
+
+/// The settings menu's black over the photo.
+const SETTINGS_SHADE: f32 = 0.5;
+
+/// Black at `opacity`.
+fn black(opacity: f32) -> Color32 {
+    Color32::from_black_alpha((opacity * 255.0).round() as u8)
 }
 
 impl crate::Mail {
@@ -275,15 +306,27 @@ enum Edge {
     Bottom,
 }
 
-/// A `linear-gradient` from `edge` into `window` through `stops` (distance from the edge, color),
-/// transparent past the last. A mesh interpolates premultiplied colors linearly, as CSS does.
-fn scrim(painter: &Painter, window: Rect, edge: Edge, stops: &[(f32, Color32)]) {
+impl Edge {
+    /// How far `y` is from this edge of `window`.
+    fn distance(self, window: Rect, y: f32) -> f32 {
+        match self {
+            Edge::Top => y - window.top(),
+            Edge::Bottom => window.bottom() - y,
+        }
+    }
+}
+
+/// A black `linear-gradient` from `edge` into `window` through `stops` (distance from the edge,
+/// opacity), transparent past the last. A mesh interpolates premultiplied colors linearly, as CSS
+/// does.
+fn scrim(painter: &Painter, window: Rect, edge: Edge, stops: &[(f32, f32)]) {
     let y = |distance: f32| match edge {
         Edge::Top => window.top() + distance,
         Edge::Bottom => window.bottom() - distance,
     };
     let mut mesh = Mesh::default();
-    for (i, &(distance, color)) in stops.iter().enumerate() {
+    for (i, &(distance, opacity)) in stops.iter().enumerate() {
+        let color = black(opacity);
         let (left, right) = (
             pos2(window.left(), y(distance)),
             pos2(window.right(), y(distance)),
@@ -298,6 +341,17 @@ fn scrim(painter: &Painter, window: Rect, edge: Edge, stops: &[(f32, Color32)]) 
         }
     }
     painter.add(Shape::mesh(mesh));
+}
+
+/// A scrim's opacity `distance` from its edge, between its `stops` as [`scrim`] paints them.
+fn opacity_at(stops: &[(f32, f32)], distance: f32) -> f32 {
+    let after = stops.partition_point(|&(at, _)| at <= distance);
+    match (after.checked_sub(1).map(|i| stops[i]), stops.get(after)) {
+        (Some((from, a)), Some(&(to, b))) => a + (b - a) * (distance - from) / (to - from),
+        (Some(_), None) => 0.0,
+        (None, Some(&(_, opacity))) => opacity,
+        (None, None) => 0.0,
+    }
 }
 
 /// Where `object-position` puts a covering image, as fractions of how much larger than the
@@ -356,6 +410,18 @@ mod tests {
         );
         // The same local time elsewhere is the same photo.
         assert_eq!(at("2026-11-17T09:00:00+09:00[Asia/Tokyo]"), today);
+    }
+
+    #[test]
+    fn a_scrims_opacity_runs_between_its_stops() {
+        let stops = [(0.0, 0.5), (176.0, 0.05), (216.0, 0.0)];
+        assert_eq!(opacity_at(&stops, 0.0), 0.5);
+        assert!((opacity_at(&stops, 88.0) - 0.275).abs() < 1e-6);
+        assert!((opacity_at(&stops, 196.0) - 0.025).abs() < 1e-6);
+        assert_eq!(opacity_at(&stops, 216.0), 0.0);
+        assert_eq!(opacity_at(&stops, 500.0), 0.0);
+        // Past the window's edge, the first stop's.
+        assert_eq!(opacity_at(&stops, -3.0), 0.5);
     }
 
     #[test]

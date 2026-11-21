@@ -449,3 +449,79 @@ fn the_read_only_view_lists_the_snippets_files_and_zips_them() {
         ["plans.txt", "terms.txt"]
     );
 }
+
+#[test]
+fn the_read_only_view_shows_an_image_files_thumbnail() {
+    let mut app = start_with_settings("snippets-thumbnail", &|settings| {
+        settings.snippets.push(exo_store::Snippet {
+            id: "draft00snippetimage".into(),
+            name: "Chart".into(),
+            subject: "Chart".into(),
+            body: "<div>Our chart.</div>".into(),
+            attachments: vec![exo_store::DraftAttachment {
+                uuid: "u-chart".into(),
+                name: "chart.png".into(),
+                mime_type: "image/png".into(),
+                size: 100,
+                content_id: None,
+                source: exo_store::AttachmentSource::Local,
+            }],
+            date: "2026-11-12T15:30:00Z".into(),
+            ..exo_store::Snippet::default()
+        });
+    });
+    let kept = app.mail().account().draft_files().to_owned();
+    std::fs::create_dir_all(&kept).expect("the draft files");
+    let image = image::RgbaImage::from_pixel(300, 200, image::Rgba([230, 20, 20, 255]));
+    image
+        .save_with_format(kept.join("u-chart"), image::ImageFormat::Png)
+        .expect("kept");
+    let red = |app: &mut Fixture| {
+        let frame = app.harness.render().expect("renders");
+        frame
+            .pixels()
+            .filter(|pixel| pixel[0] > 170 && pixel[1] < 90 && pixel[2] < 90)
+            .count()
+    };
+    app.key(Key::G);
+    app.key(Key::Semicolon);
+    assert_eq!(red(&mut app), 0, "nothing red before");
+    app.key(Key::Enter);
+    assert_eq!(app.mail().snippet_viewed(), Some("draft00snippetimage"));
+    let mut shown = 0;
+    for _ in 0..20 {
+        app.wait(0.25);
+        shown = red(&mut app);
+        if shown > 0 {
+            break;
+        }
+    }
+    // The card is about 150×100, at 2×.
+    assert!(
+        shown > 10_000,
+        "the card shows the picture: {shown} red pixels"
+    );
+}
+
+#[test]
+fn command_semicolon_in_the_palette_switches_to_the_snippet_picker() {
+    let mut app = start("snippets-picker-palette");
+    create_snippet(&mut app, "thanks", "Thanks {first_name}!");
+    app.key(Key::G);
+    app.key(Key::I);
+    app.key(Key::Enter);
+    app.key(Key::R);
+    app.press(Key::K, COMMAND);
+    app.type_text("zz");
+    app.press(Key::Semicolon, COMMAND);
+    let rows = app.mail().sub_palette_rows();
+    assert_eq!(
+        rows.as_ref().map(|(prompt, _)| prompt.as_str()),
+        Some("Use Snippet"),
+        "⌘; in ⌘K opens the snippet picker: {rows:?}"
+    );
+    app.key(Key::Enter);
+    app.wait(1.5);
+    let raw = draft_raw(&app, "Re: Design crit moved to 3pm");
+    assert!(raw.contains("Thanks Tom!") && !raw.contains("zz"), "{raw}");
+}

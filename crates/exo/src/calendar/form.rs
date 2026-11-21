@@ -45,6 +45,15 @@ const ICON: f32 = 16.0;
 const VALUE_LEFT: f32 = PADDING_X + ICON + 12.0;
 /// The fields' text: 12px/16px, the input nudged `top: 1px`, an underline 2px under it.
 const SMALL: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 12.0, 16.0);
+/// The meeting link's pill: 5px either side of its text, 3px above it and 22px tall, its cross an
+/// 8.47px glyph 2px after the text in `#a3a3a3`, and `#aeb1dd` round it with the keyboard.
+const PILL_PADDING: f32 = 5.0;
+const PILL_ABOVE: f32 = 3.0;
+const PILL_HEIGHT: f32 = 22.0;
+const PILL_CROSS_GAP: f32 = 2.0;
+const PILL_CROSS_WIDTH: f32 = 8.47;
+const PILL_CROSS: Color32 = Color32::from_rgb(0xa3, 0xa3, 0xa3);
+const ACCENT: Color32 = Color32::from_rgb(0xae, 0xb1, 0xdd);
 const UNDERLINE: f32 = 2.0;
 /// A guest's line under the input is 24px tall and 322px at most, 4px from the next (`gap: 4px`),
 /// with the first 7px under the input. It holds a 20px avatar 2px down, then, 8px on and inside the
@@ -261,9 +270,11 @@ pub struct EventForm {
     /// The highlighted suggestion, or (`chip`) guest.
     suggestion: usize,
     chip: Option<usize>,
-    /// The guest's `Name <email>` tooltip (`CopyTooltip`), and what a click on it asked for.
+    /// The guest's `Name <email>` tooltip and the meeting link's, and what a click on one asked
+    /// for.
     chip_tip: exo_ui::CopyTooltip,
-    pub chip_clicked: Option<ChipTip>,
+    link_tip: exo_ui::CopyTooltip,
+    pub tip_clicked: Option<TipClick>,
     dropdown: Option<(Dropdown, usize)>,
     /// A field to focus on the next frame.
     focus: Option<Field>,
@@ -340,11 +351,12 @@ pub fn paint_away_hint(ui: &Ui, form_bottom_left: Pos2, away: bool) -> f32 {
     MARGIN_TOP + HINT.line_height
 }
 
-/// A click on a guest's tooltip. Its text composes to them (popped out with ⇧), and its icon
-/// copies their address.
+/// A click on a copy tooltip. A guest's text composes to them (popped out with ⇧), the meeting
+/// link's opens it, and the icon copies.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ChipTip {
+pub enum TipClick {
     Compose(Address, bool),
+    Open(String),
     Copy(String),
 }
 
@@ -377,6 +389,8 @@ pub struct Shown<'a> {
     pub conversation: &'a [Address],
     /// The places found for what's typed in Where.
     pub places: &'a [Place],
+    /// Whether Exo is online, which a new Meet link waits for.
+    pub online: bool,
     /// Each guest's marker and busy status (`(busy)`/`(OOO)`), by address.
     pub chips: &'a BTreeMap<String, (super::guests::Marker, Option<&'static str>)>,
 }
@@ -474,7 +488,8 @@ impl EventForm {
             suggestion: 0,
             chip: None,
             chip_tip: exo_ui::CopyTooltip::default(),
-            chip_clicked: None,
+            link_tip: exo_ui::CopyTooltip::default(),
+            tip_clicked: None,
             dropdown: None,
             focus: Some(focus),
             focused: None,
@@ -866,7 +881,11 @@ impl EventForm {
         if ui.rect_contains_pointer(body) {
             self.scroll -= ui.input(|input| input.smooth_scroll_delta.y);
         }
+        // Find scrolls at once to a match out of view.
+        let find = exo_ui::id(ui.ctx(), "calendar-form-find");
+        self.scroll += exo_ui::find::reveal(ui.ctx(), find).map_or(0.0, |delta| delta.y);
         self.scroll = self.scroll.clamp(0.0, (content - body.height()).max(0.0));
+        let found = exo_ui::find::Scope::begin(ui.ctx(), find, body, self.scroll);
         let mut y = body.top() + BODY_TOP - self.scroll;
         let mut overlay = None;
         // A focused input's underline hangs 1px under its row (the box starts 1px down). The right
@@ -914,7 +933,7 @@ impl EventForm {
                     self.repeat_row(&mut child, value, shown, focus == Some(field), &mut overlay)
                 }
                 Field::Meeting => {
-                    self.meeting_row(&mut child, value, focus == Some(field), &mut overlay)
+                    self.meeting_row(&mut child, value, shown, focus == Some(field), &mut overlay)
                 }
                 Field::Location => self.location_row(
                     &mut child,
@@ -946,6 +965,7 @@ impl EventForm {
             }
             y += height + ROW_GAP;
         }
+        drop(found);
         if self.focused == Some(Field::Guests) && focused != Some(Field::Guests) {
             // Leaving Who takes what's typed.
             self.commit_guests();
@@ -1202,25 +1222,13 @@ impl EventForm {
                 self.chip = Some(position);
                 ui.memory_mut(|memory| memory.request_focus(id));
             }
-            let avatar =
-                Rect::from_min_size(pos2(line.left(), line.top() + 2.0), Vec2::splat(AVATAR));
-            ui.painter()
-                .circle_filled(avatar.center(), AVATAR / 2.0, palette.icon_base_subdued);
-            let initial = guest
-                .name
-                .as_deref()
-                .unwrap_or(&guest.email)
-                .chars()
-                .next()
-                .map(|first| first.to_uppercase().to_string())
-                .unwrap_or_default();
-            let width = SMALL.width(ui.ctx(), &initial);
-            SMALL.paint_line(
+            // The guest's avatar, with their answer's badge in an event's form.
+            super::details::paint_avatar(
                 ui.painter(),
-                pos2(avatar.center().x - width / 2.0, avatar.top() + 2.0),
-                &initial,
-                palette.icon_base_inverse,
-                None,
+                pos2(line.left(), line.top() + 2.0),
+                &guest.email,
+                super::event::Rsvp::parse(guest.response.as_deref()),
+                palette,
             );
             let text = guest.name.clone().unwrap_or_else(|| guest.email.clone());
             // Their calendar's swatch, or its spinner, inside the content's border and padding.
@@ -1334,13 +1342,13 @@ impl EventForm {
             self.chip_tip
                 .show(ui, exo_ui::id(ui.ctx(), "calendar-form-guest-tip"), tip)
         {
-            self.chip_clicked = Some(match click {
+            self.tip_clicked = Some(match click {
                 exo_ui::CopyClick::Text => {
                     let guest = shown_guests
                         .iter()
                         .find(|(_, guest)| guest.email == tip.copied)
                         .map(|(_, guest)| guest);
-                    ChipTip::Compose(
+                    TipClick::Compose(
                         Address {
                             name: guest.and_then(|guest| guest.name.clone()),
                             email: tip.copied,
@@ -1348,7 +1356,7 @@ impl EventForm {
                         ui.input(|input| input.modifiers.shift_only()),
                     )
                 }
-                exo_ui::CopyClick::Icon => ChipTip::Copy(tip.copied),
+                exo_ui::CopyClick::Icon => TipClick::Copy(tip.copied),
             });
         }
         let hidden = self.hidden_guests(pane);
@@ -1587,11 +1595,13 @@ impl EventForm {
         self.focus = Some(Field::Location);
     }
 
-    /// The meeting link: `Add a meeting link`, or the link (or its state) with a ×.
+    /// The meeting link: `Add a meeting link`, or the link (or its state) with a ×. A link shows
+    /// its copy tooltip on hover.
     fn meeting_row(
         &mut self,
         ui: &mut Ui,
         value: Rect,
+        shown: &Shown<'_>,
         focus: bool,
         overlay: &mut Option<Overlay>,
     ) -> bool {
@@ -1618,7 +1628,14 @@ impl EventForm {
                     palette.text_base_accent,
                     None,
                 );
-                if response.clicked() || (response.has_focus() && keys.0) {
+                // A click focuses the trigger, as the button takes focus, so its list's keys
+                // work. With the list open, Enter is the list's.
+                if response.clicked() {
+                    response.request_focus();
+                }
+                if (response.clicked() && !keys.0)
+                    || (response.has_focus() && keys.0 && self.dropdown.is_none())
+                {
                     self.dropdown = if self
                         .dropdown
                         .is_some_and(|(open, _)| open == Dropdown::Meeting)
@@ -1630,52 +1647,104 @@ impl EventForm {
                 }
             }
             meeting => {
-                // The link's pill: `left: -5px; padding: 2px 4px`.
+                // The pill takes the keyboard on a click, for Backspace and ⌘C.
+                if response.clicked() {
+                    response.request_focus();
+                }
+                // The link, or what will become of it, in a pill that shows when hovered or with the
+                // keyboard: 5px either side of the text and 3px over it, 22px tall, with its cross
+                // (2px after the text) only then.
                 let text = match &meeting {
                     Meeting::Existing(link) => link
                         .trim_start_matches("https://")
                         .trim_start_matches("http://")
                         .to_owned(),
-                    _ => "Link will be added when saved".to_owned(),
+                    _ if shown.online => "Link will be added when saved".to_owned(),
+                    _ => "Link will be added when online".to_owned(),
                 };
+                let carbon = palette.theme == exo_ui::Theme::Carbon;
+                let text_at = value.min;
                 let width = SMALL.width(ui.ctx(), &text);
-                let pill = Rect::from_min_size(
-                    pos2(value.left() - 5.0, value.top() - 2.0),
-                    vec2(width + 8.0 + 20.0, SMALL.line_height + 4.0),
+                let cross = Rect::from_min_size(
+                    text_at + vec2(width + PILL_CROSS_GAP, 0.0),
+                    vec2(PILL_CROSS_WIDTH, SMALL.line_height),
                 );
-                if response.hovered() || response.has_focus() {
-                    ui.painter().rect_filled(
+                let pill = Rect::from_min_max(
+                    text_at - vec2(PILL_PADDING, PILL_ABOVE),
+                    pos2(
+                        cross.right() + PILL_PADDING,
+                        text_at.y - PILL_ABOVE + PILL_HEIGHT,
+                    ),
+                );
+                let focused = response.has_focus();
+                let lit = focused || ui.rect_contains_pointer(pill);
+                if lit {
+                    // `#fafafa` (Carbon `#555b64`) in a 1px border, `#aeb1dd` with the keyboard and
+                    // otherwise `#f3f3f3` (Carbon `#636973`).
+                    let fill = if carbon {
+                        Color32::from_rgb(0x55, 0x5b, 0x64)
+                    } else {
+                        Color32::from_rgb(0xfa, 0xfa, 0xfa)
+                    };
+                    let border = match (focused, carbon) {
+                        (true, _) => ACCENT,
+                        (false, true) => Color32::from_rgb(0x63, 0x69, 0x73),
+                        (false, false) => Color32::from_rgb(0xf3, 0xf3, 0xf3),
+                    };
+                    ui.painter().rect(
                         exo_ui::pixel_snap(pill),
-                        CornerRadius::same(4),
-                        palette.fill_hover_default,
+                        CornerRadius::same(2),
+                        fill,
+                        Stroke::new(1.0, border),
+                        egui::StrokeKind::Inside,
                     );
                 }
-                SMALL.paint_line(
-                    ui.painter(),
-                    pos2(value.left() - 1.0, value.top()),
-                    &text,
-                    palette.text_base_default,
-                    None,
-                );
-                let cross = Rect::from_min_size(
-                    pos2(pill.right() - 18.0, pill.top() + 2.0),
-                    Vec2::splat(16.0),
-                );
-                let close = "legacy/DEPRECATED_closeV3";
-                let removed = exo_ui::IconButton::new(close)
-                    .show(
+                // The link at `.9` (Carbon `.85`), a state at `.35`.
+                let ink = if matches!(meeting, Meeting::Existing(_)) {
+                    palette.ink(0.9, 0.85)
+                } else {
+                    palette.ink(0.35, 0.35)
+                };
+                SMALL.paint_line(ui.painter(), text_at, &text, ink, None);
+                let close = "legacy/DEPRECATED_closeV2";
+                let removed = lit && {
+                    // The glyph's square fills the cross's width.
+                    exo_ui::paint_icon(
                         ui,
-                        exo_ui::id(ui.ctx(), "calendar-form-meeting-remove"),
+                        close,
+                        Rect::from_center_size(cross.center(), Vec2::splat(PILL_CROSS_WIDTH)),
+                        PILL_CROSS,
+                    );
+                    ui.interact(
                         cross,
-                        exo_ui::icon_rect(ui.ctx(), close, cross),
+                        exo_ui::id(ui.ctx(), "calendar-form-meeting-remove"),
+                        Sense::click(),
                     )
-                    .clicked();
+                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                    .clicked()
+                };
                 if removed || (response.has_focus() && keys.1) {
                     self.values.meeting = Meeting::None;
                 }
+                let tip = self
+                    .meeting_link(shown.calendars, shown.me)
+                    .and_then(|copied| {
+                        ui.rect_contains_pointer(pill).then(|| exo_ui::CopyTip {
+                            target: pill,
+                            shown: text.clone(),
+                            copied,
+                        })
+                    });
+                let id = exo_ui::id(ui.ctx(), "calendar-form-meeting-tip");
+                if let Some((click, tip)) = self.link_tip.show(ui, id, tip) {
+                    self.tip_clicked = Some(match click {
+                        exo_ui::CopyClick::Text => TipClick::Open(tip.copied),
+                        exo_ui::CopyClick::Icon => TipClick::Copy(tip.copied),
+                    });
+                }
             }
         }
-        if response.has_focus() {
+        if response.has_focus() && self.values.meeting == Meeting::None {
             underline(ui, value, palette.border_brand_default);
         }
         if let Some((Dropdown::Meeting, highlighted)) = self.dropdown {
@@ -2008,6 +2077,30 @@ impl EventForm {
     /// editor has something open.
     pub fn about_focused(&self) -> bool {
         self.focused == Some(Field::About)
+    }
+
+    /// Whether the event's own meeting link has the keyboard, so ⌘C copies it.
+    pub fn meeting_link_focused(&self) -> bool {
+        self.focused == Some(Field::Meeting) && matches!(self.values.meeting, Meeting::Existing(_))
+    }
+
+    /// The event's own meeting link as it opens and copies: a Meet link as the account of the
+    /// event's calendar among `calendars` (`authuser`), else as `me`.
+    pub fn meeting_link(&self, calendars: &[CalendarOption], me: &str) -> Option<String> {
+        let Meeting::Existing(link) = &self.values.meeting else {
+            return None;
+        };
+        let Ok(mut url) = url::Url::parse(link) else {
+            return Some(link.clone());
+        };
+        if url.host_str() == Some("meet.google.com") {
+            let account = calendars
+                .iter()
+                .find(|calendar| calendar.id == self.values.calendar)
+                .map_or(me, |calendar| calendar.account.as_str());
+            url.query_pairs_mut().append_pair("authuser", account);
+        }
+        Some(url.to_string())
     }
 
     /// The field after `field` in the mode's order.
@@ -2900,6 +2993,38 @@ mod tests {
                 "maya.lin@example.com",
             ),
         ]
+    }
+
+    #[test]
+    fn a_meet_link_opens_as_the_events_calendar_account() {
+        let form = |link: &str, calendar: &str| {
+            EventForm::create(
+                Values {
+                    meeting: Meeting::Existing(link.into()),
+                    calendar: calendar.into(),
+                    ..values()
+                },
+                true,
+            )
+        };
+        let meet = "https://meet.google.com/abc-defg-hij";
+        assert_eq!(
+            form(meet, "maya.lin@example.com")
+                .meeting_link(&calendars(), "maya@brightmoor.co")
+                .as_deref(),
+            Some("https://meet.google.com/abc-defg-hij?authuser=maya.lin%40example.com")
+        );
+        assert_eq!(
+            form("https://zoom.us/j/1", "team")
+                .meeting_link(&calendars(), "maya@brightmoor.co")
+                .as_deref(),
+            Some("https://zoom.us/j/1"),
+            "only Meet's links take the account"
+        );
+        assert_eq!(
+            EventForm::create(values(), true).meeting_link(&calendars(), "maya@brightmoor.co"),
+            None
+        );
     }
 
     fn listed(rows: &[CalendarRow<'_>]) -> Vec<String> {

@@ -1,5 +1,6 @@
 //! A bare one-line text field, an egui `TextEdit` whose text sits where CSS puts an input's (the
-//! palette's and the shortcuts sheet's search fields, dialog inputs).
+//! palette's and the shortcuts sheet's search fields, dialog inputs). Find in page searches what's
+//! typed in it, as it does the rest of the page.
 //!
 //! A right-click in one opens the shell's menu for editable text. As on a Mac, the click selects
 //! the word under it (or keeps the selection it's on), and the field reports it
@@ -41,13 +42,19 @@ pub fn text_field(
     let pixels_per_point = ui.ctx().pixels_per_point();
     let phase = (line.left() * pixels_per_point).fract() / pixels_per_point;
     let rect = line.translate(vec2(-phase, style.baseline(ui.ctx()) - egui_baseline));
+    let mut laid_out = None;
     let mut layouter = |ui: &Ui, text: &dyn TextBuffer, _wrap: f32| {
         let mut job = style.line_job(text.as_str(), color, None);
         if let Some(first) = job.sections.first_mut() {
             first.leading_space += phase;
         }
-        crate::text::layout(ui.ctx(), job)
+        let mut galley = crate::text::layout(ui.ctx(), job);
+        crate::find::darken_matches(ui.ctx(), &mut galley);
+        laid_out = Some(galley.clone());
+        galley
     };
+    // Find's highlights go under the selection, in a slot filled once the edit has laid out.
+    let found = ui.painter().add(Shape::Noop);
     // The selection is painted here, over the CSS line box (egui's would follow its own row, off
     // by the baseline shift), behind the text. It's a slot now, filled once the edit has run.
     let behind = ui.painter().add(Shape::Noop);
@@ -86,6 +93,10 @@ pub fn text_field(
             ui.put(rect, edit)
         })
         .inner;
+    if let Some(galley) = laid_out {
+        let highlights = crate::find::field(ui.painter(), rect.min, &galley, style);
+        ui.painter().set(found, Shape::Vec(highlights));
+    }
     let pressed = ctx.data(|data| data.get_temp::<Option<CCursorRange>>(pressed_id));
     if let Some(pressed) = pressed {
         let (down, released) = ui.input(|input| {
@@ -243,6 +254,7 @@ fn right_click(
         CCursorRange::two(CCursor::new(range.start), CCursor::new(range.end)),
     );
     ctx.memory_mut(|memory| memory.request_focus(id));
+    crate::claim_right_click(ctx);
     let menu = FieldMenu {
         field: id,
         at: point,

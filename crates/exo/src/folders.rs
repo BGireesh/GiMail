@@ -3,13 +3,16 @@
 //!
 //! Items are numbered from 0, the account, then the folders, then the labels; a nested label's
 //! parent heading isn't an item.
+//!
+//! Over Inbox Zero's photo the drawer is see-through: black at .3 over the photo blurred 35px,
+//! with white text.
 
 use egui::{
     Color32, CornerRadius, Id, Painter, Pos2, Rect, Sense, Ui, Vec2, pos2, text::LayoutJob, vec2,
 };
 use exo_store::{Label, ListCount, ListId};
 use exo_ui::{
-    BoxShadow, Family, Font, KeycapColors, Keycaps, TextStyle, Theme,
+    Behind, BoxShadow, Family, Font, KeycapColors, Keycaps, Palette, TextStyle, Theme,
     motion::{self, CubicBezier},
     paint_job,
 };
@@ -62,6 +65,9 @@ const MAX_COUNT: usize = 1000;
 const COUNT_HIDDEN: f32 = 75.0;
 const COUNT_SHOWN: f32 = -8.0;
 const HOVER: f32 = 0.1;
+/// Over the photo: `background: rgba(0,0,0,.3); backdrop-filter: blur(35px)`.
+const SEE_THROUGH: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 77);
+const BLUR: f32 = 35.0;
 
 /// Where a folder of the drawer goes: a list, or the Snippets folder, which isn't one.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -238,6 +244,8 @@ pub struct View<'a> {
     pub inbox: Option<ListCount>,
     /// Whether Important and Other are on, which the Inbox's row says.
     pub important_other: bool,
+    /// What the drawer shows through, over Inbox Zero's photo.
+    pub behind: Option<&'a Behind>,
 }
 
 /// The drawer's state.
@@ -397,8 +405,9 @@ impl Folders {
             pos2(page.left() + LEFT - width * (1.0 - shown), page.top()),
             vec2(width, page.height()),
         );
+        // Under the toasts' stack and the dialogs, whenever it opened.
         egui::Area::new(id)
-            .order(egui::Order::Foreground)
+            .order(egui::Order::Middle)
             .fixed_pos(page.min)
             .show(ctx, |ui| {
                 self.draw(ui, page, drawer, rem, shown, lines, view)
@@ -423,6 +432,7 @@ impl Folders {
         let ctx = ui.ctx().clone();
         let id = exo_ui::id(&ctx, "exo::folders");
         let palette = exo_ui::palette(&ctx);
+        let inks = Inks::new(palette, view.behind.is_some());
         let mut action = None;
         // A click anywhere else closes the drawer, and goes no further.
         if self.open && ui.allocate_rect(page, Sense::click()).clicked() {
@@ -442,7 +452,8 @@ impl Folders {
             page.max,
         ));
         // The drawer's shadow: `0 0 30px 0 rgba(0, 0, 0, .1), 0 0 .5px 0 rgba(0, 0, 0, .05)`, or
-        // `0 0 30px 0 #000` in Carbon.
+        // `0 0 30px 0 #000` in Carbon. Under the see-through drawer it's only outside it, as CSS
+        // clips a box-shadow.
         let shadows: &[BoxShadow] = match exo_ui::theme(&ctx) {
             Theme::Snow => &[
                 BoxShadow::new([0.0, 0.0], 30.0, 0.0, Color32::from_black_alpha(26)),
@@ -451,9 +462,18 @@ impl Folders {
             Theme::Carbon => &[BoxShadow::new([0.0, 0.0], 30.0, 0.0, Color32::BLACK)],
         };
         for shadow in shadows {
-            shadow.paint(&shadow_painter, drawer, CornerRadius::ZERO);
+            if view.behind.is_some() {
+                shadow.paint_outside(&shadow_painter, drawer);
+            } else {
+                shadow.paint(&shadow_painter, drawer, CornerRadius::ZERO);
+            }
         }
-        painter.rect_filled(drawer, 0.0, palette.background_elevated_subdued);
+        if let Some(behind) = view.behind {
+            behind.paint(&painter, drawer, BLUR);
+            painter.rect_filled(drawer, 0.0, SEE_THROUGH);
+        } else {
+            painter.rect_filled(drawer, 0.0, palette.background_elevated_subdued);
+        }
         // Clicks on the drawer itself don't reach the layer under it.
         let _ = ui.interact(drawer, id.with("panel"), Sense::click());
 
@@ -545,20 +565,16 @@ impl Folders {
             origin,
             highlight,
             self.jump,
+            inks.highlight,
         );
         let mut index = 0;
         for (i, (line, &(row_top, height))) in lines.iter().zip(&layout).enumerate() {
             if i == folders {
-                // The divider: a 1px #ededed line, #5f6165 in Carbon.
                 let y = origin + row_top - DIVIDER + DIVIDER_LINE;
-                let color = match exo_ui::theme(&ctx) {
-                    Theme::Snow => Color32::from_rgb(0xed, 0xed, 0xed),
-                    Theme::Carbon => Color32::from_rgb(0x5f, 0x61, 0x65),
-                };
                 list_painter.rect_filled(
                     exo_ui::pixel_snap(Rect::from_min_max(pos2(left, y), pos2(right, y + 1.0))),
                     0.0,
-                    color,
+                    inks.divider,
                 );
             }
             let row = Rect::from_min_size(
@@ -606,14 +622,14 @@ impl Folders {
                         &list_painter,
                         pos2(left, text_top),
                         name,
-                        label_color(palette),
+                        inks.label,
                         Some(right - left),
                     );
                     if inbox && view.important_other {
                         paint_important_other(
                             &list_painter,
                             pos2(left + name_width, text_top),
-                            palette,
+                            &inks,
                         );
                     }
                     let hover = hovered && self.mousing;
@@ -628,7 +644,7 @@ impl Folders {
                     let caps = Keycaps::new(
                         &ctx,
                         tokens.as_ref().map_or(&[][..], |tokens| &tokens[..]),
-                        keycap_colors(&ctx, shortcut),
+                        keycap_colors(&inks, shortcut),
                     );
                     // `float: right`, there even while transparent.
                     let shortcut_left = right - caps.width();
@@ -649,7 +665,7 @@ impl Folders {
                         );
                         paint_count(
                             &list_painter,
-                            &ctx,
+                            inks.count,
                             row,
                             shortcut_left + COUNT_HIDDEN + (COUNT_SHOWN - COUNT_HIDDEN) * slide,
                             view.inbox,
@@ -660,11 +676,8 @@ impl Folders {
                     name, nested: true, ..
                 } => {
                     let nested_left = drawer.left() + 3.5 * rem * 1.75;
-                    // A nested label's name: at .5 in both themes.
-                    let mut job = LayoutJob::single_section(
-                        name.clone(),
-                        LABEL.format(palette.ink(0.5, 0.5)),
-                    );
+                    let mut job =
+                        LayoutJob::single_section(name.clone(), LABEL.format(inks.nested));
                     job.wrap.max_width = right - nested_left;
                     paint_job(&list_painter, pos2(nested_left, text_top), job, &LABEL);
                 }
@@ -673,7 +686,7 @@ impl Folders {
                         &list_painter,
                         pos2(left, text_top),
                         name,
-                        label_color(palette),
+                        inks.label,
                         Some(right - left),
                     );
                 }
@@ -701,6 +714,7 @@ impl Folders {
             0.0,
             (self.cursor == 0).then_some((account.top(), ROW)),
             self.jump,
+            inks.highlight,
         );
         if self.open && moved && pointer.is_some_and(|at| account.contains(at)) {
             self.move_to(0, true);
@@ -712,7 +726,7 @@ impl Folders {
         {
             action = Some(Action::SwitchAccounts);
         }
-        paint_account(ui, account, left, right, view);
+        paint_account(ui, account, left, right, view, &inks);
         exo_ui::scroll_shadow(
             &painter,
             id.with("shadow"),
@@ -744,9 +758,9 @@ fn wrapped_height(ctx: &egui::Context, name: &str, width: f32) -> f32 {
     rows as f32 * LABEL.line_height + 2.0 * NESTED_PADDING
 }
 
-/// The cursor's highlight on the row at `target` (its top and height in content that starts
-/// at `origin` on screen, so scrolling doesn't slide it), sliding from where it was, or fading
-/// out with no target.
+/// The cursor's highlight (`color`) on the row at `target` (its top and height in content that
+/// starts at `origin` on screen, so scrolling doesn't slide it), sliding from where it was, or
+/// fading out with no target.
 fn paint_highlight(
     painter: &Painter,
     id: Id,
@@ -754,6 +768,7 @@ fn paint_highlight(
     origin: f32,
     target: Option<(f32, f32)>,
     jump: bool,
+    color: Color32,
 ) {
     let ctx = painter.ctx();
     let now = ctx.input(|input| input.time);
@@ -810,7 +825,7 @@ fn paint_highlight(
     painter.rect_filled(
         rect,
         CornerRadius::same(HIGHLIGHT_RADIUS),
-        palette.background_brand_subdued.gamma_multiply(opacity),
+        color.gamma_multiply(opacity),
     );
     // `::before`, shown while the drawer has the keyboard, which it always has while open.
     let bar = Rect::from_min_size(rect.min, vec2(BAR_WIDTH, rect.height()));
@@ -830,12 +845,12 @@ fn paint_highlight(
     }
 }
 
-/// The Inbox row's `Important • Other` after its name: 12px after it, black or white at .5, its
-/// dot at .25 with 1px either side.
-fn paint_important_other(painter: &Painter, at: Pos2, palette: &exo_ui::Palette) {
+/// The Inbox row's `Important • Other` after its name: 12px after it, its dot with 1px either
+/// side.
+fn paint_important_other(painter: &Painter, at: Pos2, inks: &Inks) {
     let (color, dot) = (
-        IMPORTANT_OTHER.format(palette.ink(0.5, 0.5)),
-        IMPORTANT_OTHER.format(palette.ink(0.25, 0.25)),
+        IMPORTANT_OTHER.format(inks.important),
+        IMPORTANT_OTHER.format(inks.dot),
     );
     // The dot's leading space collapses into the one before it, and its trailing one swallows
     // `Other`'s. Its margins go either side.
@@ -846,27 +861,18 @@ fn paint_important_other(painter: &Painter, at: Pos2, palette: &exo_ui::Palette)
     paint_job(painter, pos2(at.x + 12.0, at.y), job, &IMPORTANT_OTHER);
 }
 
-/// A folder's `G then {key}` caps (its `then` in the subdued text color), `opacity` of the way
-/// faded in.
-fn keycap_colors(ctx: &egui::Context, opacity: f32) -> KeycapColors {
-    let palette = exo_ui::palette(ctx);
-    let colors = KeycapColors::base(palette);
+/// A folder's `G then {key}` caps, `opacity` of the way faded in.
+fn keycap_colors(inks: &Inks, opacity: f32) -> KeycapColors {
     KeycapColors {
-        background: colors.background.gamma_multiply(opacity),
-        text: colors.text.gamma_multiply(opacity),
-        divider: palette.text_base_subdued.gamma_multiply(opacity),
+        background: inks.keycaps.background.gamma_multiply(opacity),
+        text: inks.keycaps.text.gamma_multiply(opacity),
+        divider: inks.keycaps.divider.gamma_multiply(opacity),
     }
 }
 
 /// The Inbox's count, its right edge at `right`. That's 75px past the keys' left edge, or clear
 /// of them by 8px while hovered. The row clips it.
-fn paint_count(
-    painter: &Painter,
-    ctx: &egui::Context,
-    row: Rect,
-    right: f32,
-    count: Option<ListCount>,
-) {
+fn paint_count(painter: &Painter, color: Color32, row: Rect, right: f32, count: Option<ListCount>) {
     let Some(count) = count.filter(|count| (1..MAX_COUNT).contains(&count.threads)) else {
         return;
     };
@@ -875,8 +881,6 @@ fn paint_count(
     } else {
         format!("{}+", count.threads)
     };
-    // Black at .35, white at .45.
-    let color = exo_ui::palette(ctx).ink(0.35, 0.45);
     let width = LABEL.single_line(painter, &text, color, None).size().x;
     let clip = painter.with_clip_rect(painter.clip_rect().intersect(row));
     LABEL.paint_line(
@@ -889,7 +893,7 @@ fn paint_count(
 }
 
 /// The account row: avatar, address and the switch-account caret.
-fn paint_account(ui: &Ui, row: Rect, left: f32, right: f32, view: &View<'_>) {
+fn paint_account(ui: &Ui, row: Rect, left: f32, right: f32, view: &View<'_>, inks: &Inks) {
     let (painter, ctx) = (ui.painter(), ui.ctx());
     let palette = exo_ui::palette(ctx);
     // The avatar, initial or photo, on whole pixels.
@@ -918,7 +922,7 @@ fn paint_account(ui: &Ui, row: Rect, left: f32, right: f32, view: &View<'_>) {
         painter,
         pos2(text_left, row.center().y - 8.0),
         view.email,
-        label_color(palette),
+        inks.label,
         Some((caret.left() - 4.0 - text_left).max(0.0)),
     );
     let name = "legacy/DEPRECATED_rightCaret";
@@ -926,13 +930,74 @@ fn paint_account(ui: &Ui, row: Rect, left: f32, right: f32, view: &View<'_>) {
         ui,
         name,
         exo_ui::icon_rect(ui.ctx(), name, caret),
-        palette.icon_base_default,
+        inks.caret,
     );
 }
 
-/// A row's label color: black at .75, white at .75.
-fn label_color(palette: &exo_ui::Palette) -> Color32 {
-    palette.ink(0.75, 0.75)
+/// The drawer's colors, which turn white over Inbox Zero's photo.
+struct Inks {
+    /// A row's label and the account's address.
+    label: Color32,
+    /// A nested label's name.
+    nested: Color32,
+    /// The Inbox row's `Important • Other`, and its dot.
+    important: Color32,
+    dot: Color32,
+    /// The Inbox's count.
+    count: Color32,
+    /// The line between the folders and the labels.
+    divider: Color32,
+    /// The cursor's highlight.
+    highlight: Color32,
+    /// The account's caret.
+    caret: Color32,
+    /// A folder's `G then {key}` caps.
+    keycaps: KeycapColors,
+}
+
+impl Inks {
+    fn new(palette: &Palette, photo: bool) -> Self {
+        let white = |alpha: f32| Color32::from_white_alpha((alpha * 255.0).round() as u8);
+        if photo {
+            return Self {
+                label: white(0.9),
+                nested: white(0.6),
+                important: white(0.55),
+                dot: white(0.55),
+                count: white(0.4),
+                divider: white(0.09),
+                highlight: Color32::from_black_alpha(20),
+                caret: white(0.4),
+                keycaps: KeycapColors {
+                    background: white(0.15),
+                    text: white(0.9),
+                    divider: white(0.4),
+                },
+            };
+        }
+        Self {
+            // Black or white at .75; a nested label's at .5.
+            label: palette.ink(0.75, 0.75),
+            nested: palette.ink(0.5, 0.5),
+            // `Important • Other` at .5, its dot at .25.
+            important: palette.ink(0.5, 0.5),
+            dot: palette.ink(0.25, 0.25),
+            // Black at .35, white at .45.
+            count: palette.ink(0.35, 0.45),
+            // #ededed, #5f6165 in Carbon.
+            divider: match palette.theme {
+                Theme::Snow => Color32::from_rgb(0xed, 0xed, 0xed),
+                Theme::Carbon => Color32::from_rgb(0x5f, 0x61, 0x65),
+            },
+            highlight: palette.background_brand_subdued,
+            caret: palette.icon_base_default,
+            // The caps' `then` is in the subdued text color.
+            keycaps: KeycapColors {
+                divider: palette.text_base_subdued,
+                ..KeycapColors::base(palette)
+            },
+        }
+    }
 }
 
 #[cfg(test)]

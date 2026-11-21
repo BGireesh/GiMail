@@ -1,16 +1,19 @@
 //! The print view, a WKWebView that's never shown. It loads the conversation's page, its fonts and
 //! what its bodies load through its own URL schemes, then prints the page with an
-//! `NSPrintOperation` (WebKit lays it out and paginates it as Chromium would). Everything here
-//! runs on the main thread, and loads finish there too.
+//! `NSPrintOperation` (WebKit lays it out and paginates it as Chromium would). While the print
+//! panel is up, new paper in it lays the page out again for that paper. Everything here runs on
+//! the main thread, and loads finish there too.
 
 use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
     ffi::c_void,
     path::PathBuf,
+    time::Duration,
 };
 
 use block2::RcBlock;
+use dispatch2::DispatchTime;
 use exo_store::Attachment;
 use objc2::{
     AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, Message as _, define_class,
@@ -25,8 +28,8 @@ use objc2_app_kit::{
     NSWindowStyleMask,
 };
 use objc2_foundation::{
-    NSArray, NSCopying, NSData, NSError, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize,
-    NSString, NSURL, NSURLResponse,
+    NSArray, NSCopying, NSData, NSError, NSNotificationCenter, NSObject, NSObjectProtocol, NSPoint,
+    NSRect, NSSize, NSString, NSURL, NSURLResponse,
 };
 use objc2_web_kit::{
     WKContentWorld, WKNavigation, WKNavigationDelegate, WKURLSchemeHandler, WKURLSchemeTask,
@@ -34,7 +37,7 @@ use objc2_web_kit::{
     WKWebViewConfiguration, WKWebsiteDataStore,
 };
 
-use super::{Conversation, Destination, Done, Page, Resource, document};
+use super::{Destination, Done, Page, Printout, Resource, document};
 use crate::account::Loader;
 
 /// Moves each body's template into a shadow root on its `.Shadowbox` host, once the page is
@@ -47,7 +50,8 @@ const SHADOW_ROOTS: &str = "for (const template of document.querySelectorAll('.S
 /// a block. An inline image that has alt text or lacks either attribute is a 16px square. A blocked
 /// image keeps the box `body.css` gives it, and any other shows nothing. Last, it marks the bodies
 /// of three lines or fewer, which Chromium can't break while keeping the hairline's padding with
-/// the last two lines (`print.css`).
+/// the last two lines (`print.css`): the body's wrapper, or the body alone under an invitation's
+/// card, which breaks between its rows.
 const BEFORE_PRINT: &str = r#"
 await document.fonts.ready;
 const size = (value) => { const number = parseFloat(value); return number > 0 && !String(value).includes('%') ? number : 0; };
@@ -64,7 +68,7 @@ for (const host of document.querySelectorAll('.Shadowbox')) {
     if (!image.hasAttribute('data-exo-blocked')) image.style.setProperty('visibility', 'hidden', 'important');
   }
   const body = host.shadowRoot && host.shadowRoot.querySelector('.ShadowBody');
-  if (body && body.getBoundingClientRect().height <= 3 * parseFloat(getComputedStyle(body).lineHeight)) host.parentElement.classList.add('isShort');
+  if (body && body.getBoundingClientRect().height <= 3 * parseFloat(getComputedStyle(body).lineHeight)) (host.parentElement.querySelector('.CalendarInvite') ? host : host.parentElement).classList.add('isShort');
 }
 return true;
 "#;
@@ -86,22 +90,25 @@ fn next_id() -> u64 {
     })
 }
 
+/// How often the print panel's paper is checked while it's up.
+const PAPER_CHECK: Duration = Duration::from_millis(250);
+
 /// One print job's objects, kept until it's done.
 struct Job {
     id: u64,
-    _web_view: Retained<WKWebView>,
+    web_view: Retained<WKWebView>,
     _window: Retained<NSWindow>,
-    _printer: Retained<Printer>,
+    printer: Retained<Printer>,
     _handler: Retained<Handler>,
 }
 
-/// The paper the print panel starts on, which is the default printer's, upright
-/// (`@page { size: portrait }`). Off the main thread it's Letter.
-pub(super) fn default_page() -> Page {
-    if MainThreadMarker::new().is_none() {
-        return Page::LETTER;
-    }
-    let NSSize { width, height } = NSPrintInfo::sharedPrintInfo().paperSize();
+/// The paper the print panel starts on, which is the default printer's.
+fn default_page() -> Page {
+    page(NSPrintInfo::sharedPrintInfo().paperSize())
+}
+
+/// The page for paper `size`, upright (`@page { size: portrait }`).
+fn page(NSSize { width, height }: NSSize) -> Page {
     let (width, height) = (width as f32, height as f32);
     Page {
         paper: [width.min(height), width.max(height)],
@@ -144,10 +151,11 @@ pub(super) fn choose_pdf(file_name: &str, chosen: impl FnOnce(PathBuf) + 'static
     }
 }
 
-/// Lays `conversation` out in a new print view and prints it to `destination` once everything it
-/// shows has loaded. `done` hears whether it printed.
+/// Lays `printout` out in a new print view, for the paper the panel starts on (or Letter for a
+/// PDF), and prints it to `destination` once everything it shows has loaded. `done` hears
+/// whether it printed.
 pub(super) fn print(
-    conversation: &Conversation,
+    printout: Printout,
     loader: Loader,
     destination: Destination,
     done: Option<Done>,
@@ -160,7 +168,12 @@ pub(super) fn print(
         return;
     };
     let id = next_id();
-    let html = document::html(conversation);
+    let page = match destination {
+        Destination::Panel => default_page(),
+        Destination::Pdf(_) => Page::LETTER,
+    };
+    let conversation = printout.on(page);
+    let html = document::html(&conversation);
     let inline = crate::body::fetch::by_content_id(conversation.inline.clone());
     let handler = Handler::new(mtm, Loads { loader, inline });
     let printer = Printer::new(
@@ -168,8 +181,10 @@ pub(super) fn print(
         Printing {
             id,
             destination,
-            title: conversation.title.clone(),
-            page: conversation.page,
+            title: conversation.title,
+            page: Cell::new(page),
+            printout,
+            operation: RefCell::new(None),
             done: Cell::new(done),
         },
     );
@@ -221,20 +236,56 @@ pub(super) fn print(
     };
     window.setContentView(Some(&web_view));
     // SAFETY: the delegate is kept alive in `JOBS` for as long as the view is.
-    unsafe {
-        web_view.setNavigationDelegate(Some(ProtocolObject::from_ref(&*printer)));
-        let base = NSURL::URLWithString(&NSString::from_str(document::BASE_URL));
-        web_view.loadHTMLString_baseURL(&NSString::from_str(&html), base.as_deref());
-    }
+    unsafe { web_view.setNavigationDelegate(Some(ProtocolObject::from_ref(&*printer))) };
+    load(&web_view, &html);
     JOBS.with(|jobs| {
         jobs.borrow_mut().push(Job {
             id,
-            _web_view: web_view,
+            web_view,
             _window: window,
-            _printer: printer,
+            printer,
             _handler: handler,
         })
     });
+}
+
+/// Loads `html` into `web_view`, its relative URLs resolving on the remote scheme.
+fn load(web_view: &WKWebView, html: &str) {
+    // SAFETY: the page is Exo's own, and its loads go through the job's handler.
+    unsafe {
+        let base = NSURL::URLWithString(&NSString::from_str(document::BASE_URL));
+        web_view.loadHTMLString_baseURL(&NSString::from_str(html), base.as_deref());
+    }
+}
+
+/// While job `id` is under way, checks its paper every [`PAPER_CHECK`].
+fn watch_paper(id: u64) {
+    let Ok(when) = DispatchTime::try_from(PAPER_CHECK) else {
+        return;
+    };
+    let _ = dispatch2::DispatchQueue::main().after(when, move || {
+        let job = JOBS.with(|jobs| {
+            jobs.borrow()
+                .iter()
+                .find(|job| job.id == id)
+                .map(|job| (job.web_view.clone(), job.printer.clone()))
+        });
+        if let Some((web_view, printer)) = job {
+            printer.check_paper(&web_view);
+            watch_paper(id);
+        }
+    });
+}
+
+/// Has the print panel paginate the page again and redraw its preview, as WebKit's print view
+/// does once it has new pages (AppKit's notification for changed print settings, which it
+/// doesn't declare).
+fn repaginate() {
+    // SAFETY: a notification with no object, on the main thread.
+    unsafe {
+        NSNotificationCenter::defaultCenter()
+            .postNotificationName_object(&NSString::from_str("NSPrintInfoDidChange"), None);
+    }
 }
 
 /// Ends job `id`, after the callback that finished it has returned.
@@ -248,7 +299,12 @@ struct Printing {
     id: u64,
     destination: Destination,
     title: String,
-    page: Page,
+    /// The paper the page is laid out for.
+    page: Cell<Page>,
+    /// The conversation, to lay out again for new paper.
+    printout: Printout,
+    /// The operation, once it runs.
+    operation: RefCell<Option<Retained<NSPrintOperation>>>,
     done: Cell<Option<Done>>,
 }
 
@@ -270,7 +326,12 @@ define_class!(
                 if !error.is_null() {
                     log::warn!("printing: getting the page ready failed");
                 }
-                printer.run(&view);
+                // The page laid out again for new paper goes to the operation under way.
+                if printer.ivars().operation.borrow().is_some() {
+                    repaginate();
+                } else {
+                    printer.run(&view);
+                }
             });
             // SAFETY: the script only awaits the page's fonts, lays out and hides the images that
             // didn't load and marks the short bodies, in the client world.
@@ -287,14 +348,12 @@ define_class!(
 
         #[unsafe(method(webView:didFailNavigation:withError:))]
         fn did_fail(&self, _web_view: &WKWebView, _navigation: Option<&WKNavigation>, error: &NSError) {
-            log::warn!("printing: the page didn't load: {}", error.localizedDescription());
-            self.end(false);
+            self.failed(error);
         }
 
         #[unsafe(method(webView:didFailProvisionalNavigation:withError:))]
         fn did_fail_provisional(&self, _web_view: &WKWebView, _navigation: Option<&WKNavigation>, error: &NSError) {
-            log::warn!("printing: the page didn't load: {}", error.localizedDescription());
-            self.end(false);
+            self.failed(error);
         }
 
         #[unsafe(method(webViewWebContentProcessDidTerminate:))]
@@ -337,10 +396,8 @@ impl Printer {
         let window = match &printing.destination {
             Destination::Panel => NSApplication::sharedApplication(mtm).mainWindow(),
             Destination::Pdf(path) => {
-                info.setPaperSize(NSSize::new(
-                    f64::from(printing.page.paper[0]),
-                    f64::from(printing.page.paper[1]),
-                ));
+                let [width, height] = printing.page.get().paper.map(f64::from);
+                info.setPaperSize(NSSize::new(width, height));
                 let Some(url) = NSURL::from_file_path(path) else {
                     log::warn!("printing: can't write to {}", path.display());
                     return self.end(false);
@@ -360,6 +417,7 @@ impl Printer {
         };
         // SAFETY: the operation prints `web_view`, which outlives it (it's held in `JOBS`).
         let operation = unsafe { web_view.printOperationWithPrintInfo(&info) };
+        printing.operation.replace(Some(operation.clone()));
         let panel = printing.destination == Destination::Panel;
         operation.setShowsPrintPanel(panel);
         operation.setShowsProgressPanel(panel);
@@ -378,10 +436,50 @@ impl Printer {
                 std::ptr::null_mut(),
             );
         }
+        if panel {
+            watch_paper(printing.id);
+        }
+    }
+
+    /// Lays the page out again when the panel's paper has changed, which the operation takes up
+    /// once it has loaded ([`repaginate`]).
+    fn check_paper(&self, web_view: &WKWebView) {
+        let printing = self.ivars();
+        let Some(paper) = printing
+            .operation
+            .borrow()
+            .as_ref()
+            .map(|operation| operation.printInfo().paperSize())
+        else {
+            return;
+        };
+        let page = page(paper);
+        if page != printing.page.get() {
+            printing.page.set(page);
+            load(web_view, &document::html(&printing.printout.on(page)));
+        }
+    }
+
+    /// The page didn't load. Before the operation runs that ends the job; after, it's a page laid
+    /// out again that a newer one stopped, or that failed, and the panel keeps the last one.
+    fn failed(&self, error: &NSError) {
+        if self.ivars().operation.borrow().is_some() {
+            log::info!(
+                "printing: a page for new paper didn't load: {}",
+                error.localizedDescription()
+            );
+        } else {
+            log::warn!(
+                "printing: the page didn't load: {}",
+                error.localizedDescription()
+            );
+            self.end(false);
+        }
     }
 
     /// Reports how the job went (once) and lets it go.
     fn end(&self, printed: bool) {
+        self.ivars().operation.take();
         if let Some(done) = self.ivars().done.take() {
             done(printed);
         }

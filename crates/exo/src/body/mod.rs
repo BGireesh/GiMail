@@ -67,6 +67,10 @@ pub struct Facts {
     pub actions: Vec<exo_mail::Action>,
     /// What a Google Calendar notification says about its event.
     pub calendar: exo_mail::CalendarData,
+    /// The dates the new part mentions outside quotes, as written.
+    pub unquoted_dates: Vec<String>,
+    /// The new part proposes or settles a time (`are you free`, `works for me`…).
+    pub proposes_time: bool,
 }
 
 /// How a body is shown. Changing any of it lays the body out again.
@@ -334,6 +338,8 @@ struct Laid {
     width: f32,
     /// How much wider than the column it is, when it scrolls sideways (else 0), in CSS px.
     overflow: f32,
+    /// How much it's shrunk to fit the column (1 when it fits).
+    zoom: f32,
     /// Where its animated images are.
     animations: Vec<[f32; 4]>,
 }
@@ -565,7 +571,8 @@ impl Bodies {
     }
 
     /// Message `id`'s body as it prints (`exo_mail::printable_body`), with its quoted part when
-    /// `show_quoted` and its remote content blocked as on screen. `None` until it's rendered.
+    /// `show_quoted`, its remote content blocked and its shrinking to fit as on screen. `None`
+    /// until it's rendered.
     pub fn printable(&self, id: &str, show_quoted: bool) -> Option<String> {
         let facts = self.facts(id)?;
         // The parts of the render that a body is composed from, which are all that printing reads.
@@ -578,10 +585,16 @@ impl Bodies {
             quoted_is_marketing: facts.quoted_marketing,
             ..Render::default()
         };
+        let zoom = self
+            .entries
+            .get(id)
+            .and_then(|entry| entry.laid.as_ref())
+            .map_or(1.0, |laid| laid.zoom);
         Some(exo_mail::printable_body(
             &render,
             show_quoted,
             self.blocks_images(id),
+            zoom,
         ))
     }
 
@@ -1106,6 +1119,7 @@ impl View {
             generation: self.generation,
             width: self.body.width(),
             overflow,
+            zoom: self.body.zoom(),
             animations: self.body.animations(),
         };
         Output::Laid {
@@ -1746,6 +1760,8 @@ fn facts(render: &Render) -> Facts {
         links: render.links.clone(),
         actions: render.actions.clone(),
         calendar: render.calendar_data.clone(),
+        unquoted_dates: render.unquoted_dates.clone(),
+        proposes_time: render.proposes_time,
     }
 }
 

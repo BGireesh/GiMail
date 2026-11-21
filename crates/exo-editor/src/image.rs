@@ -218,6 +218,14 @@ impl Pictures {
         next.map(|due| due.saturating_sub(now).as_secs_f64())
     }
 
+    /// The file of `key`'s image, once it has loaded.
+    pub(crate) fn file(&self, key: &str) -> Option<Arc<[u8]>> {
+        match self.states.get(key)? {
+            State::Loaded { file, .. } => Some(file.clone()),
+            _ => None,
+        }
+    }
+
     /// The natural size of `key`'s image, once it has loaded.
     pub(crate) fn natural(&self, key: &str) -> Option<Vec2> {
         match self.states.get(key)? {

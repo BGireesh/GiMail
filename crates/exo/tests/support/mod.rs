@@ -7,6 +7,7 @@
 )]
 
 use std::{
+    ops::{Deref, DerefMut},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::{Duration, Instant},
@@ -21,7 +22,7 @@ use exo::{
 
 /// The app on a fresh store synced from an in-process gmail-mock, at 1280×800.
 pub struct Fixture {
-    pub harness: Harness<'static, App>,
+    pub harness: Running,
     /// Serves the mock, and runs what other devices do to it.
     runtime: tokio::runtime::Runtime,
     server: gmail_mock::MockServer,
@@ -32,6 +33,24 @@ pub struct Fixture {
     _silent: Option<std::net::TcpListener>,
     /// Last, so the app is gone before its store is.
     dir: Dir,
+}
+
+/// The running app's harness. [`Fixture::relaunch`] empties it to quit the app before the next one
+/// opens the store, as only one Exo runs at a time.
+pub struct Running(Option<Harness<'static, App>>);
+
+impl Deref for Running {
+    type Target = Harness<'static, App>;
+
+    fn deref(&self) -> &Self::Target {
+        self.0.as_ref().expect("the app is running")
+    }
+}
+
+impl DerefMut for Running {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.0.as_mut().expect("the app is running")
+    }
 }
 
 /// The fixture's folder (the store, attachment previews), deleted when the fixture is.
@@ -49,31 +68,40 @@ const PREVIEWS: &str = "previews";
 /// Starts the app on an account with one Inbox and no splits, which most tests are about.
 /// `name` keeps concurrent tests' stores apart.
 pub fn start(name: &str) -> Fixture {
-    start_with(name, false, true, &|_| {})
+    start_with(name, gmail_mock::Config::default(), false, true, &|_| {})
 }
 
 /// [`start`], with the account's settings changed by `change` first.
 pub fn start_with_settings(name: &str, change: &dyn Fn(&mut exo_store::Settings)) -> Fixture {
-    start_with(name, false, true, change)
+    start_with(name, gmail_mock::Config::default(), false, true, change)
 }
 
 /// [`start`], with Google's People API (contacts) taking requests and never answering.
 pub fn start_with_silent_people(name: &str) -> Fixture {
-    start_with(name, true, true, &|_| {})
+    start_with(name, gmail_mock::Config::default(), true, true, &|_| {})
 }
 
 /// [`start`] on a new account as Exo sets it up: Important and Other, and the default splits.
 pub fn start_new_account(name: &str) -> Fixture {
-    start_with(name, false, false, &|_| {})
+    start_with(name, gmail_mock::Config::default(), false, false, &|_| {})
+}
+
+/// [`start`], with the saved contacts and colleagues having photos of their own.
+pub fn start_with_contact_photos(name: &str) -> Fixture {
+    let config = gmail_mock::Config {
+        contact_photos: true,
+        ..gmail_mock::Config::default()
+    };
+    start_with(name, config, false, true, &|_| {})
 }
 
 fn start_with(
     name: &str,
+    config: gmail_mock::Config,
     silent_people: bool,
     one_inbox: bool,
     change: &dyn Fn(&mut exo_store::Settings),
 ) -> Fixture {
-    let config = gmail_mock::Config::default();
     let now = Arc::new(Mutex::new(config.now.clone()));
     let runtime = tokio::runtime::Runtime::new().expect("runtime");
     let server = runtime
@@ -107,7 +135,7 @@ fn start_with(
     let mut harness = launch(&dir, &endpoints, &now);
     use_split_library(&mut harness, None);
     let mut fixture = Fixture {
-        harness,
+        harness: Running(Some(harness)),
         runtime,
         server,
         endpoints,
@@ -165,9 +193,11 @@ fn launch(
 }
 
 impl Fixture {
-    /// Quits the app and opens it again on the same store, as relaunching Exo does.
+    /// Quits the app and opens it again on the same store, as relaunching Exo does. The app is
+    /// gone, having saved and sent what it held, before the next one opens the store.
     pub fn relaunch(&mut self) {
-        self.harness = launch(&self.dir.0, &self.endpoints, &self.now);
+        self.harness.0 = None;
+        self.harness.0 = Some(launch(&self.dir.0, &self.endpoints, &self.now));
         use_split_library(&mut self.harness, None);
         self.settle();
     }

@@ -243,13 +243,13 @@ pub(super) fn register_view(commands: &mut Commands<commands::Action>) {
     );
 }
 
-/// The Replied number's tooltip, shown 8px under `anchor` on the tooltips' hover timing, with
-/// thousands grouped in its numbers.
+/// The Replied number's tooltip, shown 8px under `anchor` on the tooltips' hover timing, with its
+/// numbers grouped as the locale groups them.
 fn replies_tooltip(ui: &Ui, anchor: &egui::Response, replies: u32, sends: u32) {
     let text = format!(
         "{} out of {} messages sent with\nthis snippet were replied to.",
-        grouped(replies),
-        grouped(sends)
+        crate::format::thousands(replies),
+        crate::format::thousands(sends)
     );
     let within = egui::Rangef::new(ui.clip_rect().left(), ui.ctx().content_rect().right());
     exo_ui::TextTooltip {
@@ -282,19 +282,6 @@ fn top_status(ui: &Ui, painter: &egui::Painter, at: egui::Pos2, none: bool) {
     key.paint(painter, x, at.y + 8.0);
     x += key.width();
     STATUS.paint_line(painter, pos2(x, line), " to create a Snippet!", ink, None);
-}
-
-/// `count` with thousands separated by commas (`1,500`), as en-US writes them.
-fn grouped(count: u32) -> String {
-    let digits = count.to_string();
-    let mut grouped = String::new();
-    for (at, digit) in digits.chars().enumerate() {
-        if at > 0 && (digits.len() - at) % 3 == 0 {
-            grouped.push(',');
-        }
-        grouped.push(digit);
-    }
-    grouped
 }
 
 /// A count, shortened: `999`, `1k`, `1.5k`, `150k`, `1M`.
@@ -608,14 +595,6 @@ mod tests {
         assert_eq!(statistic(1500), "1.5k");
         assert_eq!(statistic(150_000), "150k");
         assert_eq!(statistic(1_000_000), "1M");
-    }
-
-    #[test]
-    fn counts_group_their_thousands() {
-        assert_eq!(grouped(0), "0");
-        assert_eq!(grouped(999), "999");
-        assert_eq!(grouped(1500), "1,500");
-        assert_eq!(grouped(1_234_567), "1,234,567");
     }
 
     #[test]

@@ -263,13 +263,40 @@ impl Mail {
         }
     }
 
+    /// Opens Get Me To Zero as the first run ends in it. It welcomes the user to their inbox, and
+    /// so does every Get Me To Zero until one has closed.
+    pub fn open_first_get_me_to_zero(&mut self) {
+        self.account
+            .update_settings(|settings| settings.show_first_time_gmtz = true);
+        self.bulk_run(Action::OpenGetMeToZero);
+    }
+
+    /// Closes the bulk dialog. A Get Me To Zero that welcomed the user leaves the keyboard on the
+    /// first conversation, and the welcome is done with.
+    fn close_bulk_dialog(&mut self) {
+        self.bulk_dialogs.open = false;
+        if let Some(Shown::GetMeToZero(state)) = &self.bulk_dialogs.shown
+            && state.is_first_time()
+        {
+            self.inbox.cursor_to_top();
+            self.account
+                .update_settings(|settings| settings.show_first_time_gmtz = false);
+        }
+    }
+
     /// Carries out a bulk dialog's `action`.
     pub(crate) fn bulk_run(&mut self, action: Action) {
         match action {
             Action::OpenGetMeToZero => {
+                // The welcome lasts until a Get Me To Zero that shows it closes.
+                let state = if self.account.settings().show_first_time_gmtz {
+                    get_me_to_zero::State::first_time()
+                } else {
+                    get_me_to_zero::State::default()
+                };
                 self.commands.close_palette();
                 self.bulk_dialogs = Dialogs {
-                    shown: Some(Shown::GetMeToZero(get_me_to_zero::State::default())),
+                    shown: Some(Shown::GetMeToZero(state)),
                     open: true,
                 };
             }
@@ -287,12 +314,12 @@ impl Mail {
                 match state.handle(event) {
                     Some(get_me_to_zero::Event::Confirm) => {
                         let state = state.clone();
-                        self.bulk_dialogs.open = false;
+                        self.close_bulk_dialog();
                         self.confirm_get_me_to_zero(&state);
                     }
                     // `Clean up your inbox anytime by hitting ⌘ K → Get Me To Zero!`
                     Some(get_me_to_zero::Event::DoLater) => {
-                        self.bulk_dialogs.open = false;
+                        self.close_bulk_dialog();
                         self.commands.hint(
                             Hint::new()
                                 .text("Clean up your inbox anytime by hitting")
@@ -300,7 +327,7 @@ impl Mail {
                                 .text("→ Get Me To Zero!"),
                         );
                     }
-                    Some(get_me_to_zero::Event::Close) => self.bulk_dialogs.open = false,
+                    Some(get_me_to_zero::Event::Close) => self.close_bulk_dialog(),
                     _ => {}
                 }
             }
@@ -402,8 +429,8 @@ impl Mail {
         );
     }
 
-    /// The session's Get Me To Zero actions, newest first, which are the Bulk Actions dialog's
-    /// rows.
+    /// The Get Me To Zero actions of the last week, newest first, which are the Bulk Actions
+    /// dialog's rows.
     fn get_me_to_zero_actions(&self) -> Vec<Summary> {
         self.account
             .bulk_actions()
@@ -438,7 +465,7 @@ impl Mail {
             None => self.bulk_dialogs.shown = None,
             Some(action) => {
                 if close {
-                    self.bulk_dialogs.open = false;
+                    self.close_bulk_dialog();
                 }
                 if let Some(action) = action {
                     self.bulk_run(action);

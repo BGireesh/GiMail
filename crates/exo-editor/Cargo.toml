@@ -18,6 +18,7 @@ jiff = { workspace = true }
 log = { workspace = true }
 markup5ever_rcdom = { workspace = true }
 regex = { workspace = true }
+url = { workspace = true }
 
 [dev-dependencies]
 anyhow = { workspace = true }

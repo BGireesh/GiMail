@@ -1,11 +1,14 @@
 //! The thread list's header: the folders button, the inbox's split tabs with their counts, Add
 //! Split, the split settings gear, compose and search, and the scroll shadow under it.
 
+use std::sync::LazyLock;
+
 use egui::{Color32, CornerRadius, CursorIcon, Painter, Pos2, Rect, Sense, Ui, Vec2, pos2, vec2};
 use exo_ui::{
     Family, Font, IconButton, KeyTooltip, Placement, ShortcutTooltip, TextStyle,
     motion::{self, CubicBezier},
 };
+use regex::Regex;
 
 /// `padding: 32px … 20px` around a 24px line of tabs.
 pub(super) const HEIGHT: f32 = 76.0;
@@ -386,15 +389,15 @@ pub(super) fn show(
                 gap: 8.0,
                 shift: 10.0,
             };
-            // As a row's actions: 24px boxes 4px apart, the 14px glyphs 5px in, the 16×14 check at
-            // its box's left, 5px down.
+            // 24px boxes 4px apart, with the 14px glyphs 5px in and the 16×14 check 4px in, all
+            // 6px down (as Chromium lays them out, 1px under a row's).
             let mut place = |inset: Vec2, size: Vec2| {
                 let hit =
                     Rect::from_min_size(pos2(left - 24.0, rect.top() + 30.0), Vec2::splat(24.0));
                 left = hit.left() - 4.0;
                 (hit, Rect::from_min_size(hit.min + inset, size))
             };
-            let (hit, glyph) = place(vec2(5.0, 5.0), Vec2::splat(14.0));
+            let (hit, glyph) = place(vec2(5.0, 6.0), Vec2::splat(14.0));
             action = action.or(button(
                 hit,
                 glyph,
@@ -408,7 +411,7 @@ pub(super) fn show(
                 placement,
             ));
             if let Some(remind) = remind {
-                let (hit, glyph) = place(vec2(5.0, 5.0), Vec2::splat(14.0));
+                let (hit, glyph) = place(vec2(5.0, 6.0), Vec2::splat(14.0));
                 let icon = if remind.set {
                     super::row::REMIND_SET_ICON
                 } else {
@@ -441,16 +444,26 @@ pub(super) fn show(
                     action = Some(HeaderAction::Remind);
                 }
             }
-            let (hit, glyph) = place(vec2(0.0, 5.0), vec2(16.0, 14.0));
-            action = action.or(button(
-                hit,
-                glyph,
-                "legacy/DEPRECATED_threadActionsDone",
-                None,
-                HeaderAction::Done,
-                done_tooltip,
-                placement,
-            ));
+            // A done selection's check is a done row's.
+            let (hit, glyph) = place(vec2(4.0, 6.0), vec2(16.0, 14.0));
+            let icon = super::row::DONE_ICON;
+            if *done {
+                let response = super::row::done_check(ui, id.with(icon), hit, glyph);
+                done_tooltip.show_at(ui, &response, placement);
+                if response.clicked() {
+                    action = action.or(Some(HeaderAction::Done));
+                }
+            } else {
+                action = action.or(button(
+                    hit,
+                    glyph,
+                    icon,
+                    None,
+                    HeaderAction::Done,
+                    done_tooltip,
+                    placement,
+                ));
+            }
         }
     }
 
@@ -826,7 +839,9 @@ fn hiding(ui: &Ui, id: egui::Id, hidden: bool) -> (f32, f32) {
 /// `top: 1px`, in a box 8px wide per character that widens 250ms after the count does), a `+` while
 /// the count is incomplete, and its bullet. The name is ink at .8 (.85 in Carbon) on the selected
 /// tab, .6 while hovered and .4 otherwise, and the count is at .35 on the selected tab and .25
-/// otherwise. A tab collapsing as it hides is cut to `cut`'s width at its opacity. With `tooltip`,
+/// otherwise. A tab named with emoji alone is at .6, and at 1 while hovered or selected, since
+/// emoji don't take the name's color. A tab collapsing as it hides is cut to `cut`'s width at its
+/// opacity. With `tooltip`,
 /// hovering it says what it is ([`crate::splits::describe`]). Returns the tab's box and whether it
 /// was clicked.
 #[expect(
@@ -875,6 +890,9 @@ fn tab(
     let hovered = response.hovered() && !folder.hidden;
     if hovered {
         ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+    }
+    if !selected && !hovered && emoji_only(&folder.name) {
+        painter.multiply_opacity(0.6);
     }
     if tooltip && !folder.hidden {
         let (text, keys) = folder.key();
@@ -925,6 +943,14 @@ fn tab(
         );
     }
     (rect, response.clicked() && !folder.hidden)
+}
+
+/// Whether `name` is all pictographs (`⭐`, `🔥🔥`), with nothing else, not even an emoji's
+/// variation selector or joiner.
+fn emoji_only(name: &str) -> bool {
+    static PICTOGRAPHS: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^\p{Extended_Pictographic}+$").expect("valid regex"));
+    PICTOGRAPHS.is_match(name)
 }
 
 /// White at `alpha`, over Inbox Zero's photo.
@@ -1049,4 +1075,21 @@ fn plus(painter: &Painter, at: egui::Pos2, color: Color32) {
     painter.rect_filled(bar([0.0, 4.725], [10.5, 5.775]), 0.0, color);
     painter.rect_filled(bar([4.725, 0.0], [5.775, 4.725]), 0.0, color);
     painter.rect_filled(bar([4.725, 5.775], [5.775, 10.5]), 0.0, color);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::emoji_only;
+
+    #[test]
+    fn a_name_of_pictographs_alone_is_emoji_only() {
+        assert!(emoji_only("⭐"));
+        assert!(emoji_only("🔥🚀"));
+        // A variation selector, a space or a word is something else.
+        assert!(!emoji_only("❤\u{fe0f}"));
+        assert!(!emoji_only("🔥 🚀"));
+        assert!(!emoji_only("🚀 Launch"));
+        assert!(!emoji_only("VIP"));
+        assert!(!emoji_only(""));
+    }
 }

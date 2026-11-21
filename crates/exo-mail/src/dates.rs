@@ -1,4 +1,6 @@
-//! Dates in message text, marked for the "Create Event" hover.
+//! Dates in message text, marked for the "Create Event" hover, and what suggests the thread's
+//! calendar tip (`Tip: Hit b to create a calendar event!`): the message's own dates and a phrase
+//! that proposes a time.
 
 use std::sync::LazyLock;
 
@@ -308,6 +310,62 @@ pub(crate) fn decorate(root: &NodeRef) {
     dom::replace_all(decorated);
 }
 
+/// Whether `node` holds quoted mail: a `blockquote`, `#quoted-content` or `.gmail_quote`.
+fn is_quote(node: &NodeRef) -> bool {
+    dom::is(node, "blockquote")
+        || dom::attr(node, "id").as_deref() == Some("quoted-content")
+        || dom::has_class(node, "gmail_quote")
+}
+
+/// The dates marked in the new part of a message (`root`) outside a quote left in it, as written.
+pub(crate) fn unquoted(root: &NodeRef) -> Vec<String> {
+    dom::select(root, |node| {
+        dom::is(node, "span") && dom::has_class(node, "exo-date")
+    })
+    .into_iter()
+    .filter(|span| dom::closest(span, is_quote).is_none())
+    .map(|span| dom::text_content(&span))
+    .collect()
+}
+
+/// Whether the new part of a message (`root`) has a phrase that proposes or settles a time (`how
+/// about`, `are you free`, `works for me`…). It's looked for in `root`'s elements one level at a
+/// time, from the first: one whose text has a phrase counts unless a quote is inside it, in which
+/// case the search goes on among its children instead (and never back out).
+pub(crate) fn proposes_time(root: &NodeRef) -> bool {
+    static PHRASE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(
+            r"(?i)(?-u:\b)(?:invite|invitation|how about|what about|are you free|are you available|calendar|would be fine|is fine|is great|is good|sounds good|sounds great|works for me|that works)(?-u:\b)",
+        )
+        .expect("valid regex")
+    });
+    let level = |node: &NodeRef| -> Vec<NodeRef> {
+        dom::children(node)
+            .into_iter()
+            .filter(|child| dom::is_element(child) || dom::is_text(child))
+            .collect()
+    };
+    let mut nodes = level(root);
+    let mut at = 0;
+    while let Some(node) = nodes.get(at) {
+        if dom::is_element(node) && PHRASE.is_match(&dom::text_content(node)) {
+            if dom::select_first(node, |inner| {
+                dom::is(inner, "blockquote")
+                    || dom::attr(inner, "id").as_deref() == Some("quoted-content")
+            })
+            .is_none()
+            {
+                return true;
+            }
+            nodes = level(node);
+            at = 0;
+        } else {
+            at += 1;
+        }
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -384,6 +442,36 @@ mod tests {
             dom::inner_html(&body),
             "<p>Let's meet <span class=\"exo-date\">tomorrow</span>, <a href=\"x\">or Friday</a></p>"
         );
+    }
+
+    #[test]
+    fn lists_the_dates_outside_quotes() {
+        let document = dom::parse(
+            "<p>How about tomorrow?</p><blockquote>Or Friday</blockquote><div class=\"gmail_quote\">Monday</div>",
+        );
+        let body = dom::body(&document).unwrap();
+        decorate(&body);
+        assert_eq!(unquoted(&body), ["tomorrow"]);
+    }
+
+    #[test]
+    fn finds_a_phrase_that_proposes_a_time_outside_quotes() {
+        let proposes = |html: &str| proposes_time(&dom::body(&dom::parse(html)).unwrap());
+        assert!(proposes("<div>Are you free on Friday?</div>"));
+        assert!(proposes("<p>Thursday WORKS FOR ME.</p>"));
+        // Words, not parts of words.
+        assert!(!proposes("<p>Calendaring went well</p>"));
+        // Only elements count.
+        assert!(!proposes("How about Friday?"));
+        // Around a quote, the search goes into the element, and it stops at the first one with
+        // no quote inside that has a phrase, which can be the quote itself.
+        assert!(proposes(
+            "<div><p>That works.</p><blockquote>How about Friday?</blockquote></div>"
+        ));
+        // Text of its own beside a quote isn't an element, so it doesn't count.
+        assert!(!proposes(
+            "<div>How about Friday? <blockquote>Thanks!</blockquote></div><p>Is fine</p>"
+        ));
     }
 
     #[test]

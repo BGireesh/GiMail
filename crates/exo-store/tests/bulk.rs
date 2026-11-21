@@ -4,7 +4,10 @@ mod support;
 
 use std::collections::BTreeSet;
 
-use exo_store::{BulkTarget, ListCutoff, ListId, Mutation, Progress, Relabelled, Scope};
+use exo_store::{
+    BulkRecord, BulkState, BulkTarget, ListCutoff, ListId, LoggedBulk, Mutation, Progress,
+    Relabelled, Scope,
+};
 use gmail::ListQuery;
 use support::Harness;
 
@@ -638,4 +641,94 @@ async fn a_sender_filter_gmail_already_has_stays_after_undo() {
         [(SENDER.to_owned(), vec!["TRASH".to_owned()])],
         "undo leaves the user's own"
     );
+}
+
+#[tokio::test]
+async fn the_log_keeps_a_week_of_bulk_actions_with_what_they_changed() {
+    let mut harness = Harness::synced().await;
+    let every = harness.gmail_ids(ListQuery::default()).await;
+    let target = BulkTarget {
+        list: Some(ListCutoff {
+            scope: Scope::List(ListId::All),
+            filter: None,
+            keep: Vec::new(),
+            before: jiff::Timestamp::now(),
+        }),
+        ..BulkTarget::default()
+    };
+    let mut record = BulkRecord {
+        name: "Star".into(),
+        query: None,
+        mutation: Mutation::Star,
+        target: target.clone(),
+        state: BulkState::Pending,
+        count: 0,
+    };
+    let id = harness
+        .store
+        .log_bulk(&record, &Relabelled::default())
+        .await
+        .unwrap();
+    let mut done = Relabelled::default();
+    harness
+        .store
+        .bulk(&target, &Mutation::Star, &Progress::logged(id), &mut done)
+        .await
+        .unwrap();
+    assert!(done.len() > 200, "{} threads", done.len());
+    // What it changed was logged as it went, so a quit midway could still put it back.
+    let midway = harness.store.bulk_log().await.unwrap();
+    assert_eq!(midway.len(), 1);
+    assert!(
+        (200..done.len()).contains(&midway[0].changed.len()),
+        "{} of {}",
+        midway[0].changed.len(),
+        done.len()
+    );
+    record.state = BulkState::Done;
+    record.count = done.len();
+    harness.store.relog_bulk(id, &record, &done).await.unwrap();
+
+    // A relaunch reads it back, and its undo still puts everything back.
+    harness.reopen().await;
+    let logged = harness.store.bulk_log().await.unwrap();
+    assert_eq!(
+        logged,
+        [LoggedBulk {
+            id,
+            record,
+            changed: done
+        }]
+    );
+    harness
+        .store
+        .undo_bulk(&logged[0].changed, &Progress::default())
+        .await
+        .unwrap();
+    assert!(
+        harness
+            .gmail_ids(ListQuery {
+                q: Some("is:starred".into()),
+                ..ListQuery::default()
+            })
+            .await
+            .len()
+            < every.len()
+    );
+
+    // A week on, it's forgotten.
+    let db = rusqlite::Connection::open(
+        harness
+            .dir
+            .path()
+            .join(format!("{}.sqlite3", support::ACCOUNT)),
+    )
+    .expect("opens the store");
+    let week_ago = jiff::Timestamp::now() - jiff::SignedDuration::from_hours(7 * 24 + 1);
+    db.execute(
+        "UPDATE bulk_actions SET started_at = ?1",
+        [week_ago.as_millisecond()],
+    )
+    .expect("dates it");
+    assert!(harness.store.bulk_log().await.unwrap().is_empty());
 }

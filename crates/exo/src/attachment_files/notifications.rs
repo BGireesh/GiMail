@@ -5,10 +5,10 @@
 
 use std::path::PathBuf;
 
-use egui::{Context, Rect};
+use egui::{Context, Id, LayerId, Rect};
 use exo_ui::{ToastActionView, ToastKind, ToastView, motion};
 
-use super::{AttachmentFiles, State};
+use super::{AttachmentFiles, Key, State};
 
 /// A notification is 48px tall with 12px above it, so each card sits this far above the one below.
 pub(crate) const STEP: f32 = 60.0;
@@ -24,7 +24,21 @@ pub(crate) enum Click {
     Preview(PathBuf, String),
 }
 
+/// The area of the notification for the download `key`.
+fn notification_id(ctx: &Context, key: &Key) -> Id {
+    exo_ui::id(ctx, ("exo::file-notification", key))
+}
+
 impl AttachmentFiles {
+    /// The layers the notifications are painted on, oldest first, for keeping the toasts' stack
+    /// in order.
+    pub(crate) fn notification_layers(&self, ctx: &Context) -> Vec<LayerId> {
+        self.downloads
+            .iter()
+            .map(|download| ToastView::layer(notification_id(ctx, &download.key)))
+            .collect()
+    }
+
     /// Draws the downloads' notifications at the bottom left of `area`, with the lowest one
     /// `bottom` px above the area's bottom edge (over the toast when one shows), and returns what
     /// was clicked. A click on an action or the × lets that notification go.
@@ -38,7 +52,7 @@ impl AttachmentFiles {
         let mut clicked = None;
         let mut cleared = None;
         for (index, download) in self.downloads.iter().enumerate() {
-            let id = exo_ui::id(ctx, ("exo::file-notification", &download.key));
+            let id = notification_id(ctx, &download.key);
             let hover_id = id.with("pointer");
             let hovered = ctx
                 .data(|data| data.get_temp::<bool>(hover_id))

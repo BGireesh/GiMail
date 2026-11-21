@@ -664,6 +664,47 @@ fn dates() {
     ]);
 }
 
+/// Remind me where the locale writes the day first (en-GB): a typed `8/7` is the 8th of July, and
+/// its label puts the day first.
+fn remind_day_first() -> Options {
+    Options {
+        month_first: false,
+        ..remind()
+    }
+}
+
+/// Dates as written where the locale puts the day first.
+#[test]
+fn dates_day_first() {
+    check(&[
+        (
+            remind_day_first,
+            "8/7",
+            &["on 8th July 2027 → Thu 2027-07-08 08:00"],
+        ),
+        (
+            remind_day_first,
+            "13/7",
+            &["on 13th July 2027 → Tue 2027-07-13 08:00"],
+        ),
+        (
+            remind_day_first,
+            "7/8/2027",
+            &["on 7th August 2027 → Sat 2027-08-07 08:00"],
+        ),
+        (
+            remind_day_first,
+            "aug 7",
+            &["on August 7th 2027 → Sat 2027-08-07 08:00"],
+        ),
+        (
+            remind_day_first,
+            "7 aug",
+            &["on 7th August 2027 → Sat 2027-08-07 08:00"],
+        ),
+    ]);
+}
+
 /// Times in another zone, moved to this one.
 #[test]
 fn time_zones() {

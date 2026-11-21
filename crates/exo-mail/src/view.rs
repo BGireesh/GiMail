@@ -70,6 +70,10 @@ pub(crate) const BASE_URL: &str = "https://exo.invalid/";
 /// The tallest band painted at once, in device pixels (the rasterizer's sizes are 16-bit).
 const MAX_BAND_ROWS: u32 = 8192;
 
+/// How many times a layout resolves styles at most: once, and again for the `data:` images the
+/// styles asked for (whose own styles could ask for more).
+const MAX_RESOLVES: usize = 3;
+
 /// Bodies up to this much wider than the column are shrunk to fit it…
 const MAX_SHRINK: f32 = 1.25;
 /// …plus this many px.
@@ -208,10 +212,25 @@ pub struct Animated {
     pub next: Option<Duration>,
 }
 
-/// An animated image and the elements showing it (all in step, as in Chromium).
+/// An animated image and where it shows (all in step, as in Chromium).
 struct Animation {
     player: Player,
-    nodes: Vec<blitz_dom::NodeId>,
+    shown: Vec<Shown>,
+}
+
+/// Somewhere an image shows: an `<img>`, or one of an element's CSS background layers.
+#[derive(Clone, Copy)]
+enum Shown {
+    Image(blitz_dom::NodeId),
+    Background(blitz_dom::NodeId, usize),
+}
+
+impl Shown {
+    fn node(self) -> blitz_dom::NodeId {
+        match self {
+            Self::Image(node) | Self::Background(node, _) => node,
+        }
+    }
 }
 
 /// Painted pixels: premultiplied RGBA8, `width × height` device pixels, rows top to bottom.
@@ -249,6 +268,8 @@ pub struct BodyView {
     content_width: f32,
     /// Responses the fetch hook has delivered, and how many were laid out.
     arrived: Option<Arc<AtomicUsize>>,
+    /// How many `data:` URLs have been answered.
+    answered_inline: Option<Arc<AtomicUsize>>,
     applied: usize,
     /// Images that arrived and may be animated, not looked at yet.
     may_animate: Option<MayAnimate>,
@@ -314,6 +335,9 @@ impl BodyView {
             zoom: 1.0,
             content_width: 0.0,
             arrived: provider.as_ref().map(|provider| provider.arrived.clone()),
+            answered_inline: provider
+                .as_ref()
+                .map(|provider| provider.answered_inline.clone()),
             applied: 0,
             may_animate: provider.map(|provider| provider.may_animate.clone()),
             animations: Vec::new(),
@@ -361,6 +385,11 @@ impl BodyView {
         self.width
     }
 
+    /// How much the body is shrunk to fit its column, as last laid out (1 when it fits).
+    pub fn zoom(&self) -> f32 {
+        self.zoom
+    }
+
     /// Shrinks a body that is a little too wide for the column, and measures what's left wider
     /// than it. It shrinks once, so the body isn't rescaled after the images have loaded.
     fn shrink_to_fit(&mut self) {
@@ -402,10 +431,25 @@ impl BodyView {
     /// Applies loaded resources and lays out, then undoes Taffy's rounding. Chromium keeps
     /// fractional box positions (text lands at subpixel offsets) and snaps only what it paints,
     /// which [`BodyView::paint`] does.
+    ///
+    /// A `data:` image is answered as soon as it's asked for, and a style's (a CSS background's)
+    /// is asked for while styles resolve, after the answers were taken: the view resolves again
+    /// for those.
     fn resolve(&mut self) {
-        self.document.handle_messages();
-        self.adopt_animations();
-        self.document.resolve(0.0);
+        let answered = |view: &Self| {
+            view.answered_inline
+                .as_ref()
+                .map_or(0, |answered| answered.load(Ordering::Acquire))
+        };
+        for _ in 0..MAX_RESOLVES {
+            let before = answered(self);
+            self.document.handle_messages();
+            self.adopt_animations();
+            self.document.resolve(0.0);
+            if answered(self) == before {
+                break;
+            }
+        }
         let ids: Vec<_> = self
             .document
             .tree()
@@ -425,7 +469,8 @@ impl BodyView {
         }
     }
 
-    /// Starts playing the animated images that arrived, on the `<img>` elements showing them.
+    /// Starts playing the animated images that arrived, on the `<img>` elements and the CSS
+    /// backgrounds showing them.
     fn adopt_animations(&mut self) {
         let arrived = match self.may_animate.as_ref().map(|pending| pending.lock()) {
             Some(Ok(mut pending)) => std::mem::take(&mut *pending),
@@ -433,37 +478,44 @@ impl BodyView {
         };
         let base = url::Url::parse(BASE_URL).expect("the base URL parses");
         for (url, bytes) in arrived {
-            let nodes: Vec<_> = self
-                .document
-                .tree()
-                .iter()
-                .filter(|(_, node)| {
-                    node.element_data().is_some_and(|element| {
-                        element.name.local == local_name!("img")
-                            && element
-                                .attr(local_name!("src"))
-                                .and_then(|src| base.join(src).ok())
-                                .is_some_and(|src| src.as_str() == url)
-                    })
-                })
-                .map(|(id, _)| id)
-                .collect();
-            if nodes.is_empty() {
+            let mut shown = Vec::new();
+            for (id, node) in self.document.tree().iter() {
+                let Some(element) = node.element_data() else {
+                    continue;
+                };
+                if element.name.local == local_name!("img")
+                    && element
+                        .attr(local_name!("src"))
+                        .and_then(|src| base.join(src).ok())
+                        .is_some_and(|src| src.as_str() == url)
+                {
+                    shown.push(Shown::Image(id));
+                }
+                for (layer, background) in element.background_images.iter().enumerate() {
+                    if background
+                        .as_ref()
+                        .is_some_and(|background| background.url.as_str() == url)
+                    {
+                        shown.push(Shown::Background(id, layer));
+                    }
+                }
+            }
+            if shown.is_empty() {
                 continue;
             }
             if let Some(player) = Player::new(bytes) {
-                self.animations.push(Animation { player, nodes });
+                self.animations.push(Animation { player, shown });
             }
         }
     }
 
     /// The boxes of the animated images (`[left, top, width, height]`, CSS px from the body's
-    /// top left), as of the last layout.
+    /// top left), as of the last layout. An animated background's is its element's border box.
     pub fn animations(&self) -> Vec<[f32; 4]> {
         self.animations
             .iter()
-            .flat_map(|animation| animation.nodes.iter())
-            .filter_map(|node| self.client_box(*node))
+            .flat_map(|animation| animation.shown.iter())
+            .filter_map(|shown| self.client_box(shown.node()))
             .collect()
     }
 
@@ -474,9 +526,9 @@ impl BodyView {
         let mut animated = Animated::default();
         for at in 0..self.animations.len() {
             let boxes: Vec<[f32; 4]> = self.animations[at]
-                .nodes
+                .shown
                 .iter()
-                .filter_map(|node| self.client_box(*node))
+                .filter_map(|shown| self.client_box(shown.node()))
                 .collect();
             if !boxes
                 .iter()
@@ -488,18 +540,33 @@ impl BodyView {
             if animation.player.advance(now) {
                 let frame = animation.player.frame();
                 let data = Arc::new(frame.as_raw().clone());
-                for node in &animation.nodes {
-                    if let Some(image) = self
+                let image = || {
+                    blitz_dom::node::RasterImageData::new(
+                        frame.width(),
+                        frame.height(),
+                        data.clone(),
+                    )
+                };
+                for shown in &animation.shown {
+                    let Some(element) = self
                         .document
-                        .get_node_mut(*node)
+                        .get_node_mut(shown.node())
                         .and_then(|node| node.element_data_mut())
-                        .and_then(|element| element.raster_image_data_mut())
-                    {
-                        *image = blitz_dom::node::RasterImageData::new(
-                            frame.width(),
-                            frame.height(),
-                            data.clone(),
-                        );
+                    else {
+                        continue;
+                    };
+                    match *shown {
+                        Shown::Image(_) => {
+                            if let Some(raster) = element.raster_image_data_mut() {
+                                *raster = image();
+                            }
+                        }
+                        Shown::Background(_, layer) => {
+                            if let Some(Some(background)) = element.background_images.get_mut(layer)
+                            {
+                                background.image = blitz_dom::node::ImageData::Raster(image());
+                            }
+                        }
                     }
                 }
                 animated.changed.extend(boxes);
@@ -1235,19 +1302,21 @@ fn compose(render: &Render, options: ViewOptions, root_class: &str) -> String {
     let hints = hints::stylesheet(&format!("{}{}", render.unquoted_html, render.quoted_html));
     format!(
         "<!DOCTYPE html><html><head></head><body>{}</body></html>",
-        shadow_root(render, options.show_quoted, root_class, &hints, "")
+        shadow_root(render, options.show_quoted, root_class, &hints, "", 1.0)
     )
 }
 
 /// What a body's shadow root holds, `.ShadowHTML` down: the body stylesheet after
 /// `first_css`, the unquoted part with the original `<body>` attributes, the `…` and the quoted
-/// part when it's shown, then the restyle sheet and `last_css` (when there is one).
+/// part when it's shown, then the restyle sheet, the fixes for the message's sender and
+/// `last_css` (when there are any). A `zoom` other than 1 shrinks the content (its `.ShadowWrapper`) by that much.
 pub(crate) fn shadow_root(
     render: &Render,
     show_quoted: bool,
     root_class: &str,
     first_css: &str,
     last_css: &str,
+    zoom: f32,
 ) -> String {
     let mut wrapper = String::from("exo-color-transparent-bg ShadowWrapper");
     if !render.quoted_is_marketing {
@@ -1282,18 +1351,26 @@ pub(crate) fn shadow_root(
     } else {
         "<div class=\"Exo-quoting-ellipsis\"><span></span></div>".to_owned()
     };
-    let last = if last_css.is_empty() {
-        String::new()
-    } else {
-        format!("<style>{last_css}</style>")
+    let style = |css: &str| {
+        if css.is_empty() {
+            String::new()
+        } else {
+            format!("<style>{css}</style>")
+        }
     };
+    let (sender, last) = (style(render.sender_css), style(last_css));
     format!(
         "<div class=\"{root_class}\"><div class=\"ShadowBody\">\
          <style>{first_css}</style><style>{BODY_CSS}</style>\
-         <div class=\"{wrapper}\"><div{unquoted_attributes}>{unquoted}</div>{quoted}</div>\
-         <style>{RESTYLE_CSS}</style>{last}\
+         <div class=\"{wrapper}\"{zoom}><div{unquoted_attributes}>{unquoted}</div>{quoted}</div>\
+         <style>{RESTYLE_CSS}</style>{sender}{last}\
          </div></div>",
         unquoted = render.unquoted_html,
+        zoom = if zoom == 1.0 {
+            String::new()
+        } else {
+            format!(" style=\"zoom: {zoom}\"")
+        },
     )
 }
 

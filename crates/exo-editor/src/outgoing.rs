@@ -91,10 +91,17 @@ pub fn inlined(body: &str, signature: Option<&str>, quote: Option<&str>) -> Stri
     }
 }
 
-/// A reply's quote: the reply header and the quoted body. `body_class`, `body_style` and `body_id`
-/// are the original body element's `class`, `style` and `id`, and `body` is its inner HTML.
+/// A reply's quote: the reply header and the quoted body. `sent` is when the message was sent, and
+/// `time` its time of day as the locale writes it (`3:45 PM`). `body_class`, `body_style` and
+/// `body_id` are the original body element's `class`, `style` and `id`, and `body` is its inner
+/// HTML.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the header's pieces and the original body's"
+)]
 pub fn reply_quote(
     sent: &Zoned,
+    time: &str,
     name: &str,
     email: &str,
     body_class: &str,
@@ -102,9 +109,8 @@ pub fn reply_quote(
     body_id: &str,
     body: &str,
 ) -> String {
-    // `Tue, Nov 17, 2026`, then the en-US time without its seconds.
+    // `Tue, Nov 17, 2026`.
     let date = sent.strftime("%a, %b %d, %Y");
-    let time = sent.strftime("%-I:%M %p");
     let (name, email) = (escape(name), escape(email));
     let class = if body_class.is_empty() {
         "gmail_quote".to_owned()

@@ -363,6 +363,7 @@ fn quote() -> String {
     let message = r#"<div dir="ltr" class="exo-color-black exo-color"><div class="exo-color-black exo-color">Heads up: <span class="exo-date exo-color-black exo-color" data-date-isostring="2026-11-17">today</span>'s design crit moves to 3pm, Daniel needed the 1pm slot. Same room.</div></div>"#;
     outgoing::reply_quote(
         &sent,
+        "8:31 AM",
         "Tom Becker",
         "tom@brightmoor.co",
         "exo-color-black exo-color",

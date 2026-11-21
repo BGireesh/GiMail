@@ -33,6 +33,7 @@ pub fn router() -> Router<Arc<App>> {
         .route("/__mock/unsubscribe/{*list}", post(unsubscribe))
         .route("/__mock/unsubscribes", get(unsubscribes))
         .route("/__mock/photo/{name}", get(photo))
+        .route("/__mock/people", post(people))
 }
 
 /// The account's profile photo (`Config::photo`), answered as Google's image server answers
@@ -40,15 +41,23 @@ pub fn router() -> Router<Arc<App>> {
 /// and without options it's the 512px original. Public, as Google's are.
 async fn photo(State(app): Shared, Path(name): Path<String>) -> Response {
     let (id, options) = name.split_once('=').unwrap_or((&name, ""));
-    let ours = app
-        .lock()
-        .account
-        .photo
-        .as_deref()
-        .is_some_and(|photo| photo.rsplit('/').next() == Some(id));
-    if !ours {
+    let seed = {
+        let world = app.lock();
+        let ours = world
+            .account
+            .photo
+            .as_deref()
+            .is_some_and(|photo| photo.rsplit('/').next() == Some(id));
+        // The account's own photo is the first portrait; a contact's is picked by their address.
+        match crate::fixtures::photo_owner(&world.people, id) {
+            _ if ours => Some(0),
+            Some(email) => Some(crate::fixtures::fnv(email).max(1)),
+            None => None,
+        }
+    };
+    let Some(seed) = seed else {
         return StatusCode::NOT_FOUND.into_response();
-    }
+    };
     let size = options
         .split('-')
         .find_map(|option| option.strip_prefix('s')?.parse::<u32>().ok())
@@ -56,7 +65,7 @@ async fn photo(State(app): Shared, Path(name): Path<String>) -> Response {
         .clamp(1, 1024);
     (
         [(header::CONTENT_TYPE, "image/png")],
-        crate::fixtures::portrait_png(size),
+        crate::fixtures::portrait_png(size, seed),
     )
         .into_response()
 }
@@ -332,8 +341,38 @@ async fn expire_history(State(app): Shared) -> Response {
     StatusCode::NO_CONTENT.into_response()
 }
 
-/// Arms a fault. The next `times` requests whose path starts with `path` (and whose method
-/// matches, if given) fail with `status`. With `after`, they fail once they've taken effect.
+/// A change to the People API's lists, as another device or an admin makes it.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PeopleChange {
+    list: Option<crate::people::Kind>,
+    /// Adds this person to `list`, or replaces the one with its resource name.
+    put: Option<gmail::people::Person>,
+    /// Takes whoever has this address off `list`.
+    remove: Option<String>,
+    /// Expires every sync token given so far.
+    #[serde(default)]
+    expire: bool,
+}
+
+/// Changes the People API's lists, which their sync tokens then see.
+async fn people(State(app): Shared, axum::Json(change): axum::Json<PeopleChange>) -> Response {
+    let mut world = app.lock();
+    let people = &mut world.people;
+    match (change.list, change.put, change.remove) {
+        (Some(list), Some(person), _) => people.put(list, person),
+        (Some(list), None, Some(email)) => people.remove(list, &email),
+        _ if change.expire => {}
+        _ => return StatusCode::BAD_REQUEST.into_response(),
+    }
+    if change.expire {
+        people.expire();
+    }
+    StatusCode::NO_CONTENT.into_response()
+}
+
+/// Arms a fault. The next `times` requests whose path starts with `path` (and whose method and
+/// query match, if given) fail with `status`. With `after`, they fail once they've taken effect.
 async fn add_fault(State(app): Shared, axum::Json(fault): axum::Json<Fault>) -> Response {
     app.lock().faults.push(fault);
     StatusCode::NO_CONTENT.into_response()

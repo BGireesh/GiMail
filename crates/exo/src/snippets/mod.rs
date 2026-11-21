@@ -57,7 +57,8 @@ pub(crate) enum Action {
     Pick,
     /// A snippet picked there.
     Use(String),
-    /// `;` outside the body (`Use Snippet Inline`), which types `;` in the body to open its picker.
+    /// `;` outside the body, or `Use Snippet Inline` from the palette, which types `;` in the body
+    /// (or a new message's subject) to open its picker.
     Inline,
     /// J / K in the folder, or in the view, where the next snippet opens.
     Move(isize),
@@ -76,6 +77,8 @@ pub(crate) enum Action {
     OpenFile { uuid: String, preview: bool },
     /// The view's `Download all`, which downloads the snippet's files zipped.
     DownloadFiles,
+    /// A file's card in the view dragged out from this point.
+    DragFile { uuid: String, at: egui::Pos2 },
 }
 
 /// Where ⌘; was pressed, which decides where the snippet goes.
@@ -207,19 +210,23 @@ pub(crate) fn register(commands: &mut Commands<commands::Action>, cx: &Context) 
             .default_score(score)
             .icon("data/snippets"),
     );
-    if cx.draft_focused && !cx.typing && !cx.snippet {
-        commands.add(
-            Command::new(
-                "USE_SNIPPET_INLINE",
-                "Use Snippet Inline",
-                act(Action::Inline),
-            )
-            .key(";")
-            .key_code([";"])
-            .aliases(["Insert Snippet Inline", "Use Template Inline"])
-            .icon("data/snippets")
-            .regions(COMPOSE),
-        );
+    if cx.draft_focused && !cx.snippet {
+        let inline = Command::new(
+            "USE_SNIPPET_INLINE",
+            "Use Snippet Inline",
+            act(Action::Inline),
+        )
+        .key(";")
+        .key_code([";"])
+        .aliases(["Insert Snippet Inline", "Use Template Inline"])
+        .icon("data/snippets")
+        .regions(COMPOSE);
+        // While a field takes text, `;` types, and the row is the palette's only.
+        commands.add(if cx.typing {
+            inline.display_only()
+        } else {
+            inline
+        });
     }
     commands.add(
         Command::new("CREATE_SNIPPET", "Create Snippet", act(Action::Create))
@@ -270,6 +277,11 @@ pub(crate) fn register(commands: &mut Commands<commands::Action>, cx: &Context) 
             .key("g ;")
             .regions(exo_commands::LIST_AND_THREAD),
     );
+    commands.add(crate::commands::from_week(
+        "GO_TO_SNIPPETS",
+        &["g ;"],
+        act(Action::Go),
+    ));
     if cx.viewing {
         folder::register_view(commands);
     } else if cx.folder && !cx.editing {
@@ -349,6 +361,7 @@ impl crate::Mail {
             Action::Discard => self.discard_folder_snippet(),
             Action::OpenFile { uuid, preview } => self.open_snippet_file(&uuid, preview),
             Action::DownloadFiles => self.download_snippet_files(),
+            Action::DragFile { uuid, at } => self.drag_snippet_file(&uuid, at),
         }
     }
 

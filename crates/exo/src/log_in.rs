@@ -450,6 +450,7 @@ impl LogIn {
             ui,
             chrome::Tab {
                 title: "Exo",
+                email: None,
                 login_screen: true,
                 account_color: None,
             },

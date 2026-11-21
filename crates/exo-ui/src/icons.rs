@@ -84,24 +84,35 @@ pub fn paint_icon_rotated(ui: &Ui, name: &str, rect: Rect, color: Color32, angle
         .paint_at(ui, fit(ui.ctx(), name, rect));
 }
 
-/// Where in `rect` icon `name` draws: its `viewBox` scaled to fit and centered, as an `<svg>`
-/// sized to `rect` draws (`preserveAspectRatio`'s default, `xMidYMid meet`).
+/// Where in `rect` icon `name`'s image draws: scaled to fit and centered, as an `<svg>` sized to
+/// `rect` draws by default. The image is the SVG's whole canvas, so it keeps its intrinsic size's
+/// proportions, which can differ from its `viewBox`'s (the paperclip's 19×8 holds an 18×8 one).
 pub(crate) fn fit(ctx: &Context, name: &str, rect: Rect) -> Rect {
-    let Some(view_box) = registry(ctx).and_then(|registry| registry.view_boxes.get(name).copied())
-    else {
+    let Some(canvas) = registry(ctx).and_then(|registry| {
+        registry
+            .sizes
+            .get(name)
+            .or_else(|| registry.view_boxes.get(name))
+            .copied()
+    }) else {
         return rect;
     };
-    let scale = (rect.width() / view_box.x).min(rect.height() / view_box.y);
-    Rect::from_center_size(rect.center(), view_box * scale)
+    let scale = (rect.width() / canvas.x).min(rect.height() / canvas.y);
+    Rect::from_center_size(rect.center(), canvas * scale)
 }
 
 /// [`paint_icon`] through `painter`, inside its clip (an icon in a scrolling pane).
 pub fn paint_icon_on(painter: &egui::Painter, name: &str, rect: Rect, color: Color32) {
+    let image = Image::new(icon_uri(painter.ctx(), name)).tint(color);
+    paint_image_on(painter, &image, name, rect);
+}
+
+/// Paints `image`, icon `name` or an edit of it, filling `rect` through `painter`.
+fn paint_image_on(painter: &egui::Painter, image: &Image<'_>, name: &str, rect: Rect) {
     let ctx = painter.ctx();
     let pixels_per_point = painter.pixels_per_point();
     let rect = egui::emath::GuiRounding::round_to_pixels(fit(ctx, name, rect), pixels_per_point);
     let size = (rect.size() * pixels_per_point).round();
-    let image = Image::new(icon_uri(ctx, name)).tint(color);
     let hint = egui::SizeHint::Size {
         width: size.x as _,
         height: size.y as _,
@@ -191,6 +202,26 @@ pub fn icon_rect(ctx: &Context, name: &str, within: Rect) -> Rect {
 /// importer) in `red` and its `blue` one in `blue`, as Classic's CSS colors icons like the
 /// contact pane's (`[fill*=red]`, `[fill*=blue]`).
 pub fn paint_icon_two_tone(ui: &Ui, name: &str, rect: Rect, red: Color32, blue: Color32) {
+    if let Some(uri) = two_tone_uri(ui.ctx(), name, red, blue) {
+        Image::new(uri).paint_at(ui, fit(ui.ctx(), name, rect));
+    }
+}
+
+/// [`paint_icon_two_tone`] through `painter`, inside its clip.
+pub fn paint_icon_two_tone_on(
+    painter: &egui::Painter,
+    name: &str,
+    rect: Rect,
+    red: Color32,
+    blue: Color32,
+) {
+    if let Some(uri) = two_tone_uri(painter.ctx(), name, red, blue) {
+        paint_image_on(painter, &Image::new(uri), name, rect);
+    }
+}
+
+/// The URI of icon `name` with its placeholders in `red` and `blue`, or `None` until it loads.
+fn two_tone_uri(ctx: &Context, name: &str, red: Color32, blue: Color32) -> Option<String> {
     let hex = |color: Color32| {
         let [r, g, b, a] = color.to_srgba_unmultiplied();
         (format!("#{r:02x}{g:02x}{b:02x}"), f32::from(a) / 255.0)
@@ -211,9 +242,7 @@ pub fn paint_icon_two_tone(ui: &Ui, name: &str, rect: Rect, red: Color32, blue: 
     };
     // No `#` in the key, because a URI's fragment isn't part of what loaders look up.
     let key = format!("{red_hex}{red_alpha}{blue_hex}{blue_alpha}").replace('#', "");
-    if let Some(uri) = edited_icon(ui.ctx(), name, &key, edit) {
-        Image::new(uri).paint_at(ui, fit(ui.ctx(), name, rect));
-    }
+    edited_icon(ctx, name, &key, edit)
 }
 
 /// The root `<svg>`'s `width` and `height` in px (`"16"` or `"16px"`), when both are given that

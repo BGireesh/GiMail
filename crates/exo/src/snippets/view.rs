@@ -226,6 +226,22 @@ impl crate::Mail {
         }
     }
 
+    /// A card in the view dragged out from `at`, which drags out snippet file `uuid`.
+    pub(crate) fn drag_snippet_file(&mut self, uuid: &str, at: egui::Pos2) {
+        let folder = self.account.draft_files().to_owned();
+        if let Some(part) = self.viewed_snippet().and_then(|snippet| {
+            snippet
+                .attachments
+                .iter()
+                .find(|file| file.uuid == uuid)
+                .and_then(|file| crate::attachment_files::Part::of_draft(file, &folder))
+        }) {
+            let zoom = self.ctx.zoom_factor();
+            self.attachment_files
+                .drag(&self.account.loader(), part, at, zoom);
+        }
+    }
+
     /// The view's `Download all`, which downloads the snippet's files in one zip named for its
     /// subject.
     pub(crate) fn download_snippet_files(&mut self) {
@@ -296,8 +312,13 @@ impl crate::Mail {
         let focused = self.commands.region() == Region::ReadOnlySnippet;
         let name = crate::compose::snippets::name(&snippet).to_owned();
         let mut asked = Vec::new();
-        self.attachment_files
-            .update_files(&mut self.snippets.preview.files);
+        self.attachment_files.update_files(
+            &self.account.loader(),
+            &mut self.snippets.preview.files,
+            &message,
+            &snippet.attachments,
+            self.account.draft_files(),
+        );
         let preview = &mut self.snippets.preview;
         let (actions, ()) = crate::thread::card_pane(
             ui,
@@ -378,8 +399,13 @@ impl crate::Mail {
                     Some(crate::thread::attachments::Click::DownloadAll { .. }) => {
                         asked.push(Action::DownloadFiles)
                     }
-                    // Dragging a file out takes a Gmail part (`attachment_files::drag`).
-                    Some(crate::thread::attachments::Click::Drag { .. }) | None => {}
+                    Some(crate::thread::attachments::Click::Drag { attachment, at }) => {
+                        asked.push(Action::DragFile {
+                            uuid: attachment.part_id,
+                            at,
+                        })
+                    }
+                    None => {}
                 }
                 // The footer: the rule, `Edit` (underlined while the view has the keyboard) and
                 // Discard.

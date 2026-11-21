@@ -5,8 +5,11 @@
 use std::fmt::Write as _;
 
 use egui::Color32;
+use exo_store::Attachments;
 
-use super::{Conversation, Header, Message, Row, When};
+use super::{
+    Conversation, Draft, DraftHeader, File, Header, Invite, InviteValue, Message, Row, Run, When,
+};
 
 /// The stylesheet for everything but the bodies.
 const PRINT_CSS: &str = include_str!("print.css");
@@ -23,8 +26,10 @@ const CONTENT_SECURITY_POLICY: &str = "default-src 'none'; img-src exo-https: ex
 
 /// The legacy icons the printed page shows, each in the color it prints in.
 const PAPERCLIP: (&str, &str) = ("legacy/DEPRECATED_paperclip", "#000");
+const CALENDAR: (&str, &str) = ("legacy/DEPRECATED_calendar", "#000");
 const COLLAPSE: (&str, &str) = ("legacy/DEPRECATED_collapse", "rgba(0,0,0,0.7)");
 const PIXEL_BLOCKING: (&str, &str) = ("legacy/DEPRECATED_pixelBlocking", "rgba(0,0,0,0.45)");
+const CROSS: (&str, &str) = ("css/isInvalid-cross", "#fff");
 
 /// The page for `conversation`.
 pub(super) fn html(conversation: &Conversation) -> String {
@@ -35,8 +40,10 @@ pub(super) fn html(conversation: &Conversation) -> String {
     };
     let icons = Icons {
         paperclip: icon(PAPERCLIP),
+        calendar: icon(CALENDAR),
         collapse: icon(COLLAPSE),
         pixel_blocking: icon(PIXEL_BLOCKING),
+        cross: icon(CROSS),
     };
     let page = conversation.page;
     let narrow = if page.narrow() {
@@ -70,16 +77,19 @@ pub(super) fn html(conversation: &Conversation) -> String {
             Message::Collapsed {
                 from,
                 snippet,
-                files,
+                icon,
                 when,
             } => {
-                let clip = if *files {
-                    format!(
+                let clip = match icon {
+                    Attachments::Files => format!(
                         "<div class=\"MessagePane-attachmentIcon\">{}</div>",
                         icons.paperclip
-                    )
-                } else {
-                    String::new()
+                    ),
+                    Attachments::CalendarInvite => format!(
+                        "<div class=\"MessagePane-calendarIcon\">{}</div>",
+                        icons.calendar
+                    ),
+                    Attachments::None => String::new(),
                 };
                 let _ = write!(
                     html,
@@ -120,8 +130,10 @@ pub(super) fn html(conversation: &Conversation) -> String {
             }
             Message::Expanded {
                 header,
+                invite,
                 body,
                 files,
+                draft,
             } => {
                 html.push_str("<div class=\"MessagePane-expanded\">");
                 match header {
@@ -141,6 +153,9 @@ pub(super) fn html(conversation: &Conversation) -> String {
                     } => full_header(&mut html, rows, when, *chevron, *tracking_blocked, &icons),
                 }
                 html.push_str("<div class=\"MessagePane-iframe-wrapper\">");
+                if let Some(invite) = invite {
+                    invite_card(&mut html, invite);
+                }
                 if let Some(body) = body {
                     // A script the print view injects moves each template into its host's shadow
                     // root (`macos::SHADOW_ROOTS`).
@@ -152,24 +167,15 @@ pub(super) fn html(conversation: &Conversation) -> String {
                 if !files.is_empty() {
                     html.push_str("<div class=\"AttachmentList\">");
                     for file in files {
-                        let badge = if file.kind.is_empty() {
-                            String::new()
-                        } else {
-                            format!(
-                                "<div class=\"Attachment-fileType\" style=\"color: {}\"><div class=\"Attachment-fileType-inner\">{}</div></div>",
-                                css_color(file.color),
-                                text(&file.kind)
-                            )
-                        };
-                        let _ = write!(
-                            html,
-                            "<div class=\"Attachment\"><div class=\"Attachment-container\"><div class=\"Attachment-name\">{}</div><div class=\"Attachment-bottom-container\">{badge}</div></div></div>",
-                            text(&file.name)
-                        );
+                        attachment(&mut html, file);
                     }
                     html.push_str("</div>");
                 }
-                html.push_str("</div></div>");
+                html.push_str("</div>");
+                if let Some(draft) = draft {
+                    draft_form(&mut html, draft, &icons);
+                }
+                html.push_str("</div>");
             }
         }
     }
@@ -177,11 +183,195 @@ pub(super) fn html(conversation: &Conversation) -> String {
     html
 }
 
+/// A draft's form without its buttons: its header (`Draft to …`, or its recipient lists), what's
+/// written, and the `…` of its quote. The editor's HTML is Exo's own, so it goes in as it is.
+fn draft_form(html: &mut String, draft: &Draft, icons: &Icons) {
+    html.push_str("<div class=\"ComposeForm\"><div class=\"ComposeForm-header\">");
+    match &draft.header {
+        DraftHeader::Collapsed(recipients) => {
+            let _ = write!(
+                html,
+                "<div class=\"ComposeForm-collapsed-header\"><span class=\"ComposeForm-collapsed-header-text\"><span class=\"ComposeForm-draft\">Draft </span>to {}</span></div>",
+                text(recipients)
+            );
+        }
+        DraftHeader::Lists(lists) => {
+            for (label, chips) in lists {
+                let _ = write!(
+                    html,
+                    "<div class=\"RecipientList\"><span class=\"RecipientList-label\">{label}</span>"
+                );
+                for (index, chip) in chips.iter().enumerate() {
+                    let invalid = if chip.invalid { " isInvalid" } else { "" };
+                    let last = if index + 1 == chips.len() {
+                        " hideSeparator"
+                    } else {
+                        ""
+                    };
+                    let cross = if chip.invalid {
+                        icons.cross.as_str()
+                    } else {
+                        ""
+                    };
+                    let _ = write!(
+                        html,
+                        "<div class=\"Recipient{invalid}{last}\"><span class=\"ContactName\">{}</span><span class=\"tail\"><span class=\"cross\">{cross}</span><span class=\"separator\">•</span></span></div>",
+                        text(&chip.label)
+                    );
+                }
+                html.push_str("<div class=\"RecipientList-input\"></div></div>");
+            }
+        }
+    }
+    let _ = write!(
+        html,
+        "</div><div class=\"ComposeForm-body\"><div class=\"ComposeForm-editor\">{}</div>",
+        draft.body
+    );
+    if draft.quote {
+        html.push_str("<div class=\"ComposeForm-quote\"><span></span></div>");
+    }
+    html.push_str("</div></div>");
+}
+
+/// An attachment card: the file's name, and its type's badge.
+fn attachment(html: &mut String, file: &File) {
+    let badge = if file.kind.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "<div class=\"Attachment-fileType\" style=\"color: {}\"><div class=\"Attachment-fileType-inner\">{}</div></div>",
+            css_color(file.color),
+            text(&file.kind)
+        )
+    };
+    let _ = write!(
+        html,
+        "<div class=\"Attachment\"><div class=\"Attachment-container\"><div class=\"Attachment-name\">{}</div><div class=\"Attachment-bottom-container\">{badge}</div></div></div>",
+        text(&file.name)
+    );
+}
+
+/// An invitation's card, with the guest's note above it.
+fn invite_card(html: &mut String, invite: &Invite) {
+    if let Some(note) = &invite.note {
+        html.push_str("<div class=\"MessagePane-calendarNote\">");
+        runs(html, note);
+        html.push_str("</div>");
+    }
+    html.push_str("<div class=\"CalendarInvite\"><div class=\"CalendarInvite-image\">");
+    if let Some(status) = &invite.status {
+        let _ = write!(
+            html,
+            "<div class=\"CalendarInvite-status-update\">{}</div>",
+            text(status)
+        );
+    }
+    html.push_str("</div><div class=\"CalendarInvite-rows\">");
+    for row in &invite.rows {
+        let question = format!(
+            "<span class=\"CalendarInvite-question\">{}</span>",
+            text(row.question)
+        );
+        let kind = match row.question {
+            "When" => "when",
+            "Where" => "where",
+            "Who" => "who",
+            "About" => "about",
+            "Files" => "files",
+            _ => "video-link",
+        };
+        let _ = match &row.value {
+            // The buttons don't print. Their row is a region of its own, as on screen.
+            InviteValue::Buttons => write!(
+                html,
+                "<div class=\"FocusRegion\"><div class=\"CalendarInvite-row\">{question}</div></div>"
+            ),
+            InviteValue::When(when) => write!(
+                html,
+                "<div class=\"CalendarInvite-row\">{question}<div class=\"CalendarInvite-property CalendarInvite-property-when\"><div><span class=\"CalendarInvite-eventTime\">{}</span></div></div></div>",
+                event_time(when)
+            ),
+            InviteValue::Text(lines) => {
+                let mut value = String::new();
+                for (at, (indent, line)) in lines.iter().enumerate() {
+                    if at > 0 {
+                        value.push('\n');
+                    }
+                    if *indent > 0.0 {
+                        let _ = write!(value, "<span style=\"padding-left: {indent}px\">");
+                        runs(&mut value, line);
+                        value.push_str("</span>");
+                    } else {
+                        runs(&mut value, line);
+                    }
+                }
+                write!(
+                    html,
+                    "<div class=\"CalendarInvite-row\">{question}<div class=\"CalendarInvite-property CalendarInvite-property-{kind}\"><div>{value}</div></div></div>"
+                )
+            }
+            InviteValue::Files(files) => {
+                let _ = write!(
+                    html,
+                    "<div class=\"CalendarInvite-row\">{question}<div class=\"CalendarInvite-property CalendarInvite-property-files\"><div>"
+                );
+                for file in files {
+                    attachment(html, file);
+                }
+                write!(html, "</div></div></div>")
+            }
+        };
+    }
+    html.push_str("</div></div>");
+}
+
+/// Runs of text: links, bold, and plain.
+fn runs(html: &mut String, runs: &[Run]) {
+    for run in runs {
+        let content = text(&run.text);
+        let _ = match (&run.link, run.bold) {
+            (Some(_), _) => write!(html, "<a>{content}</a>"),
+            (None, true) => write!(html, "<b>{content}</b>"),
+            (None, false) => write!(html, "{content}"),
+        };
+    }
+}
+
+/// When, which breaks only around its `,`s, ` at` and `– `.
+fn event_time(when: &str) -> String {
+    static SEPARATOR: std::sync::LazyLock<regex::Regex> =
+        std::sync::LazyLock::new(|| regex::Regex::new(r"( at|,|– )").expect("valid regex"));
+    let mut html = String::new();
+    let mut at = 0;
+    for found in SEPARATOR.find_iter(when) {
+        for piece in [&when[at..found.start()], found.as_str()] {
+            if !piece.is_empty() {
+                if !html.is_empty() {
+                    html.push_str("<wbr>");
+                }
+                html.push_str(&text(piece));
+            }
+        }
+        at = found.end();
+    }
+    if at < when.len() {
+        if !html.is_empty() {
+            html.push_str("<wbr>");
+        }
+        html.push_str(&text(&when[at..]));
+    }
+    html
+}
+
 /// The icons, as inline SVG markup.
 struct Icons {
     paperclip: String,
+    calendar: String,
     collapse: String,
     pixel_blocking: String,
+    /// An invalid recipient chip's cross.
+    cross: String,
 }
 
 /// The subject and the label chips.
@@ -357,7 +547,7 @@ mod tests {
             Message::Collapsed {
                 from: "Ben".into(),
                 snippet: "Maya, Attached …".into(),
-                files: true,
+                icon: Attachments::Files,
                 when: When::Date("NOV 16".into()),
             },
             Message::Marker {
@@ -390,12 +580,14 @@ mod tests {
                     chevron: false,
                     tracking_blocked: false,
                 },
+                invite: None,
                 body: Some("<div class=\"ShadowHTML\">3x</div>".into()),
                 files: vec![File {
                     name: "Calloway_MSA_v3_redline".into(),
                     kind: "PDF".into(),
                     color: Color32::from_rgb(0xf7, 0x7b, 0x7b),
                 }],
+                draft: None,
             },
         ];
         let html = html(&conversation(messages));
@@ -416,5 +608,96 @@ mod tests {
             "<div class=\"Shadowbox\"><template><div class=\"ShadowHTML\">3x</div></template></div>"
         ));
         assert!(html.contains("<div class=\"Attachment-fileType\" style=\"color: #f77b7b\"><div class=\"Attachment-fileType-inner\">PDF</div></div>"));
+    }
+
+    #[test]
+    fn a_draft_prints_its_form_without_its_buttons() {
+        use crate::print::Chip;
+        let form = |header| {
+            let mut html = String::new();
+            let icons = Icons {
+                paperclip: String::new(),
+                calendar: String::new(),
+                collapse: String::new(),
+                pixel_blocking: String::new(),
+                cross: "<svg/>".into(),
+            };
+            let draft = Draft {
+                header,
+                body: "<div>Thanks</div>".into(),
+                quote: true,
+            };
+            draft_form(&mut html, &draft, &icons);
+            html
+        };
+        assert_eq!(
+            form(DraftHeader::Collapsed("Tom & <Priya>".into())),
+            "<div class=\"ComposeForm\"><div class=\"ComposeForm-header\">\
+             <div class=\"ComposeForm-collapsed-header\"><span class=\"ComposeForm-collapsed-header-text\"><span class=\"ComposeForm-draft\">Draft </span>to Tom &amp; &lt;Priya&gt;</span></div>\
+             </div><div class=\"ComposeForm-body\"><div class=\"ComposeForm-editor\"><div>Thanks</div></div>\
+             <div class=\"ComposeForm-quote\"><span></span></div></div></div>"
+        );
+        let chip = |label: &str, invalid| Chip {
+            label: label.into(),
+            invalid,
+        };
+        let lists = form(DraftHeader::Lists(vec![(
+            "To",
+            vec![chip("Tom Becker", false), chip("dana", true)],
+        )]));
+        assert!(lists.contains(
+            "<div class=\"RecipientList\"><span class=\"RecipientList-label\">To</span>\
+             <div class=\"Recipient\"><span class=\"ContactName\">Tom Becker</span><span class=\"tail\"><span class=\"cross\"></span><span class=\"separator\">•</span></span></div>\
+             <div class=\"Recipient isInvalid hideSeparator\"><span class=\"ContactName\">dana</span><span class=\"tail\"><span class=\"cross\"><svg/></span><span class=\"separator\">•</span></span></div>\
+             <div class=\"RecipientList-input\"></div></div>"
+        ), "{lists}");
+    }
+
+    #[test]
+    fn an_invitation_prints_its_card_without_its_buttons() {
+        use crate::print::{InviteRow, InviteValue, Run};
+        let link = |text: &str| Run {
+            text: text.into(),
+            link: Some("https://x.io".into()),
+            bold: false,
+        };
+        let card = Invite {
+            note: Some(vec![
+                Run {
+                    text: "Running late: ".into(),
+                    ..Run::default()
+                },
+                link("x.io"),
+            ]),
+            status: Some("Grace has accepted".into()),
+            rows: vec![
+                InviteRow {
+                    question: "RSVP",
+                    value: InviteValue::Buttons,
+                },
+                InviteRow {
+                    question: "When",
+                    value: InviteValue::When(
+                        "Wednesday, November 25th, 2026 at 9:00 AM – 9:45 AM EST".into(),
+                    ),
+                },
+                InviteRow {
+                    question: "Meet",
+                    value: InviteValue::Text(vec![(0.0, vec![link("meet.google.com/a")])]),
+                },
+            ],
+        };
+        let mut html = String::new();
+        invite_card(&mut html, &card);
+        assert_eq!(
+            html,
+            "<div class=\"MessagePane-calendarNote\">Running late: <a>x.io</a></div>\
+             <div class=\"CalendarInvite\"><div class=\"CalendarInvite-image\"><div class=\"CalendarInvite-status-update\">Grace has accepted</div></div>\
+             <div class=\"CalendarInvite-rows\">\
+             <div class=\"FocusRegion\"><div class=\"CalendarInvite-row\"><span class=\"CalendarInvite-question\">RSVP</span></div></div>\
+             <div class=\"CalendarInvite-row\"><span class=\"CalendarInvite-question\">When</span><div class=\"CalendarInvite-property CalendarInvite-property-when\"><div><span class=\"CalendarInvite-eventTime\">Wednesday<wbr>,<wbr> November 25th<wbr>,<wbr> 2026<wbr> at<wbr> 9:00 AM <wbr>– <wbr>9:45 AM EST</span></div></div></div>\
+             <div class=\"CalendarInvite-row\"><span class=\"CalendarInvite-question\">Meet</span><div class=\"CalendarInvite-property CalendarInvite-property-video-link\"><div><a>meet.google.com/a</a></div></div></div>\
+             </div></div>"
+        );
     }
 }

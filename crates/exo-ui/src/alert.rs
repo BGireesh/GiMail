@@ -64,15 +64,83 @@ const RADIO_GAP: f32 = 7.0;
 /// (13px only on a 1× screen) in a 15px line, white (at `.8` in Carbon), 2.5px down the cap
 /// (centered in its 12px content box, then `translateY(3px)`).
 const KEY_HEIGHT: f32 = 18.0;
-const KEY_MIN_WIDTH: f32 = 18.0;
 const KEY_PADDING: f32 = 5.0;
-const KEY_MARGIN: f32 = 1.0;
 const KEY_FILL: Color32 = Color32::from_rgb(0xab, 0xb7, 0xc5);
 const KEY_FILL_CARBON: Color32 = Color32::from_rgb(0x55, 0x5b, 0x64);
-const KEY_LABEL: TextStyle = TextStyle::new(Font::new(Family::Sans, 600), 12.0, 15.0);
-const KEY_LABEL_TOP: f32 = 2.5;
+const KEY: Cap = Cap {
+    min_width: 18.0,
+    margin: 1.0,
+    top: 0.0,
+    label: TextStyle::new(Font::new(Family::Sans, 600), 12.0, 15.0),
+    label_top: 2.5,
+    shift: 0.0,
+    snap: false,
+};
+/// The Undo Send alert's keycap, a plain inline keycap: as tall, at least 19px wide, with no
+/// margin, `top: 1px`, and a bold label 2px down. Its line's box is a pixel taller, which takes
+/// the line's text, and the text after it, a pixel down.
+const CONFIRM_KEY: Cap = Cap {
+    min_width: 19.0,
+    margin: 0.0,
+    top: 1.0,
+    label: TextStyle::new(Font::new(Family::Sans, 700), 12.0, 15.0),
+    label_top: 2.0,
+    shift: 1.0,
+    snap: true,
+};
+
+/// How a keycap in an alert's text is drawn.
+struct Cap {
+    min_width: f32,
+    /// Its margin either side.
+    margin: f32,
+    /// How far it's down its line.
+    top: f32,
+    label: TextStyle,
+    /// How far its label is down the cap.
+    label_top: f32,
+    /// How far its line, and the lines after it, are down from where they'd be without it.
+    shift: f32,
+    /// Its box starts on a whole CSS px, as Chromium paints an inline block's background.
+    snap: bool,
+}
 /// Separates `<p>` paragraphs in [`Alert::text`].
 pub const PARAGRAPH: char = '\u{2029}';
+/// Bold text in an alert's text: `<strong>`, weight 700.
+const STRONG: TextStyle = TextStyle::new(Font::new(Family::Sans, 700), 14.0, 20.0);
+/// A link in an alert's text: `#54acdc` in both themes, not underlined.
+const LINK_INK: Color32 = Color32::from_rgb(0x54, 0xac, 0xdc);
+
+/// A run of an alert's text ([`Alert::show_runs`]): plain, bold, or a link. A `\n` is a `<br>`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AlertRun<'a> {
+    Text(&'a str),
+    Strong(&'a str),
+    Link(&'a str),
+}
+
+impl AlertRun<'_> {
+    /// The run's text.
+    pub fn text(&self) -> &str {
+        match self {
+            Self::Text(text) | Self::Strong(text) | Self::Link(text) => text,
+        }
+    }
+
+    fn style(&self) -> &'static TextStyle {
+        match self {
+            Self::Strong(_) => &STRONG,
+            Self::Text(_) | Self::Link(_) => &TEXT,
+        }
+    }
+}
+
+/// What a click on an alert with runs did: an action, or a link by its place among the links.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AlertClick {
+    Action(usize),
+    Link(usize),
+}
 
 /// `text` for an address or domain in an alert, with a `<wbr>` before each word that follows a
 /// word and punctuation, so `daniel@brightmoor.co` can break after its `@` and `.`. Chromium lays a
@@ -215,6 +283,32 @@ impl Alert<'_> {
         keys: &[&str],
         after: &str,
     ) -> Option<usize> {
+        self.show_with_caps(ui, area, before, keys, after, &KEY)
+    }
+
+    /// [`Alert::show_with_key`] with a plain inline keycap, a bold label on it (the Undo Send
+    /// alert's `Z`).
+    pub fn show_with_confirm_key(
+        &self,
+        ui: &mut Ui,
+        area: Rect,
+        before: &str,
+        key: &str,
+        after: &str,
+    ) -> Option<usize> {
+        self.show_with_caps(ui, area, before, &[key], after, &CONFIRM_KEY)
+    }
+
+    /// [`Alert::show_with_keys`] with keycaps drawn as `cap` says.
+    fn show_with_caps(
+        &self,
+        ui: &mut Ui,
+        area: Rect,
+        before: &str,
+        keys: &[&str],
+        after: &str,
+        cap: &Cap,
+    ) -> Option<usize> {
         let ctx = ui.ctx().clone();
         let width = self.content_width();
         let paragraphs: Vec<Vec<String>> = before
@@ -228,13 +322,13 @@ impl Alert<'_> {
         let space = TEXT.width(&ctx, "a a") - TEXT.width(&ctx, "aa");
         let key_widths: Vec<f32> = keys
             .iter()
-            .map(|key| (KEY_LABEL.width(&ctx, key) + 2.0 * KEY_PADDING).max(KEY_MIN_WIDTH))
+            .map(|key| (cap.label.width(&ctx, key) + 2.0 * KEY_PADDING).max(cap.min_width))
             .collect();
         let keys_left = last + space;
         let prefix = keys_left
             + key_widths
                 .iter()
-                .map(|width| width + 2.0 * KEY_MARGIN)
+                .map(|width| width + 2.0 * cap.margin)
                 .sum::<f32>()
             + space;
         // Greedy, as Chromium breaks a paragraph whose last line keeps more than a word.
@@ -256,29 +350,43 @@ impl Alert<'_> {
         }
         let before_lines: usize = paragraphs.iter().map(Vec::len).sum();
         let gaps = paragraphs.len().saturating_sub(1) as f32 * TEXT_MARGIN;
-        let height = (before_lines + lines.len() - 1) as f32 * TEXT.line_height + gaps;
+        let height = (before_lines + lines.len() - 1) as f32 * TEXT.line_height + gaps + cap.shift;
         let (fill, ink) = match crate::app_theme(&ctx) {
             crate::Theme::Snow => (KEY_FILL, Color32::WHITE),
             crate::Theme::Carbon => (KEY_FILL_CARBON, Color32::WHITE.gamma_multiply(0.8)),
         };
+        // The keys and `after` continue the last line, which is painted with them.
+        let mut paragraphs = paragraphs;
+        let key_line = paragraphs.last_mut().and_then(Vec::pop).unwrap_or_default();
         self.paint(ui, area, height, |ui, text| {
             let painter = ui.painter();
-            // The keys and `after` continue the last line.
-            let y = paint_paragraphs(painter, text.min, &paragraphs) - TEXT.line_height;
+            let y = paint_paragraphs(painter, text.min, &paragraphs);
+            paint_paragraphs(
+                painter,
+                pos2(text.left(), y + cap.shift),
+                &[vec![key_line.clone()]],
+            );
             let mut x = text.left() + keys_left;
             for (key, key_width) in keys.iter().zip(&key_widths) {
-                let cap =
-                    Rect::from_min_size(pos2(x + KEY_MARGIN, y), vec2(*key_width, KEY_HEIGHT));
-                painter.rect_filled(cap, CornerRadius::same(3), fill);
-                let label = KEY_LABEL.width(&ctx, key);
-                KEY_LABEL.paint_line(
+                let left = x + cap.margin;
+                let rect = Rect::from_min_size(
+                    pos2(if cap.snap { left.round() } else { left }, y + cap.top),
+                    vec2(*key_width, KEY_HEIGHT),
+                );
+                painter.rect_filled(rect, CornerRadius::same(3), fill);
+                // The label stays where layout put it, unsnapped.
+                let label = cap.label.width(&ctx, key);
+                cap.label.paint_line(
                     painter,
-                    pos2(cap.center().x - label / 2.0, cap.top() + KEY_LABEL_TOP),
+                    pos2(
+                        left + key_width / 2.0 - label / 2.0,
+                        rect.top() + cap.label_top,
+                    ),
                     key,
                     ink,
                     None,
                 );
-                x += key_width + 2.0 * KEY_MARGIN;
+                x += key_width + 2.0 * cap.margin;
             }
             for (index, line) in lines.iter().enumerate() {
                 let x = if index == 0 {
@@ -288,13 +396,59 @@ impl Alert<'_> {
                 };
                 TEXT.paint_line(
                     painter,
-                    pos2(x, y + index as f32 * TEXT.line_height),
+                    pos2(x, y + cap.shift + index as f32 * TEXT.line_height),
                     line,
                     TEXT_INK,
                     None,
                 );
             }
         })
+    }
+
+    /// [`Alert::show`] with its text as `runs`, wrapped as the alert's own text wraps, the bold
+    /// runs bold and the links in their colour. Returns the action clicked, or the link.
+    pub fn show_runs(&self, ui: &mut Ui, area: Rect, runs: &[AlertRun<'_>]) -> Option<AlertClick> {
+        let lines = wrap_runs(ui.ctx(), runs, self.content_width());
+        let height = lines.len() as f32 * TEXT.line_height;
+        let mut link = None;
+        let action = self.paint(ui, area, height, |ui, text| {
+            for (index, line) in lines.iter().enumerate() {
+                let y = text.top() + index as f32 * TEXT.line_height;
+                let mut x = text.left();
+                for (run, segment) in line {
+                    let ink = if matches!(runs[*run], AlertRun::Link(_)) {
+                        LINK_INK
+                    } else {
+                        TEXT_INK
+                    };
+                    let width =
+                        runs[*run]
+                            .style()
+                            .paint_line(ui.painter(), pos2(x, y), segment, ink, None);
+                    if matches!(runs[*run], AlertRun::Link(_)) {
+                        let place = runs[..*run]
+                            .iter()
+                            .filter(|run| matches!(run, AlertRun::Link(_)))
+                            .count();
+                        let rect = Rect::from_min_size(pos2(x, y), vec2(width, TEXT.line_height));
+                        let response = ui
+                            .interact(
+                                rect,
+                                ui.id().with(("alert-link", self.title, index, *run)),
+                                Sense::click(),
+                            )
+                            .on_hover_cursor(egui::CursorIcon::PointingHand);
+                        if response.clicked() {
+                            link = Some(place);
+                        }
+                    }
+                    x += width;
+                }
+            }
+        });
+        action
+            .map(AlertClick::Action)
+            .or(link.map(AlertClick::Link))
     }
 
     /// [`Alert::show`] with `body` painting the text box itself ([`ALERT_TEXT_WIDTH`] wide with
@@ -309,6 +463,31 @@ impl Alert<'_> {
         body: impl FnOnce(&mut Ui, Rect),
     ) -> Option<usize> {
         self.paint(ui, area, height, body)
+    }
+
+    /// Where the actions go: each one's row, left edge from the text box's, and width. They float
+    /// right, the first 12px into the padding and each next 8px left of the one before, and one
+    /// that doesn't fit beside the one before starts a row below, 8px in from the right. (A
+    /// float that wraps that way spills out of the card in Chromium, whose card doesn't grow for
+    /// it. The card holds it here.)
+    fn place_actions(&self, ctx: &egui::Context) -> Vec<(usize, f32, f32)> {
+        let content = self.content_width();
+        let mut row = 0;
+        let mut right = content + ACTION_PADDING[1];
+        self.actions
+            .iter()
+            .enumerate()
+            .map(|(index, label)| {
+                let width = form::action_width(ctx, label);
+                if index > 0 && right - width < 0.0 {
+                    row += 1;
+                    right = content - ACTION_GAP;
+                }
+                let placed = (row, right - width, width);
+                right -= width + ACTION_GAP;
+                placed
+            })
+            .collect()
     }
 
     /// The text box's width. Without actions, there's no action row and a narrower padding.
@@ -377,11 +556,9 @@ impl Alert<'_> {
         body: impl FnOnce(&mut Ui, Rect),
     ) -> Option<usize> {
         let ctx = ui.ctx().clone();
-        let actions_height = if self.actions.is_empty() {
-            0.0
-        } else {
-            ACTIONS_HEIGHT
-        };
+        let placed = self.place_actions(&ctx);
+        let rows = placed.last().map_or(0, |(row, _, _)| row + 1);
+        let actions_height = rows as f32 * ACTIONS_HEIGHT;
         let height = PADDING_TOP
             + title_height
             + TEXT_MARGIN
@@ -410,18 +587,18 @@ impl Alert<'_> {
             ),
         );
 
-        // The actions float right in their row, 12px into the padding.
-        let [pad_top, pad_x, pad_bottom] = ACTION_PADDING;
-        let mut right = card.right() - PADDING_RIGHT + pad_x;
-        let row_top = text_top + text_height + TEXT_MARGIN;
+        let [pad_top, _, pad_bottom] = ACTION_PADDING;
+        let rows_top = text_top + text_height + TEXT_MARGIN;
         let mut clicked = None;
-        for (index, label) in self.actions.iter().enumerate() {
-            let size = vec2(
-                form::action_width(&ctx, label),
-                pad_top + TEXT.line_height + pad_bottom,
+        for (index, (label, (row, offset, width))) in self.actions.iter().zip(placed).enumerate() {
+            let size = vec2(width, pad_top + TEXT.line_height + pad_bottom);
+            let button = Rect::from_min_size(
+                pos2(
+                    card.left() + PADDING_LEFT + offset,
+                    rows_top + row as f32 * ACTIONS_HEIGHT + NUDGE,
+                ),
+                size,
             );
-            let button = Rect::from_min_size(pos2(right - size.x, row_top + NUDGE), size);
-            right = button.left() - ACTION_GAP;
             let response = ui.interact(
                 button,
                 ui.id().with(("alert-action", self.title, index)),
@@ -507,9 +684,146 @@ fn pretty_wrap(ctx: &egui::Context, paragraph: &str, width: f32) -> Vec<String> 
     lines
 }
 
+/// A word of an alert's runs that can't be broken, maybe across runs (`Settings` and `,`): its
+/// pieces by run, and the run of the space before it, if there's one.
+struct Word {
+    space: Option<usize>,
+    pieces: Vec<(usize, String)>,
+}
+
+/// `runs` wrapped as [`pretty_wrap`] wraps plain text: at `<br>`s and spaces, whitespace
+/// collapsed, with `text-wrap: pretty`'s rule for each part between `<br>`s. Each line is its
+/// segments, by run, with the spaces between its words in the run they're in.
+fn wrap_runs(ctx: &egui::Context, runs: &[AlertRun<'_>], width: f32) -> Vec<Vec<(usize, String)>> {
+    // The words of each part between `<br>`s.
+    let mut parts: Vec<Vec<Word>> = vec![Vec::new()];
+    let mut space = None;
+    let mut glued = false;
+    for (run, text) in runs.iter().enumerate() {
+        for (line, part) in text.text().split('\n').enumerate() {
+            if line > 0 {
+                parts.push(Vec::new());
+                (space, glued) = (None, false);
+            }
+            for (at, piece) in part.split(' ').enumerate() {
+                if at > 0 {
+                    space = Some(run);
+                    glued = false;
+                }
+                if piece.is_empty() {
+                    continue;
+                }
+                let words = parts.last_mut().expect("a part");
+                match words.last_mut() {
+                    Some(word) if glued => word.pieces.push((run, piece.to_owned())),
+                    _ => words.push(Word {
+                        space: space.take(),
+                        pieces: vec![(run, piece.to_owned())],
+                    }),
+                }
+                glued = true;
+            }
+        }
+    }
+    let segments = |words: &[&Word]| {
+        let mut line: Vec<(usize, String)> = Vec::new();
+        let mut push = |run: usize, text: &str| match line.last_mut() {
+            Some((last, segment)) if *last == run => segment.push_str(text),
+            _ => line.push((run, text.to_owned())),
+        };
+        for (at, word) in words.iter().enumerate() {
+            if let Some(run) = word.space.filter(|_| at > 0) {
+                push(run, " ");
+            }
+            for (run, piece) in &word.pieces {
+                push(*run, piece);
+            }
+        }
+        line
+    };
+    let measure = |words: &[&Word]| -> f32 {
+        segments(words)
+            .iter()
+            .map(|(run, segment)| runs[*run].style().width(ctx, segment))
+            .sum()
+    };
+    let mut lines = Vec::new();
+    for part in &parts {
+        let mut wrapped: Vec<Vec<&Word>> = vec![Vec::new()];
+        for word in part {
+            let line = wrapped.last_mut().expect("a line");
+            line.push(word);
+            if line.len() > 1 && measure(line) > width {
+                line.pop();
+                wrapped.push(vec![word]);
+            }
+        }
+        // `text-wrap: pretty`: a last line of one word takes the word before it, when they fit.
+        if let [.., before, last] = wrapped.as_mut_slice()
+            && last.len() == 1
+            && before.len() > 1
+        {
+            let mut joined = vec![before[before.len() - 1]];
+            joined.extend(last.iter());
+            if measure(&joined) <= width {
+                before.pop();
+                *last = joined;
+            }
+        }
+        lines.extend(wrapped.iter().map(|words| segments(words)));
+    }
+    lines
+}
+
 #[cfg(test)]
 mod tests {
-    use super::wbrise;
+    use super::{ALERT_TEXT_WIDTH, AlertRun, wbrise, wrap_runs};
+
+    #[test]
+    fn runs_wrap_as_one_text_with_words_across_runs_kept_whole() {
+        let ctx = egui::Context::default();
+        crate::install(&ctx).expect("the system fonts load");
+        let runs = [
+            AlertRun::Text(
+                "To RSVP faster next time, please update your Google Calendar settings. \n\n Under ",
+            ),
+            AlertRun::Link("Event Settings"),
+            AlertRun::Text(", change "),
+            AlertRun::Strong("Add invitations to my calendar"),
+            AlertRun::Text(" to "),
+            AlertRun::Strong("From everyone"),
+            AlertRun::Text("."),
+        ];
+        let mut lines = Vec::new();
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            lines = wrap_runs(ui.ctx(), &runs, ALERT_TEXT_WIDTH);
+        });
+        output.textures_delta.clear();
+        let text: Vec<String> = lines
+            .iter()
+            .map(|line| line.iter().map(|(_, segment)| segment.as_str()).collect())
+            .collect();
+        assert_eq!(
+            text,
+            [
+                "To RSVP faster next time, please update your",
+                "Google Calendar settings.",
+                "",
+                "Under Event Settings, change Add invitations to",
+                "my calendar to From everyone.",
+            ]
+        );
+        // `Settings` and `,` stay together, each in its own run.
+        assert_eq!(
+            lines[3],
+            [
+                (0, "Under ".to_owned()),
+                (1, "Event Settings".to_owned()),
+                (2, ", change ".to_owned()),
+                (3, "Add invitations to".to_owned()),
+            ]
+        );
+    }
 
     #[test]
     fn wbrise_breaks_before_words_that_follow_punctuation() {

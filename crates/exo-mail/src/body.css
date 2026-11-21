@@ -124,6 +124,10 @@ hr { border: 0; height: 0; border-top: 1px solid #ededed; border-bottom: 1px sol
   text-underline-offset: 2px;
 }
 :not(.isMarketing) .exo-date[data-date-isostring] { cursor: pointer; }
+/* In personal mail a date's last letter isn't kerned with what follows it: the `y` and `?` of
+ * `Thursday?` keep their full spacing. An empty inline-block after the date ends the run of shaped
+ * text there. */
+:not(.isMarketing) .exo-date::after { content: ""; display: inline-block; }
 .isMarketing .exo-date { text-decoration: underline; text-decoration-color: #aaa; }
 
 pre { font-family: "Exo Mono Email", monospace; font-size: 14px; letter-spacing: -0.02em; line-height: 20px; white-space: pre; }

@@ -1,6 +1,8 @@
 //! The shell's right-click menu as a native one ([`crate::desktop::context_menu`]): a link's, an
 //! image's, an editable field's (its spelling first) or a selection's. Compose's body has its own
-//! ([`crate::compose`]), and a message body's is here.
+//! ([`crate::compose`]); a message body's and the rest of the page's are here. On the rest of the
+//! page (whatever has no menu of its own) it's a link's, or the selection's with `Copy`, which is
+//! off with nothing selected.
 
 use crate::{
     Mail,
@@ -255,10 +257,103 @@ pub(crate) struct Pending {
     pub selection: Option<(String, egui::Pos2)>,
 }
 
+/// A right-click on the rest of the page, waiting to show its menu: where on screen, and the link
+/// it landed on.
+pub(crate) struct PagePending {
+    pub at: egui::Pos2,
+    pub link: Option<String>,
+}
+
 /// The size Look Up shows a message's text at, which is a body's usual 14px.
 const BODY_TEXT: f32 = 14.0;
 
 impl Mail {
+    /// Notes this frame's right-click in `page` (the window under the tab strip) that nothing with
+    /// a menu of its own took, for the shell's menu next frame. On the header's selectable text it
+    /// selects the word under it first, as a Mac's right-click does.
+    pub(crate) fn page_right_click(&mut self, ctx: &egui::Context, page: egui::Rect) {
+        let clicked = ctx.input(|input| {
+            input
+                .pointer
+                .secondary_clicked()
+                .then(|| input.pointer.interact_pos())
+                .flatten()
+        });
+        let Some(at) = clicked.filter(|at| page.contains(*at)) else {
+            return;
+        };
+        if exo_ui::right_click_claimed(ctx) {
+            return;
+        }
+        if let Some(thread) = &mut self.thread {
+            thread.select_word_at(at);
+            if thread.selected_text().is_some() {
+                self.bodies.clear_selection();
+            }
+        }
+        self.page_menu = Some(PagePending {
+            at,
+            link: exo_ui::link_at(ctx, at),
+        });
+        ctx.request_repaint();
+    }
+
+    /// Shows the shell's menu for a right-click on the rest of the page last frame, and carries
+    /// out what's chosen in it. The selection is the header's or a body's.
+    pub(crate) fn show_page_menu(&mut self, ctx: &egui::Context) {
+        let Some(PagePending { at, link }) = self.page_menu.take() else {
+            return;
+        };
+        let header = self.thread.as_ref().and_then(|thread| {
+            thread
+                .selected_text()
+                .map(|text| (text, thread.selection_start()))
+        });
+        let body = self.bodies.selected_text().map(str::to_owned);
+        let target = Target {
+            link,
+            image: None,
+            editable: None,
+            selection: header
+                .as_ref()
+                .map(|(text, _)| text.clone())
+                .or_else(|| body.clone())
+                .unwrap_or_default(),
+        };
+        let entries = entries(&target);
+        let items: Vec<MenuItem> = entries.iter().map(|(item, _)| item.clone()).collect();
+        let Some(choice) = (self.context_menu.borrow_mut())(&items, at)
+            .and_then(|index| entries.into_iter().nth(index))
+            .and_then(|(_, choice)| choice)
+        else {
+            return;
+        };
+        match choice {
+            Choice::CopyText(text) => ctx.copy_text(text),
+            Choice::OpenLink(url) if url.starts_with("mailto:") => self.compose_mailto(&url, false),
+            Choice::OpenLink(url) | Choice::Search(url) => self.open_url(&url),
+            Choice::LookUp => match (&header, &body) {
+                (Some((text, Some((baseline, size)))), _) => {
+                    context_menu::look_up(text, *baseline, *size)
+                }
+                // A body's selection is somewhere else on screen, which the menu doesn't know.
+                (_, Some(text)) => context_menu::look_up(text, at, BODY_TEXT),
+                _ => {}
+            },
+            Choice::Copy => match header {
+                Some((text, _)) => ctx.copy_text(text),
+                None => self.bodies.copy(),
+            },
+            // An image's or an editable field's, which this menu never has.
+            Choice::CopyImage
+            | Choice::Correct(_)
+            | Choice::AddToDictionary(_)
+            | Choice::IgnoreSpelling(_)
+            | Choice::Cut
+            | Choice::Paste => {}
+        }
+    }
+
     /// Shows the shell's menu for a right-click in a message body last frame (the word it
     /// selected is now on screen), and carries out what's chosen in it.
     pub(crate) fn show_message_menu(&mut self, ctx: &egui::Context) {

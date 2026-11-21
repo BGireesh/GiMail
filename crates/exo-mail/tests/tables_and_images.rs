@@ -243,3 +243,147 @@ fn a_tables_border_attribute_borders_it_and_its_cells() {
         gray(9)
     );
 }
+
+/// The color at CSS px (`x`, `y`) of `view`'s top 60 × 120 px, painted at 2× on white.
+fn color_at(view: &mut BodyView, x: u32, y: u32) -> [u8; 4] {
+    let image = view.paint(
+        Region {
+            top: 0.0,
+            height: 60.0,
+            left: 0.0,
+            width: 120.0,
+            phase: [0.0; 2],
+        },
+        [255; 4],
+    );
+    let at = ((y * 2 * image.width + x * 2) * 4) as usize;
+    image.rgba[at..at + 4].try_into().expect("a pixel")
+}
+
+const WHITE: [u8; 4] = [255; 4];
+const RED: [u8; 4] = [255, 0, 0, 255];
+
+/// A caption sits above the table's grid (below it with `caption-side: bottom`), as wide as the
+/// table, which it makes at least as wide as its own min-content width. The table's background
+/// is the grid's alone, as in Chromium.
+#[test]
+fn captions_sit_above_or_below_the_grid() {
+    let table = |style: &str, caption: &str| {
+        view(&format!(
+            "<table bgcolor=\"#ff0000\" cellspacing=\"0\" cellpadding=\"0\" style=\"{style}\">\
+             <caption><div style=\"overflow:hidden;color:white;{caption}\">.</div></caption>\
+             <tr><td><div style=\"width:20px;height:20px\"></div></td></tr></table>"
+        ))
+    };
+    let mut above = table("", "height:10px");
+    assert_eq!(above.layout(640.0, 2.0), 30.0);
+    assert_eq!(color_at(&mut above, 5, 5), WHITE, "the caption");
+    assert_eq!(color_at(&mut above, 5, 15), RED, "the grid");
+
+    let mut below = table("caption-side: bottom", "height:10px");
+    assert_eq!(below.layout(640.0, 2.0), 30.0);
+    assert_eq!(color_at(&mut below, 5, 5), RED, "the grid");
+    assert_eq!(color_at(&mut below, 5, 25), WHITE, "the caption");
+
+    let mut wide = table("", "width:50px;height:10px");
+    wide.layout(640.0, 2.0);
+    assert_eq!(color_at(&mut wide, 45, 15), RED, "as wide as its caption");
+    assert_eq!(color_at(&mut wide, 55, 15), WHITE);
+}
+
+/// In a fixed-layout table whose percentage columns take its whole width, an `auto` column and
+/// its cell are 0 wide (no background shows), however much padding the cell has.
+#[test]
+fn an_auto_column_beside_percentages_that_fill_the_table_is_empty() {
+    let mut view = view(
+        "<table width=\"100\" cellpadding=\"8\" cellspacing=\"0\" style=\"table-layout: fixed\"><tr>\
+         <td width=\"50%\" bgcolor=\"#ff0000\"></td><td width=\"50%\" bgcolor=\"#ff0000\"></td>\
+         <td bgcolor=\"#0000ff\"></td></tr></table>",
+    );
+    view.layout(640.0, 2.0);
+    assert_eq!(color_at(&mut view, 95, 8), RED);
+    assert_eq!(color_at(&mut view, 105, 8), WHITE, "no 16px of the cell's");
+}
+
+/// `<table align="center">` centres the table in its column (its margins), and leaves its
+/// cells' text where it was (no `text-align`), as in Chromium.
+#[test]
+fn a_centred_table_is_centred() {
+    let mut view = view(
+        "<table align=\"center\" cellspacing=\"0\" cellpadding=\"0\"><tr>\
+         <td width=\"40\" bgcolor=\"#ff0000\"><span style=\"display:inline-block;width:10px;height:20px;vertical-align:top;background:#0000ff\"></span></td>\
+         </tr></table>",
+    );
+    view.layout(120.0, 2.0);
+    assert_eq!(color_at(&mut view, 39, 10), WHITE);
+    assert_eq!(
+        color_at(&mut view, 45, 10),
+        [0, 0, 255, 255],
+        "at its cell's start"
+    );
+    assert_eq!(color_at(&mut view, 55, 10), RED);
+    assert_eq!(color_at(&mut view, 75, 10), RED);
+    assert_eq!(color_at(&mut view, 81, 10), WHITE);
+}
+
+/// With `border-collapse: collapse` the cells share their borders, half in each: a row of 1px
+/// borders is its content, padding and 1px, and the table half a pixel more at each end, as in
+/// Chromium. A row's rule shows though only its bottom border is set.
+#[test]
+fn collapsed_borders_are_shared_between_cells() {
+    let table = |rows: &str| {
+        view(&format!(
+            "<table width=\"100\" cellpadding=\"6\" cellspacing=\"0\" style=\"border-collapse: collapse; font: 14px/24px Arial\">{rows}</table>"
+        ))
+    };
+    let row = "<tr><td style=\"border: 1px solid #ff0000\">A</td></tr>";
+    assert_eq!(table(row).layout(640.0, 2.0), 38.0);
+    assert_eq!(table(&row.repeat(2)).layout(640.0, 2.0), 75.0);
+    let mut rules = table(
+        "<tr><td style=\"border-bottom: 2px solid #ff0000; padding: 0\">A</td></tr>\
+         <tr><td style=\"padding: 0\">B</td></tr>",
+    );
+    assert_eq!(rules.layout(640.0, 2.0), 50.0);
+    assert_eq!(
+        color_at(&mut rules, 50, 24),
+        RED,
+        "the rule, across the edge"
+    );
+    assert_eq!(color_at(&mut rules, 50, 27), WHITE);
+}
+
+/// A collapsed border is drawn in its style along each edge, as Blink draws it: `inset` as a
+/// `ridge` (lit outer half, shadowed inner half), `dashed` in dashes as long as two widths, and
+/// `double` as its outer thirds.
+#[test]
+fn collapsed_borders_draw_their_styles() {
+    let table = |border: &str| {
+        let mut view = view(&format!(
+            "<table width=\"100\" cellspacing=\"0\" style=\"border-collapse: collapse\"><tr><td style=\"border: {border}; height: 20px\"></td></tr></table>"
+        ));
+        view.layout(640.0, 2.0);
+        view
+    };
+    let mut inset = table("6px inset #336699");
+    assert_eq!(
+        color_at(&mut inset, 50, 1),
+        [79, 158, 238, 255],
+        "the lit half"
+    );
+    assert_eq!(
+        color_at(&mut inset, 50, 4),
+        [23, 46, 69, 255],
+        "the shadowed half"
+    );
+    let mut dashed = table("3px dashed #ff0000");
+    assert_eq!(color_at(&mut dashed, 2, 1), RED);
+    assert_eq!(
+        color_at(&mut dashed, 7, 1),
+        WHITE,
+        "between the first two dashes"
+    );
+    let mut double = table("6px double #ff0000");
+    assert_eq!(color_at(&mut double, 50, 1), RED);
+    assert_eq!(color_at(&mut double, 50, 3), WHITE);
+    assert_eq!(color_at(&mut double, 50, 5), RED);
+}

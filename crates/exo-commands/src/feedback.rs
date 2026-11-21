@@ -8,7 +8,7 @@
 
 use std::borrow::Cow;
 
-use egui::{Context, Rect};
+use egui::{Context, Id, LayerId, Rect};
 use exo_ui::{
     HintTooltip, TOAST_BOTTOM, ToastActionView, ToastKind, ToastView, TooltipPart,
     motion::CubicBezier,
@@ -267,6 +267,11 @@ enum Timer {
     Paused { at: f64, from: f32 },
 }
 
+/// The area of the toast numbered `serial`, so each toast's animations are its own.
+fn toast_id(ctx: &Context, serial: u64) -> Id {
+    exo_ui::id(ctx, ("exo_commands::toast", serial))
+}
+
 struct ShownHint {
     hint: Hint,
     shown_at: f64,
@@ -300,6 +305,13 @@ impl<A: Clone> Feedback<A> {
     /// The showing toast's text.
     pub(crate) fn toast_text(&self) -> Option<&str> {
         self.toast.as_ref().map(|shown| shown.toast.text.as_ref())
+    }
+
+    /// The layer the showing toast is painted on.
+    pub(crate) fn toast_layer(&self, ctx: &Context) -> Option<LayerId> {
+        self.toast
+            .as_ref()
+            .map(|shown| ToastView::layer(toast_id(ctx, shown.serial)))
     }
 
     /// The showing toast's tag.
@@ -410,7 +422,7 @@ impl<A: Clone> Feedback<A> {
         };
         let response = view.show(
             ctx,
-            exo_ui::id(ctx, ("exo_commands::toast", shown.serial)),
+            toast_id(ctx, shown.serial),
             area,
             self.toast_bottom,
             opacity,

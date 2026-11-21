@@ -8,8 +8,8 @@ mod support;
 use std::path::{Path, PathBuf};
 
 use exo_store::{
-    Address, CalendarChange, Draft, DraftAction, DraftRecord, Error, ListId, Mutation, Settings,
-    Store, Theme, Unusable,
+    Address, CalendarChange, Draft, DraftAction, DraftRecord, Error, GoogleContact, GoogleContacts,
+    GoogleList, ListId, Mutation, Settings, Store, Theme, Unusable,
 };
 use jiff::Timestamp;
 use support::{ACCOUNT, Harness};
@@ -262,6 +262,53 @@ async fn clearing_a_file_that_isnt_a_database_starts_afresh() {
     assert!(!store.sync().await.expect("syncs").rebuilt);
 }
 
+#[tokio::test]
+async fn google_contacts_are_kept_until_the_cache_is_cleared() {
+    let harness = Harness::start().await;
+    let listing = GoogleContacts {
+        listed: "2026-11-17T14:00:00Z".parse().expect("a time"),
+        saved: GoogleList {
+            sync_token: Some("^token".into()),
+            contacts: vec![GoogleContact {
+                person: "people/c1".into(),
+                email: "tom@brightmoor.co".into(),
+                name: Some("Tom Becker".into()),
+                photo: Some("https://lh3.googleusercontent.com/a-/tom=s100".into()),
+                company: Some("Brightmoor".into()),
+                title: Some("Product Designer".into()),
+            }],
+        },
+        directory: GoogleList::default(),
+        other: GoogleList::default(),
+    };
+    harness
+        .store
+        .save_google_contacts(&listing)
+        .await
+        .expect("saves");
+    let Harness {
+        server, dir, store, ..
+    } = harness;
+    drop(store);
+    let store = support::open(&server, dir.path()).await;
+    assert_eq!(
+        store.google_contacts().await.expect("reads"),
+        Some(listing),
+        "the next launch has them"
+    );
+    drop(store);
+
+    Store::clear_cache(dir.path(), ACCOUNT)
+        .await
+        .expect("clears");
+    let store = support::open(&server, dir.path()).await;
+    assert_eq!(
+        store.google_contacts().await.expect("reads"),
+        None,
+        "Google has them"
+    );
+}
+
 /// Every table is either kept by Clear Cache and Restart (`db::KEPT_TABLES`, and `kv`'s own
 /// records) or one Gmail fills again. A new table fails this until it's one or the other.
 #[tokio::test]
@@ -278,6 +325,7 @@ async fn every_table_is_kept_or_refilled() {
         .expect("reads");
     tables.sort();
     let kept = [
+        "bulk_actions",
         "calendar_changes",
         "drafts",
         "kv",

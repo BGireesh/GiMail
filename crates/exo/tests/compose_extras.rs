@@ -268,6 +268,31 @@ fn a_new_subjects_mention_shows_no_contacts() {
 }
 
 #[test]
+fn use_emoji_and_use_snippet_inline_open_the_subjects_pickers() {
+    let mut app = start("subject-commands");
+    app.key(Key::C);
+    app.key(Key::Tab);
+    app.type_text("Ship it");
+    palette(&mut app, "use emoji");
+    let subject = |app: &Fixture| app.mail().compose_focus().map(|(_, subject)| subject);
+    assert_eq!(subject(&app).as_deref(), Some("Ship it :hello"));
+    // The picker is the subject's: Enter takes its first emoji for `hello`.
+    app.key(Key::Enter);
+    app.settle();
+    let picked = subject(&app).unwrap_or_default();
+    assert!(
+        picked.starts_with("Ship it ") && !picked.contains(":hello"),
+        "{picked}"
+    );
+    palette(&mut app, "use snippet inline");
+    assert_eq!(
+        subject(&app),
+        Some(format!("{picked} ;")),
+        "the `;` follows a space"
+    );
+}
+
+#[test]
 fn a_plus_mention_adds_them_to_to() {
     let mut app = start("mentions");
     open_intro(&mut app);

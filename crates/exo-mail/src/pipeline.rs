@@ -8,7 +8,7 @@ use crate::{
     dom::{self, NodeRef, Style},
     linkify, links, pixels, plain,
     quotes::{MessageBody, Previous, Quoted, Sender},
-    remote, sanitize,
+    remote, sanitize, senders,
 };
 
 /// What the pipeline needs to know about a message.
@@ -118,6 +118,8 @@ pub fn render_with(
     };
     dom::detach_all(&quoted.nodes);
     let quoted_html: String = quoted.nodes.iter().map(dom::outer_html).collect();
+    let unquoted_dates = dates::unquoted(&unquoted_body);
+    let proposes_time = dates::proposes_time(&unquoted_body);
     classify::mark_flush_top(&unquoted);
 
     let visible_text = match quoted.hidden {
@@ -153,6 +155,9 @@ pub fn render_with(
         unsubscribe_link,
         actions: found.actions,
         calendar_data: found.calendar,
+        unquoted_dates,
+        proposes_time,
+        sender_css: senders::css(&message.from_email),
     }
 }
 
@@ -318,6 +323,21 @@ fn body_attributes(document: &NodeRef) -> BodyAttributes {
 #[cfg(test)]
 mod options_tests {
     use super::*;
+
+    #[test]
+    fn a_senders_fixes_follow_its_from_address_not_its_markup() {
+        let ticket = |from: &str| {
+            let message = Message {
+                html: "<p>Fixed.</p><div class=\"zd_encoded_id\" style=\"color:#fff\">[7L5P0J-92RQ]</div>".into(),
+                from_email: from.into(),
+                ..Message::default()
+            };
+            let rendered = render(&message, None, &[]);
+            crate::view::shadow_root(&rendered, false, "ShadowHTML", "", "", 1.0)
+        };
+        assert!(ticket("support@superhuman.com").contains("display: none"));
+        assert!(!ticket("support@acme.zendesk.com").contains(".zd_encoded_id"));
+    }
 
     #[test]
     fn a_render_without_dates_marks_none() {

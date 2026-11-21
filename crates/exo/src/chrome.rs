@@ -5,14 +5,22 @@
 //! window's own scale whatever the zoom ([`scale`]), and the page starts under it
 //! ([`tab_bar_height`]).
 
+use std::sync::Arc;
+
 use egui::{
-    Color32, CornerRadius, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, Vec2, ViewportCommand, pos2,
-    text::LayoutJob, vec2,
+    Color32, CornerRadius, Galley, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, Vec2,
+    ViewportCommand, pos2,
+    text::{CCursor, LayoutJob},
+    vec2,
 };
 use exo_ui::{
     Family, Font, TextStyle, Theme,
     motion::{self, CubicBezier},
     paint_icon, paint_text,
+};
+use icu_segmenter::{
+    LineSegmenter,
+    options::{LineBreakOptions, LineBreakWordOption},
 };
 
 /// The bar is 40px including its bottom border. The tabs' 1px top margin collapses through it, so
@@ -42,6 +50,9 @@ fn scale(ctx: &egui::Context) -> f32 {
 pub struct Tab<'a> {
     /// The tab's title.
     pub title: &'a str,
+    /// Its account's address, which the title's tooltip shows (else the title). None on the
+    /// sign-in screen.
+    pub email: Option<&'a str>,
     /// Whether the tab is on the sign-in screen, which has no link to copy.
     pub login_screen: bool,
     /// Its account's colour, by name. None on the sign-in screen.
@@ -52,6 +63,7 @@ pub struct Tab<'a> {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Pill {
     pub title: String,
+    pub email: Option<String>,
     pub login_screen: bool,
     pub account_color: Option<String>,
 }
@@ -60,6 +72,7 @@ impl Pill {
     fn tab(&self) -> Tab<'_> {
         Tab {
             title: &self.title,
+            email: self.email.as_deref(),
             login_screen: self.login_screen,
             account_color: self.account_color.as_deref(),
         }
@@ -70,6 +83,7 @@ impl From<&Tab<'_>> for Pill {
     fn from(tab: &Tab<'_>) -> Self {
         Self {
             title: tab.title.to_owned(),
+            email: tab.email.map(str::to_owned),
             login_screen: tab.login_screen,
             account_color: tab.account_color.map(str::to_owned),
         }
@@ -435,6 +449,8 @@ fn darken(color: Color32, factor: f32) -> Color32 {
 
 const PILL_HEIGHT: f32 = 24.0;
 const PILL_GAP: f32 = 8.0;
+/// The active pill's least width, border included.
+const ACTIVE_MIN_WIDTH: f32 = 125.0;
 const ADD_SIZE: f32 = 24.0;
 /// A tab's icon button: 16px with 4px padding, 3px in from the top right.
 const ICON_BUTTON: f32 = 16.0;
@@ -452,31 +468,30 @@ fn tab_strip(
     let left = bar.left() + 75.0 * s;
     let width = bar.width() - 150.0 * s;
     let top = bar.top() + 7.0 * s;
-    // Pills grow equally into what's left after their left margins, the find field, the +
-    // button and its 8px right margin (`flex: 1 1 100%`).
+    // Pills grow into what's left after their left margins, the find field, the + button and its
+    // 8px right margin. A tab only shows as active while the window is focused.
     let count = tabs.len() as f32;
     let (find_margin, find_width) = crate::find::layout(ui.ctx());
-    let pill_width =
-        ((width - (count * PILL_GAP + find_margin + find_width + ADD_SIZE + PILL_GAP) * s) / count)
-            .max(0.0);
+    let room =
+        (width - (count * PILL_GAP + find_margin + find_width + ADD_SIZE + PILL_GAP) * s).max(0.0);
+    let shown_active = window.focused.then_some(active);
+    let widths = pill_widths(room, tabs.len(), shown_active, ACTIVE_MIN_WIDTH * s);
 
     let mut action = None;
-    for (i, tab) in tabs.iter().enumerate() {
-        let x = left + PILL_GAP * s + i as f32 * (pill_width + PILL_GAP * s);
-        let rect = Rect::from_min_size(pos2(x, top), vec2(pill_width, PILL_HEIGHT * s));
-        // A tab only shows as active while the window is focused.
+    let mut x = left;
+    for (i, (tab, width)) in tabs.iter().zip(widths).enumerate() {
+        x += PILL_GAP * s;
+        let rect = Rect::from_min_size(pos2(x, top), vec2(width, PILL_HEIGHT * s));
+        x += width;
         let state = PillState {
-            active: i == active && window.focused,
+            active: shown_active == Some(i),
             closable: tabs.len() > 1,
             window_focused: window.focused,
         };
         action = pill(ui, rect, i, tab, &state, colors, s).or(action);
     }
     let find = Rect::from_min_size(
-        pos2(
-            left + count * (PILL_GAP * s + pill_width) + find_margin * s,
-            top,
-        ),
+        pos2(x + find_margin * s, top),
         vec2(find_width * s, PILL_HEIGHT * s),
     );
     crate::find::show(ui, find, s, colors.pill_border, |ui, button, visibility| {
@@ -493,6 +508,21 @@ fn tab_strip(
     });
     let add = Rect::from_min_size(pos2(find.right(), top), Vec2::splat(ADD_SIZE * s));
     add_button(ui, add, colors, s).or(action)
+}
+
+/// The pills' widths in `room`: equal shares (`flex: 1 1 100%`), except that the `active` one
+/// keeps at least `min` (`min-width`) and the others share the rest.
+fn pill_widths(room: f32, count: usize, active: Option<usize>, min: f32) -> Vec<f32> {
+    let share = room / count as f32;
+    match active {
+        Some(active) if share < min => {
+            let rest = ((room - min) / count.saturating_sub(1).max(1) as f32).max(0.0);
+            (0..count)
+                .map(|i| if i == active { min } else { rest })
+                .collect()
+        }
+        _ => vec![share; count],
+    }
 }
 
 struct PillState {
@@ -531,7 +561,7 @@ fn pill(
         0.15,
         CubicBezier::EASE,
     );
-    let text = motion::mix(colors.text, colors.text_emphasized, emphasis);
+    let text_color = motion::mix(colors.text, colors.text_emphasized, emphasis);
 
     let painter = ui.painter();
     painter.rect_stroke(
@@ -556,12 +586,6 @@ fn pill(
         Some(rest) => (true, rest.trim_start()),
         None => (false, tab.title),
     };
-    let galley = ui.fonts_mut(|fonts| {
-        fonts.layout_job(LayoutJob::single_section(
-            title.to_owned(),
-            style.format(text.gamma_multiply(opacity)),
-        ))
-    });
     // The account's dot leads the title, off the sign-in screen and See Your Week.
     let dot = tab
         .account_color
@@ -577,7 +601,31 @@ fn pill(
         (false, Some(_)) => (ACCOUNT_DOT + ACCOUNT_DOT_GAP) * s,
         (false, None) => 0.0,
     };
+    let layout = |text: &str| {
+        ui.fonts_mut(|fonts| {
+            fonts.layout_job(LayoutJob::single_section(
+                text.to_owned(),
+                style.format(text_color.gamma_multiply(opacity)),
+            ))
+        })
+    };
+    // A title too long for the pill breaks anywhere (`word-break: break-all`), and only its first
+    // line shows, centred.
+    let galley = layout(first_line(&layout(title), title, content.width() - lead));
     let line = pos2(content.center().x - (lead + galley.size().x) / 2.0, top);
+    // Hovered, the title fades out under the × and copy buttons (`mask-image`): transparent for
+    // 6px from its right edge and opaque from 26px, or 25px and 45px with both buttons.
+    let buttons = usize::from(state.closable) + usize::from(!tab.login_screen);
+    let fade = match buttons {
+        1 if hovered => Some((6.0, 26.0)),
+        2 if hovered => Some((25.0, 45.0)),
+        _ => None,
+    };
+    let mask = |x: f32| {
+        fade.map_or(1.0, |(clear, opaque)| {
+            ((content.right() - x - clear * s) / ((opaque - clear) * s)).clamp(0.0, 1.0)
+        })
+    };
     if let Some(color) = dot {
         // An inline-block on the baseline, .45 opaque and .9 on the hovered or active tab
         // (`transition: opacity 50ms`).
@@ -596,7 +644,7 @@ fn pill(
         painter.rect_filled(
             rect,
             CornerRadius::from(2.0 * s),
-            color.gamma_multiply((0.45 + 0.45 * lit) * opacity),
+            color.gamma_multiply((0.45 + 0.45 * lit) * opacity * mask(rect.center().x)),
         );
     }
     if calendar {
@@ -614,10 +662,22 @@ fn pill(
             day,
             color,
             jiff::Zoned::now().day(),
-            shown * opacity,
+            shown * opacity * mask(day.center().x),
         );
     }
-    paint_text(&painter, line + vec2(lead, 0.0), galley, &style);
+    let origin = line + vec2(lead, 0.0);
+    // Its text, calendar included, is titled with the tab's address, else the title itself.
+    let titled = Rect::from_min_max(
+        pos2(if calendar { line.x } else { origin.x }, origin.y),
+        origin + galley.size(),
+    )
+    .intersect(content);
+    let galley = if fade.is_some() {
+        masked(&galley, origin.x, mask)
+    } else {
+        galley
+    };
+    paint_text(&painter, origin, galley, &style);
 
     // Copy link (always, off the login screen) and × (with more than one tab) appear on hover.
     let icons_visible = motion::transition(
@@ -628,6 +688,7 @@ fn pill(
         CubicBezier::EASE,
     );
     let mut action = response.clicked().then_some(Action::Select(index));
+    let mut on_button = false;
     let mut right = rect.right() - (1.0 + 3.0) * s;
     for (shown, icon, size, clicked) in [
         (
@@ -651,6 +712,7 @@ fn pill(
             Vec2::splat(ICON_BUTTON * s),
         );
         right -= (ICON_BUTTON + 3.0) * s;
+        on_button |= ui.rect_contains_pointer(button);
         if icon_button(
             ui,
             button,
@@ -664,7 +726,40 @@ fn pill(
             action = Some(clicked);
         }
     }
+    // The buttons are over the title, and keep its tooltip away.
+    let over_title = !on_button && ui.rect_contains_pointer(titled);
+    exo_ui::title(&ctx, titled, tab.email.unwrap_or(tab.title), over_title);
     action
+}
+
+/// As much of `text` (laid out in `galley`) as fits `room` on a line that breaks anywhere the
+/// line-breaking rules allow with `word-break: break-all`, without the spaces it breaks after,
+/// which hang.
+fn first_line<'a>(galley: &Galley, text: &'a str, room: f32) -> &'a str {
+    let mut options = LineBreakOptions::default();
+    options.word_option = Some(LineBreakWordOption::BreakAll);
+    LineSegmenter::new_for_non_complex_scripts(options)
+        .segment_str(text)
+        .map(|at| text[..at].trim_end())
+        .take_while(|line| {
+            let end = CCursor::new(line.chars().count());
+            galley.pos_from_cursor(end).min.x <= room + 0.01
+        })
+        .last()
+        .unwrap_or_default()
+}
+
+/// `galley`, painted with its left edge at `left`, with each glyph's vertices faded by `mask`
+/// at where they are.
+fn masked(galley: &Arc<Galley>, left: f32, mask: impl Fn(f32) -> f32) -> Arc<Galley> {
+    let mut faded = (**galley).clone();
+    for placed in &mut faded.rows {
+        let row_left = left + placed.pos.x;
+        for vertex in &mut Arc::make_mut(&mut placed.row).visuals.mesh.vertices {
+            vertex.color = vertex.color.gamma_multiply(mask(row_left + vertex.pos.x));
+        }
+    }
+    Arc::new(faded)
 }
 
 /// A 16px icon button in `color`, at `visibility` opacity. Returns whether it was clicked.
@@ -810,4 +905,97 @@ fn paint_calendar_day(painter: &egui::Painter, rect: Rect, color: Color32, day: 
         galley,
         &style,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_active_pill_keeps_125px_and_the_others_share_the_rest() {
+        assert_eq!(pill_widths(600.0, 3, Some(1), 125.0), vec![200.0; 3]);
+        assert_eq!(
+            pill_widths(325.0, 5, Some(4), 125.0),
+            vec![50.0, 50.0, 50.0, 50.0, 125.0]
+        );
+        assert_eq!(
+            pill_widths(325.0, 5, None, 125.0),
+            vec![65.0; 5],
+            "an unfocused window has no active pill"
+        );
+        assert_eq!(pill_widths(100.0, 1, Some(0), 125.0), vec![125.0]);
+    }
+
+    #[test]
+    fn a_long_title_shows_the_first_line_it_breaks_into() {
+        let ctx = egui::Context::default();
+        exo_ui::install(&ctx).expect("the system fonts load");
+        // Fonts load with the first frame.
+        ctx.run_ui(egui::RawInput::default(), |_| {})
+            .drop_without_applying_deltas();
+        let style = TextStyle::new(Font::new(Family::System, 400), 12.8, 22.0);
+        let title = "Important (16) - Exo";
+        let galley = exo_ui::layout(
+            &ctx,
+            LayoutJob::single_section(title.to_owned(), style.format(Color32::BLACK)),
+        );
+        let x = |text: &str| style.width(&ctx, text);
+        assert_eq!(first_line(&galley, title, 1000.0), title);
+        assert_eq!(
+            first_line(&galley, title, x("Important (16") + 1.0),
+            "Important (1",
+            "no break before the `)` that follows"
+        );
+        assert_eq!(
+            first_line(&galley, title, x("Important ") + 1.0),
+            "Important",
+            "the space it breaks after hangs"
+        );
+        assert_eq!(first_line(&galley, title, 1.0), "");
+    }
+
+    #[test]
+    fn a_pills_title_is_titled_with_its_address_else_its_title() {
+        let ctx = egui::Context::default();
+        exo_ui::install(&ctx).expect("the system fonts load");
+        let screen = Rect::from_min_size(Pos2::ZERO, vec2(1280.0, 800.0));
+        let frame = |pointer: Pos2| {
+            let input = egui::RawInput {
+                screen_rect: Some(screen),
+                events: vec![egui::Event::PointerMoved(pointer)],
+                ..Default::default()
+            };
+            ctx.run_ui(input, |ui| {
+                set_tabs(
+                    ui.ctx(),
+                    vec![
+                        Pill {
+                            title: "Exo".into(),
+                            login_screen: true,
+                            ..Pill::default()
+                        },
+                        Pill::default(),
+                    ],
+                    1,
+                );
+                let tab = Tab {
+                    title: "Important (16) - Exo",
+                    email: Some("maya@brightmoor.co"),
+                    login_screen: false,
+                    account_color: Some("sea"),
+                };
+                show(ui, tab, Backdrop::Page);
+            })
+            .drop_without_applying_deltas();
+            exo_ui::take_titles(&ctx)
+        };
+        frame(Pos2::ZERO);
+        let title = frame(Pos2::ZERO)[1].rect;
+        let titles = frame(title.center());
+        let texts: Vec<(&str, bool)> = titles
+            .iter()
+            .map(|title| (title.text.as_str(), title.hovered))
+            .collect();
+        assert_eq!(texts, [("Exo", false), ("maya@brightmoor.co", true)]);
+    }
 }

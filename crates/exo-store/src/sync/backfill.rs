@@ -9,7 +9,7 @@ use gmail::ListQuery;
 use jiff::Timestamp;
 
 use super::{ATTEMPTS, Rows, fetch_rows};
-use crate::db::{ListCursor, MessageRow, ThreadRow};
+use crate::db::{self, ListCursor, ListEntry, MessageRow, ThreadRow};
 use crate::error::{Error, Result};
 use crate::ids::ListId;
 use crate::provider;
@@ -53,11 +53,23 @@ const PLAN: [(ListId, Limit); 4] = [
     (ListId::Important, Limit::Cap(LIST_CAP)),
     (ListId::Other, Limit::Cap(LIST_CAP)),
 ];
+/// The other lists people open most, which each round tops up a page at a time until they have
+/// [`WARM`] threads stored without a gap, so they open full, offline too. The inbox lists and the
+/// splits have passes of their own, and reminders and scheduled sends are all stored.
+pub(crate) const WARMED: [ListId; 5] = [
+    ListId::Sent,
+    ListId::Starred,
+    ListId::Done,
+    ListId::Drafts,
+    ListId::Muted,
+];
+/// Two screenfuls.
+const WARM: u32 = 2 * FIRST_SCREEN;
 
 impl Inner {
     /// One page of every background pass (All Mail, Inbox, Important, Other and every split),
-    /// then a page of the bodies the app shows first (`bodies`). Returns whether any has more to
-    /// do.
+    /// then one of each [`WARMED`] list short of [`WARM`] threads, then a page of the bodies the
+    /// app shows first (`bodies`). Returns whether any has more to do.
     pub(super) async fn backfill_round(&self) -> Result<bool> {
         let splits = self.router().splits;
         let on_screen = self
@@ -78,6 +90,26 @@ impl Inner {
                     more |= page.more;
                     break;
                 }
+            }
+        }
+        for list in &WARMED {
+            if self.is_warm(list).await? {
+                continue;
+            }
+            // Gmail is asked only past what All Mail's pass covers, since a list's first page
+            // starts where that pass ends.
+            let page = {
+                let _sync = self.lock_sync().await?;
+                self.backfill_page(list, Limit::None, 0).await
+            };
+            match page {
+                Ok(page) => more |= page.more,
+                // Muted's label gone (deleted in Gmail, say) leaves the list to fill when it's
+                // opened, and the round goes on.
+                Err(error @ (Error::Gmail(_) | Error::NotSynced(_))) => {
+                    log::warn!("filling {list:?} ahead: {error}");
+                }
+                Err(error) => return Err(error),
             }
         }
         let bodies = {
@@ -187,6 +219,30 @@ impl Inner {
             seen: updated.seen,
             more: !finished(&updated, limit),
         })
+    }
+}
+
+impl Inner {
+    /// Whether `list` has [`WARM`] threads stored without a gap, or everything Gmail has.
+    async fn is_warm(&self, list: &ListId) -> Result<bool> {
+        let mut db = self.db.clone();
+        let Some(bound) = db::coverage(&mut db, list).await? else {
+            return Ok(false);
+        };
+        if bound == i64::MIN {
+            return Ok(true);
+        }
+        let fields = ListEntry::fields();
+        let covered = ListEntry::filter(
+            fields
+                .list_id()
+                .in_list(list.members())
+                .and(fields.sort().ge(bound)),
+        )
+        .limit(WARM as usize)
+        .exec(&mut db)
+        .await?;
+        Ok(covered.len() >= WARM as usize)
     }
 }
 

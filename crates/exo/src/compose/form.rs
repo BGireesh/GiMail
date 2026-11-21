@@ -922,6 +922,8 @@ pub(super) fn show(ui: &mut Ui, open: &mut Open, rect: Rect, cx: &Context<'_>) -
     {
         super::assistant::edit_mention(open, cx.book);
     }
+    let find = viewport
+        .map(|viewport| exo_ui::find::Scope::begin(&ctx, find_scope(&ctx, open), viewport, scroll));
     let edited = open.editor.ui(
         &mut body_ui,
         &EditorStyle {
@@ -929,6 +931,7 @@ pub(super) fn show(ui: &mut Ui, open: &mut Open, rect: Rect, cx: &Context<'_>) -
             min_height: layout.body_height,
         },
     );
+    drop(find);
     if edited.changed {
         open.touch(now);
     }
@@ -1154,12 +1157,7 @@ pub(super) fn show(ui: &mut Ui, open: &mut Open, rect: Rect, cx: &Context<'_>) -
     let focused_on = |field: Field| cx.focused && open.state.field == field;
     // A snippet's label is `Done`, and a draft with a Send later time (not one a reply called
     // off) says `Schedule`.
-    let scheduled = open
-        .record
-        .send_later
-        .as_ref()
-        .filter(|_| open.unscheduled_by.is_none())
-        .map(|later| later.at);
+    let scheduled = open.scheduled_at();
     let label = if open.is_snippet() {
         "Done"
     } else if scheduled.is_some() {
@@ -1555,10 +1553,13 @@ fn scroll_body(
         pos2(origin.x + width, origin.y + scrolled.bottom),
     );
     let editor_bottom = layout.body_top + open.body_height;
+    let find = exo_ui::find::reveal(ui.ctx(), find_scope(ui.ctx(), open));
     let scroll = &mut open.body_scroll;
     if ui.rect_contains_pointer(viewport.with_max_x(viewport.right() + SCROLLBAR_RIGHT)) {
         scroll.offset -= ui.input(|input| input.smooth_scroll_delta.y);
     }
+    // Find scrolls at once to a match out of view.
+    scroll.offset += find.map_or(0.0, |delta| delta.y);
     if let Some(caret) = scroll.caret.filter(|_| std::mem::take(&mut scroll.reveal)) {
         scroll.offset += reveal(
             caret.translate(vec2(0.0, layout.body_top)),
@@ -1575,6 +1576,11 @@ fn scroll_body(
         most,
     ));
     viewport
+}
+
+/// What find calls the body's scroll area.
+fn find_scope(ctx: &egui::Context, open: &Open) -> egui::Id {
+    exo_ui::id(ctx, ("compose-body-find", &open.id))
 }
 
 /// The header's rows past its max height, with its box `area` on screen. The wheel over the box
@@ -2448,6 +2454,39 @@ fn placeholder(open: &Open, cx: &Context<'_>) -> Option<String> {
     Some(if note { "Write a note" } else { "Say hello" }.into())
 }
 
+/// The form as it prints: `Draft to …`, or the recipient lists the header shows (From left out),
+/// then what's written, then the `…` when a quote or signature is behind one.
+pub(super) fn printout(open: &Open, aliases: &[Alias], me: &str) -> crate::print::Draft {
+    let header = if open.state.header_expanded {
+        let mut lists = vec![List::To];
+        if open.state.cc_bcc_shown {
+            lists.extend([List::Cc, List::Bcc]);
+        }
+        let chips = |list: List| {
+            open.list(list)
+                .iter()
+                .map(|address| crate::print::Chip {
+                    label: chip_label(address),
+                    invalid: !recipients::sendable(address),
+                })
+                .collect()
+        };
+        crate::print::DraftHeader::Lists(
+            lists
+                .into_iter()
+                .map(|list| (list.label(), chips(list)))
+                .collect(),
+        )
+    } else {
+        crate::print::DraftHeader::Collapsed(collapsed_text(open, me))
+    };
+    crate::print::Draft {
+        header,
+        body: open.editor.html(),
+        quote: open.has_hidden_quote(aliases),
+    }
+}
+
 /// The `{recipients}` of `Draft to {recipients}`: one person by full name, or several by first
 /// name (leaving you out), joined with `, ` and ` & `, then `. Bcc: …`. At most 15 are named
 /// before the Bcc.
@@ -2783,6 +2822,13 @@ fn show_row(
                     pressed: Some(picked),
                     ..
                 } => response.actions.push(Action::PickSuggestion(picked)),
+                // The pointer moving onto a row highlights it.
+                exo_ui::ContactListResponse {
+                    hovered: Some(hovered),
+                    ..
+                } if hovered != open.input(list).highlight => {
+                    response.actions.push(Action::HighlightSuggestion(hovered));
+                }
                 _ => {}
             }
         } else {
@@ -3011,7 +3057,7 @@ fn paint_drag_image(ui: &Ui, drag: &super::chips::Drag, ink: &Ink) {
 /// The suggestions under the input `input` (on screen), as `ContactSelectorList` draws them.
 /// There's a name column and an address column with the typed text dark in each, and the
 /// highlighted row is filled, with `Remove Suggestion` on it while hovered unless the row comes
-/// from the thread. Says which row the pointer picked (mouse-down picks) or removed.
+/// from the thread. Says which row the pointer picked (mouse-down picks), removed or moved onto.
 fn suggestions(
     ui: &Ui,
     input: Rect,
@@ -3118,6 +3164,7 @@ const FROM_ITEM_PADDING: f32 = 18.0;
 
 /// The From row's dropdown, from the row's top left `at`. It shows the alias's address, with a
 /// caret while hovered or focused, and when focused and open, its list of aliases under it.
+/// Hovered, it shows the alias in the contact pane.
 fn from_row(
     ui: &Ui,
     open: &mut Open,
@@ -3175,6 +3222,10 @@ fn from_row(
             caret,
             ink.text(1.0).gamma_multiply(0.5 * shown),
         );
+    }
+    // Actions go to the draft with the keyboard.
+    if button.hovered() && cx.focused {
+        response.actions.push(Action::HoverFrom);
     }
     if button.clicked() {
         if !focused {

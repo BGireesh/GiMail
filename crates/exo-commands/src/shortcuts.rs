@@ -6,7 +6,7 @@ use egui::{
     text::{CCursor, CCursorRange},
 };
 use exo_ui::{
-    BoxShadow, Family, Font, KeycapColors, Keycaps, TextStyle, focus_field, motion, palette,
+    BoxShadow, Family, Font, KeycapColors, Keycaps, TextStyle, Theme, focus_field, motion, palette,
     pixel_snap, rem, text_field,
 };
 
@@ -20,8 +20,9 @@ struct Section {
 }
 
 /// The table as a Gmail account without AI or a team sees it, so without the rows for AI features:
-/// `Ask AI`, `Summarize`, the AI assistant and its `Create Empty Event`. `Send later` and compose's
-/// `Remind me` are listed, because Exo schedules sends and keeps reminders itself.
+/// `Ask AI`, `Summarize` and the AI assistant. `Send later` and compose's `Remind me` are listed,
+/// because Exo schedules sends and keeps reminders itself, and so is `Create Empty Event`, which
+/// Exo has though only an account with AI lists it.
 const SECTIONS: &[Section] = &[
     Section {
         title: "Actions",
@@ -184,6 +185,7 @@ const SECTIONS: &[Section] = &[
             ("Next Day/Week", "="),
             ("Share Availability", "⌘ shift A"),
             ("Create Event", "B"),
+            ("Create Empty Event", "shift B"),
         ],
     },
     Section {
@@ -305,7 +307,12 @@ impl Shortcuts {
             snapped,
             CornerRadius::ZERO,
         );
-        painter.rect_filled(snapped, 0.0, tokens.background_base_default);
+        // White, and `#18191a` in Carbon.
+        let fill = match tokens.theme {
+            Theme::Snow => tokens.background_base_default,
+            Theme::Carbon => Color32::from_rgb(0x18, 0x19, 0x1a),
+        };
+        painter.rect_filled(snapped, 0.0, fill);
 
         // Search field: a 28px row with the brand bar on the panel's left edge.
         let header_top = panel.top() + 28.0;
@@ -372,12 +379,17 @@ impl Shortcuts {
             KeycapColors::shortcuts_pane(tokens),
             KeycapColors::shortcuts_pane_highlighted(tokens),
         );
+        // A matching row's band: `hsl(220, 45%, 97%)`, Carbon white at `.05`.
+        let matched_fill = match tokens.theme {
+            Theme::Snow => Color32::from_rgb(0xf4, 0xf6, 0xfb),
+            Theme::Carbon => Color32::from_white_alpha(13),
+        };
         for (section, matches) in &sections {
             TITLE.paint_line(
                 &column_painter,
                 Pos2::new(name_left, y + 3.0),
                 section.title,
-                tokens.text_base_default,
+                tokens.ink(0.85, 0.85),
                 None,
             );
             y += 20.0 + 8.0;
@@ -395,14 +407,14 @@ impl Shortcuts {
                     column_painter.rect_filled(
                         pixel_snap(row),
                         0.0,
-                        tokens.fill_active_default.gamma_multiply(highlight),
+                        matched_fill.gamma_multiply(highlight),
                     );
                 }
                 NAME.paint_line(
                     &column_painter,
                     Pos2::new(name_left, y + 3.0),
                     name,
-                    tokens.text_base_default,
+                    tokens.ink(0.7, 0.7),
                     None,
                 );
                 let colors = KeycapColors {

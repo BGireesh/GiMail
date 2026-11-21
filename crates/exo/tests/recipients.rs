@@ -127,6 +127,7 @@ fn exclude_from_auto_bcc_adds_the_sender_or_their_domain_once() {
 #[test]
 fn a_removed_suggestion_stays_out_until_undone_or_written_to() {
     let mut app = start("recipients-remove-suggestion");
+    app.settle();
     app.key(Key::C);
     app.type_text("pa");
     app.wait(0.3);
@@ -243,6 +244,33 @@ fn the_contact_pane_shows_a_replys_selected_chip() {
         app.mail().contact_pane_email(),
         Some("carlos@pemberton-cpa.com"),
         "whom the reply just got"
+    );
+}
+
+#[test]
+fn a_highlighted_suggestion_shows_in_the_contact_pane() {
+    let mut app = start("recipients-pane-suggestion");
+    let found = suggest(&mut app, "brightmoor");
+    assert_eq!(found[1], "Priya Raman priya@brightmoor.co");
+    // The pointer moving onto the second row highlights it.
+    let ctx = app.harness.ctx.clone();
+    let input = ctx
+        .memory(|memory| memory.focused())
+        .and_then(|focused| ctx.read_response(focused))
+        .expect("To has the keyboard")
+        .rect;
+    app.hover(egui::pos2(
+        input.left() + 40.0,
+        input.bottom() + 6.0 + 11.0 + 48.0,
+    ));
+    app.wait(0.1);
+    assert_eq!(app.mail().contact_pane_email(), Some("priya@brightmoor.co"));
+    app.key(Key::ArrowDown);
+    app.wait(0.1);
+    assert_eq!(
+        app.mail().contact_pane_email(),
+        Some("tom@brightmoor.co"),
+        "and so does ↓"
     );
 }
 

@@ -1,16 +1,24 @@
 //! The account's bulk actions, queued and run one at a time on the account's runtime, straight
 //! against Gmail (exo-store's `Store::bulk`). Each is undoable while it waits (which cancels it),
-//! while it runs (which stops it and puts back what it did) and after.
+//! while it runs (which stops it and puts back what it did) and after. The store's log keeps a
+//! week of them with what each changed, so after a relaunch they're listed and can still be put
+//! back, and one that a quit stopped carries on.
 
 use std::{
     collections::HashSet,
     sync::{Arc, Mutex, MutexGuard},
 };
 
-use exo_store::{BulkTarget, Mutation, Progress, Relabelled, Store};
+use exo_store::{
+    BulkRecord, BulkState, BulkTarget, LoggedBulk, Mutation, Progress, Relabelled, Store,
+};
 use tokio::sync::Notify;
 
 use crate::account::{Repaint, UndoToken};
+
+/// The tokens of the bulk actions read back from the log: the entry's id with the top bit set,
+/// which this session's own tokens, counting up from 0, never reach.
+const LOGGED: UndoToken = 1 << 63;
 
 /// Where a bulk action is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -35,7 +43,7 @@ pub struct Summary {
     /// The toast's undo token, which also names it.
     pub token: UndoToken,
     /// What it does, such as `Mark Done`.
-    pub name: &'static str,
+    pub name: String,
     /// What it's on, as the Bulk Actions dialog shows it.
     pub query: Option<String>,
     /// Where it is.
@@ -72,6 +80,77 @@ struct Job {
     progress: Arc<Progress>,
     /// What it changed, to put back.
     changed: Relabelled,
+    /// Its entry in the log, and the state the entry has, once it's written.
+    logged: Option<(u64, BulkState)>,
+}
+
+impl Job {
+    /// One read back from the log.
+    fn read(entry: LoggedBulk) -> Self {
+        let LoggedBulk {
+            id,
+            record,
+            changed,
+        } = entry;
+        let status = match record.state {
+            BulkState::Pending => Status::Pending,
+            BulkState::Done => Status::Done,
+            BulkState::Undoing => Status::Undoing,
+            BulkState::Undone => Status::Undone,
+            BulkState::Failed => Status::Failed,
+        };
+        let progress = match record.state {
+            BulkState::Pending | BulkState::Undoing => Progress::default(),
+            BulkState::Done | BulkState::Undone | BulkState::Failed => {
+                Progress::ended(record.count)
+            }
+        };
+        Self {
+            summary: Summary {
+                token: LOGGED | id,
+                name: record.name,
+                query: record.query,
+                status,
+                active: false,
+                threads: Arc::default(),
+                done: 0,
+                total: 0,
+            },
+            mutation: record.mutation,
+            target: record.target,
+            progress: Arc::new(progress),
+            changed,
+            logged: Some((id, record.state)),
+        }
+    }
+
+    /// Where the log has it. One running is still to finish, should a quit stop it.
+    fn state(&self) -> BulkState {
+        match self.summary.status {
+            Status::Pending | Status::Running => BulkState::Pending,
+            Status::Done => BulkState::Done,
+            Status::Undoing => BulkState::Undoing,
+            Status::Undone => BulkState::Undone,
+            Status::Failed => BulkState::Failed,
+        }
+    }
+
+    /// What the log keeps of it.
+    fn record(&self) -> BulkRecord {
+        let state = self.state();
+        BulkRecord {
+            name: self.summary.name.clone(),
+            query: self.summary.query.clone(),
+            mutation: self.mutation.clone(),
+            target: self.target.clone(),
+            state,
+            count: match state {
+                // What its undo put back.
+                BulkState::Undone => self.progress.total(),
+                _ => self.changed.len(),
+            },
+        }
+    }
 }
 
 /// The bulk actions, shared between the UI and the task running them.
@@ -88,21 +167,25 @@ struct Shared {
 
 /// What the runner does next.
 enum Work {
-    Run(BulkTarget, Mutation, Arc<Progress>),
+    /// Run it, adding to what it has changed already (before a quit stopped it).
+    Run(BulkTarget, Mutation, Arc<Progress>, Relabelled),
     Undo(Relabelled, Arc<Progress>),
 }
 
 impl Jobs {
     /// Starts the task that runs `store`'s bulk actions on the current runtime, and starts it
-    /// again after a panic as `restarts` says. `repaint` asks for frames as they move on.
+    /// again after a panic as `restarts` says. `repaint` asks for frames as they move on. The
+    /// bulk actions `logged` in an earlier session come first, and those still to run or to put
+    /// back carry on.
     pub(crate) fn start(
         store: Store,
         repaint: Repaint,
         restarts: &Arc<crate::recovery::Restarts>,
+        logged: Vec<LoggedBulk>,
     ) -> Self {
         let jobs = Self {
             shared: Arc::new(Shared {
-                jobs: Mutex::new(Vec::new()),
+                jobs: Mutex::new(logged.into_iter().map(Job::read).collect()),
                 wake: Notify::new(),
                 repaint,
             }),
@@ -132,7 +215,7 @@ impl Jobs {
         } = request;
         let summary = Summary {
             token,
-            name,
+            name: name.to_owned(),
             query,
             status: Status::Pending,
             active: false,
@@ -146,6 +229,7 @@ impl Jobs {
             target,
             progress: Arc::default(),
             changed: Relabelled::default(),
+            logged: None,
         });
         self.shared.wake.notify_one();
     }
@@ -158,7 +242,11 @@ impl Jobs {
             return false;
         };
         match job.summary.status {
-            Status::Pending => job.summary.status = Status::Undone,
+            Status::Pending => {
+                job.summary.status = Status::Undone;
+                // For the log.
+                self.shared.wake.notify_one();
+            }
             Status::Running => {
                 job.progress.stop();
                 job.summary.status = Status::Undoing;
@@ -172,7 +260,7 @@ impl Jobs {
         true
     }
 
-    /// Every bulk action of this session, oldest first.
+    /// Every bulk action of this session and those logged in the last week, oldest first.
     pub fn summaries(&self) -> Vec<Summary> {
         self.lock()
             .iter()
@@ -203,20 +291,63 @@ impl Jobs {
         job.summary.active = true;
         let work = if job.summary.status == Status::Pending {
             job.summary.status = Status::Running;
+            // A logged one's entry keeps what it changes as it goes.
+            job.progress = Arc::new(
+                job.logged
+                    .map_or_else(Progress::default, |(id, _)| Progress::logged(id)),
+            );
             Work::Run(
                 job.target.clone(),
                 job.mutation.clone(),
                 job.progress.clone(),
+                job.changed.clone(),
             )
         } else {
             job.progress = Arc::default();
-            Work::Undo(std::mem::take(&mut job.changed), job.progress.clone())
+            Work::Undo(job.changed.clone(), job.progress.clone())
         };
         Some((job.summary.token, work))
     }
 
+    /// Writes to the store's log what it doesn't have yet: the new bulk actions, and the others'
+    /// new states with what they changed.
+    async fn log(&self, store: &Store) {
+        let due: Vec<(UndoToken, Option<u64>, BulkRecord, Relabelled)> = self
+            .lock()
+            .iter()
+            .filter(|job| job.logged.map(|(_, state)| state) != Some(job.state()))
+            .map(|job| {
+                (
+                    job.summary.token,
+                    job.logged.map(|(id, _)| id),
+                    job.record(),
+                    job.changed.clone(),
+                )
+            })
+            .collect();
+        for (token, id, record, changed) in due {
+            let written = match id {
+                Some(id) => store.relog_bulk(id, &record, &changed).await.map(|()| id),
+                None => store.log_bulk(&record, &changed).await,
+            };
+            match written {
+                Ok(id) => {
+                    if let Some(job) = self
+                        .lock()
+                        .iter_mut()
+                        .find(|job| job.summary.token == token)
+                    {
+                        job.logged = Some((id, record.state));
+                    }
+                }
+                Err(error) => log::error!("logging a bulk action: {error}"),
+            }
+        }
+    }
+
     async fn run(self, store: Store) {
         loop {
+            self.log(&store).await;
             let Some((token, work)) = self.next() else {
                 self.shared.wake.notified().await;
                 continue;
@@ -224,8 +355,7 @@ impl Jobs {
             self.shared.repaint.request();
             // What it changed (still to put back, when an undo failed), and whether it worked.
             let (changed, ran, ok) = match work {
-                Work::Run(target, mutation, progress) => {
-                    let mut changed = Relabelled::default();
+                Work::Run(target, mutation, progress, mut changed) => {
                     let result = store
                         .bulk(&target, &mutation, &progress, &mut changed)
                         .await;

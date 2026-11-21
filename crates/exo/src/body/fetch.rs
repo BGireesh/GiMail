@@ -79,7 +79,7 @@ impl exo_mail::Fetch for Fetcher {
             match named(&self.inline, cid) {
                 Some(attachment) => self
                     .loader
-                    .attachment(attachment, |bytes| finish(bytes.ok())),
+                    .inline_image(attachment, |bytes| finish(bytes.ok())),
                 None => log::debug!("no inline attachment for a `cid:` link"),
             }
         } else if url.starts_with("https://") || url.starts_with("http://") {

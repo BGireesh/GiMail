@@ -259,13 +259,19 @@ impl crate::Mail {
         super::snippets::apply(open, snippet, &aliases, book, at_start, now);
     }
 
-    /// `Use Snippet Inline` gives the body the keyboard, with its caret at the end unless the
-    /// body already had the keyboard. Then a `;` (after a no-break space when the caret follows a
-    /// word) opens the picker there.
+    /// `Use Snippet Inline` types a `;`, which opens the picker. In a new message's subject it
+    /// goes in at the caret ([`super::subject::use_snippet`]). Otherwise the body gets the
+    /// keyboard, with its caret at the end unless the body already had the keyboard, and the `;`
+    /// goes after a no-break space when the caret follows a word.
     pub(crate) fn snippet_inline(&mut self, now: f64) {
         let Some(open) = self.compose.focused_mut() else {
             return;
         };
+        if open.state.field == Field::Subject && open.is_new_email() {
+            super::subject::use_snippet(open);
+            open.touch(now);
+            return;
+        }
         if open.state.field != Field::Body {
             open.state.field = Field::Body;
             let end = open.editor.document().end();

@@ -102,8 +102,9 @@ fn the_folder_drawer_goes_to_snippets_and_opens_on_it_there() {
 #[test]
 fn the_contact_panes_mail_header_searches_their_address() {
     let mut app = start("pane-mail-header");
-    // The Mail header of the first row's contact pane, at 1280×800.
-    app.click(Pos2::new(1100.0, 174.0));
+    // The Mail header of the first row's contact pane, at 1280×800, under Tom's photo and
+    // company.
+    app.click(Pos2::new(1100.0, 273.0));
     assert_eq!(
         app.mail().search_query().map(str::trim),
         Some("tom@brightmoor.co")

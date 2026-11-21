@@ -77,6 +77,21 @@ pub(super) struct Library {
 }
 
 impl Library {
+    /// Shows role `index`'s templates alone, from the top.
+    pub(super) fn show_role(&mut self, index: usize) {
+        self.role = Some(index);
+        self.search.clear();
+        self.category = None;
+        self.scroll = 0.0;
+        self.target = None;
+    }
+
+    /// The role whose templates show alone, if one's picked.
+    #[cfg(test)]
+    pub(super) fn role(&self) -> Option<usize> {
+        self.role
+    }
+
     /// Whether the search shows its results in place of the sections.
     fn searching(&self) -> bool {
         !self.search.trim().is_empty() && self.role.is_none() && self.category.is_none()
@@ -438,11 +453,7 @@ pub(super) fn show(
             .map(|top| (top + 8.0).min(max_scroll));
     }
     if let Some(index) = clicked_role {
-        state.role = Some(index);
-        state.search.clear();
-        state.category = None;
-        state.scroll = 0.0;
-        state.target = None;
+        state.show_role(index);
     }
     if ui.rect_contains_pointer(viewport) {
         let delta = ui.input(|input| input.smooth_scroll_delta.y);
@@ -466,6 +477,12 @@ pub(super) fn show(
             ctx.request_repaint();
         }
     }
+    // Find scrolls at once to a match out of view.
+    let find = exo_ui::id(&ctx, "split-library-find");
+    if let Some(delta) = exo_ui::find::reveal(&ctx, find) {
+        state.target = None;
+        state.scroll += delta.y;
+    }
     state.scroll = state.scroll.clamp(0.0, max_scroll);
     // The scroll spy: the last category whose top is within 50px of the viewport's.
     if state.target.is_none() && state.role.is_none() && !state.searching() {
@@ -485,6 +502,9 @@ pub(super) fn show(
     );
     let mut content = ui.new_child(egui::UiBuilder::new().max_rect(viewport));
     content.set_clip_rect(viewport.intersect(ui.clip_rect()));
+    let _find = exo_ui::find::Scope::begin(&ctx, find, viewport, state.scroll);
+    // While find searches, the cards out of view are painted too, for it to find.
+    let searching = exo_ui::find::searching(&ctx);
     for (section, top) in shown.iter().zip(&tops) {
         let mut y = viewport.top() + top - state.scroll + 8.0;
         if let Some(name) = section.name {
@@ -505,7 +525,8 @@ pub(super) fn show(
                     pos2(left + (column + GRID_GAP) * index as f32, y + row_top),
                     vec2(column, *row_height),
                 );
-                if rect.bottom() < viewport.top() || rect.top() > viewport.bottom() {
+                if !searching && (rect.bottom() < viewport.top() || rect.top() > viewport.bottom())
+                {
                     continue;
                 }
                 let response = content

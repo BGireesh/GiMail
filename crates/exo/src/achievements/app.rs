@@ -114,14 +114,14 @@ impl Mail {
     }
 
     /// Paints `Week N` over the photo (`window`), under the app. When that isn't playing, paints
-    /// the dim layer behind the popups at Inbox Zero instead (150ms).
+    /// the dim layer behind the popups at Inbox Zero instead (150ms), and returns how far it's in.
     pub(crate) fn paint_behind_app(
         &mut self,
         ctx: &Context,
         painter: &egui::Painter,
         window: Rect,
         now: f64,
-    ) {
+    ) -> f32 {
         if let Some(animation) = self
             .achievements
             .animation
@@ -129,7 +129,7 @@ impl Mail {
         {
             animation.paint(painter, window, now);
             ctx.request_repaint();
-            return;
+            return 0.0;
         }
         self.achievements.animation = None;
         let dim = exo_ui::motion::transition(
@@ -146,17 +146,12 @@ impl Mail {
                 egui::Color32::from_black_alpha((51.0 * dim).round() as u8),
             );
         }
+        dim
     }
 
     /// Shows the dialog, then the popups over the page (below the tab strip) and above the
     /// regular toast.
-    pub(crate) fn show_achievement_overlays(
-        &mut self,
-        ctx: &Context,
-        page: Rect,
-        zero: bool,
-        now: f64,
-    ) {
+    pub(crate) fn show_achievement_overlays(&mut self, ctx: &Context, page: Rect, now: f64) {
         let shown = self.achievements.dialog;
         let statistics = self.account.settings().statistics.clone();
         let seen = self.account.device_settings().achievements.clone();
@@ -186,10 +181,20 @@ impl Mail {
             ctx,
             page,
             self.commands.toast_bottom() + step * under as f32,
-            zero,
             now,
         ) {
             self.show_achievements(view);
         }
+    }
+
+    /// Keeps the toasts' stack in order once it's painted, back to front: the popups, oldest
+    /// first, then the file notifications, newest first, then the toast. It's over the dialogs,
+    /// and under the command palette.
+    pub(crate) fn stack_toasts(&self, ctx: &Context) {
+        let mut cards = self.achievements.popups.layers(ctx);
+        cards.extend(self.attachment_files.notification_layers(ctx).iter().rev());
+        cards.extend(self.commands.toast_layer(ctx));
+        let palette = self.commands.region() == exo_commands::Region::Command;
+        exo_ui::ToastView::stack(ctx, &cards, !palette);
     }
 }

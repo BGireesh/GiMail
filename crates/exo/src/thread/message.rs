@@ -38,6 +38,8 @@ const HEADER_LABEL: f32 = 60.0;
 /// A collapsed row's sender: at least 85px wide, then 15px of padding.
 pub(super) const FROM_MIN_WIDTH: f32 = 85.0;
 pub(super) const FROM_PADDING: f32 = 15.0;
+/// A collapsed row's attachment icon and its margin take 27px before the date.
+pub(super) const DATE_ICON: f32 = 27.0;
 /// A sent message's date has `padding-left: 14px`. The reply buttons' legacy glyphs are 13×9,
 /// 28px apart and 3px below the line's top, with Forward's right edge where the date's padding
 /// starts.
@@ -413,11 +415,23 @@ pub(super) fn card(ui: &Ui, rect: Rect, layout: &Layout, kind: CardKind, marketi
     }
 }
 
-/// The focused card's bar: 3px of `rgb(190.2, 192.6, 227.8)`.
-const FOCUS: Color32 = Color32::from_rgb(190, 193, 228);
+/// The focused card's bar: 3px of `rgb(190.2, 192.6, 227.8)`, fading in over 66ms.
+pub(super) const FOCUS: Color32 = Color32::from_rgb(190, 193, 228);
+const FOCUS_FADE: f32 = 0.066;
 
-/// The focus bar down the card's left edge.
-fn focus_bar(ui: &Ui, rect: Rect, color: Color32) {
+/// The focus bar down the card's left edge, which fades in over 66ms as message `id` takes the
+/// focus, and goes at once.
+fn focus_bar(ui: &Ui, rect: Rect, color: Color32, id: &str, focused: bool) {
+    let shown = exo_ui::motion::transition_in(
+        ui.ctx(),
+        ui.id().with(("focus-bar", id)),
+        focused,
+        FOCUS_FADE,
+        exo_ui::motion::CubicBezier::LINEAR,
+    );
+    if shown <= 0.0 {
+        return;
+    }
     let bar = exo_ui::pixel_snap(Rect::from_min_size(rect.min, vec2(3.0, rect.height())));
     ui.painter().rect_filled(
         bar,
@@ -427,27 +441,36 @@ fn focus_bar(ui: &Ui, rect: Rect, color: Color32) {
             ne: 0,
             se: 0,
         },
-        color,
+        color.gamma_multiply(shown),
     );
 }
 
-/// A contact as message headers name them: the first name, `Me`,
-/// or the lower-cased address.
-fn name(contact: &Contact) -> String {
-    named(contact, NameFormat::First)
+/// A contact as message headers name them: the first name, `Me`, or the lower-cased address. In
+/// a spam conversation (`spam`) everyone is named in full, you too, so that a sender can't pass
+/// for someone you know.
+fn name(contact: &Contact, spam: bool) -> String {
+    if spam {
+        names::display_name(&person(contact), false, NameFormat::Full, false)
+    } else {
+        named(contact, NameFormat::First)
+    }
 }
 
 /// [`name`] in `format`.
 fn named(contact: &Contact, format: NameFormat) -> String {
-    names::display_name(
-        &Person::new(
-            contact.name.clone().unwrap_or_default(),
-            contact.email.clone(),
-        ),
-        contact.is_me,
-        format,
-        false,
+    names::display_name(&person(contact), contact.is_me, format, false)
+}
+
+fn person(contact: &Contact) -> Person {
+    Person::new(
+        contact.name.clone().unwrap_or_default(),
+        contact.email.clone(),
     )
+}
+
+/// Whether the conversation is spam, which its headers name everyone in full for.
+fn is_spam(thread: &ThreadDetail) -> bool {
+    thread.labels.iter().any(|label| label == "SPAM")
 }
 
 /// The people on the thread who aren't you.
@@ -467,7 +490,7 @@ fn others(thread: &ThreadDetail) -> usize {
 /// The participants: the sender, and in an expanded message ` to ` its recipients when the thread
 /// has more than one other person in it (or is all yours). With `full_names`
 /// (`showSenderFullNames`) the sender is named in full, unless it's you. The recipients keep their
-/// first names.
+/// first names. A spam conversation names everyone in full, and never says `Note to self`.
 pub(super) fn participants(
     message: &MessageDetail,
     thread: &ThreadDetail,
@@ -499,7 +522,8 @@ fn participant_pieces<'a>(
             .iter()
             .chain(&message.bcc.iter().collect::<Vec<_>>())
             .all(|contact| contact.is_me);
-    if expanded && everyone_me {
+    let spam = is_spam(thread);
+    if expanded && everyone_me && !spam {
         return vec![(
             if message.bcc.is_empty() {
                 "Note to self".into()
@@ -510,15 +534,10 @@ fn participant_pieces<'a>(
         )];
     }
     let from = sender
-        .map(|from| {
-            named(
-                from,
-                if full_names {
-                    NameFormat::Full
-                } else {
-                    NameFormat::First
-                },
-            )
+        .map(|from| match (spam, full_names) {
+            (true, _) => name(from, true),
+            (false, true) => named(from, NameFormat::Full),
+            (false, false) => named(from, NameFormat::First),
         })
         .unwrap_or_default();
     let mut pieces = vec![(from, sender)];
@@ -527,18 +546,22 @@ fn participant_pieces<'a>(
         return pieces;
     }
     pieces.push((" to ".into(), None));
-    join_pieces(&mut pieces, &recipients);
+    join_pieces(&mut pieces, &recipients, spam);
     // Whoever sent it, a message you got as Bcc says so too.
     if !message.bcc.is_empty() {
         pieces.push((". Bcc: ".into(), None));
-        join_pieces(&mut pieces, &message.bcc.iter().collect::<Vec<_>>());
+        join_pieces(&mut pieces, &message.bcc.iter().collect::<Vec<_>>(), spam);
     }
     pieces
 }
 
-/// Adds `contacts` to `pieces` as a list: each contact's name, `, ` between and ` & ` before the
-/// last.
-fn join_pieces<'a>(pieces: &mut Vec<(String, Option<&'a Contact>)>, contacts: &[&'a Contact]) {
+/// Adds `contacts` to `pieces` as a list: each contact's [`name`], `, ` between and ` & ` before
+/// the last.
+fn join_pieces<'a>(
+    pieces: &mut Vec<(String, Option<&'a Contact>)>,
+    contacts: &[&'a Contact],
+    spam: bool,
+) {
     for (at, contact) in contacts.iter().enumerate() {
         if at > 0 {
             pieces.push((
@@ -551,7 +574,7 @@ fn join_pieces<'a>(pieces: &mut Vec<(String, Option<&'a Contact>)>, contacts: &[
                 None,
             ));
         }
-        pieces.push((name(contact), Some(contact)));
+        pieces.push((name(contact, spam), Some(contact)));
     }
 }
 
@@ -561,6 +584,8 @@ fn join_pieces<'a>(pieces: &mut Vec<(String, Option<&'a Contact>)>, contacts: &[
 struct Condensed<'a> {
     sender: (String, Option<&'a Contact>),
     lead: &'a Contact,
+    /// The lead's [`name`].
+    lead_name: String,
     more: usize,
 }
 
@@ -587,6 +612,7 @@ fn condensed<'a>(
     Some(Condensed {
         sender: pieces.swap_remove(0),
         lead,
+        lead_name: name(lead, is_spam(thread)),
         more: recipients.len() - 1,
     })
 }
@@ -608,7 +634,7 @@ impl Condensed<'_> {
                 .size()
                 .x
         };
-        let lead_text = name(self.lead);
+        let lead_text = &self.lead_name;
         let count = (self.more > 0).then(|| format!("+{}", self.more));
         let (sender_me, lead_me) = (
             self.sender.1.is_some_and(|contact| contact.is_me),
@@ -620,7 +646,7 @@ impl Condensed<'_> {
             .map_or(0.0, |count| CONDENSED_COUNT_GAP + width(count));
         let (sender, lead) = condense(
             width(&self.sender.0),
-            width(&lead_text),
+            width(lead_text),
             to + count_width,
             room,
             sender_me,
@@ -637,7 +663,7 @@ impl Condensed<'_> {
         FROM.paint_line(
             painter,
             at + vec2(sender + to, 0.0),
-            &lead_text,
+            lead_text,
             color,
             Some(lead),
         );
@@ -832,9 +858,7 @@ pub(super) fn collapsed(
     if hovered || focused {
         card(ui, rect, layout, CardKind::Collapsed, false);
     }
-    if focused {
-        focus_bar(ui, rect, FOCUS);
-    }
+    focus_bar(ui, rect, FOCUS, &message.id, focused);
     let (left, right) = (layout.inner.left(), layout.inner.right());
     let line = rect.top() + PADDING_TOP;
 
@@ -890,7 +914,7 @@ pub(super) fn collapsed(
                 now,
                 ui.id().with(("date", &message.id)),
             );
-            left
+            date_icon(ui, message, left, line)
         }
     };
 
@@ -914,6 +938,35 @@ pub(super) fn collapsed(
     );
 }
 
+/// Paints a collapsed row's attachment icon before its date, which starts at `date_left`, on the
+/// line at `line`, and returns where the date's box then starts. The date's box sits 1px under
+/// the line. The paperclip (19×8, 3px down in it, `margin-right: 8px`) marks files, else the
+/// calendar (12×12 at the right of a 13px box 1px down in it, `margin-right: 14px`) an invite, both black at 40%
+/// (white in Carbon).
+fn date_icon(ui: &Ui, message: &MessageDetail, date_left: f32, line: f32) -> f32 {
+    let (name, offset, size) = match attachments::kind(message) {
+        exo_store::Attachments::Files => (
+            "legacy/DEPRECATED_paperclip",
+            vec2(0.0, 4.0),
+            vec2(19.0, 8.0),
+        ),
+        exo_store::Attachments::CalendarInvite => (
+            "legacy/DEPRECATED_calendar",
+            vec2(1.0, 2.0),
+            vec2(12.0, 12.0),
+        ),
+        exo_store::Attachments::None => return date_left,
+    };
+    let left = date_left - DATE_ICON;
+    exo_ui::paint_icon(
+        ui,
+        name,
+        exo_ui::pixel_snap(Rect::from_min_size(pos2(left, line) + offset, size)),
+        exo_ui::palette(ui.ctx()).ink(0.4, 0.4),
+    );
+    left
+}
+
 /// A collapsed row's snippet: cleaned, its whitespace collapsed, cut at a word with ` …` past 200
 /// characters or when `overflows` says it's wider than `available` px. The cut is estimated from
 /// the text's measured width, then an ellipsis trims what still overflows.
@@ -922,9 +975,22 @@ pub(super) fn snippet(
     available: f32,
     overflows: impl FnOnce(&str) -> bool,
 ) -> String {
-    let text = facts
+    cut_snippet(snippet_text(facts), available, overflows)
+}
+
+/// A body's snippet before it's cut to fit: its text up to the quote, whitespace collapsed.
+pub(super) fn snippet_text(facts: Option<&Facts>) -> String {
+    facts
         .map(|facts| measure::normalize_whitespace(clean_snippet(&facts.snippet)))
-        .unwrap_or_default();
+        .unwrap_or_default()
+}
+
+/// Cuts `text` with ` …` to `available` px, as [`snippet`] does.
+pub(super) fn cut_snippet(
+    text: String,
+    available: f32,
+    overflows: impl FnOnce(&str) -> bool,
+) -> String {
     if measure::utf16_len(&text) >= 200 {
         format!("{} …", measure::truncate(&text, 200, true))
     } else if overflows(&text) {
@@ -970,9 +1036,13 @@ pub(super) fn expanded(
         marketing,
     );
     let ink = Ink::new(ui.ctx(), marketing);
-    if state.focused && state.show_focus {
-        focus_bar(ui, rect, ink.focus);
-    }
+    focus_bar(
+        ui,
+        rect,
+        ink.focus,
+        &message.id,
+        state.focused && state.show_focus,
+    );
     let id = ui.id().with(("message-header", &message.id));
     let mut hit = if state.header_expanded {
         full_header(
@@ -1712,6 +1782,33 @@ mod tests {
             participants(&mine, &thread(vec![mine.clone()]), false, true),
             "Me",
             "your own name isn't written in full"
+        );
+    }
+
+    #[test]
+    fn spam_names_everyone_in_full() {
+        let me = contact("Maya Okafor", "maya@brightmoor.co", true);
+        let prize = contact("Prize Center", "winner@prize.example", false);
+        let tom = contact("Tom Becker", "tom@brightmoor.co", false);
+        let spam = |messages: Vec<MessageDetail>| ThreadDetail {
+            labels: vec!["SPAM".into()],
+            ..thread(messages)
+        };
+        let claim = message(prize, vec![me.clone(), tom]);
+        assert_eq!(
+            participants(&claim, &spam(vec![claim.clone()]), true, false),
+            "Prize Center to Maya Okafor & Tom Becker"
+        );
+        assert_eq!(
+            participants(&claim, &spam(vec![claim.clone()]), false, false),
+            "Prize Center",
+            "collapsed too"
+        );
+        let spoofed = message(me.clone(), vec![me]);
+        assert_eq!(
+            participants(&spoofed, &spam(vec![spoofed.clone()]), true, false),
+            "Maya Okafor to Maya Okafor",
+            "never `Note to self`"
         );
     }
 

@@ -1,10 +1,11 @@
 //! Renders Exo offscreen at 2× and saves a PNG, the same each run, for screenshot comparisons.
 //!
 //! usage: cargo run -p exo --example shot -- <out.png> [width height] [--keys KEYS] [--hover X,Y] [--theme snow|carbon|auto] [--settings FILE] [--device-settings FILE] [--pdf FILE]
-//!        [--signed-out [--sign-in-error | --no-client] | --revoked] [--accounts LIST] [--calendar-accounts LIST] [--photo] [--eml FILE]...
+//!        [--signed-out [--sign-in-error | --no-client] | --revoked] [--accounts LIST] [--calendar-accounts LIST] [--photo] [--contact-photos] [--eml FILE]...
 //!        [--connection offline|auth|gmail|throttled|disabled] [--fault JSON]...
 //!        [--teardown corrupt|full|locked|error] [--vacation JSON] [--calendar-event JSON]...
 //!        [--places "NAME|ADDRESS;…"] [--joined TIMESTAMP] [--inbox-zero-photo FILE] [--first-run] [--account-setup] [--welcome-alert]
+//!        [--first-get-me-to-zero]
 //!        [--updates]
 //!
 //! The account is an in-process gmail-mock with its defaults (seed 1, now 2026-11-17 09:00 New
@@ -36,7 +37,8 @@
 //! any day (the mock's day has `saad-chaudhry-G25LeMV7fAw.jpg`). `--first-run` opens the account
 //! as if for the first time on this Mac, under the welcome splash. `--account-setup` opens
 //! account setup at once. `--welcome-alert` opens the `Welcome to Exo` alert, which account
-//! setup ends on when the inbox is small.
+//! setup ends on when the inbox is small, and `--first-get-me-to-zero` the Get Me To Zero it
+//! ends on when it isn't.
 //!
 //! `--updates` gives Exo an updater whose checks never hear back, for ⌘K's `Check for Updates`:
 //! `--keys "Meta+k type:check%20for%20updates Enter"` shows `Checking for updates…`.
@@ -50,6 +52,8 @@
 //! the device after the mock's account (`!` marks one that Google signed out). They sign in on the
 //! mock's mailbox, and the mock's account opens. `--photo` gives the mock's account a profile
 //! photo of its own (gmail-mock's `--photo`), and signs it in as `--accounts` does.
+//! `--contact-photos` gives the mock's saved contacts and colleagues photos of their own
+//! (gmail-mock's `--contact-photos`).
 //!
 //! `--teardown` shows the `Sorry!` alert for an account whose store can't be opened, for that
 //! reason (a corrupt or locked database, a full disk, another error), with nothing else on screen.
@@ -94,6 +98,7 @@ struct Options {
     /// Calendar accounts signed in for the mock's account (`--calendar-accounts`).
     calendar_accounts: Vec<String>,
     photo: bool,
+    contact_photos: bool,
     eml: Vec<String>,
     settings: Option<String>,
     device_settings: Option<String>,
@@ -109,6 +114,7 @@ struct Options {
     first_run: bool,
     account_setup: bool,
     welcome_alert: bool,
+    first_get_me_to_zero: bool,
     updates: bool,
 }
 
@@ -194,7 +200,7 @@ impl gmail::TokenProvider for Refreshing {
 
 fn options() -> anyhow::Result<Options> {
     let mut args = std::env::args().skip(1);
-    let usage = "usage: shot <out.png> [width height] [--keys \"j x e\"] [--hover X,Y] [--theme snow|carbon|auto] [--settings FILE] [--device-settings FILE] [--split-library FILE] [--signed-out [--sign-in-error | --no-client] | --revoked] [--accounts LIST] [--calendar-accounts LIST] [--photo] [--eml FILE]... [--connection offline|auth|gmail|throttled|disabled] [--fault JSON]... [--teardown corrupt|full|locked|error] [--vacation JSON] [--calendar-event JSON]... [--pdf FILE] [--places \"NAME|ADDRESS;…\"] [--joined TIMESTAMP] [--first-run] [--account-setup] [--welcome-alert]";
+    let usage = "usage: shot <out.png> [width height] [--keys \"j x e\"] [--hover X,Y] [--theme snow|carbon|auto] [--settings FILE] [--device-settings FILE] [--split-library FILE] [--signed-out [--sign-in-error | --no-client] | --revoked] [--accounts LIST] [--calendar-accounts LIST] [--photo] [--contact-photos] [--eml FILE]... [--connection offline|auth|gmail|throttled|disabled] [--fault JSON]... [--teardown corrupt|full|locked|error] [--vacation JSON] [--calendar-event JSON]... [--pdf FILE] [--places \"NAME|ADDRESS;…\"] [--joined TIMESTAMP] [--locale en_GB] [--first-run] [--account-setup] [--welcome-alert] [--first-get-me-to-zero]";
     let mut options = Options {
         out: args.next().context(usage)?,
         width: 1280.0,
@@ -209,6 +215,7 @@ fn options() -> anyhow::Result<Options> {
         accounts: None,
         calendar_accounts: Vec::new(),
         photo: false,
+        contact_photos: false,
         eml: Vec::new(),
         settings: None,
         device_settings: None,
@@ -224,6 +231,7 @@ fn options() -> anyhow::Result<Options> {
         first_run: false,
         account_setup: false,
         welcome_alert: false,
+        first_get_me_to_zero: false,
         updates: false,
     };
     let mut positional = Vec::new();
@@ -252,6 +260,7 @@ fn options() -> anyhow::Result<Options> {
                     .collect()
             }
             "--photo" => options.photo = true,
+            "--contact-photos" => options.contact_photos = true,
             "--eml" => options.eml.push(args.next().context(usage)?),
             "--settings" => options.settings = Some(args.next().context(usage)?),
             "--device-settings" => options.device_settings = Some(args.next().context(usage)?),
@@ -284,7 +293,11 @@ fn options() -> anyhow::Result<Options> {
             "--first-run" => options.first_run = true,
             "--account-setup" => options.account_setup = true,
             "--welcome-alert" => options.welcome_alert = true,
+            "--first-get-me-to-zero" => options.first_get_me_to_zero = true,
             "--updates" => options.updates = true,
+            "--locale" => exo::format::locale::install(exo::format::locale::Locale::named(
+                &args.next().context(usage)?,
+            )),
             "--places" => {
                 exo::places::answer_with(places(&percent_decode(&args.next().context(usage)?)))
             }
@@ -501,6 +514,7 @@ fn main() -> anyhow::Result<()> {
             .map(std::fs::read)
             .collect::<Result<_, _>>()?,
         photo: options.photo,
+        contact_photos: options.contact_photos,
         ..gmail_mock::Config::default()
     };
     let now = config.now.clone();
@@ -698,6 +712,9 @@ fn main() -> anyhow::Result<()> {
         }
         if options.welcome_alert {
             mail.welcome_to_exo();
+        }
+        if options.first_get_me_to_zero {
+            mail.open_first_get_me_to_zero();
         }
     }
     if let Some(file) = &options.inbox_zero_photo {

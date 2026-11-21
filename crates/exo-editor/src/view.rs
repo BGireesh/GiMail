@@ -174,6 +174,17 @@ pub struct ContextMenu {
     pub selection_baseline: Pos2,
     /// The selection's text size, for Look Up.
     pub text_size: f32,
+    /// The image clicked, once it has loaded.
+    pub image: Option<MenuImage>,
+}
+
+/// An image a right-click landed on: an inline one, or one in a kept table.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MenuImage {
+    /// Where it's from: its URL, or `cid:` and the Content-ID of one of the draft's files.
+    pub src: String,
+    /// Its file.
+    pub file: Arc<[u8]>,
 }
 
 /// What a key did beyond editing.
@@ -1244,6 +1255,7 @@ impl Editor {
         if response.secondary_clicked()
             && let Some(point) = response.interact_pointer_pos()
         {
+            exo_ui::claim_right_click(ui.ctx());
             self.right_click(ui, rect.min, point);
             response.request_focus();
             return;
@@ -1379,6 +1391,7 @@ impl Editor {
                 Selection::caret(pos)
             });
         }
+        let image = self.image_hit(origin, point);
         let selection = self.selection;
         let misspelling = self.misspelling_at(selection.start()).filter(|word| {
             Pos::new(word.block, word.range.start) == selection.start()
@@ -1401,6 +1414,10 @@ impl Editor {
             line.min.x,
             line.min.y + shift + text.style.baseline(ui.ctx()),
         );
+        let (image, link) = match image {
+            Some((image, around)) => (Some(image), around),
+            None => (None, link),
+        };
         self.view.context_menu = Some(ContextMenu {
             at: point,
             link,
@@ -1408,7 +1425,38 @@ impl Editor {
             selection: self.selected_text(),
             selection_baseline,
             text_size: text.style.size,
+            image,
         });
+    }
+
+    /// The loaded image under `point`, for an editor at `origin`, with the `href` of the link
+    /// around it: an inline image, or an `<img>` in a kept table.
+    fn image_hit(&self, origin: Pos2, point: Pos2) -> Option<(MenuImage, Option<String>)> {
+        let layout = self.view.layout.as_ref()?;
+        let (index, view, placed) =
+            layout.blocks.iter().enumerate().find_map(|(index, view)| {
+                let local = (point - origin - vec2(view.left, view.top)).to_pos2();
+                view.images
+                    .iter()
+                    .find(|placed| placed.rect.contains(local))
+                    .map(|placed| (index, view, placed))
+            })?;
+        if let Look::Table(key) = placed.look {
+            let at = point - origin - vec2(view.left, view.top) - placed.rect.min.to_vec2();
+            return self
+                .view
+                .tables
+                .image_at(key, at.to_pos2(), &self.view.pictures);
+        }
+        let at = Pos::new(index, placed.offset);
+        let src = ImageSource::of(self.image_element(at)?)?.key();
+        let file = self.view.pictures.file(&src)?;
+        let link = self.doc.blocks[index]
+            .slice(at.offset..at.offset + 1)
+            .pop()
+            .and_then(|run| run.marks.into_iter().find(|mark| mark.is("a")))
+            .and_then(|link| link.attr("href").map(str::to_owned));
+        Some((MenuImage { src, file }, link))
     }
 
     /// The word around `pos` (double click): letters and digits, or a run of spaces, or one

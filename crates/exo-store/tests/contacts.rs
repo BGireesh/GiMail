@@ -188,3 +188,37 @@ async fn the_fill_retries_through_gmail_errors() {
         newest_from_gmail(&harness, email).await
     );
 }
+
+#[tokio::test]
+async fn a_senders_newest_message_keeps_gmails_authentication_results() {
+    let harness = Harness::synced().await;
+    let raw = "From: Brand <news@brand.example>\r\nTo: maya@brightmoor.co\r\nSubject: Our news\r\nMessage-ID: <news-1@brand.example>\r\nAuthentication-Results: mx.google.com;\r\n       dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=brand.example\r\nContent-Type: text/plain\r\n\r\nHello.\r\n";
+    let delivered = harness
+        .deliver(serde_json::json!({ "raw": gmail::wire::encode_base64url(raw.as_bytes()) }))
+        .await;
+    harness.sync_all().await;
+    let results = |headers: Vec<exo_store::Header>| {
+        headers
+            .into_iter()
+            .find(|header| header.name == "Authentication-Results")
+            .map(|header| header.value)
+    };
+    let id = delivered.id.expect("an id");
+    let kept = harness
+        .store
+        .headers(&id)
+        .await
+        .expect("reads")
+        .expect("stored");
+    assert!(
+        results(kept).is_some_and(|value| value.contains("dmarc=pass")),
+        "a row keeps Gmail's verdict"
+    );
+    let newest = harness
+        .store
+        .latest_headers_from("news@brand.example")
+        .await
+        .expect("reads")
+        .expect("their message");
+    assert!(results(newest).is_some());
+}

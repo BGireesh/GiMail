@@ -157,7 +157,7 @@ const SECTIONS: &[Section] = &[
             ("Autocorrect", Action::Open(Dialog::Autocorrect)),
             ("Reminders", Action::Open(Dialog::Reminders)),
             ("Split Inbox", Action::Open(Dialog::SplitInbox)),
-            ("Split Inbox Library", Action::SplitLibrary),
+            ("Split Inbox Library", Action::SplitLibrary { role: None }),
         ],
     },
     Section {
@@ -345,10 +345,14 @@ pub fn show(
     } else {
         0.0
     };
+    // Find scrolls at once to a match out of view, as the wheel does.
+    let find = exo_ui::id(ui.ctx(), "settings-menu-find");
+    let wheel = wheel - exo_ui::find::reveal(ui.ctx(), find).map_or(0.0, |delta| delta.y);
     if wheel != 0.0 {
         scroll.offset = (scroll.offset - wheel).clamp(0.0, (height - list.height()).max(0.0));
         scroll.shadow = scroll.offset + list.height() < height;
     }
+    let find = exo_ui::find::Scope::begin(ui.ctx(), find, list, scroll.offset);
 
     let mut list_ui = ui.new_child(egui::UiBuilder::new().max_rect(list));
     list_ui.set_clip_rect(list.intersect(ui.clip_rect()));
@@ -434,6 +438,7 @@ pub fn show(
         clicked = Some(Action::SignOut);
     }
     LABEL.paint_line(&painter, label.min, SIGN_OUT, subdued, None);
+    drop(find);
 
     footer_shadow(ui, pane, rem, scroll.shadow && !zero);
     clicked

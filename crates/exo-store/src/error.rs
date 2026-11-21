@@ -28,6 +28,10 @@ pub enum Error {
     /// (`Event has been deleted`).
     #[error("the event has been cancelled")]
     EventCancelled,
+    /// Calendar doesn't have the event an answer is for, and the invitation is from a sender it
+    /// doesn't know, so it can't be added (`Failed to RSVP due to unknown sender`).
+    #[error("the invitation is from a sender Calendar doesn't know")]
+    UnknownSender,
     /// The local database failed.
     #[error("local database: {0}")]
     Database(#[from] toasty::Error),

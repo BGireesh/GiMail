@@ -1,11 +1,12 @@
 //! The Achievements dialog, with a banner showing the category's ribbon over its statistic cards.
-//! In the main view each card opens its category, and a category has a back button out of it.
+//! In the main view each card opens its category, and a category has a back button out of it. In
+//! a window too short for it, it scrolls.
 //!
 //! The ribbons' art is the system's emoji.
 
 use egui::{
-    Area, Color32, Context, CornerRadius, CursorIcon, Mesh, Order, Painter, Pos2, Rect, Sense, Ui,
-    Vec2, pos2, vec2,
+    Area, Color32, Context, CornerRadius, CursorIcon, Id, Mesh, Order, Painter, Pos2, Rect, Sense,
+    Stroke, StrokeKind, Ui, Vec2, pos2, vec2,
 };
 use exo_store::{Achievements, Statistics};
 use exo_ui::{BoxShadow, Family, Font, TextStyle, Theme, gradient, motion, paint_icon};
@@ -29,10 +30,16 @@ const SUBHEADER_BOLD: TextStyle = TextStyle::new(Font::new(Family::Sans, 700), 1
 const VALUE: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 32.0, 36.0);
 /// A card's unit: 14px/20px, `top: 3px`.
 const UNIT: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 14.0, 20.0);
+/// A category's units keep the cards' `letter-spacing: .4px`, which the main view takes off.
+const CATEGORY_UNIT: TextStyle = UNIT.letter_spacing(0.4);
 /// A card's tag: 10px/12px semibold.
 const TAG: TextStyle = TextStyle::new(Font::new(Family::Sans, 600), 10.0, 12.0);
 /// The backdrop: `rgba(0,0,0,.5)`, fading over 200ms.
 const BACKDROP: Color32 = Color32::from_black_alpha(128);
+/// The scrollbar's thumb sits 2px inside its track (`border: 2px solid transparent`), and is at
+/// least 7px long.
+const THUMB_INSET: f32 = 2.0;
+const THUMB_MIN: f32 = 7.0;
 
 /// What a frame of the dialog asked for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -57,6 +64,9 @@ pub fn show(ctx: &Context, area: Rect, open: bool, shown: &Shown<'_>) -> Option<
     let id = exo_ui::id(ctx, "achievements-dialog");
     let opacity = motion::transition(ctx, id.with("fade"), open, 0.2, motion::CubicBezier::EASE);
     if opacity <= 0.0 {
+        // It opens scrolled to the top.
+        let scroll = scroll_id(ctx);
+        ctx.data_mut(|data| data.remove::<f32>(scroll));
         return None;
     }
     Area::new(id)
@@ -78,6 +88,10 @@ fn pick(theme: Theme, snow: Color32, carbon: Color32) -> Color32 {
     if theme == Theme::Snow { snow } else { carbon }
 }
 
+fn scroll_id(ctx: &Context) -> Id {
+    exo_ui::id(ctx, "achievements-dialog-scroll")
+}
+
 fn card(ui: &mut Ui, area: Rect, shown: &Shown<'_>) -> Option<Asked> {
     let ctx = ui.ctx().clone();
     let theme = exo_ui::theme(&ctx);
@@ -87,12 +101,6 @@ fn card(ui: &mut Ui, area: Rect, shown: &Shown<'_>) -> Option<Asked> {
         .cards()
         .iter()
         .map(|&card| Row::new(card, shown))
-        .collect();
-    let numbers = if main { 120.0 } else { 50.0 };
-    let text_width = WIDTH - 64.0 - 24.0 - numbers;
-    let heights: Vec<f32> = rows
-        .iter()
-        .map(|row| row.height(&ctx, text_width))
         .collect();
     // The cards in the Inbox Zero and Send views have 16px under them. The dialog's foot is
     // `32px 0 16px` under the main view's cards and in Carbon, and `22px 0 24px` otherwise.
@@ -106,12 +114,29 @@ fn card(ui: &mut Ui, area: Rect, shown: &Shown<'_>) -> Option<Asked> {
     } else {
         22.0 + 24.0
     };
-    let height = BANNER + heights.iter().sum::<f32>() + after_cards + wordmark;
+    let layout = |width: f32| {
+        let heights: Vec<f32> = rows
+            .iter()
+            .map(|row| row.height(&ctx, row.text_width(&ctx, width - 64.0, main)))
+            .collect();
+        let height = BANNER + heights.iter().sum::<f32>() + after_cards + wordmark;
+        (heights, height)
+    };
+    // `max-height: 100%; overflow: auto`. In a window too short for it, the dialog scrolls, and
+    // its scrollbar takes 11px of its width (12px in Carbon).
+    let (mut width, mut gutter) = (WIDTH, 0.0);
+    let (mut heights, mut height) = layout(width);
+    if height > area.height() {
+        gutter = pick_size(theme, 11.0, 12.0);
+        width -= gutter;
+        (heights, height) = layout(width);
+    }
     let modal = exo_ui::pixel_snap(Rect::from_center_size(
         area.center(),
         vec2(WIDTH, height.min(area.height())),
     ));
     ui.allocate_rect(modal, Sense::click());
+    let scroll = scroll(ui, modal, height, gutter);
     let painter = ui.painter().with_clip_rect(modal);
     // `box-shadow: 0 15px 75px 0 rgba(0,0,0,.18)` under a `#fafcff` background (`#1f1e1d` in
     // Carbon).
@@ -127,9 +152,12 @@ fn card(ui: &mut Ui, area: Rect, shown: &Shown<'_>) -> Option<Asked> {
     );
     ui.painter()
         .rect_filled(modal, CornerRadius::same(RADIUS), background);
+    // What scrolls: everything but the background and the scrollbar.
+    let top = modal.top() - scroll;
     paint_banner(
-        ui.painter(),
-        Rect::from_min_size(modal.min, vec2(WIDTH, BANNER)),
+        &painter,
+        Rect::from_min_size(pos2(modal.left(), top), vec2(width, BANNER)),
+        modal.top(),
         theme,
     );
 
@@ -144,8 +172,8 @@ fn card(ui: &mut Ui, area: Rect, shown: &Shown<'_>) -> Option<Asked> {
     RIBBON.paint_line(
         &painter,
         pos2(
-            modal.center().x - ribbon_width / 2.0,
-            modal.top() + 0.6 * BANNER - RIBBON.line_height / 2.0,
+            modal.left() + (width - ribbon_width) / 2.0,
+            top + 0.6 * BANNER - RIBBON.line_height / 2.0,
         ),
         ribbon,
         Color32::WHITE,
@@ -153,12 +181,12 @@ fn card(ui: &mut Ui, area: Rect, shown: &Shown<'_>) -> Option<Asked> {
     );
 
     let mut asked = None;
-    if !main && back_button(ui, &painter, modal.min + vec2(20.0, 20.0), theme) {
+    if !main && back_button(ui, &painter, pos2(modal.left() + 20.0, top + 20.0), theme) {
         asked = Some(Asked::Show(View::Main));
     }
-    let mut top = modal.top() + BANNER;
+    let mut top = top + BANNER;
     for (index, (row, height)) in rows.iter().zip(&heights).enumerate() {
-        let rect = Rect::from_min_size(pos2(modal.left() + 32.0, top), vec2(WIDTH - 64.0, *height));
+        let rect = Rect::from_min_size(pos2(modal.left() + 32.0, top), vec2(width - 64.0, *height));
         let last = index + 1 == rows.len();
         if !last {
             // `border-bottom: 1px solid rgba(0,0,0,.05)`, `#474543` in Carbon.
@@ -176,11 +204,11 @@ fn card(ui: &mut Ui, area: Rect, shown: &Shown<'_>) -> Option<Asked> {
             );
         }
         let accent = accent(shown.view, index, theme);
-        row.paint(&painter, rect, text_width, numbers, accent, theme);
+        row.paint(&painter, rect, main, accent, theme);
         if main {
             let response = ui
                 .interact(
-                    rect,
+                    rect.intersect(modal),
                     exo_ui::id(ui.ctx(), ("achievements-card", index)),
                     Sense::click(),
                 )
@@ -195,7 +223,65 @@ fn card(ui: &mut Ui, area: Rect, shown: &Shown<'_>) -> Option<Asked> {
         }
         top += height;
     }
+    paint_thumb(ui, &painter, modal, height, gutter, scroll);
     asked
+}
+
+/// Picks a size for Snow or for Carbon.
+fn pick_size(theme: Theme, snow: f32, carbon: f32) -> f32 {
+    if theme == Theme::Snow { snow } else { carbon }
+}
+
+/// How far the dialog at `modal`, `content` px tall, is scrolled: by the wheel over it, or its
+/// thumb dragged.
+fn scroll(ui: &Ui, modal: Rect, content: f32, gutter: f32) -> f32 {
+    let ctx = ui.ctx();
+    let id = scroll_id(ctx);
+    let overflow = (content - modal.height()).max(0.0);
+    let mut scroll = ctx.data(|data| data.get_temp::<f32>(id)).unwrap_or(0.0);
+    if let Some(thumb) = thumb(modal, content, gutter, scroll) {
+        let drag = ui.interact(thumb, id.with("thumb"), Sense::drag());
+        scroll += drag.drag_delta().y * overflow / (modal.height() - thumb.height()).max(1.0);
+        if ui.rect_contains_pointer(modal) {
+            scroll -= ctx.input(|input| input.smooth_scroll_delta.y);
+        }
+    }
+    let scroll = scroll.clamp(0.0, overflow);
+    ctx.data_mut(|data| data.insert_temp(id, scroll));
+    scroll
+}
+
+/// The scrollbar's thumb, as long against the dialog as what shows is against `content`, down
+/// its `gutter`-wide track at the dialog's right edge. None when nothing overflows.
+fn thumb(modal: Rect, content: f32, gutter: f32, scroll: f32) -> Option<Rect> {
+    let overflow = content - modal.height();
+    if overflow <= 0.0 || gutter <= 0.0 {
+        return None;
+    }
+    let length = (modal.height() * modal.height() / content).max(THUMB_MIN + 2.0 * THUMB_INSET);
+    let top = modal.top() + (modal.height() - length) * scroll / overflow;
+    Some(Rect::from_min_size(
+        pos2(modal.right() - gutter, top),
+        vec2(gutter, length),
+    ))
+}
+
+/// The thumb: black at .5 while the pointer is on it or drags it, nothing otherwise
+/// (`rgba(0,0,0,var(--scroll-opacity))`). Carbon rings it in white at .2 (.4 while dragged).
+fn paint_thumb(ui: &Ui, painter: &Painter, modal: Rect, content: f32, gutter: f32, scroll: f32) {
+    let Some(thumb) = thumb(modal, content, gutter, scroll) else {
+        return;
+    };
+    let dragged = ui.ctx().is_being_dragged(scroll_id(ui.ctx()).with("thumb"));
+    let fill = thumb.shrink(THUMB_INSET);
+    let round = CornerRadius::same(100);
+    if dragged || ui.rect_contains_pointer(thumb) {
+        painter.rect_filled(fill, round, Color32::from_black_alpha(128));
+    }
+    if exo_ui::theme(ui.ctx()) == Theme::Carbon {
+        let ring = Color32::from_white_alpha(if dragged { 102 } else { 51 });
+        painter.rect_stroke(fill, round, Stroke::new(0.75, ring), StrokeKind::Inside);
+    }
 }
 
 /// The value's color for the card at `index` of `view`. The main view's first, second and third
@@ -229,7 +315,7 @@ fn back_button(ui: &Ui, painter: &Painter, at: Pos2, theme: Theme) -> bool {
     let rect = Rect::from_min_size(at, Vec2::splat(40.0));
     let response = ui
         .interact(
-            rect,
+            rect.intersect(painter.clip_rect()),
             exo_ui::id(ui.ctx(), "achievements-back"),
             Sense::click(),
         )
@@ -248,9 +334,10 @@ fn back_button(ui: &Ui, painter: &Painter, at: Pos2, theme: Theme) -> bool {
         round,
         pick(theme, Color32::WHITE, Color32::from_rgb(0x1f, 0x1e, 0x1d)),
     );
-    // `[fill*=red] { fill: #000 }`, `#e8e5df` in Carbon.
+    // `[fill*=red] { fill: #000 }`, `#e8e5df` in Carbon, at `opacity: .3` (.5 hovered).
     let icon = Rect::from_min_size(at + vec2(13.0, 12.5), Vec2::splat(14.0));
-    let ink = pick(theme, Color32::BLACK, Color32::from_rgb(0xe8, 0xe5, 0xdf));
+    let ink = pick(theme, Color32::BLACK, Color32::from_rgb(0xe8, 0xe5, 0xdf))
+        .gamma_multiply(if response.hovered() { 0.5 } else { 0.3 });
     paint_icon(
         ui,
         "legacy/DEPRECATED_backArrow",
@@ -261,8 +348,9 @@ fn back_button(ui: &Ui, painter: &Painter, at: Pos2, theme: Theme) -> bool {
 }
 
 /// The banner's background, a 115° gradient under two layers: a radial veil at its bottom middle,
-/// and a fade into the dialog over its last 96px.
-fn paint_banner(painter: &Painter, rect: Rect, theme: Theme) {
+/// and a fade into the dialog over its last 96px. Scrolled, the part above the dialog's `top`
+/// isn't painted, and the dialog's corners round what is.
+fn paint_banner(painter: &Painter, rect: Rect, top: f32, theme: Theme) {
     let rgba = |r: u8, g: u8, b: u8, a: f32| {
         [
             f32::from(r) / 255.0,
@@ -327,20 +415,33 @@ fn paint_banner(painter: &Painter, rect: Rect, theme: Theme) {
             (color[2] * 255.0).round() as u8,
         )
     };
-    // A grid fine enough that interpolating between its vertices doesn't show. Its top rows are a
-    // pixel apart and narrowed to the dialog's rounded corners.
+    // A grid fine enough that interpolating between its vertices doesn't show. Its rows under the
+    // dialog's top are a pixel apart and narrowed to its rounded corners.
     let radius = f32::from(RADIUS);
     let columns = 46;
-    let mut ys: Vec<f32> = (0..RADIUS).map(f32::from).collect();
-    ys.extend((0..=16).map(|i| radius + (rect.height() - radius) * i as f32 / 16.0));
+    let from = rect.top().max(top);
+    let rounded = (top + radius).max(from);
+    let mut ys: Vec<f32> = (0..RADIUS)
+        .map(|y| top + f32::from(y))
+        .filter(|&y| y >= from && y < rect.bottom())
+        .collect();
+    if rounded < rect.bottom() {
+        ys.extend((0..=16).map(|i| rounded + (rect.bottom() - rounded) * i as f32 / 16.0));
+    }
+    if ys.len() < 2 {
+        return;
+    }
     let mut mesh = Mesh::default();
     for &y in &ys {
-        let from_corner = (radius - y).max(0.0);
+        let from_corner = (top + radius - y).max(0.0);
         let inset = radius - (radius * radius - from_corner * from_corner).sqrt();
+        // The right corner is the dialog's, past the scrollbar's track when there is one.
+        let right = (rect.left() + WIDTH - inset).min(rect.right());
         for column in 0..=columns {
-            let x =
-                rect.left() + inset + (rect.width() - 2.0 * inset) * column as f32 / columns as f32;
-            let point = pos2(x, rect.top() + y);
+            let x = rect.left()
+                + inset
+                + (right - rect.left() - inset) * column as f32 / columns as f32;
+            let point = pos2(x, y);
             mesh.colored_vertex(point, color_at(point));
         }
     }
@@ -392,7 +493,7 @@ impl Row {
             }
         };
         let left = |value: u64| super::remaining(card, value);
-        let n = super::grouped;
+        let n = crate::format::thousands;
         let (header, subheader, value, unit) = match card {
             Card::InboxZero => {
                 let days = u64::from(statistics.inbox_zero_days_all_time);
@@ -522,6 +623,24 @@ impl Row {
 
     /// `padding: 16px 0`, less the separator's pixel, around content at `margin-top: 4px` that
     /// starts with a 32px header.
+    /// The number's column: 120px in the main view, and in a category's as wide as the number
+    /// or its unit, at least 50px (`flex: 0 0 auto; min-width: 50px`).
+    fn column(&self, ctx: &Context, main: bool) -> f32 {
+        if main {
+            return 120.0;
+        }
+        let value = VALUE.width(ctx, &super::abbreviated(self.value));
+        50.0_f32
+            .max(value)
+            .max(CATEGORY_UNIT.width(ctx, &self.unit))
+    }
+
+    /// The subheader's width in a card `width` wide: what the number's column and the 24px
+    /// between leave.
+    fn text_width(&self, ctx: &Context, width: f32, main: bool) -> f32 {
+        width - 24.0 - self.column(ctx, main)
+    }
+
     fn height(&self, ctx: &Context, width: f32) -> f32 {
         16.0 + 4.0
             + HEADER.line_height
@@ -529,16 +648,9 @@ impl Row {
             + 16.0
     }
 
-    fn paint(
-        &self,
-        painter: &Painter,
-        rect: Rect,
-        width: f32,
-        numbers: f32,
-        accent: Color32,
-        theme: Theme,
-    ) {
+    fn paint(&self, painter: &Painter, rect: Rect, main: bool, accent: Color32, theme: Theme) {
         let ctx = painter.ctx();
+        let width = self.text_width(ctx, rect.width(), main);
         let top = rect.top() + 16.0 + 4.0;
         let header_width = HEADER.paint_line(
             painter,
@@ -604,20 +716,16 @@ impl Row {
             style(segment_bold).paint_line(painter, pos2(x, y), &segment, ink, None);
             y += SUBHEADER.line_height;
         }
-        // The number is centered in its column (`text-align: center`), which is 120px wide in the
-        // main view and at least 50px in a category's.
+        // The number is centered in its column (`text-align: center`).
+        let numbers = self.column(ctx, main);
         let column = Rect::from_min_size(
             pos2(rect.right() - numbers, rect.top() + 16.0),
             vec2(numbers, VALUE.line_height + UNIT.line_height),
         );
         let value = super::abbreviated(self.value);
         let value_width = VALUE.width(ctx, &value);
-        let unit_width = UNIT.width(ctx, &self.unit);
-        let column = if numbers < 120.0 {
-            column.with_min_x(column.right() - numbers.max(value_width).max(unit_width))
-        } else {
-            column
-        };
+        let unit = if main { &UNIT } else { &CATEGORY_UNIT };
+        let unit_width = unit.width(ctx, &self.unit);
         VALUE.paint_line(
             painter,
             pos2(column.center().x - value_width / 2.0, column.top()),
@@ -625,7 +733,7 @@ impl Row {
             accent,
             None,
         );
-        UNIT.paint_line(
+        unit.paint_line(
             painter,
             pos2(
                 column.center().x - unit_width / 2.0,

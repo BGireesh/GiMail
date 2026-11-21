@@ -39,6 +39,19 @@ pub struct CalendarData {
     pub response_comment: Option<String>,
     /// What an update changed (the info bar's `Changed: …`, without `Changed:`).
     pub updated_fields: Option<String>,
+    /// The link that marks the sender as known to Google Calendar (`marksenderasknown`), which
+    /// an invitation from a sender it doesn't know carries.
+    pub mark_sender_known: Option<String>,
+    /// The invitation's own answer links.
+    pub rsvp_links: RsvpLinks,
+}
+
+/// An invitation's Yes, No and Maybe links (`a.grey-button-text` with `rst=1`, `2` and `3`).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RsvpLinks {
+    pub accepted: Option<String>,
+    pub declined: Option<String>,
+    pub tentative: Option<String>,
 }
 
 /// schema.org's `EventStatusType`, the two that are read.
@@ -353,8 +366,25 @@ fn upper_first(word: &str) -> String {
         .unwrap_or_default()
 }
 
-/// A Google Calendar notification's facts, from the root element of the message.
+/// A Google Calendar notification's facts, and any invitation's links, from the root element of
+/// the message.
 fn calendar_data(root: &NodeRef) -> CalendarData {
+    let hrefs = |matches: &dyn Fn(&NodeRef) -> bool| -> Vec<String> {
+        dom::select(root, |n| dom::is(n, "a") && matches(n))
+            .iter()
+            .filter_map(|a| dom::attr(a, "href"))
+            .collect()
+    };
+    let mark_sender_known = hrefs(&|_| true)
+        .into_iter()
+        .find(|href| href.contains("marksenderasknown"));
+    let buttons = hrefs(&|n| dom::has_class(n, "grey-button-text"));
+    let answer = |rst: &str| buttons.iter().find(|href| href.contains(rst)).cloned();
+    let rsvp_links = RsvpLinks {
+        accepted: answer("rst=1"),
+        declined: answer("rst=2"),
+        tentative: answer("rst=3"),
+    };
     let itemprop = |n: &NodeRef, name: &str| {
         dom::is(n, "meta") && dom::attr(n, "itemprop").as_deref() == Some(name)
     };
@@ -363,7 +393,11 @@ fn calendar_data(root: &NodeRef) -> CalendarData {
     })
     .is_none()
     {
-        return CalendarData::default();
+        return CalendarData {
+            mark_sender_known,
+            rsvp_links,
+            ..CalendarData::default()
+        };
     }
     let event_status = dom::select_first(root, |n| itemprop(n, "eventStatus")).and_then(|meta| {
         match dom::attr(&meta, "content")?.as_str() {
@@ -408,6 +442,8 @@ fn calendar_data(root: &NodeRef) -> CalendarData {
         event_status,
         response_comment,
         updated_fields,
+        mark_sender_known,
+        rsvp_links,
     }
 }
 
@@ -520,9 +556,33 @@ mod tests {
                 gcal: true,
                 event_status: Some(EventStatus::Rescheduled),
                 response_comment: Some("Running late".into()),
-                updated_fields: Some("time, location".into())
+                updated_fields: Some("time, location".into()),
+                ..CalendarData::default()
             }
         );
         assert_eq!(found("<p>Hi</p>").calendar, CalendarData::default());
+    }
+
+    #[test]
+    fn reads_an_invitations_links() {
+        let html = r#"<html><body><a class="grey-button-text" href="https://calendar.google.com/calendar/event?action=RESPOND&amp;rst=1&amp;tok=a">Yes</a><a class="grey-button-text" href="https://calendar.google.com/calendar/event?action=RESPOND&amp;rst=2&amp;tok=a">No</a><a href="https://calendar.google.com/calendar/event?action=RESPOND&amp;rst=3">Maybe</a><a href="https://calendar.google.com/calendar/marksenderasknown?eid=e&amp;tok=a">Know this sender?</a></body></html>"#;
+        let calendar = found(html).calendar;
+        assert_eq!(
+            calendar.mark_sender_known.as_deref(),
+            Some("https://calendar.google.com/calendar/marksenderasknown?eid=e&tok=a")
+        );
+        assert_eq!(
+            calendar.rsvp_links,
+            RsvpLinks {
+                accepted: Some(
+                    "https://calendar.google.com/calendar/event?action=RESPOND&rst=1&tok=a".into()
+                ),
+                declined: Some(
+                    "https://calendar.google.com/calendar/event?action=RESPOND&rst=2&tok=a".into()
+                ),
+                // Only the buttons count.
+                tentative: None,
+            }
+        );
     }
 }

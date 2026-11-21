@@ -82,6 +82,8 @@ pub(crate) struct FetchProvider {
     remote: bool,
     /// How many responses have been handed over, for [`BodyView::poll`](crate::BodyView::poll).
     pub(crate) arrived: Arc<AtomicUsize>,
+    /// How many `data:` URLs have been answered, which happens as they're asked for.
+    pub(crate) answered_inline: Arc<AtomicUsize>,
     pub(crate) may_animate: MayAnimate,
 }
 
@@ -91,6 +93,7 @@ impl FetchProvider {
             fetch,
             remote,
             arrived: Arc::default(),
+            answered_inline: Arc::default(),
             may_animate: MayAnimate::default(),
         }
     }
@@ -104,6 +107,7 @@ impl NetProvider for FetchProvider {
                 if let Some(bytes) = decode_data_url(url) {
                     note_animation(&self.may_animate, url, &bytes);
                     handler.bytes(url.to_owned(), Bytes::from(bytes));
+                    self.answered_inline.fetch_add(1, Ordering::Release);
                 }
             }
             "http" | "https" if !self.remote => {}

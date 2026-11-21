@@ -68,6 +68,8 @@ struct Find {
     window_focused: bool,
     /// Who had the keyboard before the field took it, to give it back when the field closes.
     returns_focus_to: Option<Id>,
+    /// Whether the field opened or took the keyboard again this frame.
+    revealed: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -107,7 +109,10 @@ pub(crate) fn begin(ctx: &Context, available: bool) {
         adopt_pasteboard(ctx);
     }
     let keys = take_shortcuts(ctx);
-    with(ctx, |find| find.commands.extend(keys));
+    with(ctx, |find| {
+        find.commands.extend(keys);
+        find.revealed = false;
+    });
     let commands = with(ctx, |find| std::mem::take(&mut find.commands));
     for command in commands {
         match command {
@@ -134,6 +139,12 @@ pub(crate) fn begin(ctx: &Context, available: bool) {
     if with(ctx, |find| find.focused) {
         take_field_keys(ctx);
     }
+}
+
+/// Whether ⌘F, ⌘G or ⌘⇧G opened the field or gave it the keyboard this frame, which hides the
+/// page's link preview.
+pub(crate) fn revealed(ctx: &Context) -> bool {
+    with(ctx, |find| find.revealed)
 }
 
 /// Whether ⌘E asked for the selected text this frame. Hand it over with [`selected`].
@@ -166,7 +177,7 @@ fn reveal(ctx: &Context) {
         if !find.focused {
             find.returns_focus_to = previous;
         }
-        (find.open, find.focused, find.select) = (true, true, true);
+        (find.open, find.focused, find.select, find.revealed) = (true, true, true, true);
     });
 }
 

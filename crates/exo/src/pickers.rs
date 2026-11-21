@@ -7,6 +7,7 @@ use std::cmp::Ordering;
 
 use exo_commands::{Command, Commands, Hint, Region, SubPalette, Toast, ToastKind, command_score};
 use exo_store::{Label, ListId, Mutation};
+use exo_ui::{AlertClick, AlertRun};
 use jiff::Timestamp;
 
 use crate::{
@@ -39,6 +40,29 @@ const RESERVED: [&str; 16] = [
 /// Move's built-in destinations after the recently used ones, last first: Spam, Trash, Done,
 /// Important, Other.
 const MOVE_ORDER: [&str; 5] = ["SH_OTHER", "SH_IMPORTANT", "SH_ARCHIVED", "TRASH", "SPAM"];
+/// Google Calendar's settings, where invitations from anyone can be let in.
+const CALENDAR_SETTINGS: &str = "https://calendar.google.com/calendar/u/0/r/settings";
+/// `RSVP faster next time`'s text: the settings' place links to them, and their names are bold.
+const RSVP_FASTER: &[AlertRun<'static>] = &[
+    AlertRun::Text(
+        "To RSVP faster next time, please update your Google Calendar settings.\n\nUnder ",
+    ),
+    AlertRun::Link("Event Settings"),
+    AlertRun::Text(", change "),
+    AlertRun::Strong("Add invitations to my calendar"),
+    AlertRun::Text(" to "),
+    AlertRun::Strong("From everyone"),
+    AlertRun::Text("."),
+];
+/// The text of the alert for an answer from an unknown sender's invite: Google Calendar links to
+/// where the sender is marked as known.
+const UNKNOWN_SENDER: &[AlertRun<'static>] = &[
+    AlertRun::Text(
+        "Your RSVP cannot be saved because Google thinks you might not know the sender. Go to ",
+    ),
+    AlertRun::Link("Google Calendar"),
+    AlertRun::Text(" to mark them as safe, then retry RSVPing."),
+];
 
 /// What a picker or its keys asked for.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -155,6 +179,17 @@ enum Then {
     /// Calendar refused an answer to an invite in conversation `thread`. The first action is
     /// `Open in Gmail`, and the second `See Message`.
     RsvpFailed(String),
+    /// An invitation from a sender Calendar doesn't know, in conversation `thread`, was answered
+    /// with its own link. The first action opens Calendar's settings, and the second is
+    /// `See Message`.
+    RsvpFasterNextTime(String),
+    /// Calendar refused an answer to an invite in conversation `thread` from a sender it doesn't
+    /// know. The first action opens `url`, which marks them as known, and the second is
+    /// `See Message`.
+    MarkSenderKnown {
+        url: String,
+        thread: String,
+    },
     /// Update split `id` (named `name`) to definition `query`. The second action (and Escape)
     /// names the new split again.
     UpdateSplit {
@@ -314,6 +349,32 @@ impl Pickers {
             selected: 0,
             keys: None,
             then: Some(Then::RsvpFailed(thread)),
+        });
+    }
+
+    /// An invitation from a sender Calendar doesn't know was answered with its own link: how to
+    /// have Calendar take such invitations, `Event settings` and `See Message`.
+    pub(crate) fn rsvp_faster_next_time(&mut self, thread: String) {
+        self.alert = Some(Alert {
+            title: "RSVP faster next time".into(),
+            text: RSVP_FASTER.iter().map(AlertRun::text).collect(),
+            actions: vec!["Event settings", "See Message"],
+            selected: 0,
+            keys: None,
+            then: Some(Then::RsvpFasterNextTime(thread)),
+        });
+    }
+
+    /// Calendar refused an answer to an invite from a sender it doesn't know: `url` marks them as
+    /// known, then the answer can go again.
+    pub(crate) fn rsvp_unknown_sender(&mut self, url: String, thread: String) {
+        self.alert = Some(Alert {
+            title: "Sorry!".into(),
+            text: UNKNOWN_SENDER.iter().map(AlertRun::text).collect(),
+            actions: vec!["Open in Google Calendar", "See Message"],
+            selected: 0,
+            keys: None,
+            then: Some(Then::MarkSenderKnown { url, thread }),
         });
     }
 
@@ -917,6 +978,16 @@ impl Mail {
                             .url(self.account.email(), &crate::compose::uuid_v4()),
                     ),
                     (1, Some(Then::RsvpFailed(thread))) => self.open_thread(thread),
+                    (
+                        0,
+                        Some(then @ (Then::RsvpFasterNextTime(_) | Then::MarkSenderKnown { .. })),
+                    ) => self.open_alert_link(&then),
+                    (
+                        1,
+                        Some(
+                            Then::RsvpFasterNextTime(thread) | Then::MarkSenderKnown { thread, .. },
+                        ),
+                    ) => self.open_thread(thread),
                     (0, Some(Then::UpdateSplit { id, query, .. })) => {
                         self.update_existing_split(&id, &query, now)
                     }
@@ -1256,16 +1327,53 @@ impl Mail {
                     actions: &alert.actions,
                     selected: alert.selected,
                 };
-                match &alert.keys {
-                    Some(keys) => {
-                        shown.show_with_keys(ui, page, &alert.text, keys.caps, keys.after)
-                    }
-                    None => shown.show(ui, page),
+                let runs = match &alert.then {
+                    Some(Then::RsvpFasterNextTime(_)) => Some(RSVP_FASTER),
+                    Some(Then::MarkSenderKnown { .. }) => Some(UNKNOWN_SENDER),
+                    _ => None,
+                };
+                match (&alert.keys, runs) {
+                    (Some(keys), _) => shown
+                        .show_with_keys(ui, page, &alert.text, keys.caps, keys.after)
+                        .map(AlertClick::Action),
+                    (None, Some(runs)) => shown.show_runs(ui, page, runs),
+                    (None, None) => shown.show(ui, page).map(AlertClick::Action),
                 }
             });
-        if let Some(index) = clicked.inner {
-            let now = ui.input(|input| input.time);
-            self.pick(Action::Alert(index), now);
+        match clicked.inner {
+            Some(AlertClick::Action(index)) => {
+                let now = ui.input(|input| input.time);
+                self.pick(Action::Alert(index), now);
+            }
+            // A link in the text opens its page and leaves the alert up.
+            Some(AlertClick::Link(_)) => {
+                if let Some(then) = self
+                    .pickers
+                    .alert
+                    .as_ref()
+                    .and_then(|alert| alert.then.clone())
+                {
+                    self.open_alert_link(&then);
+                }
+            }
+            None => {}
+        }
+    }
+
+    /// Opens the page an RSVP alert's first action and its text's link go to: Calendar's
+    /// settings as the account, or where the sender is marked as known.
+    fn open_alert_link(&self, then: &Then) {
+        match then {
+            Then::RsvpFasterNextTime(_) => {
+                let mut settings =
+                    url::Url::parse(CALENDAR_SETTINGS).expect("Calendar's settings page is a URL");
+                settings
+                    .query_pairs_mut()
+                    .append_pair("authuser", self.account.email());
+                self.open_url(settings.as_str());
+            }
+            Then::MarkSenderKnown { url, .. } => self.open_url(url),
+            _ => {}
         }
     }
 }

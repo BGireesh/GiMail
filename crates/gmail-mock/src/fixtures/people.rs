@@ -10,8 +10,13 @@ use super::compose::fnv;
 use crate::people::{DEFAULT_PHOTO, Directory};
 
 /// Everyone the People API knows. `photo` is the account's own photo (without Google's size
-/// option), when it has one.
-pub fn directory(google_id: &str, photo: Option<&str>) -> Directory {
+/// option), when it has one. With `contact_photos`, the mock's origin, saved contacts and
+/// directory people have photos of their own, served there.
+pub fn directory(
+    google_id: &str,
+    photo: Option<&str>,
+    contact_photos: Option<&url::Url>,
+) -> Directory {
     let mut profile = person(
         cast::me(),
         &format!("people/{google_id}"),
@@ -76,7 +81,37 @@ pub fn directory(google_id: &str, photo: Option<&str>) -> Directory {
     directory
         .contacts
         .sort_by(|a, b| a.names[0].display_name.cmp(&b.names[0].display_name));
+    if let Some(origin) = contact_photos {
+        for person in directory
+            .contacts
+            .iter_mut()
+            .chain(&mut directory.directory)
+        {
+            let id = person.resource_name.as_deref().unwrap_or_default();
+            let id = id.rsplit('/').next().unwrap_or_default();
+            let primary = &mut person.photos[0];
+            primary.url = Some(format!("{origin}__mock/photo/{id}=s100"));
+            primary.default = None;
+        }
+    }
     directory
+}
+
+/// Whose photo `/__mock/photo/{id}` is: the address of the saved contact or directory person
+/// whose photo URL names `id`.
+pub fn photo_owner<'a>(directory: &'a Directory, id: &str) -> Option<&'a str> {
+    let path = format!("/__mock/photo/{id}=");
+    directory
+        .contacts
+        .iter()
+        .chain(&directory.directory)
+        .find(|person| {
+            person
+                .photos
+                .iter()
+                .any(|photo| photo.url.as_deref().is_some_and(|url| url.contains(&path)))
+        })
+        .and_then(|person| person.email_addresses.first()?.value.as_deref())
 }
 
 /// The profile of `email`, another address signed in on the mock's mailbox: just the address,

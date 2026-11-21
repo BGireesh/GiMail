@@ -61,9 +61,10 @@ mod quotes;
 mod remote;
 mod render;
 mod sanitize;
+mod senders;
 mod view;
 
-pub use actions::{Action, ActionSource, CalendarData, EventStatus};
+pub use actions::{Action, ActionSource, CalendarData, EventStatus, RsvpLinks};
 pub use animation::{Player, may_animate};
 pub use colors::css_color;
 pub use dates::{DateParts, date_parts, find_dates};

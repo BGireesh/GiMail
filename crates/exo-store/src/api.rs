@@ -62,6 +62,12 @@ impl Failure {
         matches!(self, Self::Permanent(_))
     }
 
+    /// Gmail won't send what was asked for in one answer (a thread too large for `threads.get`,
+    /// 500 `responseTooLarge`).
+    pub fn is_too_large(&self) -> bool {
+        matches!(self, Self::Permanent(gmail::Error::Api(api)) if too_large(api))
+    }
+
     /// Gmail's error message, for logs and failure reports.
     pub fn message(&self) -> String {
         match self {
@@ -323,6 +329,8 @@ fn classify(error: &gmail::Error) -> Kind {
                 503 if says("CommandConcurrencyLimitReached") => {
                     Kind::RateLimited(retry_after(api))
                 }
+                // The thread is as large every time, so the caller asks for it another way.
+                _ if too_large(api) => Kind::Permanent,
                 500..=599 => Kind::Transient,
                 400 if api.message.contains("Precondition check failed") => Kind::Transient,
                 _ => Kind::Permanent,
@@ -339,6 +347,11 @@ fn classify(error: &gmail::Error) -> Kind {
 /// still go.
 fn sending_limit(error: &gmail::Error) -> bool {
     matches!(error, gmail::Error::Api(api) if mentions(api, "(Mail sending)"))
+}
+
+/// Gmail's 500 for an answer too large to send (`responseTooLarge`).
+fn too_large(api: &gmail::ApiError) -> bool {
+    api.code == 500 && mentions(api, "responseTooLarge")
 }
 
 /// Whether Google's error body says `needle` anywhere: message, reasons or details.

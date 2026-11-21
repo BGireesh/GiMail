@@ -40,6 +40,9 @@ pub struct Look {
     /// The glow, which shows while the block is under the pointer, its details are open, or it's
     /// the invite being read.
     pub glowing: f32,
+    /// Under the pointer, its details open, or the invite being read, at once (the glow fades in),
+    /// which lifts a past block to brighter colours.
+    pub lifted: bool,
     /// Ended before now.
     pub past: bool,
     /// A create or edit form is open.
@@ -107,6 +110,7 @@ pub fn paint(ui: &Ui, clip: Rect, rect: Rect, event: &Event, span: SignedDuratio
                 create: look.preview,
                 past: look.past,
                 focused: false,
+                lifted: look.lifted,
             },
         )
     };

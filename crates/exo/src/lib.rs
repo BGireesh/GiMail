@@ -13,6 +13,7 @@ mod app;
 mod attachment_files;
 mod backdrop;
 mod body;
+mod brands;
 mod bulk;
 mod calendar;
 mod chrome;
@@ -51,6 +52,7 @@ pub mod notifications;
 mod open_links;
 pub mod out_of_office;
 mod page_menu;
+pub mod people;
 mod photo;
 mod pickers;
 pub mod power;
@@ -80,6 +82,7 @@ pub mod teardown;
 pub mod thread;
 pub mod time_suggest;
 mod touch_bar_tip;
+mod unavailable;
 mod unsubscribe;
 pub mod update;
 mod welcome;
@@ -299,6 +302,8 @@ pub struct Mail {
     context_menu: std::rc::Rc<std::cell::RefCell<Box<desktop::context_menu::Show>>>,
     /// A right-click in a message body, whose menu shows next frame.
     message_menu: Option<page_menu::Pending>,
+    /// A right-click on the rest of the page, whose menu shows next frame.
+    page_menu: Option<page_menu::PagePending>,
     /// Makes a draft body's spellchecker (macOS's, [`desktop::spelling::engine`]).
     spelling: std::rc::Rc<dyn Fn() -> Option<Box<dyn exo_editor::Spelling>>>,
     /// Whether that spellchecker corrects spelling automatically, autocorrect's default
@@ -438,6 +443,7 @@ impl Mail {
                 desktop::context_menu::show,
             ))),
             message_menu: None,
+            page_menu: None,
             spelling: std::rc::Rc::new(desktop::spelling::engine),
             corrects_automatically: desktop::spelling::corrects_automatically,
             copied: None,
@@ -1129,46 +1135,44 @@ impl Mail {
 
     /// Prints the open conversation through the macOS print panel (`Print`, ⌘P, File ▸ Print).
     pub fn print(&mut self) {
-        if let Some(thread) = &self.thread {
-            print::conversation(
-                &self.ctx,
-                thread,
-                &self.bodies,
-                &self.account.loader(),
-                self.print_title(),
-            );
+        if let Some(printout) = self.printout() {
+            print::conversation(printout, &self.account.loader());
         }
     }
 
     /// `Save as PDF`, which shows the save panel, then prints the open conversation into the file
     /// chosen.
     fn save_as_pdf(&mut self) {
-        if let Some(thread) = &self.thread {
-            print::save_as_pdf(
-                &self.ctx,
-                thread,
-                &self.bodies,
-                &self.account.loader(),
-                self.print_title(),
-            );
+        if let Some(printout) = self.printout() {
+            print::save_as_pdf(printout, &self.account.loader());
         }
     }
 
     /// Prints the open conversation into the PDF at `path` (`Save as PDF` without its panel, for
     /// screenshots and tests). `done` hears whether it was written.
     pub fn print_to_pdf(&mut self, path: std::path::PathBuf, done: print::Done) {
-        match &self.thread {
-            Some(thread) => print::print(
-                &self.ctx,
-                thread,
-                &self.bodies,
+        match self.printout() {
+            Some(printout) => print::print(
+                printout,
                 &self.account.loader(),
-                self.print_title(),
                 print::Destination::Pdf(path),
                 Some(done),
             ),
             None => done(false),
         }
+    }
+
+    /// The open conversation as it prints, with the drafts open in it. `None` before it loads.
+    fn printout(&self) -> Option<print::Printout> {
+        let thread = self.thread.as_ref()?;
+        let drafts = thread
+            .shared_detail()
+            .map(|detail| {
+                self.compose
+                    .printouts(&detail, &self.snapshot.aliases, self.account.email())
+            })
+            .unwrap_or_default();
+        thread.printout(&self.ctx, &self.bodies, self.print_title(), drafts)
     }
 
     /// The print job's title, from the open thread's subject.
@@ -1327,6 +1331,12 @@ impl Mail {
                 self.show(list);
             }
             Action::LeaveThread => self.close_thread(),
+            Action::FromWeek(action) => {
+                if self.calendar_form() != Some(true) {
+                    self.run(Action::Calendar(calendar::Action::CloseWeek), now);
+                    self.run(*action, now);
+                }
+            }
             Action::GoToLabel => self.commands.open_palette(Some("go to ")),
             Action::MuteHint => {
                 let verb = if self.list == ListId::Muted {
@@ -1796,6 +1806,7 @@ impl Mail {
                 }
                 Event::Unsent(unsent) => self.sign_out_unsent(unsent),
                 Event::Thread { id, detail } => self.unsubscribe_thread_read(id, detail),
+                Event::Unavailable { id, offline } => self.thread_unavailable(&id, offline),
                 event => self.compose_event(event),
             }
         }
@@ -1843,6 +1854,13 @@ impl Mail {
                         .hint(Hint::new().text("Tip: you can hit").keys(["X"]).text(what));
                 }
                 inbox::Action::File { file, download } => self.open_result_file(file, !download),
+                inbox::Action::FilesHint => self.commands.hint(
+                    Hint::new()
+                        .text("Hit")
+                        .keys(["⌘", "O"])
+                        .text("to open attachments instantly!")
+                        .duration(2.0),
+                ),
                 inbox::Action::Achievements => {
                     self.show_achievements(achievements::View::InboxZero)
                 }
@@ -1870,6 +1888,7 @@ impl Mail {
                 inbox::Action::RowMenu(at) => {
                     // Next frame, once the row has the cursor on screen, since the menu waits for
                     // the user.
+                    exo_ui::claim_right_click(&self.ctx);
                     self.row_menu = Some(at);
                     self.ctx.request_repaint();
                 }
@@ -1922,6 +1941,37 @@ impl Mail {
                 self.compose_new(compose::Fields::default(), None);
             }
             _ => {}
+        }
+    }
+
+    /// Whether there's somewhere for the rail's back area to go: out of the week view, a new
+    /// message, a conversation, a snippet, search or the Snippets folder, or to the home list from
+    /// another.
+    fn can_go_back(&self) -> bool {
+        self.calendar_week().is_some()
+            || self.compose.pane().is_some()
+            || self.thread.is_some()
+            || self.search.is_some()
+            || self.snippets.folder.is_open()
+            || self.list != splits::home(self.account.settings())
+    }
+
+    /// The rail's back area: back out of what's on screen, as its back gutter or Escape goes,
+    /// without first collapsing or deselecting anything.
+    fn go_back(&mut self, now: f64) {
+        if self.calendar_week().is_some() {
+            self.run(Action::Calendar(calendar::Action::CloseWeek), now);
+        } else if self.compose.pane().is_some() {
+            self.run(Action::Compose(compose::Action::LeavePane), now);
+        } else if self.thread.is_some() {
+            self.close_thread();
+            self.command_nudge_left_thread();
+        } else if self.snippets.folder.viewing().is_some() && self.search.is_none() {
+            self.snippets_run(snippets::Action::Back, now);
+        } else if self.search.is_some() {
+            self.search_exit(now);
+        } else {
+            self.run(Action::Go(splits::home(self.account.settings())), now);
         }
     }
 
@@ -2004,14 +2054,27 @@ impl Mail {
         while let Ok((id, bytes)) = self.invites.1.try_recv() {
             thread.set_invite(&id, &bytes);
         }
+        // The header's `trash` and `spam` chips show where the view shows Trash or Spam.
+        let (trash, spam) = match self.search.as_ref().and_then(|search| search.query()) {
+            Some(query) => {
+                let query = exo_store::SearchQuery::parse(query);
+                (query.shows_label("trash"), query.shows_label("spam"))
+            }
+            None => (self.list == ListId::Trash, self.list == ListId::Spam),
+        };
         let chips = thread
             .detail()
             .map(|detail| {
-                mailbox::Chips::new(&self.snapshot.labels)
-                    .header_chips(&detail.labels, detail.muted)
+                mailbox::Chips::new(&self.snapshot.labels).header_chips(
+                    &detail.labels,
+                    detail.muted,
+                    trash,
+                    spam,
+                )
             })
             .unwrap_or_default();
         thread.set_chips(chips);
+        thread.set_spam_view(spam);
         let region = self.commands.region();
         let typing = self
             .compose
@@ -2198,7 +2261,7 @@ impl Mail {
                 thread::Action::DownloadAll { message } => self.download_all(&message),
                 thread::Action::DragFile { attachment, at } => self.attachment_files.drag(
                     &self.account.loader(),
-                    &attachment,
+                    attachment_files::Part::Gmail(attachment),
                     at,
                     ui.ctx().zoom_factor(),
                 ),
@@ -2305,6 +2368,7 @@ impl Mail {
         self.out_of_office_spelling(&ctx);
         self.field_menus(&ctx);
         self.show_message_menu(&ctx);
+        self.show_page_menu(&ctx);
         // This frame's keys go to last frame's commands before anything draws, so a key a
         // command takes never reaches a widget.
         let actions = self.commands.dispatch(&ctx);
@@ -2358,11 +2422,14 @@ impl Mail {
         // pane is hidden. (The list and the rail don't fade.)
         self.backdrop.refresh(&ctx, &self.now);
         let zero = self.inbox.at_inbox_zero();
-        if zero {
-            self.backdrop
-                .paint(ui.painter(), window, self.settings.visible());
-            self.paint_behind_app(&ctx, ui.painter(), window, now);
-        }
+        let behind = zero.then(|| {
+            let settings_open = self.settings.visible();
+            self.backdrop.paint(ui.painter(), window, settings_open);
+            let dim = self.paint_behind_app(&ctx, ui.painter(), window, now);
+            self.backdrop.behind(window, settings_open, dim)
+        });
+        // The toasts' stack shows the photo through, unless the folder drawer has the keyboard.
+        exo_ui::Behind::set_for_toasts(&ctx, behind.clone().filter(|_| !self.folders.is_open()));
         let popout_wheel = self.take_wheel_over_popout(&ctx);
         // A popped-out draft shrinks the root font and widens the content pane.
         let popped_out = self.compose.popped().is_some();
@@ -2410,8 +2477,10 @@ impl Mail {
         }
         self.was_zero = zero;
 
-        // The rail's Calendar opens the week view, its Mail closes it.
-        match shell::rail(ui, columns.rail, zero, self.calendar_week().is_some()) {
+        // The rail's Calendar opens the week view, its Mail closes it, and the rest of it goes
+        // back.
+        let back = self.can_go_back();
+        match shell::rail(ui, columns.rail, zero, self.calendar_week().is_some(), back) {
             // Each switches only to the other app, with the hint at its key.
             Some(shell::RailAction::Calendar) if self.calendar_week().is_none() => {
                 self.run(Action::Calendar(calendar::Action::OpenWeek), now);
@@ -2432,6 +2501,7 @@ impl Mail {
                 );
             }
             Some(shell::RailAction::Calendar | shell::RailAction::Mail) => {}
+            Some(shell::RailAction::Back) => self.go_back(now),
             None => {}
         }
         let events = self.bodies.poll(&ctx);
@@ -2614,11 +2684,21 @@ impl Mail {
                 | Region::TextFormatterColor
                 | Region::SearchBar
         );
-        // The streak animation hides the footer.
-        let footer = if self.calendar_pane_form() || self.achievements.hides_chrome(now) {
+        // The streak animation hides the footer at once, and it comes back over 150ms (`ease`).
+        let hidden = self.achievements.hides_chrome(now);
+        let shown = motion::transition_in(
+            &ctx,
+            exo_ui::id(&ctx, "footer-shown"),
+            !hidden,
+            0.15,
+            CubicBezier::EASE,
+        );
+        let footer = if self.calendar_pane_form() || hidden {
             None
         } else {
-            shell::footer(
+            let opacity = ui.opacity();
+            ui.multiply_opacity(shown);
+            let footer = shell::footer(
                 ui,
                 pane,
                 rem,
@@ -2626,7 +2706,9 @@ impl Mail {
                 self.settings.visible(),
                 composing,
                 zero,
-            )
+            );
+            ui.set_opacity(opacity);
+            footer
         };
         match footer {
             Some(shell::FooterAction::Settings) => {
@@ -2666,6 +2748,7 @@ impl Mail {
                 ui,
                 chrome::Tab {
                     title: &title,
+                    email: Some(self.account.email()),
                     login_screen: false,
                     account_color: Some(account_color),
                 },
@@ -2676,6 +2759,9 @@ impl Mail {
             .thread
             .as_ref()
             .and_then(|thread| thread.hovered_link(&self.bodies));
+        if crate::find::revealed(&ctx) {
+            self.link_preview.hide(now);
+        }
         self.link_preview
             .show(ui.painter(), page, hovered.as_deref(), now);
 
@@ -2698,6 +2784,7 @@ impl Mail {
                 self.snapshot.inbox
             },
             important_other,
+            behind: behind.as_ref(),
         };
         if let Some(action) = self.folders.show(ui, page, rem, &lines, &view) {
             self.folder_action(action, now);
@@ -3038,21 +3125,31 @@ impl Mail {
         self.copy_listed_frame();
         self.new_split_frame();
         self.command_nudge_frame(now);
-        self.show_achievement_overlays(&ctx, page, self.inbox.at_inbox_zero(), now);
+        self.show_achievement_overlays(&ctx, page, now);
         for action in self.commands.show(&ctx, page) {
             self.run(action, now);
         }
+        self.stack_toasts(&ctx);
+        let email = self.account.email().to_owned();
         self.show_first_run(
             ui,
             window,
             page,
             &chrome::Tab {
                 title: &title,
+                email: Some(&email),
                 login_screen: false,
                 account_color: Some(account_color),
             },
         );
         self.show_welcome(ui, window, &title, account_color);
+        self.page_right_click(
+            &ctx,
+            Rect::from_min_max(
+                pos2(window.left(), window.top() + chrome::tab_bar_height(&ctx)),
+                window.max,
+            ),
+        );
         self.history_visit();
         self.request.take()
     }

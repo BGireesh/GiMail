@@ -166,3 +166,15 @@ fn a_match_past_a_widened_columns_edge_scrolls_it_sideways() {
         "the column scrolled to the link"
     );
 }
+
+#[test]
+fn text_typed_in_a_field_is_found() {
+    let mut app = start("find-field");
+    app.key(Key::Slash);
+    app.type_text("zqxv");
+    find(&mut app, "ZQXV");
+    // The bar's underlay (its lozenges' text, under the field's) and the field's text.
+    assert_eq!(count(&app), Some((1, 2)));
+    app.key(Key::Enter);
+    assert_eq!(count(&app), Some((2, 2)));
+}

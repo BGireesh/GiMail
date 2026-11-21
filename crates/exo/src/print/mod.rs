@@ -21,9 +21,11 @@ mod macos;
 use std::{collections::HashMap, path::PathBuf};
 
 use egui::Color32;
-use exo_store::Attachment;
+use exo_store::{Attachment, Attachments};
 
-use crate::{account::Loader, body::Bodies, thread::ThreadView};
+use crate::account::Loader;
+#[cfg(doc)]
+use crate::thread::ThreadView;
 
 /// A conversation as it prints.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -98,17 +100,21 @@ pub enum Message {
     Collapsed {
         from: String,
         snippet: String,
-        /// It has files, so a paperclip comes before the date (`.MessagePane-attachmentIcon`).
-        files: bool,
+        /// The paperclip for its files, or the calendar for its invite, before the date.
+        icon: Attachments,
         when: When,
     },
     /// An expanded message (`.MessagePane-expanded`).
     Expanded {
         header: Header,
+        /// Its invitation's card, above the body.
+        invite: Option<Invite>,
         /// The body's shadow-root markup ([`exo_mail::printable_body`]), or `None` while it's
-        /// still being rendered, which prints as nothing.
+        /// still being rendered or the card stands in for it, which prints as nothing.
         body: Option<String>,
         files: Vec<File>,
+        /// The reply or forward open under it, as its form prints without its buttons.
+        draft: Option<Draft>,
     },
     /// A marker between messages (`.ThreadShareMarker`): a message in Trash folded into
     /// `This message was moved to Trash.` and its link, or `Reminder returned` and when.
@@ -117,6 +123,74 @@ pub enum Message {
         link: Option<String>,
         when: Option<String>,
     },
+}
+
+/// A draft open in the conversation, as its form prints: its header, then what's been written,
+/// then the `…` of its quote or signature.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Draft {
+    pub header: DraftHeader,
+    /// The editor's HTML.
+    pub body: String,
+    /// A quote or signature sits behind a `…`.
+    pub quote: bool,
+}
+
+/// A draft form's header.
+#[derive(Clone, Debug, PartialEq)]
+pub enum DraftHeader {
+    /// `Draft to {recipients}`.
+    Collapsed(String),
+    /// The recipient lists that are showing (To, then Cc and Bcc), each its label and chips.
+    Lists(Vec<(&'static str, Vec<Chip>)>),
+}
+
+/// A recipient's chip.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Chip {
+    pub label: String,
+    /// The address can't be sent to, which outlines the chip in red.
+    pub invalid: bool,
+}
+
+/// An invitation's card as it prints: neither its background nor its photo prints, nor do its
+/// buttons, so the RSVP row prints its name alone.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Invite {
+    /// The guest's note above the card.
+    pub note: Option<Vec<Run>>,
+    /// The status over the photo.
+    pub status: Option<String>,
+    pub rows: Vec<InviteRow>,
+}
+
+/// One of the card's rows: its name, then its value.
+#[derive(Clone, Debug, PartialEq)]
+pub struct InviteRow {
+    pub question: &'static str,
+    pub value: InviteValue,
+}
+
+/// A card row's value.
+#[derive(Clone, Debug, PartialEq)]
+pub enum InviteValue {
+    /// Lines of runs, each indented by its first number (Where, the call, Who, About as far as
+    /// it's open).
+    Text(Vec<(f32, Vec<Run>)>),
+    /// When, which breaks only after a `,`, ` at` or `– `.
+    When(String),
+    /// The RSVP buttons, or Add To Calendar.
+    Buttons,
+    /// Files, as attachment cards.
+    Files(Vec<File>),
+}
+
+/// A run of text, a link or bold.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Run {
+    pub text: String,
+    pub link: Option<String>,
+    pub bold: bool,
 }
 
 /// What a header shows in the date's place.
@@ -162,6 +236,20 @@ pub struct File {
     pub color: Color32,
 }
 
+impl File {
+    /// The card for a file named `filename` of type `mime_type`.
+    pub(crate) fn of(filename: &str, mime_type: &str) -> Self {
+        let (name, kind) = filename
+            .rsplit_once('.')
+            .map_or((filename, ""), |(stem, extension)| (stem, extension));
+        Self {
+            name: name.to_owned(),
+            kind: kind.to_uppercase(),
+            color: exo_ui::attachment_badge_color(filename, mime_type),
+        }
+    }
+}
+
 /// Hears whether a print job went out, meaning the panel closed on Print or the PDF was written.
 pub type Done = Box<dyn FnOnce(bool)>;
 
@@ -174,85 +262,66 @@ pub enum Destination {
     Pdf(PathBuf),
 }
 
-/// Prints the open conversation `thread` through the macOS print panel over Exo's window
-/// (⌘P, File ▸ Print, ⌘K `Print`). `bodies` has its messages' bodies, `loader` fetches what they
-/// load, and `title` comes from [`title`]. Returns at once, and the panel runs on its own.
-pub fn conversation(
-    ctx: &egui::Context,
-    thread: &ThreadView,
-    bodies: &Bodies,
-    loader: &Loader,
-    title: String,
-) {
-    print(ctx, thread, bodies, loader, title, Destination::Panel, None);
+/// A conversation ready to print on any paper ([`ThreadView::printout`]). What it prints is
+/// settled; a page's width only cuts its collapsed rows' snippets again, and sets its widths.
+pub struct Printout {
+    /// The print job's title ([`title`]).
+    pub title: String,
+    lay_out: Box<dyn Fn(Page) -> Conversation>,
+}
+
+impl Printout {
+    pub(crate) fn new(title: String, lay_out: impl Fn(Page) -> Conversation + 'static) -> Self {
+        Self {
+            title,
+            lay_out: Box::new(lay_out),
+        }
+    }
+
+    /// The conversation laid out for `page`.
+    pub fn on(&self, page: Page) -> Conversation {
+        (self.lay_out)(page)
+    }
+}
+
+/// Prints the open conversation through the macOS print panel over Exo's window (⌘P,
+/// File ▸ Print, ⌘K `Print`), laying it out again for the paper the panel is set to. `loader`
+/// fetches what its bodies load. Returns at once, and the panel runs on its own.
+pub fn conversation(printout: Printout, loader: &Loader) {
+    print(printout, loader, Destination::Panel, None);
 }
 
 /// `Save as PDF` (`Print to PDF`, `Save to PDF`, `Export to PDF`). It opens a save panel titled
 /// `Save as PDF` proposing `{title}.pdf`, then prints the conversation into the chosen file on US
 /// Letter.
-pub fn save_as_pdf(
-    ctx: &egui::Context,
-    thread: &ThreadView,
-    bodies: &Bodies,
-    loader: &Loader,
-    title: String,
-) {
-    let Some(conversation) = thread.printout(ctx, bodies, title, Page::LETTER) else {
-        return;
-    };
+pub fn save_as_pdf(printout: Printout, loader: &Loader) {
     #[cfg(target_os = "macos")]
     {
         let loader = loader.clone();
-        macos::choose_pdf(&file_name(&conversation.title), move |path| {
-            macos::print(&conversation, loader, Destination::Pdf(path), None)
+        macos::choose_pdf(&file_name(&printout.title), move |path| {
+            macos::print(printout, loader, Destination::Pdf(path), None)
         });
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = (conversation, loader);
+        let _ = (printout, loader);
         log::warn!("Save as PDF is macOS-only");
     }
 }
 
-/// Prints `thread` to `destination`, then calls `done` with whether it went (the panel closed on
-/// Print, or the file was written). Returns at once.
-pub fn print(
-    ctx: &egui::Context,
-    thread: &ThreadView,
-    bodies: &Bodies,
-    loader: &Loader,
-    title: String,
-    destination: Destination,
-    done: Option<Done>,
-) {
-    let page = match destination {
-        Destination::Panel => default_page(),
-        Destination::Pdf(_) => Page::LETTER,
-    };
-    let Some(conversation) = thread.printout(ctx, bodies, title, page) else {
-        if let Some(done) = done {
-            done(false);
-        }
-        return;
-    };
+/// Prints `printout` to `destination`, then calls `done` with whether it went (the panel closed
+/// on Print, or the file was written). Returns at once.
+pub fn print(printout: Printout, loader: &Loader, destination: Destination, done: Option<Done>) {
     #[cfg(target_os = "macos")]
-    macos::print(&conversation, loader.clone(), destination, done);
+    macos::print(printout, loader.clone(), destination, done);
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = (conversation, loader);
+        let _ = (printout, loader, destination);
         log::warn!("printing is macOS-only");
         if let Some(done) = done {
             done(false);
         }
     }
-}
-
-/// The paper the print panel starts on, which is the default printer's.
-fn default_page() -> Page {
-    #[cfg(target_os = "macos")]
-    return macos::default_page();
-    #[cfg(not(target_os = "macos"))]
-    Page::LETTER
 }
 
 /// What the print view loads for a URL its page asks for.

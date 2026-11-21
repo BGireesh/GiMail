@@ -115,6 +115,10 @@ async fn inject_faults(State(app): State<Arc<App>>, request: Request, next: Next
         let mut world = app.lock();
         let path = request.uri().path();
         let method = request.method().as_str();
+        let query: Vec<(String, String)> =
+            url::form_urlencoded::parse(request.uri().query().unwrap_or_default().as_bytes())
+                .into_owned()
+                .collect();
         world
             .faults
             .iter_mut()
@@ -125,6 +129,11 @@ async fn inject_faults(State(app): State<Arc<App>>, request: Request, next: Next
                         .method
                         .as_deref()
                         .is_none_or(|wanted| wanted.eq_ignore_ascii_case(method))
+                    && fault.query.as_deref().is_none_or(|wanted| {
+                        url::form_urlencoded::parse(wanted.as_bytes())
+                            .into_owned()
+                            .all(|pair| query.contains(&pair))
+                    })
             })
             .map(|fault| {
                 fault.times -= 1;

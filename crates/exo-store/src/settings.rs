@@ -184,6 +184,15 @@ pub struct Settings {
     /// the first time the account opens on this Mac, and the flow clears it as it starts.
     #[serde(skip_serializing_if = "is_false")]
     pub do_show_tutorial: bool,
+    /// `doShowUndoSendFtue`: the Undo Send alert (`Congratulations 🙌`) is still to show on a
+    /// send. Exo sets it with the tutorial, and dismissing the alert clears it.
+    #[serde(skip_serializing_if = "is_false")]
+    pub do_show_undo_send_ftue: bool,
+    /// `showFirstTimeGMTZ`: Get Me To Zero is still to welcome the user to their inbox
+    /// (`Welcome to your Inbox 👋`). Exo sets it as the first run ends in Get Me To Zero, and the
+    /// next Get Me To Zero to close clears it, wherever it was opened from.
+    #[serde(rename = "showFirstTimeGMTZ", skip_serializing_if = "is_false")]
+    pub show_first_time_gmtz: bool,
     /// `typingAssistance`: autocorrect and autocomplete.
     #[serde(skip_serializing_if = "is_default")]
     pub typing_assistance: TypingAssistance,

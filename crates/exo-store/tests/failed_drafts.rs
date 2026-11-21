@@ -515,6 +515,36 @@ async fn a_short_rate_limit_only_delays_a_send() {
 }
 
 #[tokio::test]
+async fn a_send_waiting_out_a_rate_limit_is_retrying() {
+    let harness = Harness::synced().await;
+    let id = "draft00000000000029";
+    harness
+        .store
+        .save_draft(draft(id, &format!("{id}@exo")))
+        .await
+        .expect("saves");
+    harness.store.push_drafts().await.expect("pushes");
+    harness
+        .store
+        .send_draft(id, Timestamp::now())
+        .await
+        .expect("holds");
+    let mut fault = rate_limit(SignedDuration::from_mins(1), false);
+    fault["times"] = json!(1);
+    harness.fault(fault).await;
+    let report = harness.store.push_drafts().await.expect("pushes");
+    assert!(
+        report.failed.is_empty() && report.retrying == [id] && !report.offline,
+        "{report:?}"
+    );
+    let held = harness.store.draft(id).await.expect("reads").expect("kept");
+    assert!(
+        held.send_at.is_some() && held.failure.is_none(),
+        "still held"
+    );
+}
+
+#[tokio::test]
 async fn gmails_sending_limit_holds_sending_alone() {
     let harness = Harness::synced().await;
     let (failed, _) = send_with(
@@ -694,7 +724,10 @@ async fn being_offline_never_fails_a_send() {
     .await
     .expect("opens");
     let report = offline.push_drafts().await.expect("pushes");
-    assert!(report.failed.is_empty() && report.offline, "{report:?}");
+    assert!(
+        report.failed.is_empty() && report.offline && report.retrying.is_empty(),
+        "{report:?}"
+    );
     let draft = offline
         .draft("draft00000000000041")
         .await

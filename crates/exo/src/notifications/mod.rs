@@ -12,6 +12,7 @@ pub mod reminders;
 
 use std::{
     collections::VecDeque,
+    path::PathBuf,
     sync::{Arc, Mutex, PoisonError},
 };
 
@@ -44,6 +45,8 @@ pub struct Notice {
     pub subtitle: Option<String>,
     /// The body.
     pub body: String,
+    /// The sender's photo: a copy the OS takes, which macOS shows beside the text.
+    pub image: Option<PathBuf>,
     /// The `Join meeting` button, and what it does.
     pub button: Option<Click>,
     /// What clicking the notification does.
@@ -51,12 +54,15 @@ pub struct Notice {
 }
 
 impl Notice {
-    /// The OS's notification: its title, subtitle, body and key, and the button.
+    /// The OS's notification: its title, subtitle, body, key and image, and the button.
     fn notification(&self) -> fastframe_notifications::Notification {
-        let notification = fastframe_notifications::Notification::new(&self.title)
+        let mut notification = fastframe_notifications::Notification::new(&self.title)
             .subtitle(self.subtitle.as_deref().unwrap_or_default())
             .body(&self.body)
             .key(&self.key);
+        if let Some(image) = &self.image {
+            notification = notification.image(image);
+        }
         if self.button.is_some() {
             notification.action(JOIN, JOIN_MEETING)
         } else {
@@ -350,6 +356,7 @@ mod tests {
             title: "Priya Raman".into(),
             subtitle: subtitle.map(str::to_owned),
             body: "Launch checklist".into(),
+            image: None,
             button: None,
             click: Click {
                 account: "maya@brightmoor.co".into(),

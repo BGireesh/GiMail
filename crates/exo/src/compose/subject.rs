@@ -26,6 +26,9 @@ pub(crate) struct State {
     dismissed: bool,
     /// Where the caret goes once a picked row has replaced the trigger's text.
     caret: Option<usize>,
+    /// The subject's selection as the field last had it, as the characters it starts and ends
+    /// at, which `Use Emoji` and `Use Snippet Inline` type at.
+    selection: Option<(usize, usize)>,
 }
 
 /// Whether this frame's keys type a trigger character. Call it before the field takes the keys.
@@ -46,8 +49,15 @@ pub(super) fn update(ui: &Ui, open: &mut Open, id: Id, line: Rect, style: &TextS
         state.armed = true;
         state.dismissed = false;
     }
-    let caret = TextEditState::load(ctx, id)
-        .and_then(|edit| edit.cursor.char_range())
+    let range = TextEditState::load(ctx, id).and_then(|edit| edit.cursor.char_range());
+    state.selection = range.map(|range| {
+        let (primary, secondary) = (
+            usize::from(range.primary.index),
+            usize::from(range.secondary.index),
+        );
+        (primary.min(secondary), primary.max(secondary))
+    });
+    let caret = range
         .filter(|range| range.is_empty())
         .map(|range| usize::from(range.primary.index));
     let subject = &open.record.subject;
@@ -73,19 +83,66 @@ pub(super) fn update(ui: &Ui, open: &mut Open, id: Id, line: Rect, style: &TextS
     });
 }
 
-/// Replaces the trigger's text in the subject with `text` and puts the caret after it.
-pub(super) fn replace(open: &mut Open, trigger: &Trigger, text: &str) {
+/// `Use Emoji` in the subject: `:hello` goes in after the selection, with a space before it unless
+/// it follows a space or starts the subject, and a space after it unless a space or the end
+/// follows. The caret goes after `:hello`, which opens the picker.
+pub(super) fn use_emoji(open: &mut Open) {
     let chars: Vec<char> = open.record.subject.chars().collect();
-    let (start, end) = (
-        trigger.start.offset.min(chars.len()),
-        trigger.end.offset.min(chars.len()),
+    let at = open
+        .subject_assistant
+        .selection
+        .map_or(chars.len(), |(_, end)| end)
+        .min(chars.len());
+    let space_before = at > 0 && chars[at - 1] != ' ';
+    let space_after = at < chars.len() && chars[at] != ' ';
+    let text = format!(
+        "{}:hello{}",
+        if space_before { " " } else { "" },
+        if space_after { " " } else { "" }
     );
-    open.record.subject = chars[..start]
+    splice(open, at..at, &text);
+    let state = &mut open.subject_assistant;
+    state.caret = Some(at + usize::from(space_before) + ":hello".len());
+    state.dismissed = false;
+}
+
+/// `Use Snippet Inline` in the subject: `;` replaces the selection, with a space before it unless
+/// it follows whitespace or starts the subject, which opens the picker as a typed `;` does.
+pub(super) fn use_snippet(open: &mut Open) {
+    let chars: Vec<char> = open.record.subject.chars().collect();
+    let (start, end) = open
+        .subject_assistant
+        .selection
+        .unwrap_or((chars.len(), chars.len()));
+    let (start, end) = (start.min(chars.len()), end.min(chars.len()));
+    let text = if start == 0 || chars[start - 1].is_whitespace() {
+        ";"
+    } else {
+        " ;"
+    };
+    splice(open, start..end, text);
+    let state = &mut open.subject_assistant;
+    state.caret = Some(start + text.chars().count());
+    state.armed = true;
+    state.dismissed = false;
+}
+
+/// Puts `text` in the subject in place of the characters `range`.
+fn splice(open: &mut Open, range: std::ops::Range<usize>, text: &str) {
+    let chars: Vec<char> = open.record.subject.chars().collect();
+    open.record.subject = chars[..range.start]
         .iter()
         .copied()
         .chain(text.chars())
-        .chain(chars[end..].iter().copied())
+        .chain(chars[range.end..].iter().copied())
         .collect();
+}
+
+/// Replaces the trigger's text in the subject with `text` and puts the caret after it.
+pub(super) fn replace(open: &mut Open, trigger: &Trigger, text: &str) {
+    let len = open.record.subject.chars().count();
+    let (start, end) = (trigger.start.offset.min(len), trigger.end.offset.min(len));
+    splice(open, start..end, text);
     let state = &mut open.subject_assistant;
     state.caret = Some(start + text.chars().count());
     state.armed = false;

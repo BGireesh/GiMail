@@ -42,6 +42,7 @@ mod snippet_editor;
 pub(crate) mod snippets;
 mod spelling;
 mod subject;
+mod undo_alert;
 mod unsubscribe;
 
 use exo_commands::{Command, Commands, Hint, Region, Toast, ToastKind};
@@ -164,6 +165,10 @@ pub(crate) enum Action {
     OpenAttachment { uuid: String, preview: bool },
     /// ↑ / ↓ in the suggestions.
     MoveSuggestion(isize),
+    /// The pointer moving over a suggestion other than the highlighted one.
+    HighlightSuggestion(usize),
+    /// The pointer over From's address, which shows the alias in the contact pane.
+    HoverFrom,
     /// A suggestion picked with the pointer.
     PickSuggestion(usize),
     /// `Remove Suggestion` on a suggestion.
@@ -279,6 +284,9 @@ struct Sending {
     until: Timestamp,
     /// Gmail has the message, so the toast reads `Message sent.`.
     acked: bool,
+    /// Gmail didn't take it on a try and it's being tried again, so the toast reads
+    /// `Still sending…`.
+    retrying: bool,
     undoing: bool,
     /// When the hover last held the send longer.
     held_at: f64,
@@ -375,6 +383,31 @@ enum AlertThen {
     CreateSnippet,
     /// The follow-up hint after a send: `Set reminder` or `Maybe later`.
     FollowUp,
+    /// The Undo Send alert after the send with this toast tag: `Got it`.
+    UndoSend(u64),
+}
+
+/// A contact a draft shows in the contact pane itself: the suggestion highlighted, or From's alias
+/// while it's hovered or once it's chosen.
+struct Shown {
+    draft: String,
+    /// In the new-message pane, whom the pane showed for the draft otherwise
+    /// ([`pane_own`]). The contact shows until that changes.
+    over: Option<Address>,
+    contact: Address,
+}
+
+/// Whom the new-message pane's draft has the contact pane show: the chip at the selection's edge
+/// while chips are selected, else its last recipient, To through Bcc.
+fn pane_own(open: &Open) -> Option<&Address> {
+    chips::edge(open).or_else(|| {
+        open.record
+            .to
+            .iter()
+            .chain(&open.record.cc)
+            .chain(&open.record.bcc)
+            .last()
+    })
 }
 
 /// A reply asked for before its thread was loaded (`R` from the list).
@@ -431,8 +464,12 @@ pub(crate) struct Compose {
     recipients_seen: Option<(String, Vec<String>)>,
     /// The recipient the focused draft got last, for the contact pane to show.
     just_added: Option<Address>,
+    /// The contact a draft last showed in the contact pane itself.
+    shown: Option<Shown>,
     /// The follow-up hint holding its send while it's open.
     follow_up: Option<reminder::FollowUp>,
+    /// The Undo Send alert holding its send while it's open.
+    undo_alert: Option<undo_alert::Held>,
     /// The threads that drafts sent this session went into (a few), the latest last.
     sent_threads: Vec<(String, String)>,
     /// The account's `Send + Mark Done` (`sendAndDone`), as of this frame.
@@ -484,6 +521,12 @@ impl Compose {
         } else {
             Region::ComposeForm
         })
+    }
+
+    /// Whether `message` is a reply just sent, shown in its thread until Gmail's copy takes its
+    /// place.
+    pub fn is_sent_reply(&self, message: &str) -> bool {
+        self.in_thread.draft_of(message).is_some()
     }
 
     /// The draft with the keyboard.
@@ -548,38 +591,106 @@ impl Compose {
         self.pane.as_ref().map(|(id, _)| id.as_str())
     }
 
-    /// The new message's last recipient, To through Bcc, while its pane shows (`Some(None)`
-    /// with none yet). While chips are selected, it's the chip at the selection's edge.
+    /// Whom the new message has the contact pane show while its pane shows (`Some(None)` for
+    /// you): the chip at the selection's edge while chips are selected, else its last recipient,
+    /// To through Bcc. A contact the draft showed itself ([`Shown`]) shows until that changes.
     pub fn pane_recipient(&self) -> Option<Option<&exo_store::Address>> {
         let (id, _) = self.pane.as_ref()?;
         let open = self.drafts.iter().find(|open| &open.id == id)?;
-        if let Some(selected) = chips::edge(open) {
-            return Some(Some(selected));
+        let own = pane_own(open);
+        if let Some(shown) = self
+            .shown
+            .as_ref()
+            .filter(|shown| shown.draft == *id && shown.over.as_ref() == own)
+        {
+            return Some(Some(&shown.contact));
         }
-        Some(
-            open.record
-                .to
-                .iter()
-                .chain(&open.record.cc)
-                .chain(&open.record.bcc)
-                .last(),
-        )
+        Some(own)
     }
 
     /// Whom the contact pane is to show for the focused draft, when that draft isn't the
     /// new-message pane's ([`Self::pane_recipient`] covers that one). It's the chip at the
-    /// selection's edge, else the recipient just added, which this takes.
+    /// selection's edge, else the recipient just added or the contact the draft showed itself
+    /// ([`Shown`]), which this takes.
     pub fn shown_recipient(&mut self) -> Option<Address> {
         let added = self.just_added.take();
+        let pane = self.pane().map(str::to_owned);
+        let shown = self
+            .shown
+            .take_if(|shown| pane.as_deref() != Some(shown.draft.as_str()));
         let open = self
             .focused()
-            .filter(|open| self.pane() != Some(open.id.as_str()))?;
-        chips::edge(open).cloned().or(added)
+            .filter(|open| pane.as_deref() != Some(open.id.as_str()))?;
+        let shown = shown
+            .filter(|shown| shown.draft == open.id)
+            .map(|shown| shown.contact);
+        chips::edge(open).cloned().or(added).or(shown)
+    }
+
+    /// The focused draft shows `contact` in the contact pane.
+    fn show_contact(&mut self, contact: Address) {
+        let Some(open) = self.focused() else {
+            return;
+        };
+        let over = (self.pane() == Some(open.id.as_str()))
+            .then(|| pane_own(open).cloned())
+            .flatten();
+        self.shown = Some(Shown {
+            draft: open.id.clone(),
+            over,
+            contact,
+        });
+    }
+
+    /// The focused draft's highlighted suggestion shows in the contact pane.
+    fn show_suggestion(&mut self) {
+        let highlighted = self.focused().and_then(|open| {
+            let input = open.input(open.state.field.list()?);
+            input.suggestions.get(input.highlight).cloned()
+        });
+        if let Some(contact) = highlighted {
+            self.show_contact(contact);
+        }
+    }
+
+    /// The focused draft's From alias shows in the contact pane.
+    fn show_from(&mut self) {
+        if let Some(from) = self
+            .focused()
+            .and_then(|open| open.record.from.clone())
+            .filter(|from| !from.email.is_empty())
+        {
+            self.show_contact(from);
+        }
     }
 
     /// The popped-out draft's id.
     pub fn popped(&self) -> Option<&str> {
         self.popped.as_deref()
+    }
+
+    /// The drafts open in `thread` as they print, each with the message it hangs under. One in
+    /// the new-message pane or popped out isn't in the conversation.
+    pub fn printouts(
+        &self,
+        thread: &ThreadDetail,
+        aliases: &[Alias],
+        me: &str,
+    ) -> Vec<(String, crate::print::Draft)> {
+        let shown: Vec<&MessageDetail> = thread
+            .messages
+            .iter()
+            .filter(|message| !message.is_draft())
+            .collect();
+        let elsewhere = [self.pane.as_ref().map(|(id, _)| id.as_str()), self.popped()];
+        self.drafts
+            .iter()
+            .filter(|open| {
+                open.thread.as_deref() == Some(thread.id.as_str())
+                    && !elsewhere.contains(&Some(open.id.as_str()))
+            })
+            .filter_map(|open| Some((anchor(open, &shown)?, form::printout(open, aliases, me))))
+            .collect()
     }
 
     /// The drafts of `thread`, each under the message it answers (or under the last message when
@@ -700,6 +811,14 @@ impl Compose {
                 commands.add(
                     Command::shortcut("FOLLOW_UP_H", act(Action::Alert(0)))
                         .key("h")
+                        .regions(ALERT),
+                );
+            }
+            // `z` in the Undo Send alert undoes the send.
+            if let AlertThen::UndoSend(tag) = alert.then {
+                commands.add(
+                    Command::shortcut("UNDO_SEND_Z", act(Action::UndoSend(tag)))
+                        .key("z")
                         .regions(ALERT),
                 );
             }
@@ -1414,7 +1533,12 @@ impl crate::Mail {
                 if let Some(open) = self.compose.focused_mut() {
                     from_menu(open, &aliases, &action, now);
                 }
+                // The alias chosen shows in the contact pane.
+                if matches!(action, Action::FromChoose(_)) {
+                    self.compose.show_from();
+                }
             }
+            Action::HoverFrom => self.compose.show_from(),
             Action::SnippetMove(delta) => {
                 if let Some(open) = self
                     .compose
@@ -1615,6 +1739,18 @@ impl crate::Mail {
                     input.highlight =
                         (input.highlight as isize + delta).rem_euclid(count as isize) as usize;
                 }
+                self.compose.show_suggestion();
+            }
+            Action::HighlightSuggestion(index) => {
+                if let Some(input) = self
+                    .compose
+                    .focused_mut()
+                    .and_then(|open| open.state.field.list().map(|list| open.input_mut(list)))
+                    .filter(|input| index < input.suggestions.len())
+                {
+                    input.highlight = index;
+                }
+                self.compose.show_suggestion();
             }
             Action::PickSuggestion(index) => {
                 if let Some((open, book)) = self.compose.focused_with_book()
@@ -2372,7 +2508,7 @@ impl crate::Mail {
             {
                 let (actions, then) = match problem.kind {
                     checks::Kind::SendAnyway(bypass) => (
-                        vec!["Send anyway", "Cancel"],
+                        vec![checks::anyway(open), "Cancel"],
                         AlertThen::SendAnyway(bypass, mark_done),
                     ),
                     checks::Kind::Ok { focus_from } => (vec!["OK"], AlertThen::Ok { focus_from }),
@@ -2459,6 +2595,7 @@ impl crate::Mail {
             done,
             until,
             acked: false,
+            retrying: false,
             undoing: false,
             held_at: f64::NEG_INFINITY,
             scheduled: scheduled.is_some(),
@@ -2468,12 +2605,14 @@ impl crate::Mail {
         } else {
             "Sending…"
         };
-        self.commands
-            .toast(send_toast(text, tag, !sending.scheduled).sticky());
+        let scheduled = sending.scheduled;
+        let instant = !scheduled && !self.undo_alert_pending();
+        self.commands.toast(send_toast(text, tag, instant).sticky());
         self.compose.sends.push(sending);
         if surface == Surface::Pane {
             self.close_pane_to_origin();
         }
+        self.show_undo_alert(&id, tag, scheduled, now);
         self.follow_up_hint(&id, reminded, now);
     }
 
@@ -2508,6 +2647,14 @@ impl crate::Mail {
         self.account.undo_send(&sending.open.id);
         self.commands
             .toast(Toast::new("Undoing…").tag(tag).sticky());
+        if self
+            .compose
+            .undo_alert
+            .as_ref()
+            .is_some_and(|held| held.tag == tag)
+        {
+            self.finish_undo_alert();
+        }
     }
 
     /// An alert's action.
@@ -2548,6 +2695,7 @@ impl crate::Mail {
             AlertThen::CreateSnippet => {}
             AlertThen::FollowUp if first => self.follow_up_set_reminder(alert.draft),
             AlertThen::FollowUp => self.compose.follow_up = None,
+            AlertThen::UndoSend(tag) => self.dismiss_undo_alert(tag),
         }
     }
 
@@ -2588,6 +2736,7 @@ impl crate::Mail {
         self.inline_snippet_rows();
         self.assistant_rows();
         self.postpone_for_follow_up(now);
+        self.hold_for_undo_alert(now);
         self.automatic_reminders(now);
         self.note_unscheduled();
         self.unschedule_passed();
@@ -2868,6 +3017,7 @@ impl crate::Mail {
     /// What the account says about drafts.
     pub(crate) fn compose_event(&mut self, event: Event) {
         let showing = self.commands.toast_tag();
+        let undo_alert = self.undo_alert_pending();
         match event {
             Event::DraftSaved(id) => {
                 if let Some(sending) = self
@@ -2879,8 +3029,28 @@ impl crate::Mail {
                     sending.acked = true;
                     if showing == Some(sending.tag) {
                         let text = sending.sent_text();
+                        let instant = !sending.scheduled && !undo_alert;
+                        let toast = send_toast(text, sending.tag, instant);
+                        // The Undo Send alert keeps the toast up while it's open.
+                        let held = self
+                            .compose
+                            .undo_alert
+                            .as_ref()
+                            .is_some_and(|held| held.tag == sending.tag);
                         self.commands
-                            .toast(send_toast(text, sending.tag, !sending.scheduled));
+                            .toast(if held { toast.sticky() } else { toast });
+                    }
+                }
+            }
+            Event::SendRetrying(id) => {
+                if let Some(sending) = self.compose.sends.iter_mut().find(|sending| {
+                    sending.open.id == id && !sending.acked && !sending.undoing && !sending.retrying
+                }) {
+                    sending.retrying = true;
+                    // A scheduled send keeps saying `Scheduling…`.
+                    if showing == Some(sending.tag) && !sending.scheduled {
+                        self.commands
+                            .toast(send_toast("Still sending…", sending.tag, !undo_alert).sticky());
                     }
                 }
             }
@@ -3035,7 +3205,8 @@ impl crate::Mail {
             | Event::LabelCreated(_)
             | Event::LabelNotCreated { .. }
             | Event::Unsent(_)
-            | Event::Thread { .. } => {}
+            | Event::Thread { .. }
+            | Event::Unavailable { .. } => {}
         }
     }
 
@@ -3108,6 +3279,14 @@ impl crate::Mail {
                 reminder::HINT_BEFORE,
                 reminder::HINT_KEY,
                 reminder::HINT_AFTER,
+            )
+        } else if matches!(alert.then, AlertThen::UndoSend(_)) {
+            shown.show_with_confirm_key(
+                ui,
+                page,
+                undo_alert::BEFORE,
+                undo_alert::KEY,
+                undo_alert::AFTER,
             )
         } else {
             shown.show(ui, page)

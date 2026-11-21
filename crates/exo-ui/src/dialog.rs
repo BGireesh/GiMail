@@ -55,6 +55,7 @@ const FADE: f32 = 0.2;
 pub struct Dialog<'a> {
     id: Id,
     header: &'a str,
+    header_emoji: Option<&'a str>,
     header_style: TextStyle,
     header_ink: Color32,
     body_height: f32,
@@ -82,6 +83,7 @@ impl<'a> Dialog<'a> {
         Self {
             id: Id::new(("exo_ui::dialog", id)),
             header,
+            header_emoji: None,
             header_style: HEADER,
             header_ink: HEADER_INK,
             body_height,
@@ -124,6 +126,15 @@ impl<'a> Dialog<'a> {
         Self {
             header_style: style,
             header_ink: ink,
+            ..self
+        }
+    }
+
+    /// Its header followed by `emoji` drawn as an image, as when the header is a row of its text
+    /// and an `<img>`: 16px square, 3px after the text (`left: 3px`) and at the top of the line.
+    pub fn header_emoji(self, emoji: &'a str) -> Self {
+        Self {
+            header_emoji: Some(emoji),
             ..self
         }
     }
@@ -283,13 +294,14 @@ impl<'a> Dialog<'a> {
 
         // The header and the close control, over anything the body paints behind them.
         if self.fill.is_none() {
-            self.header_style.paint_line(
-                &painter,
-                pos2(content.left(), content.top() + HEADER_NUDGE),
-                self.header,
-                self.header_ink,
-                None,
-            );
+            let at = pos2(content.left(), content.top() + HEADER_NUDGE);
+            let width =
+                self.header_style
+                    .paint_line(&painter, at, self.header, self.header_ink, None);
+            if let Some(emoji) = self.header_emoji {
+                let image = Rect::from_min_size(at + vec2(width + 3.0, 0.0), vec2(16.0, 16.0));
+                crate::paint_emoji(&painter, emoji, image);
+            }
         }
         if self.back {
             // The back arrow, its viewBox fitted into the box.

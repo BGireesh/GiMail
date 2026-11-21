@@ -12,6 +12,8 @@ use crate::{
 const ACTION: TextStyle = TextStyle::new(Font::new(Family::Sans, 700), 14.0, 20.0);
 const ACTION_PADDING: [f32; 3] = [8.0, 12.0, 4.0];
 const ACTION_RADIUS: u8 = 2;
+/// An emoji image after an action's label: 14px, `top: 1px; vertical-align: top`.
+const ACTION_EMOJI: f32 = 14.0;
 /// [`DialogAction::origin_light`]'s label: Exo Sans Alt.
 const ORIGIN_ACTION: TextStyle = TextStyle::new(Font::new(Family::SansAlt, 700), 14.0, 20.0);
 /// [`DialogAction::origin_light`]'s label, fill and hovered fill.
@@ -60,6 +62,7 @@ pub enum ActionKind {
 #[must_use]
 pub struct DialogAction<'a> {
     label: &'a str,
+    emoji: Option<&'a str>,
     kind: ActionKind,
     enabled: bool,
     focused: bool,
@@ -74,6 +77,7 @@ impl<'a> DialogAction<'a> {
     pub fn new(label: &'a str, kind: ActionKind) -> Self {
         Self {
             label,
+            emoji: None,
             kind,
             enabled: true,
             focused: false,
@@ -81,6 +85,16 @@ impl<'a> DialogAction<'a> {
             unfilled: false,
             disabled_fill: None,
             origin_light: false,
+        }
+    }
+
+    /// Its label followed by a space and `emoji` drawn as an image (an `<img>` after the text),
+    /// 14px square and 1px down from the top of the line, as Get Me To Zero's `Let's go! ✨` has
+    /// it. The image is narrower than the emoji as a glyph, and keeps its colors.
+    pub fn emoji(self, emoji: &'a str) -> Self {
+        Self {
+            emoji: Some(emoji),
+            ..self
         }
     }
 
@@ -129,14 +143,17 @@ impl<'a> DialogAction<'a> {
         }
     }
 
-    /// Its width with its padding, for a label alone.
+    /// Its width with its padding.
     pub fn width(&self, ctx: &egui::Context) -> f32 {
-        let style = if self.origin_light {
+        label_width(ctx, &self.style(), self.label, self.emoji) + 2.0 * ACTION_PADDING[1]
+    }
+
+    fn style(&self) -> TextStyle {
+        if self.origin_light {
             ORIGIN_ACTION
         } else {
             ACTION
-        };
-        style.width(ctx, &self.label.to_uppercase()) + 2.0 * ACTION_PADDING[1]
+        }
     }
 
     /// Paints the button filling `rect` (its padding box, already nudged down), the label
@@ -179,12 +196,12 @@ impl<'a> DialogAction<'a> {
             let ink = motion::mix(ORIGIN_LABEL, Color32::WHITE, filled);
             let opacity = if self.enabled { 1.0 } else { 0.4 };
             let glow = if self.enabled { glow } else { 0.0 };
-            paint_action_in(
+            paint_box(ui.painter(), rect, fill.gamma_multiply(opacity), glow);
+            paint_label(
                 ui.painter(),
                 rect,
                 self.label,
-                fill.gamma_multiply(opacity),
-                glow,
+                self.emoji,
                 ink.gamma_multiply(opacity),
                 &ORIGIN_ACTION,
             );
@@ -228,14 +245,24 @@ impl<'a> DialogAction<'a> {
                 motion::mix(plain, on_accent, filled),
             )
         };
-        paint_action(ui.painter(), rect, self.label, fill, glow, ink);
+        paint_box(ui.painter(), rect, fill, glow);
+        paint_label(ui.painter(), rect, self.label, self.emoji, ink, &ACTION);
         response
     }
 }
 
 /// An action's width: its uppercase label and side padding.
 pub(crate) fn action_width(ctx: &egui::Context, label: &str) -> f32 {
-    ACTION.width(ctx, &label.to_uppercase()) + 2.0 * ACTION_PADDING[1]
+    label_width(ctx, &ACTION, label, None) + 2.0 * ACTION_PADDING[1]
+}
+
+/// The width of `label` uppercase in `style`, with a space and `emoji`'s image after it if there
+/// is one.
+fn label_width(ctx: &egui::Context, style: &TextStyle, label: &str, emoji: Option<&str>) -> f32 {
+    match emoji {
+        Some(_) => style.width(ctx, &format!("{} ", label.to_uppercase())) + ACTION_EMOJI,
+        None => style.width(ctx, &label.to_uppercase()),
+    }
 }
 
 /// An alert action's fill and label at `filled` of the way from plain to filled with the accent.
@@ -256,37 +283,48 @@ pub(crate) fn paint_action(
     glow: f32,
     ink: Color32,
 ) {
-    paint_action_in(painter, rect, label, fill, glow, ink, &ACTION);
+    paint_box(painter, rect, fill, glow);
+    paint_label(painter, rect, label, None, ink, &ACTION);
 }
 
-/// [`paint_action`] with its label in `style`.
-fn paint_action_in(
-    painter: &Painter,
-    rect: Rect,
-    label: &str,
-    fill: Color32,
-    glow: f32,
-    ink: Color32,
-    style: &TextStyle,
-) {
+/// An action's padding box `rect`: its glow at `glow`, outside the box as CSS clips a
+/// `box-shadow`, and `fill`.
+fn paint_box(painter: &Painter, rect: Rect, fill: Color32, glow: f32) {
     let snapped = pixel_snap(rect);
-    let radius = CornerRadius::same(ACTION_RADIUS);
     if glow > 0.0 {
         for shadow in GLOW {
             shadow.with_opacity(glow).paint_outside(painter, snapped);
         }
     }
-    painter.rect_filled(snapped, radius, fill);
-    let label = label.to_uppercase();
+    painter.rect_filled(snapped, CornerRadius::same(ACTION_RADIUS), fill);
+}
+
+/// An action's uppercase label in `style` and `ink`, centered in `rect`, with `emoji`'s image
+/// after it if there is one ([`DialogAction::emoji`]).
+fn paint_label(
+    painter: &Painter,
+    rect: Rect,
+    label: &str,
+    emoji: Option<&str>,
+    ink: Color32,
+    style: &TextStyle,
+) {
+    let width = label_width(painter.ctx(), style, label, emoji);
     // `text-align: center`, for buttons given a width.
-    let x = rect.center().x - style.width(painter.ctx(), &label) / 2.0;
-    style.paint_line(
-        painter,
-        pos2(x, rect.top() + ACTION_PADDING[0]),
-        &label,
-        ink,
-        None,
+    let at = pos2(
+        rect.center().x - width / 2.0,
+        rect.top() + ACTION_PADDING[0],
     );
+    let mut text = label.to_uppercase();
+    if emoji.is_some() {
+        text.push(' ');
+    }
+    let text_width = style.paint_line(painter, at, &text, ink, None);
+    if let Some(emoji) = emoji {
+        let image =
+            Rect::from_min_size(at + vec2(text_width, 1.0), vec2(ACTION_EMOJI, ACTION_EMOJI));
+        crate::paint_emoji(painter, emoji, image);
+    }
 }
 
 /// A dialog's text input, a borderless field over a 1px rule. The rule takes the active color

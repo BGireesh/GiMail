@@ -31,7 +31,8 @@ impl From<Rsvp> for Response {
 }
 
 impl Rsvp {
-    fn parse(status: Option<&str>) -> Option<Self> {
+    /// The answer Calendar's `responseStatus` names.
+    pub(super) fn parse(status: Option<&str>) -> Option<Self> {
         Some(match status? {
             "accepted" => Self::Accepted,
             "tentative" => Self::Tentative,

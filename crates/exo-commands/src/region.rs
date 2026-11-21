@@ -44,6 +44,9 @@ pub enum Region {
     CalendarColorPicker,
     CalendarCreate,
     ShareAvailability,
+    /// A control of Share Availability's sidebar other than its text fields: Duration, a listed
+    /// attendee, Insert or Cancel.
+    ShareAvailabilitySidebar,
     ShareAvailabilitySidebarAttendees,
     ShareAvailabilitySidebarTimezoneInput,
 }

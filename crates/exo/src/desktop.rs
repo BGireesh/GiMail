@@ -18,6 +18,7 @@ mod quit;
 pub(crate) mod spelling;
 #[cfg(target_os = "macos")]
 mod text_input;
+pub(crate) mod titles;
 
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 

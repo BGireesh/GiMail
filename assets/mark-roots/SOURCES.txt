@@ -1,0 +1,23 @@
+The root certificates Exo trusts for brands' mark certificates (Verified Mark and Common Mark
+Certificates, BIMI's), compiled in: those of the issuers the BIMI Group lists
+(https://bimigroup.org/vmc-issuers/), which Gmail's BIMI setup points to. Public data, each
+downloaded from its issuer over HTTPS and converted to PEM unchanged.
+
+Roots (sha256 of the file, file; subject, SHA-256 fingerprint, source):
+  146f0c7c4e916f8a3381fe303fd9bf2b3007de3dd66836a8b21598feda523b6a  DigiCertVerifiedMarkRootCA.pem
+      subject      C=US, ST=Utah, L=Lehi, O=DigiCert, Inc., OU=www.digicert.com, CN=DigiCert Verified Mark Root CA
+      fingerprint  50:43:86:C9:EE:89:32:FE:CC:95:FA:DE:42:7F:69:C3:E2:53:4B:73:10:48:9E:30:0F:EE:44:8E:33:C4:6B:42
+      source       https://cacerts.digicert.com/DigiCertVerifiedMarkRootCA.crt (DER), the same as
+                   https://bimigroup.org/certs/digicert.pem
+  d7c80c0a6003476c340d33a0a9e8486a54c567dd308ab46f408f860764a5f817  GlobalSignVerifiedMarkRootR42.pem
+      subject      C=BE, O=GlobalSign nv-sa, CN=GlobalSign Verified Mark Root R42
+      fingerprint  CD:12:2C:B8:77:C6:92:8B:90:17:B0:F0:B8:0D:BD:50:81:96:30:0B:BD:03:CD:73:56:C3:BE:EF:52:4E:7E:0B
+      source       https://secure.globalsign.com/cacert/gsverifiedmarkrootr42.crt (DER)
+  f6cc96992bd674ec10681b16507a2de0edfaf9e2ccbdf90844c508caea4136f5  SSLcomVMCECCRootCA2024.pem
+      subject      C=US, O=SSL Corporation, CN=SSL.com VMC ECC Root CA 2024
+      fingerprint  1B:82:E7:F4:91:0B:51:E3:E8:02:A4:93:AC:DC:17:FF:58:EA:C8:B9:EB:7C:09:B5:2A:C6:CD:2E:FB:83:59:8C
+      source       https://ssl.com/repo/certs/SSL.com-VMC-Root-2024-ECC.pem
+  31415b123a16db182bddc5cd3ac593dfb26f1df40d065ff3fc8044eff778c903  SSLcomVMCRSARootCA2024.pem
+      subject      C=US, O=SSL Corporation, CN=SSL.com VMC RSA Root CA 2024
+      fingerprint  8F:9D:1B:76:98:88:67:82:A5:99:B4:85:10:65:1C:66:A1:AA:0C:5C:A3:19:20:97:BD:C6:85:34:15:4B:D3:0D
+      source       https://ssl.com/repo/certs/SSL.com-VMC-Root-2024-RSA.pem

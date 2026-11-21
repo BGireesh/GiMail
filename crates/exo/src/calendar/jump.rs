@@ -2,7 +2,7 @@
 //! calendar there.
 
 use exo_commands::{Command, SubPalette, command_score};
-use jiff::{Zoned, civil::Date};
+use jiff::Zoned;
 
 use super::Action;
 use crate::{
@@ -23,8 +23,9 @@ pub(super) fn palette(now: Zoned) -> SubPalette<AppAction> {
     .empty_note("No matching date found")
 }
 
-/// The parser's first five dates, each with its date as en-US writes it. With a query, only the
-/// labels it fuzzy matches stay, best first, so `8/7` (`August 7th 2027`) lists nothing.
+/// The parser's first five dates, each with its date in numbers as the locale writes it. With a
+/// query, only the labels it fuzzy matches stay, best first, so `8/7` (`August 7th 2027`) lists
+/// nothing.
 fn rows(query: &str, now: &Zoned) -> Vec<Command<AppAction>> {
     let options = Options {
         defaults: &["next week", "next month", "in 3 months"],
@@ -46,6 +47,7 @@ fn rows(query: &str, now: &Zoned) -> Vec<Command<AppAction>> {
             })
             .collect();
     scored.sort_by(|a, b| b.0.total_cmp(&a.0));
+    let locale = crate::format::locale::current();
     scored
         .into_iter()
         .enumerate()
@@ -56,14 +58,9 @@ fn rows(query: &str, now: &Zoned) -> Vec<Command<AppAction>> {
                 suggestion.label,
                 AppAction::Calendar(Action::JumpTo(date)),
             )
-            .side_title(locale_date(date))
+            .side_title(locale.date(date))
         })
         .collect()
-}
-
-/// `date` as en-US writes it in short: `11/23/2026`.
-fn locale_date(date: Date) -> String {
-    format!("{}/{}/{}", date.month(), date.day(), date.year())
 }
 
 #[cfg(test)]
@@ -86,6 +83,5 @@ mod tests {
             "`August 7th 2027` doesn't match what was typed"
         );
         assert_eq!(jump.titles("last friday"), ["No matching date found"]);
-        assert_eq!(locale_date(jiff::civil::date(2026, 12, 1)), "12/1/2026");
     }
 }

@@ -517,6 +517,7 @@ fn quote(action: DraftAction, message: &MessageDetail, sent: &Zoned, body: &Quot
     });
     exo_editor::outgoing::reply_quote(
         sent,
+        &crate::format::locale::current().time(sent),
         &name,
         &email,
         &body.class,
@@ -837,6 +838,32 @@ mod tests {
             Vec::new(),
         );
         assert_eq!(account.addressee(&to_primary).email, ME);
+    }
+
+    #[test]
+    fn a_replys_quote_header_has_the_locales_time() {
+        let message = message(
+            contact("Tom Becker", "tom@brightmoor.co"),
+            Vec::new(),
+            Vec::new(),
+        );
+        let sent = message
+            .date
+            .to_zoned(TimeZone::get("America/New_York").unwrap());
+        let header = |locale| {
+            crate::format::locale::pinned(locale, || {
+                let quote = quote(DraftAction::Reply, &message, &sent, &QuotedBody::default());
+                quote[..quote.find(" <span").expect("the address follows")].to_owned()
+            })
+        };
+        assert_eq!(
+            header(crate::format::locale::Locale::en_us()),
+            "<div class=\"gmail_quote\">On Tue, Nov 17, 2026 at 8:31 AM, Tom Becker"
+        );
+        assert_eq!(
+            header(crate::format::locale::Locale::en_gb()),
+            "<div class=\"gmail_quote\">On Tue, Nov 17, 2026 at 08:31, Tom Becker"
+        );
     }
 
     #[test]

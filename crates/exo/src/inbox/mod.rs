@@ -30,7 +30,7 @@ pub use header::{Focus as HeaderFocus, HeaderAction};
 pub use nudge::{HIDE_EMPTY_SPLIT, NudgeAction};
 
 /// A row's height. A search result with files is taller, to show them under its row.
-const ROW_HEIGHT: f32 = 36.0;
+pub(super) const ROW_HEIGHT: f32 = 36.0;
 const ROW_WITH_FILES: f32 = 68.0;
 /// A date separator's height.
 const SEPARATOR_HEIGHT: f32 = 48.0;
@@ -103,6 +103,8 @@ pub enum Action {
     },
     /// A row's checkmark was clicked, so suggest X (`SELECT`, or `DESELECT` for a selected row).
     SelectHint { deselect: bool },
+    /// The pointer settled on a search result's file card, so suggest ⌘O.
+    FilesHint,
     /// Inbox Zero's button, which opens the Inbox Zero achievements.
     Achievements,
 }
@@ -271,6 +273,8 @@ pub struct Inbox {
     viewport: f32,
     /// Which row the pointer gives the cursor.
     hover: RowHover,
+    /// The search result's file card the pointer is settling on: its row and index.
+    file_intent: exo_ui::HoverIntent<(String, usize)>,
     /// Whether the list has the keyboard, which it doesn't while the folder drawer is open.
     focused: bool,
     /// Whether the focus bar shows on the cursor's row, which it doesn't while the search bar has
@@ -451,6 +455,7 @@ impl Inbox {
             scroll: 0.0,
             viewport: 0.0,
             hover: RowHover::default(),
+            file_intent: exo_ui::HoverIntent::default(),
             focused: true,
             bar: true,
             reading: false,
@@ -1414,11 +1419,20 @@ impl Inbox {
                 remind,
             }
         };
-        // The streak animation hides the header at once.
+        // The streak animation hides the header at once, and it comes back over 150ms (`ease`).
+        let shown = motion::transition_in(
+            ui.ctx(),
+            ui.id().with("header-shown"),
+            !self.view.hide_chrome,
+            0.15,
+            CubicBezier::EASE,
+        );
         let header = if self.view.hide_chrome {
             None
         } else {
-            header::show(
+            let opacity = ui.opacity();
+            ui.multiply_opacity(shown);
+            let header = header::show(
                 ui,
                 header_rect,
                 rem,
@@ -1428,7 +1442,9 @@ impl Inbox {
                 self.scroll > 0.0,
                 zero,
                 self.header_focus,
-            )
+            );
+            ui.set_opacity(opacity);
+            header
         };
         match header {
             Some(HeaderAction::ToggleSelectAll) if self.all_selected() => self.clear_selection(),
@@ -1749,8 +1765,10 @@ impl Inbox {
         if self.view.more && self.content_height() - (self.scroll + rect.height()) < LOAD_AHEAD {
             actions.push(Action::More);
         }
+        let mut over_file = None;
         for (id, hit) in events {
             match hit {
+                Some(row::Hit::FileHovered(index)) => over_file = Some((id, index)),
                 Some(row::Hit::Done) => actions.push(Action::ToggleDone),
                 Some(row::Hit::Remind) => actions.push(Action::Remind),
                 Some(row::Hit::Command) => actions.push(Action::CommandPalette),
@@ -1787,6 +1805,9 @@ impl Inbox {
                 None if modifiers.command || self.is_selecting() => self.toggle(&id),
                 None => actions.push(Action::Open(id)),
             }
+        }
+        if self.file_intent.update(ui.ctx(), over_file).is_some() {
+            actions.push(Action::FilesHint);
         }
         actions
     }

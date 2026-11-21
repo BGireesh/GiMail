@@ -575,3 +575,80 @@ async fn people_profile_contacts_and_directory() {
         Some(400)
     );
 }
+
+#[tokio::test]
+async fn a_directory_sync_token_sees_what_changed_until_it_expires() {
+    let server = support::server().await;
+    let client = support::client(&server);
+    let people = client.people();
+    let fields = "emailAddresses,names,metadata";
+    let listed = people
+        .directory(
+            fields,
+            &PeopleQuery {
+                page_size: Some(1000),
+                request_sync_token: true,
+                ..PeopleQuery::default()
+            },
+        )
+        .await
+        .unwrap();
+    let token = listed
+        .next_sync_token
+        .expect("the last page carries a token");
+    let change = |body: serde_json::Value| {
+        let url = server.url().join("/__mock/people").unwrap();
+        async move {
+            let response = reqwest::Client::new()
+                .post(url)
+                .json(&body)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(response.status(), 204);
+        }
+    };
+    change(serde_json::json!({ "list": "directory", "put": {
+        "resourceName": "people/9001",
+        "emailAddresses": [{ "value": "ivy@brightmoor.co" }],
+    } }))
+    .await;
+    change(serde_json::json!({ "list": "directory", "remove": "noor@brightmoor.co" })).await;
+    let since = |token: &str| PeopleQuery {
+        sync_token: Some(token.to_owned()),
+        ..PeopleQuery::default()
+    };
+
+    let changes = people.directory(fields, &since(&token)).await.unwrap();
+    let names: Vec<(&str, bool)> = changes
+        .people
+        .iter()
+        .map(|person| {
+            let deleted = person
+                .metadata
+                .as_ref()
+                .and_then(|metadata| metadata.deleted);
+            (
+                person.resource_name.as_deref().unwrap(),
+                deleted == Some(true),
+            )
+        })
+        .collect();
+    assert_eq!(names.len(), 2, "{names:?}");
+    assert!(names.contains(&("people/9001", false)));
+    assert!(names.iter().any(|&(_, deleted)| deleted), "Noor, deleted");
+    let latest = changes.next_sync_token.expect("a newer token");
+    assert!(
+        people
+            .directory(fields, &since(&latest))
+            .await
+            .unwrap()
+            .people
+            .is_empty(),
+        "nothing since"
+    );
+
+    change(serde_json::json!({ "expire": true })).await;
+    let expired = people.directory(fields, &since(&latest)).await.unwrap_err();
+    assert_eq!(expired.status(), Some(400));
+}

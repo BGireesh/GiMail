@@ -553,22 +553,9 @@ fn remaining(card: Card, value: u64) -> u64 {
     }
 }
 
-/// `count` with its thousands grouped in English: `1,000`.
-pub fn grouped(count: u64) -> String {
-    let digits = count.to_string();
-    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
-    for (i, digit) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i).is_multiple_of(3) {
-            out.push(',');
-        }
-        out.push(digit);
-    }
-    out
-}
-
 /// A popup's title.
 pub fn title(reached: Reached) -> String {
-    let n = grouped(reached.completed);
+    let n = crate::format::thousands(reached.completed);
     match reached.kind {
         Kind::Send if reached.completed == 1 => "You sent your first message!".to_owned(),
         Kind::Send => format!("You've sent {n} messages!"),
@@ -584,7 +571,7 @@ pub fn title(reached: Reached) -> String {
 
 /// A popup's body, a line each. `pick` chooses from a pool, given the pool's size.
 pub fn body(reached: Reached, pick: impl FnOnce(usize) -> usize) -> Vec<String> {
-    let next = grouped(reached.next);
+    let next = crate::format::thousands(reached.next);
     let special = |table: &[(u64, &'static [&'static str])]| {
         table
             .iter()

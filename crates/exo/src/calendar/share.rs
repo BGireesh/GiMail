@@ -114,6 +114,9 @@ pub struct Share {
     blur: bool,
     /// The field with the keyboard last frame.
     pub typing: Option<Input>,
+    /// Another of the sidebar's controls had the keyboard last frame: Duration, a listed attendee,
+    /// Insert or Cancel.
+    pub control: bool,
 }
 
 impl Share {
@@ -139,6 +142,7 @@ impl Share {
             focus: Some(Input::Who),
             blur: false,
             typing: Some(Input::Who),
+            control: false,
         }
     }
 
@@ -150,8 +154,11 @@ impl Share {
     }
 
     /// Escape in a field clears its text, or with none, the field lets go of the keyboard and
-    /// the page closes.
+    /// the page closes. The durations' list closes first.
     pub fn escape(&mut self) -> bool {
+        if self.durations.take().is_some() {
+            return false;
+        }
         match self.typing {
             Some(Input::Who) if !self.who.is_empty() => {
                 self.who.clear();
@@ -347,6 +354,33 @@ impl Share {
         let palette = exo_ui::palette(&ctx);
         let carbon = palette.theme == Theme::Carbon;
         let mut actions = Vec::new();
+        // Tab goes through Duration, Who, each listed attendee, Timezone, then Insert while it can
+        // and Cancel, round again. Who with text, and Timezone with its list, keep Tab for
+        // themselves.
+        let duration_id = exo_ui::id(&ctx, "share-duration");
+        let who_id = exo_ui::id(&ctx, "share-who");
+        let zone_id = exo_ui::id(&ctx, "share-zone");
+        let insert_id = exo_ui::id(&ctx, "share-insert");
+        let cancel_id = exo_ui::id(&ctx, "share-cancel");
+        let attendee_ids: Vec<Id> = self
+            .attendees
+            .iter()
+            .filter(|attendee| attendee.visible)
+            .map(|attendee| attendee_id(&ctx, attendee))
+            .collect();
+        let has_focus = |id: Id| ctx.memory(|memory| memory.has_focus(id));
+        if !(has_focus(who_id) && !self.who.is_empty())
+            && !(has_focus(zone_id) && !self.zones.is_empty())
+        {
+            let order: Vec<Id> = [duration_id, who_id]
+                .into_iter()
+                .chain(attendee_ids.iter().copied())
+                .chain([zone_id])
+                .chain(self.can_insert(now).then_some(insert_id))
+                .chain([cancel_id])
+                .collect();
+            exo_ui::tab_order(&ctx, &order);
+        }
         // `#fff`, Carbon `#18191a`, with the sidebar's `border-left: 1px solid rgba(0,0,0,.09)`.
         ui.painter().rect_filled(
             sidebar,
@@ -406,12 +440,21 @@ impl Share {
         // Duration: a dropdown, `30 mins`.
         label("Duration", top);
         let button = Rect::from_min_size(pos2(left, top + LABEL_HEIGHT), vec2(width, FIELD_HEIGHT));
+        let current = DURATIONS
+            .iter()
+            .position(|minutes| *minutes == self.minutes)
+            .unwrap_or(0);
+        if let Some(row) = exo_ui::list_keys(
+            &ctx,
+            duration_id,
+            &mut self.durations,
+            DURATIONS.len(),
+            current,
+        ) {
+            self.minutes = DURATIONS[row];
+        }
         let opened = ui
-            .interact(
-                button,
-                exo_ui::id(ui.ctx(), "share-duration"),
-                Sense::click(),
-            )
+            .interact(button, duration_id, Sense::click())
             .on_hover_cursor(egui::CursorIcon::PointingHand);
         FIELD.paint_line(
             &painter,
@@ -420,7 +463,11 @@ impl Share {
             palette.ink(0.9, 0.9),
             None,
         );
-        rule(button.top(), self.durations.is_some(), false);
+        rule(
+            button.top(),
+            self.durations.is_some() || opened.has_focus(),
+            false,
+        );
         if opened.clicked() {
             self.durations = if self.durations.is_some() {
                 None
@@ -438,7 +485,6 @@ impl Share {
             pos2(left, top + LABEL_HEIGHT + 1.0),
             vec2(width, FIELD_HEIGHT),
         );
-        let who_id = exo_ui::id(&ctx, "share-who");
         let had_focus = ui.memory(|memory| memory.has_focus(who_id));
         let keys = ui.input(|input| {
             (
@@ -516,11 +562,15 @@ impl Share {
             None,
         );
         let mut removed = None;
-        for (index, attendee) in self
+        // Where the keyboard goes when Enter removes the attendee that has it: the next one
+        // listed, else the one before, else Who.
+        let mut refocus = None;
+        for (listed, (index, attendee)) in self
             .attendees
             .iter()
             .enumerate()
             .filter(|(_, attendee)| attendee.visible)
+            .enumerate()
         {
             row_top += LIST_ROW;
             let name = attendee
@@ -539,7 +589,26 @@ impl Share {
                     row_top + 19.0,
                 ),
             );
-            let hovered = ui.rect_contains_pointer(pill);
+            // A row takes the keyboard on a click, as on Tab, and shows as hovered while it has
+            // it. Enter then removes it.
+            let row = ui.interact(pill, attendee_ids[listed], Sense::click());
+            if row.clicked() {
+                row.request_focus();
+            }
+            if row.has_focus() {
+                exo_ui::hold_arrows(&ctx, row.id);
+            }
+            if row.has_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)) {
+                removed = Some(index);
+                refocus = attendee_ids
+                    .get(listed + 1)
+                    .or(listed
+                        .checked_sub(1)
+                        .and_then(|before| attendee_ids.get(before)))
+                    .copied()
+                    .or(Some(who_id));
+            }
+            let hovered = ui.rect_contains_pointer(pill) || row.has_focus();
             if hovered {
                 // `#e6e8f0` in `#aeb1dd`, Carbon `#555b64` in `#636973`.
                 let (fill, border) = if carbon {
@@ -619,10 +688,15 @@ impl Share {
                 actions.push(ShareAction::Say(
                     "Include at least one attendee to share availability.",
                 ));
-            } else if self.attendees[index].default && !self.attendees[index].person.internal {
-                self.attendees[index].visible = false;
             } else {
-                self.attendees.remove(index);
+                if self.attendees[index].default && !self.attendees[index].person.internal {
+                    self.attendees[index].visible = false;
+                } else {
+                    self.attendees.remove(index);
+                }
+                if let Some(id) = refocus {
+                    ui.memory_mut(|memory| memory.request_focus(id));
+                }
             }
         }
         top = row_top - 1.0 + FIELD_HEIGHT + ROW_GAP;
@@ -633,7 +707,6 @@ impl Share {
             pos2(left, top + LABEL_HEIGHT + 1.0),
             vec2(width, FIELD_HEIGHT),
         );
-        let zone_id = exo_ui::id(&ctx, "share-zone");
         let relevant = self.relevant(now);
         let current = timezones::current(self.tz.iana_name().unwrap_or("UTC"), relevant);
         if !self.zone_typed {
@@ -731,26 +804,23 @@ impl Share {
         let insert = DialogAction::new("Insert", ActionKind::Primary)
             .enabled(self.can_insert(now))
             .disabled_fill(Color32::TRANSPARENT)
+            .focused(has_focus(insert_id))
             .dark(carbon);
         let insert_rect = Rect::from_min_size(
             pos2(left, buttons_top),
             vec2(insert.width(&ctx), exo_ui::DIALOG_ACTION_HEIGHT),
         );
-        if insert
-            .show(ui, exo_ui::id(ui.ctx(), "share-insert"), insert_rect)
-            .clicked()
-        {
+        if insert.show(ui, insert_id, insert_rect).clicked() {
             actions.push(ShareAction::Insert);
         }
-        let cancel = DialogAction::new("Cancel", ActionKind::Plain).dark(carbon);
+        let cancel = DialogAction::new("Cancel", ActionKind::Plain)
+            .focused(has_focus(cancel_id))
+            .dark(carbon);
         let cancel_rect = Rect::from_min_size(
             pos2(insert_rect.right() + BUTTON_GAP, buttons_top),
             vec2(cancel.width(&ctx), exo_ui::DIALOG_ACTION_HEIGHT),
         );
-        if cancel
-            .show(ui, exo_ui::id(ui.ctx(), "share-cancel"), cancel_rect)
-            .clicked()
-        {
+        if cancel.show(ui, cancel_id, cancel_rect).clicked() {
             actions.push(ShareAction::Cancel);
         }
 
@@ -770,8 +840,12 @@ impl Share {
         }
         self.typing = [(who_id, Input::Who), (zone_id, Input::Zone)]
             .into_iter()
-            .find(|(id, _)| ui.memory(|memory| memory.has_focus(*id)))
+            .find(|(id, _)| has_focus(*id))
             .map(|(_, input)| input);
+        self.control = [duration_id, insert_id, cancel_id]
+            .into_iter()
+            .chain(attendee_ids)
+            .any(has_focus);
         actions
     }
 
@@ -853,6 +927,11 @@ impl Share {
             default: false,
         });
     }
+}
+
+/// The id of `attendee`'s row under Who.
+fn attendee_id(ctx: &egui::Context, attendee: &Attendee) -> Id {
+    exo_ui::id(ctx, ("share-attendee", attendee.address.email.as_str()))
 }
 
 /// The team's domain, from the organizer's address.
@@ -1193,6 +1272,15 @@ impl crate::Mail {
     /// What `Share Availability` is for. From the mail views, it's the open or highlighted
     /// conversation's draft open in compose, else a Reply All in it. From the week, it's a new
     /// message.
+    /// Share Availability's meeting length in minutes, while it's up (for tests).
+    pub fn calendar_share_minutes(&self) -> Option<i64> {
+        self.calendar
+            .week
+            .as_ref()
+            .and_then(|week| week.share.as_ref())
+            .map(|share| share.minutes)
+    }
+
     pub(super) fn calendar_share_target(&self) -> Target {
         if self.calendar.week.is_some() {
             return Target::New;

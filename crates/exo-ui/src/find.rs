@@ -225,7 +225,9 @@ impl Drop for Scope {
 }
 
 /// The byte ranges of `text` that match `query`, left to right without overlapping, compared
-/// as Chromium's find compares text: ignoring case and diacritics, a no-break space as a space.
+/// as Chromium's find compares text: ignoring case, diacritics and compatibility forms (`ﬁ` is
+/// `fi`), reading `ß` as `ss`, `æ` as `ae`, `ø` as `o` and the like, a no-break space as a space.
+/// A match starts and ends on whole characters.
 pub fn matches(text: &str, query: &str) -> Vec<Range<usize>> {
     let query = fold_query(query);
     found_in(text, &query)
@@ -251,11 +253,17 @@ fn found_in(text: &str, query: &[char]) -> Vec<Matched> {
     let folded = fold(text);
     let mut found = Vec::new();
     let mut at = 0;
+    // Whether a match may start (or end) between `folded[at - 1]` and `folded[at]`: not inside
+    // a character that folds to several.
+    let boundary =
+        |at: usize| at == 0 || at == folded.len() || folded[at - 1].char != folded[at].char;
     while at + query.len() <= folded.len() {
-        if folded[at..at + query.len()]
-            .iter()
-            .map(|folded| folded.ch)
-            .eq(query.iter().copied())
+        if boundary(at)
+            && boundary(at + query.len())
+            && folded[at..at + query.len()]
+                .iter()
+                .map(|folded| folded.ch)
+                .eq(query.iter().copied())
         {
             let (first, last) = (&folded[at], &folded[at + query.len() - 1]);
             found.push(Matched {
@@ -267,8 +275,6 @@ fn found_in(text: &str, query: &[char]) -> Vec<Matched> {
             at += 1;
         }
     }
-    // A character that folds to several can't be matched in part.
-    found.dedup_by(|later, earlier| later.chars.start < earlier.chars.end);
     found
 }
 
@@ -280,30 +286,62 @@ struct Folded {
     bytes: Range<usize>,
 }
 
-/// `text` without case or diacritics (each character decomposed, its combining marks dropped,
-/// lowercased), and a no-break space as a space.
+/// `text` without case, diacritics or compatibility forms (each character decomposed for
+/// compatibility, its combining marks dropped, lowercased), the letters no decomposition gives
+/// read as ICU's root collation reads them at primary strength ([`primary`]), and a no-break space
+/// as a space.
 fn fold(text: &str) -> Vec<Folded> {
     let mut folded = Vec::with_capacity(text.len());
     for (index, (at, ch)) in text.char_indices().enumerate() {
         let bytes = at..at + ch.len_utf8();
-        let ch = if ch == '\u{a0}' { ' ' } else { ch };
-        unicode_normalization::char::decompose_canonical(ch, |part| {
-            if !unicode_normalization::char::is_combining_mark(part) {
-                folded.extend(part.to_lowercase().map(|ch| Folded {
-                    ch,
-                    char: index,
-                    bytes: bytes.clone(),
-                }));
-            }
-        });
+        let mut push = |ch: char| {
+            folded.push(Folded {
+                ch,
+                char: index,
+                bytes: bytes.clone(),
+            })
+        };
+        match ch {
+            '\u{a0}' => push(' '),
+            // A letter of its own, not `и` with a breve.
+            'й' | 'Й' => push('й'),
+            ch => unicode_normalization::char::decompose_compatible(ch, |part| {
+                if unicode_normalization::char::is_combining_mark(part) {
+                    return;
+                }
+                for lower in part.to_lowercase() {
+                    match primary(lower) {
+                        Some(letters) => letters.chars().for_each(&mut push),
+                        None => push(lower),
+                    }
+                }
+            }),
+        }
     }
     folded
+}
+
+/// What ICU's root collation, which Chromium's find compares with, reads a lowercase letter as at
+/// primary strength when no decomposition says so: `ß` is `ss`, `æ` is `ae`, a stroked letter is
+/// its letter, a final sigma is a sigma, and a middle dot (Catalan's `l·l`) is nothing.
+fn primary(ch: char) -> Option<&'static str> {
+    Some(match ch {
+        'ß' => "ss",
+        'æ' => "ae",
+        'œ' => "oe",
+        'ø' => "o",
+        'đ' | 'ð' => "d",
+        'ħ' => "h",
+        'ł' => "l",
+        'ς' => "σ",
+        '·' => "",
+        _ => return None,
+    })
 }
 
 /// Searches a run of text [`crate::paint_text`] is about to paint at `origin`, and paints its
 /// matches' highlights under it, the text in them black.
 pub(crate) fn text(painter: &Painter, origin: Pos2, galley: &mut Arc<Galley>, style: &TextStyle) {
-    let ctx = painter.ctx();
     if !painter.is_visible()
         || galley
             .job
@@ -313,15 +351,90 @@ pub(crate) fn text(painter: &Painter, origin: Pos2, galley: &mut Arc<Galley>, st
     {
         return;
     }
-    let Some((query, order, scope)) = with(ctx, |state| {
-        let query = state.query.clone().filter(|_| state.unsearchable == 0)?;
-        Some((query, state.next_order(), state.scopes.last().copied()))
+    let found = register(painter, origin, galley, style, false);
+    if found.is_empty() {
+        return;
+    }
+    let galley = Arc::make_mut(galley);
+    for (pieces, current) in found {
+        for (row, glyphs, rect) in pieces {
+            if rect.width() > 0.0 {
+                painter.rect_filled(rect, 0.0, if current { CURRENT } else { MATCH });
+            }
+            recolor(&mut galley.rows[row], glyphs, MATCH_TEXT);
+        }
+    }
+}
+
+/// Searches what's typed in a field, which egui's text edit paints: `galley`, painted at
+/// `origin`. Returns the matches' highlights, for the field to paint under its text. Its layout
+/// makes the text in them black ([`darken_matches`]).
+pub(crate) fn field(
+    painter: &Painter,
+    origin: Pos2,
+    galley: &Galley,
+    style: &TextStyle,
+) -> Vec<egui::Shape> {
+    if !painter.is_visible() {
+        return Vec::new();
+    }
+    register(painter, origin, galley, style, true)
+        .into_iter()
+        .flat_map(|(pieces, current)| {
+            pieces
+                .into_iter()
+                .filter(|(_, _, rect)| rect.width() > 0.0)
+                .map(move |(_, _, rect)| {
+                    egui::Shape::rect_filled(rect, 0.0, if current { CURRENT } else { MATCH })
+                })
+        })
+        .collect()
+}
+
+/// Paints the matches in a field's freshly laid out `galley` black, as [`field`] highlights them.
+pub(crate) fn darken_matches(ctx: &Context, galley: &mut Arc<Galley>) {
+    let Some(query) = with(ctx, |state| {
+        state.query.clone().filter(|_| state.unsearchable == 0)
     }) else {
         return;
     };
     let found = found_in(galley.text(), &query);
     if found.is_empty() {
         return;
+    }
+    let pieces: Vec<_> = found
+        .iter()
+        .flat_map(|matched| pieces(galley, &matched.chars, Pos2::ZERO, 0.0, 0.0, &|x| x))
+        .collect();
+    let galley = Arc::make_mut(galley);
+    for (row, glyphs, _) in pieces {
+        recolor(&mut galley.rows[row], glyphs, MATCH_TEXT);
+    }
+}
+
+/// A match's highlight, a box per row with the row and the glyphs in it.
+type Pieces = Vec<(usize, Range<usize>, Rect)>;
+
+/// Searches `galley`, painted at `origin`, counting its matches in the page's order. Returns
+/// each match's highlight and whether it's the current match. A field's text (`in_field`) is
+/// told apart from the same text painted in the same place (the search bar's underlay).
+fn register(
+    painter: &Painter,
+    origin: Pos2,
+    galley: &Galley,
+    style: &TextStyle,
+    in_field: bool,
+) -> Vec<(Pieces, bool)> {
+    let ctx = painter.ctx();
+    let Some((query, order, scope)) = with(ctx, |state| {
+        let query = state.query.clone().filter(|_| state.unsearchable == 0)?;
+        Some((query, state.next_order(), state.scopes.last().copied()))
+    }) else {
+        return Vec::new();
+    };
+    let found = found_in(galley.text(), &query);
+    if found.is_empty() {
+        return Vec::new();
     }
     let metrics = crate::metrics(ctx, style.font.face().0);
     let ascent = (metrics.ascent * style.size).round();
@@ -334,51 +447,38 @@ pub(crate) fn text(painter: &Painter, origin: Pos2, galley: &mut Arc<Galley>, st
         galley.text(),
         content.x.round() as i32,
         content.y.round() as i32,
+        in_field,
     ))
     .value();
-    let pieces: Vec<Vec<(usize, Range<usize>, Rect)>> = found
+    let pieces: Vec<Pieces> = found
         .iter()
         .map(|matched| pieces(galley, &matched.chars, origin, ascent, descent, &snap))
         .collect();
-    let current = with(ctx, |state| {
-        let mut current = None;
-        for (index, pieces) in pieces.iter().enumerate() {
-            let key = Key {
-                scope: scope.map(|scope| scope.id),
-                source,
-                index,
-            };
-            if state.current_key == Some(key) {
-                current = Some(index);
-            }
-            let rect = pieces
-                .iter()
-                .map(|(_, _, rect)| *rect)
-                .reduce(Rect::union)
-                .unwrap_or_else(|| Rect::from_min_size(origin, egui::Vec2::ZERO));
-            state.found.push(Found {
-                key,
-                rect,
-                scope,
-                order: (order.0, order.1, index),
-            });
-        }
-        current
-    });
-    let galley = Arc::make_mut(galley);
-    for (index, pieces) in pieces.iter().enumerate() {
-        let color = if current == Some(index) {
-            CURRENT
-        } else {
-            MATCH
-        };
-        for (row, glyphs, rect) in pieces {
-            if rect.width() > 0.0 {
-                painter.rect_filled(*rect, 0.0, color);
-            }
-            recolor(&mut galley.rows[*row], glyphs.clone(), MATCH_TEXT);
-        }
-    }
+    with(ctx, |state| {
+        pieces
+            .into_iter()
+            .enumerate()
+            .map(|(index, pieces)| {
+                let key = Key {
+                    scope: scope.map(|scope| scope.id),
+                    source,
+                    index,
+                };
+                let rect = pieces
+                    .iter()
+                    .map(|(_, _, rect)| *rect)
+                    .reduce(Rect::union)
+                    .unwrap_or_else(|| Rect::from_min_size(origin, egui::Vec2::ZERO));
+                state.found.push(Found {
+                    key,
+                    rect,
+                    scope,
+                    order: (order.0, order.1, index),
+                });
+                (pieces, state.current_key == Some(key))
+            })
+            .collect()
+    })
 }
 
 /// The highlight of characters `chars` of `galley` (painted at `origin`), as a box per row over
@@ -392,7 +492,7 @@ fn pieces(
     ascent: f32,
     descent: f32,
     snap: &impl Fn(f32) -> f32,
-) -> Vec<(usize, Range<usize>, Rect)> {
+) -> Pieces {
     let mut pieces = Vec::new();
     let mut start = 0;
     let last = galley.rows.len().saturating_sub(1);
@@ -651,6 +751,31 @@ mod tests {
             vec![0..4],
             "a no-break space is a space"
         );
+    }
+
+    #[test]
+    fn matches_read_letters_as_collation_does_and_compatibility_forms_as_their_letters() {
+        assert_eq!(matches("Straße, STRASSE", "strasse"), vec![0..7, 9..16]);
+        assert_eq!(matches("Strasse", "straße"), vec![0..7]);
+        assert_eq!(
+            matches("Straße", "stras"),
+            Vec::<Range<usize>>::new(),
+            "not half of a character"
+        );
+        assert_eq!(matches("ﬁnal", "fin"), vec![0..4], "a ligature");
+        assert_eq!(matches("Encyclopædia", "encyclopaedia"), vec![0..13]);
+        assert_eq!(matches("Søren Łukasz", "soren lukasz"), vec![0..14]);
+        assert_eq!(
+            matches("col·legi", "collegi"),
+            vec![0..9],
+            "a middle dot is nothing"
+        );
+        assert_eq!(
+            matches("йод", "иод"),
+            Vec::<Range<usize>>::new(),
+            "`й` isn't `и` with a breve"
+        );
+        assert_eq!(matches("ＥＸＯ", "exo"), vec![0..9], "full-width letters");
     }
 
     #[test]

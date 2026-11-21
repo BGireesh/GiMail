@@ -6,7 +6,7 @@ members = ["crates/*"]
 license = "MIT"
 publish = false
 edition = "2024"
-version = "0.1.0"
+version = "0.2.0"
 rust-version = "1.98"
 
 [workspace.dependencies]
@@ -21,6 +21,7 @@ exo-editor = { path = "crates/exo-editor" }
 exo-commands = { path = "crates/exo-commands" }
 
 url = "2"
+psl = "2"
 log = "0.4"
 regex = "1"
 libc = "0.2"
@@ -29,9 +30,11 @@ axum = "0.8"
 anyhow = "1"
 sha2 = "0.10"
 objc2 = "0.6"
+ring = "0.17"
 flate2 = "1.1"
 peniko = "0.6"
 tempfile = "3"
+rcgen = "0.14"
 futures = "0.3"
 egui = "0.36.2"
 memmap2 = "0.9"
@@ -47,6 +50,7 @@ fancy-regex = "0.14"
 mail-parser = "0.11"
 mail-builder = "0.4"
 serde_ignored = "0.1"
+rustls-pki-types = "1"
 markup5ever_rcdom = "=0.40.1"
 toasty-driver-sqlite = "0.11"
 unicode-normalization = "0.1"
@@ -56,9 +60,11 @@ tower = { version = "0.5", features = ["util"] }
 jiff = { version = "0.2", features = ["serde"] }
 tower-http = { version = "0.6", features = ["cors"] }
 winit = { version = "0.30", default-features = false }
+resvg = { version = "0.45", default-features = false }
 arboard = { version = "3.7", default-features = false }
 rusqlite = { version = "0.40", features = ["bundled"] }
 egui_kittest = { version = "0.36.2", features = ["wgpu"] }
+rustls-webpki = { version = "0.103", features = ["ring"] }
 egui_extras = { version = "0.36.2", default-features = false }
 security-framework = { version = "3.7", default-features = false }
 style_config = { version = "0.24.0", package = "stylo_static_prefs" }
@@ -68,6 +74,7 @@ block2 = { version = "0.6", default-features = false, features = ["std"] }
 skrifa = { version = "0.44", default-features = false, features = ["std"] }
 dispatch2 = { version = "0.3", default-features = false, features = ["std"] }
 parley = { version = "0.13", default-features = false, features = ["system"] }
+icu_segmenter = { version = "2.3", default-features = false, features = ["compiled_data"] }
 blitz-html = { git = "https://github.com/m1guelpf-forks/blitz", branch = "inline-box-decorations" }
 blitz-traits = { git = "https://github.com/m1guelpf-forks/blitz", branch = "inline-box-decorations" }
 fastframe-log = { git = "https://github.com/m1guelpf-forks/fastframe", branch = "notification-subtitle" }

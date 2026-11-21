@@ -39,6 +39,7 @@ fn main() -> anyhow::Result<()> {
         return Ok(());
     }
     fastframe_titlebar::init();
+    exo::format::locale::install(exo::format::locale::Locale::system());
     let assets = exo::assets_dir();
     let dirs = DIRS
         .discover(|_, _| Ok(()))

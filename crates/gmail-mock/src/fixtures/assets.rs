@@ -88,10 +88,11 @@ pub fn chart_png(bars: &[u8]) -> Vec<u8> {
     png
 }
 
-/// Maya's profile photo, `size` pixels square (Google's `=s{size}`): an invented portrait in
-/// soft shapes on a sky gradient, each pixel the average of 4×4 samples, so every size shows
-/// the same picture.
-pub fn portrait_png(size: u32) -> Vec<u8> {
+/// A profile photo, `size` pixels square (Google's `=s{size}`): an invented portrait in soft
+/// shapes on a sky gradient, each pixel the average of 4×4 samples, so every size shows the same
+/// picture. `seed` 0 is Maya's; any other picks someone else's hair, skin, sweater and sky.
+pub fn portrait_png(size: u32, seed: u64) -> Vec<u8> {
+    let colors = Colors::new(seed);
     const SAMPLES: u32 = 4;
     let side = size as usize;
     let mut raw = Vec::with_capacity((side * 3 + 1) * side);
@@ -103,7 +104,7 @@ pub fn portrait_png(size: u32) -> Vec<u8> {
                 let at = |pixel: u32, sample: u32| {
                     (pixel as f32 + (sample as f32 + 0.5) / SAMPLES as f32) / size as f32
                 };
-                let color = portrait(at(x, sx), at(y, sy));
+                let color = portrait(&colors, at(x, sx), at(y, sy));
                 for (total, channel) in sum.iter_mut().zip(color) {
                     *total += f32::from(channel);
                 }
@@ -122,25 +123,75 @@ pub fn portrait_png(size: u32) -> Vec<u8> {
     png
 }
 
+/// A portrait's colors.
+struct Colors {
+    face: [u8; 3],
+    hair: [u8; 3],
+    neck: [u8; 3],
+    sweater: [u8; 3],
+    /// The sky at the top and at the bottom.
+    sky: ([u8; 3], [u8; 3]),
+}
+
+impl Colors {
+    /// Maya's for seed 0, else a pick of each from `seed`.
+    fn new(seed: u64) -> Self {
+        const SKIN: [([u8; 3], [u8; 3]); 4] = [
+            ([0xd9, 0xa0, 0x7a], [0xc4, 0x8a, 0x66]),
+            ([0xf1, 0xc8, 0xa8], [0xdc, 0xb0, 0x90]),
+            ([0x8d, 0x5a, 0x3b], [0x7a, 0x4c, 0x31]),
+            ([0xb8, 0x7b, 0x55], [0xa3, 0x6a, 0x47]),
+        ];
+        const HAIR: [[u8; 3]; 4] = [
+            [0x3a, 0x25, 0x1c],
+            [0x1c, 0x1a, 0x19],
+            [0x8a, 0x5a, 0x2b],
+            [0xc9, 0xa0, 0x5c],
+        ];
+        const SWEATER: [[u8; 3]; 4] = [
+            [0x2f, 0x6b, 0x5e],
+            [0x7a, 0x2f, 0x3f],
+            [0x34, 0x4e, 0x86],
+            [0x8a, 0x6d, 0x2f],
+        ];
+        const SKY: [([u8; 3], [u8; 3]); 4] = [
+            ([0xa7, 0xc7, 0xe7], [0x6f, 0x9f, 0xd0]),
+            ([0xe8, 0xd3, 0xb8], [0xd0, 0xa8, 0x7c]),
+            ([0xc6, 0xe2, 0xc9], [0x8c, 0xbf, 0x95]),
+            ([0xdc, 0xcf, 0xe8], [0xab, 0x96, 0xc9]),
+        ];
+        let pick = |shift: u32| (seed >> shift) as usize % 4;
+        let (face, neck) = SKIN[pick(0)];
+        Self {
+            face,
+            hair: HAIR[pick(8)],
+            neck,
+            sweater: SWEATER[pick(16)],
+            sky: SKY[pick(24)],
+        }
+    }
+}
+
 /// The portrait's color at `u` across and `v` down, both 0 to 1: hair, face, neck and sweater
 /// over the sky.
-fn portrait(u: f32, v: f32) -> [u8; 3] {
+fn portrait(colors: &Colors, u: f32, v: f32) -> [u8; 3] {
     let inside = |cx: f32, cy: f32, rx: f32, ry: f32| {
         ((u - cx) / rx).powi(2) + ((v - cy) / ry).powi(2) <= 1.0
     };
     if inside(0.5, 0.47, 0.155, 0.19) && v > 0.36 {
-        [0xd9, 0xa0, 0x7a]
+        colors.face
     } else if inside(0.5, 0.42, 0.2, 0.24) {
-        [0x3a, 0x25, 0x1c]
+        colors.hair
     } else if (0.44..0.56).contains(&u) && (0.55..0.8).contains(&v) {
-        [0xc4, 0x8a, 0x66]
+        colors.neck
     } else if inside(0.5, 1.02, 0.38, 0.3) {
-        [0x2f, 0x6b, 0x5e]
+        colors.sweater
     } else {
+        let (top, bottom) = colors.sky;
         let mix = |top: u8, bottom: u8| {
             (f32::from(top) + (f32::from(bottom) - f32::from(top)) * v).round() as u8
         };
-        [mix(0xa7, 0x6f), mix(0xc7, 0x9f), mix(0xe7, 0xd0)]
+        [0, 1, 2].map(|channel| mix(top[channel], bottom[channel]))
     }
 }
 

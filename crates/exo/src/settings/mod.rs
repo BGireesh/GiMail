@@ -81,8 +81,9 @@ pub enum Action {
     /// Add Split, which opens the split library, or New Split Inbox without one. Either goes back
     /// to Split Inbox Settings.
     NewSplit,
-    /// `Split Inbox Library`, from the menu or the palette, which does the same.
-    SplitLibrary,
+    /// `Split Inbox Library`, from the menu, the palette or a deep link, which does the same. A
+    /// deep link's `?role=` names a `role` whose templates show alone.
+    SplitLibrary { role: Option<String> },
     /// Something in a split inbox dialog.
     Split(SplitEvent),
     /// A Triage row the app opens a dialog of its own for (`crate::bulk`).
@@ -411,9 +412,14 @@ impl Settings {
                 }
                 self.open(dialog);
             }
-            Action::NewSplit | Action::SplitLibrary => {
+            Action::NewSplit | Action::SplitLibrary { role: None } => {
                 self.splits.open_list();
                 self.splits.open_library();
+                self.open(Dialog::SplitInbox);
+            }
+            Action::SplitLibrary { role: Some(role) } => {
+                self.splits.open_list();
+                self.splits.open_library_at_role(&role);
                 self.open(Dialog::SplitInbox);
             }
             Action::CloseDialog => self.dialog_open = false,

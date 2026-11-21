@@ -1,17 +1,28 @@
 //! The hint under a message. Under the only message of a conversation that introduces you to
 //! someone, it says `Is this an intro? Hit ⌘ shift I to instantly move {first name} to BCC!`.
-//! Under a new message started in a conversation, it says `Referring to the last conversation? Hit
-//! ⌘ shift P to pop out this draft!`. Its keys are inline blue caps.
+//! Under the last message of one that settles on a day to come, it says `Tip: Hit b to create a
+//! calendar event!`. Under a new message started in a conversation, it says `Referring to the last
+//! conversation? Hit ⌘ shift P to pop out this draft!`. Its keys are inline blue caps.
 
 use std::sync::LazyLock;
 
 use egui::{Ui, pos2};
 use exo_store::MessageDetail;
 use exo_ui::{Family, Font, KeycapColors, Keycaps, TextStyle};
+use jiff::Zoned;
 use regex::Regex;
 
 use super::Layout;
-use crate::format::names;
+use crate::{body::Facts, format::names};
+
+/// The hint under the conversation's last message.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum Hint {
+    /// The intro hint, with the first name it moves to Bcc.
+    Intro(String),
+    /// The calendar tip.
+    CalendarEvent,
+}
 
 /// The hint: 12px bold on a 24px line, `top: 1px`, `padding-bottom: 28px`.
 const HINT: TextStyle = TextStyle::new(Font::new(Family::Sans, 700), 12.0, 24.0);
@@ -66,16 +77,54 @@ pub(super) fn intro(message: &MessageDetail) -> Option<String> {
     Some(names::first_name(&name, &from.email))
 }
 
-/// Paints the intro hint for `first_name`, its line box's top at `top`.
-pub(super) fn paint_intro(ui: &Ui, layout: &Layout, top: f32, first_name: &str) {
-    paint(
-        ui,
-        layout,
-        top,
-        "Is this an intro? Hit",
-        &["⌘", "shift", "I"],
-        &format!("to instantly move {first_name} to BCC!"),
-    );
+/// Whether the conversation's last message gets the calendar tip, for its `messages` (oldest
+/// first, with their bodies' facts once rendered) at `now`: none of them is marketing mail, and one
+/// of the last two mentions a day still to come and has a phrase that proposes or settles a time.
+/// A date that can't be read counts as one to come. The caller leaves it out when the last
+/// message has a draft under it.
+pub(super) fn calendar_event(messages: &[(&MessageDetail, Option<&Facts>)], now: &Zoned) -> bool {
+    if messages
+        .iter()
+        .any(|(_, facts)| facts.is_some_and(|facts| facts.unquoted_marketing))
+    {
+        return false;
+    }
+    let last_two = &messages[messages.len().saturating_sub(2)..];
+    let to_come = last_two.iter().any(|(message, facts)| {
+        let sent = message.date.to_zoned(now.time_zone().clone());
+        facts.is_some_and(|facts| {
+            facts
+                .unquoted_dates
+                .iter()
+                .any(|text| super::dates::resolve(text, &sent).is_none_or(|day| day > now.date()))
+        })
+    });
+    to_come
+        && last_two
+            .iter()
+            .any(|(_, facts)| facts.is_some_and(|facts| facts.proposes_time))
+}
+
+/// Paints `hint`, its line box's top at `top`.
+pub(super) fn paint_hint(ui: &Ui, layout: &Layout, top: f32, hint: &Hint) {
+    match hint {
+        Hint::Intro(first_name) => paint(
+            ui,
+            layout,
+            top,
+            "Is this an intro? Hit",
+            &["⌘", "shift", "I"],
+            &format!("to instantly move {first_name} to BCC!"),
+        ),
+        Hint::CalendarEvent => paint(
+            ui,
+            layout,
+            top,
+            "Tip: Hit",
+            &["b"],
+            "to create a calendar event!",
+        ),
+    }
 }
 
 /// Paints the pop-out hint, its line box's top at `top`.
@@ -109,4 +158,78 @@ fn paint(ui: &Ui, layout: &Layout, top: f32, lead: &str, keys: &[&str], rest: &s
         ink,
         Some((layout.inner.right() - after).max(0.0)),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn message(day: i8) -> MessageDetail {
+        MessageDetail {
+            id: format!("m{day}"),
+            labels: Vec::new(),
+            date: jiff::civil::date(2026, 11, day)
+                .at(9, 0, 0, 0)
+                .in_tz("America/New_York")
+                .expect("a time")
+                .timestamp(),
+            from: None,
+            to: Vec::new(),
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            reply_to: Vec::new(),
+            subject: String::new(),
+            snippet: String::new(),
+            rfc822_id: None,
+            in_reply_to: None,
+            references: Vec::new(),
+            list_id: None,
+            list_unsubscribe: None,
+            list_unsubscribe_post: None,
+            headers: Vec::new(),
+            body: exo_store::Body::default(),
+            attachments: Vec::new(),
+            failure: None,
+            scheduled: None,
+            sending: false,
+        }
+    }
+
+    fn facts(dates: &[&str], proposes_time: bool) -> Facts {
+        Facts {
+            unquoted_dates: dates.iter().map(|date| (*date).to_owned()).collect(),
+            proposes_time,
+            ..Facts::default()
+        }
+    }
+
+    #[test]
+    fn the_calendar_tip_wants_a_day_to_come_and_a_phrase_in_the_last_two_messages() {
+        let now = jiff::civil::date(2026, 11, 17)
+            .at(9, 0, 0, 0)
+            .in_tz("America/New_York")
+            .expect("a time");
+        let (first, second, third) = (message(15), message(16), message(17));
+        let asks = facts(&["Thursday"], true);
+        let settles = facts(&[], true);
+        let dated = facts(&["Thursday"], false);
+        let tip = |messages: &[(&MessageDetail, Option<&Facts>)]| calendar_event(messages, &now);
+        assert!(tip(&[(&first, None), (&second, Some(&asks))]));
+        // The date and the phrase may come in different messages of the last two.
+        assert!(tip(&[(&second, Some(&dated)), (&third, Some(&settles))]));
+        // Not from further back.
+        assert!(!tip(&[
+            (&first, Some(&asks)),
+            (&second, None),
+            (&third, Some(&settles))
+        ]));
+        // A day gone by doesn't count, today included.
+        assert!(!tip(&[(&third, Some(&facts(&["today"], true)))]));
+        // Marketing mail anywhere in the conversation rules it out.
+        let marketing = Facts {
+            unquoted_marketing: true,
+            ..Facts::default()
+        };
+        assert!(!tip(&[(&first, Some(&marketing)), (&third, Some(&asks))]));
+    }
 }

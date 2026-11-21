@@ -309,6 +309,22 @@ impl SplitDialogs {
         }
     }
 
+    /// Opens the library with only the templates of the role named `role` (in any case), or as it
+    /// starts when no role has that name.
+    pub fn open_library_at_role(&mut self, role: &str) {
+        self.open_library();
+        let role = role.to_lowercase();
+        let index = self.library.as_deref().and_then(|library| {
+            library
+                .roles()
+                .iter()
+                .position(|section| section.section.name.to_lowercase() == role)
+        });
+        if let (Screen::Library(state), Some(index)) = (&mut self.screen, index) {
+            state.show_role(index);
+        }
+    }
+
     /// Opens the settings for template `id` (or a built-in kind's), going `back`. Returns false
     /// when there's no such template.
     fn open_template(&mut self, settings: &Settings, id: &str, back: Back) -> bool {
@@ -1973,10 +1989,16 @@ fn list(
         pos2(left - 32.0, area_top),
         pos2(right + 32.0, (area_top + natural).min(body.bottom())),
     );
+    // The wheel scrolls the splits, and find at once to a match out of view.
+    let find = exo_ui::id(ui.ctx(), "split-inbox-settings-find");
+    let mut wheel = exo_ui::find::reveal(ui.ctx(), find).map_or(0.0, |delta| -delta.y);
     if ui.rect_contains_pointer(area) {
-        *scroll = (*scroll - ui.input(|input| input.smooth_scroll_delta.y))
-            .clamp(0.0, (natural - area.height()).max(0.0));
+        wheel += ui.input(|input| input.smooth_scroll_delta.y);
     }
+    if wheel != 0.0 {
+        *scroll = (*scroll - wheel).clamp(0.0, (natural - area.height()).max(0.0));
+    }
+    let _found = exo_ui::find::Scope::begin(ui.ctx(), find, area, *scroll);
     let mut area_ui = ui.new_child(egui::UiBuilder::new().max_rect(area));
     area_ui.set_clip_rect(area.intersect(ui.clip_rect()));
     let area_painter = area_ui.painter().clone();
@@ -2431,4 +2453,29 @@ fn hide_empty(ui: &mut Ui, body: Rect, settings: &Settings) -> Option<Event> {
         );
     }
     event
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The library's role on screen, by name.
+    fn role(dialogs: &SplitDialogs) -> Option<String> {
+        let Screen::Library(state) = &dialogs.screen else {
+            panic!("the library is up");
+        };
+        let roles = dialogs.library()?.roles();
+        Some(roles.get(state.role()?)?.section.name.clone())
+    }
+
+    #[test]
+    fn a_role_named_in_any_case_shows_its_templates_alone() {
+        let mut dialogs = SplitDialogs::default();
+        dialogs.set_library(crate::splits::load_library());
+        dialogs.open_library_at_role("sales");
+        assert_eq!(role(&dialogs).as_deref(), Some("Sales"));
+        dialogs.open_list();
+        dialogs.open_library_at_role("Astronaut");
+        assert_eq!(role(&dialogs), None, "no role has that name");
+    }
 }

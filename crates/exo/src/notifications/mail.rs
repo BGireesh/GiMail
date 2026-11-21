@@ -8,7 +8,8 @@
 //!   thread back), or notifications are off on this device or for the account.
 //!
 //! A notification shows the sender as the title, the snippet as macOS's subtitle and the subject
-//! as the body, with the default sound. A click opens the conversation.
+//! as the body, with the default sound, and the sender's photo when Exo has one. A click opens the
+//! conversation.
 
 use exo_store::{Arrival, DeviceSettings, Settings};
 
@@ -50,7 +51,8 @@ pub fn notifying<'a>(
     notifying
 }
 
-/// The notification for `arrival` in `account`.
+/// The notification for `arrival` in `account`, without the sender's photo, which only the account
+/// can find.
 pub fn notice(arrival: &Arrival, account: &str) -> Notice {
     let from = arrival.from.as_ref();
     let title = from
@@ -64,6 +66,7 @@ pub fn notice(arrival: &Arrival, account: &str) -> Notice {
         // None without a snippet.
         subtitle: Some(arrival.snippet.clone()).filter(|snippet| !snippet.is_empty()),
         body: arrival.subject.clone(),
+        image: None,
         button: None,
         click: Click {
             account: account.to_owned(),

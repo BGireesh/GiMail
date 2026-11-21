@@ -17,6 +17,8 @@ const NEXT_DAY: Pos2 = Pos2::new(1115.0, 84.0);
 const REPEAT: Pos2 = Pos2::new(570.0, 378.0);
 const DAY_TODAY: Pos2 = Pos2::new(1222.0, 81.0);
 const DAY_CREATE: Pos2 = Pos2::new(1244.0, 81.0);
+/// The week's new event form's `Add a meeting link` at 1280×800.
+const MEETING: Pos2 = Pos2::new(600.0, 409.0);
 /// In the week view at 1280×800: the rail's Calendar, Thursday's 2pm `Calloway: Atlas feedback
 /// call`, and its details' `Yes`.
 const RAIL_CALENDAR: Pos2 = Pos2::new(20.0, 112.0);
@@ -192,6 +194,24 @@ fn the_week_opens_moves_and_closes() {
     assert_eq!(app.mail().calendar_week(), None);
     app.click(RAIL_CALENDAR);
     assert_eq!(app.mail().calendar_week(), Some(date(2026, 11, 17)));
+}
+
+#[test]
+fn go_to_sequences_close_the_week_first() {
+    let mut app = start("calendar-week-go-to");
+    app.key(Key::Num2);
+    app.key(Key::G);
+    app.key(Key::E);
+    assert_eq!(app.mail().calendar_week(), None);
+    assert_eq!(app.mail().list(), &exo_store::ListId::Done);
+    app.key(Key::Num2);
+    app.key(Key::G);
+    app.key(Key::I);
+    assert_eq!(
+        (app.mail().calendar_week(), app.mail().list()),
+        (None, &exo_store::ListId::Inbox),
+        "`g i` goes home"
+    );
 }
 
 #[test]
@@ -920,6 +940,171 @@ fn an_invite_answer_calendar_refuses_offers_gmail() {
     assert_eq!(app.mail().alert(), None);
 }
 
+/// Theo's invitation to a pitch on Friday, with event `uid`, as Google Calendar sends one from a
+/// sender it doesn't know: Yes, Maybe and No links, and one that marks Theo as known.
+fn unknown_senders_invite(uid: &str) -> gmail::mime::Email {
+    let link = |query: &str| format!("https://calendar.google.com/calendar/{query}&amp;tok=dG9r");
+    let html = format!(
+        "<html><head><meta itemprop=\"name\" content=\"Google Calendar\"></head><body><p>Theo Park has invited you to Pitch</p><p>Reply for maya@brightmoor.co <a class=\"grey-button-text\" href=\"{yes}\">Yes</a> <a class=\"grey-button-text\" href=\"{maybe}\">Maybe</a> <a class=\"grey-button-text\" href=\"{no}\">No</a></p><p><a href=\"{known}\">Know this sender? Mark them as known</a></p></body></html>",
+        yes = link("event?action=RESPOND&amp;rst=1"),
+        maybe = link("event?action=RESPOND&amp;rst=3"),
+        no = link("event?action=RESPOND&amp;rst=2"),
+        known = link("marksenderasknown?eid=cGl0Y2g"),
+    );
+    let ics = format!(
+        "BEGIN:VCALENDAR\r\nPRODID:-//Google Inc//Google Calendar 70.9054//EN\r\nVERSION:2.0\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nDTSTART:20261120T160000Z\r\nDTEND:20261120T170000Z\r\nDTSTAMP:20261117T133000Z\r\nUID:{uid}\r\nSUMMARY:Pitch\r\nORGANIZER;CN=Theo Park:mailto:theo@juniperpartners.vc\r\nATTENDEE;CN=Theo Park;PARTSTAT=ACCEPTED:mailto:theo@juniperpartners.vc\r\nATTENDEE;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:maya@brightmoor.co\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+    );
+    gmail::mime::Email {
+        from: Some(gmail::mime::Mailbox::new(
+            "Theo Park",
+            "theo@juniperpartners.vc",
+        )),
+        to: vec![gmail::mime::Mailbox::address("maya@brightmoor.co")],
+        subject: "Invitation: Pitch @ Fri Nov 20, 2026 11am - 12pm (EST) (maya@brightmoor.co)"
+            .into(),
+        html: Some(html),
+        attachments: vec![gmail::mime::Attachment {
+            filename: "invite.ics".into(),
+            content_type: "text/calendar; method=REQUEST".into(),
+            data: ics.into_bytes(),
+            content_id: None,
+        }],
+        message_id: Some(format!("{uid}-invite")),
+        ..gmail::mime::Email::default()
+    }
+}
+
+/// Delivers `email` to the inbox, syncs and opens it.
+fn deliver_and_open(app: &mut Fixture, email: &gmail::mime::Email) {
+    let delivery = serde_json::json!({ "raw": gmail::wire::encode_base64url(&email.to_rfc822()), "labelIds": ["INBOX", "UNREAD"] });
+    let url = app.mock_url().join("__mock/deliver").expect("a URL");
+    app.block_on(async {
+        reqwest::Client::new()
+            .post(url)
+            .json(&delivery)
+            .send()
+            .await?
+            .error_for_status()
+    })
+    .expect("delivered");
+    app.sync();
+    while app.cursor() != email.subject {
+        app.key(Key::K);
+    }
+    app.key(Key::Enter);
+    app.settle();
+}
+
+/// Answers the open invite with its card's first button (Yes) and runs frames until an alert
+/// shows. Returns the links opened meanwhile.
+fn answer_yes_until_alert(app: &mut Fixture) -> Vec<String> {
+    app.key(Key::Tab);
+    let mut opened = enter_opening(app);
+    let started = std::time::Instant::now();
+    while app.mail().alert().is_none() && started.elapsed() < std::time::Duration::from_secs(10) {
+        opened.extend(step_opening(app));
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    opened
+}
+
+/// Presses Enter and returns the links its frames opened.
+fn enter_opening(app: &mut Fixture) -> Vec<String> {
+    let mut opened = Vec::new();
+    for pressed in [true, false] {
+        app.harness.input_mut().events.push(Event::Key {
+            key: Key::Enter,
+            physical_key: None,
+            pressed,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        });
+        opened.extend(step_opening(app));
+    }
+    opened
+}
+
+/// Runs a frame and returns the links it opened.
+fn step_opening(app: &mut Fixture) -> Vec<String> {
+    app.harness.run_steps(1);
+    app.harness
+        .output()
+        .platform_output
+        .commands
+        .iter()
+        .filter_map(|command| match command {
+            egui::OutputCommand::OpenUrl(open) => Some(open.url.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn an_unknown_senders_invite_is_answered_with_its_own_link() {
+    let mut app = start("calendar-invite-unknown-sender");
+    deliver_and_open(
+        &mut app,
+        &unknown_senders_invite("pitch-1120@juniperpartners.vc"),
+    );
+    assert_eq!(app.mail().invite_answer(), Some("needsAction"));
+    let opened = answer_yes_until_alert(&mut app);
+    assert_eq!(
+        opened,
+        ["https://calendar.google.com/calendar/event?action=RESPOND&rst=1&tok=dG9r"]
+    );
+    assert_eq!(
+        app.mail().alert().map(|(title, _)| title),
+        Some("RSVP faster next time")
+    );
+    // `Event settings` opens Calendar's, as the account.
+    assert_eq!(
+        enter_opening(&mut app),
+        ["https://calendar.google.com/calendar/u/0/r/settings?authuser=maya%40brightmoor.co"]
+    );
+    assert!(
+        app.mail()
+            .calendar_events_on(date(2026, 11, 20))
+            .iter()
+            .all(|(title, _)| title != "Pitch"),
+        "Calendar isn't given the event"
+    );
+}
+
+#[test]
+fn an_answer_only_the_organizer_may_give_asks_to_mark_the_sender_known() {
+    let mut app = start("calendar-invite-organizer-only");
+    let gmail = app.gmail();
+    let pitch = gmail::calendar::Event {
+        summary: Some("Pitch".into()),
+        start: Some(gmail::calendar::EventDateTime {
+            date_time: Some("2026-11-20T16:00:00Z".into()),
+            ..Default::default()
+        }),
+        end: Some(gmail::calendar::EventDateTime {
+            date_time: Some("2026-11-20T17:00:00Z".into()),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let made = app
+        .block_on(
+            gmail
+                .calendar()
+                .insert_event("maya@brightmoor.co", &pitch, None)
+                .into_future(),
+        )
+        .expect("inserts");
+    let uid = made.ical_uid.expect("a UID");
+    deliver_and_open(&mut app, &unknown_senders_invite(&uid));
+    app.fault(Some(serde_json::json!({ "method": "PATCH", "path": "/calendar/v3/calendars/", "status": 403, "message": "Forbidden", "reason": "forbiddenForNonOrganizer" })));
+    assert!(answer_yes_until_alert(&mut app).is_empty());
+    let alert = app
+        .mail()
+        .alert()
+        .map(|(title, text)| (title.to_owned(), text.to_owned()));
+    assert_eq!(alert, Some(("Sorry!".to_owned(), "Your RSVP cannot be saved because Google thinks you might not know the sender. Go to Google Calendar to mark them as safe, then retry RSVPing.".to_owned())));
+}
+
 #[test]
 fn find_time_offers_free_slots_and_a_slot_makes_the_meeting() {
     let mut app = start("calendar-find-time");
@@ -1000,6 +1185,30 @@ fn a_guest_s_event_opens_its_details() {
     assert_eq!(
         app.mail().calendar_details_event(),
         Some(("Design crit".to_owned(), "priya@brightmoor.co".to_owned()))
+    );
+}
+
+#[test]
+fn a_new_event_on_a_hidden_weekend_day_opens_its_form() {
+    // (Out of office's nudge for the week after stays away.)
+    let mut app = support::start_with_settings("calendar-hidden-weekend", &|settings| {
+        settings.calendar.show_weekends = false;
+        settings.out_of_office_event_detection.opted_out_at = Some("2026-11-01T00:00:00Z".into());
+    });
+    // Saturday, which the week leaves out.
+    let saturday = gmail_mock::Config::default()
+        .now
+        .checked_add(jiff::SignedDuration::from_hours(4 * 24))
+        .expect("in range");
+    app.set_now(saturday);
+    app.key(Key::Num2);
+    app.settle();
+    app.key(Key::B);
+    // The form is up beside the grid's edge, its title taking what's typed.
+    app.type_text("Brunch");
+    assert_eq!(
+        app.mail().calendar_form_values().map(|(title, _)| title),
+        Some("Brunch".to_owned())
     );
 }
 
@@ -1087,6 +1296,18 @@ fn a_new_event_repeats_and_shows_its_instances_at_once() {
 }
 
 #[test]
+fn a_click_opens_the_meeting_links_and_enter_takes_google_meet() {
+    let mut app = start("calendar-meeting");
+    app.key(Key::Num2);
+    app.settle();
+    app.key(Key::B);
+    assert_eq!(app.mail().calendar_form_new_meet(), Some(false));
+    app.click(MEETING);
+    app.key(Key::Enter);
+    assert_eq!(app.mail().calendar_form_new_meet(), Some(true));
+}
+
+#[test]
 fn repeat_s_custom_dialog_makes_a_rule_and_escape_closes_it() {
     let mut app = start("calendar-repeat-custom");
     app.key(Key::Num2);
@@ -1121,6 +1342,58 @@ fn repeat_s_custom_dialog_makes_a_rule_and_escape_closes_it() {
         Some(("Weekly on Tue".to_owned(), false))
     );
     assert_eq!(app.mail().calendar_form(), Some(true), "the form stays");
+}
+
+#[test]
+fn tab_goes_through_the_custom_dialogs_fields() {
+    let mut app = start("calendar-repeat-tab");
+    app.key(Key::Num2);
+    app.settle();
+    app.key(Key::B);
+    app.click(REPEAT);
+    for _ in 0..6 {
+        app.key(Key::ArrowDown);
+    }
+    app.key(Key::Enter);
+    // Tab enters at Every's count, then the unit, whose list ↓ opens on `week` and moves on.
+    app.key(Key::Tab);
+    app.key(Key::Tab);
+    app.key(Key::ArrowDown);
+    app.key(Key::ArrowDown);
+    app.key(Key::Enter);
+    assert_eq!(
+        app.mail().calendar_form_repeat().map(|(_, custom)| custom),
+        Some(true),
+        "the dialog stays"
+    );
+    app.press(Key::Enter, CMD);
+    assert_eq!(
+        app.mail().calendar_form_repeat(),
+        Some(("Monthly".to_owned(), false))
+    );
+}
+
+#[test]
+fn tab_goes_through_share_availabilitys_sidebar() {
+    let mut app = start("calendar-share-tab");
+    app.key(Key::Num2);
+    app.settle();
+    app.press(Key::A, CMD.plus(Modifiers::SHIFT));
+    assert_eq!(app.mail().calendar_share_minutes(), Some(30));
+    // Who has the keyboard. ⇧Tab goes back to Duration, whose list ↓ opens and Enter picks from.
+    app.press(Key::Tab, Modifiers::SHIFT);
+    app.key(Key::ArrowDown);
+    app.key(Key::ArrowDown);
+    app.key(Key::Enter);
+    assert_eq!(app.mail().calendar_share_minutes(), Some(45));
+    // On to Who, then the one attendee listed, which Enter would remove.
+    app.key(Key::Tab);
+    app.key(Key::Tab);
+    app.key(Key::Enter);
+    assert_eq!(
+        app.mail().toast_text(),
+        Some("Include at least one attendee to share availability.")
+    );
 }
 
 #[test]

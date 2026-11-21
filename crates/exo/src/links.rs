@@ -37,8 +37,8 @@ pub struct Link {
 /// Where a link goes, before the account's labels and splits say what its slugs name.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum To {
-    /// A deep link's name (`deeplink`).
-    DeepLink(String),
+    /// A deep link's name (`deeplink/{name}`), and the role its `?role=` names.
+    DeepLink { name: String, role: Option<String> },
     /// A list, with a conversation open and a filter on if it says so.
     List {
         list: Slug,
@@ -92,7 +92,10 @@ pub fn parse(url: &str) -> Option<Link> {
         .map(decode)
         .collect();
     let deep_link = |segments: &[String]| match segments {
-        [deeplink, name, ..] if deeplink == "deeplink" => Some(To::DeepLink(name.clone())),
+        [deeplink, name, ..] if deeplink == "deeplink" => Some(To::DeepLink {
+            name: name.clone(),
+            role: query_param(query, "role"),
+        }),
         _ => None,
     };
     if let Some(to) = deep_link(&segments) {
@@ -337,7 +340,7 @@ impl crate::Mail {
     /// names, or else the place its path names.
     pub fn open_link(&mut self, link: &Link) {
         match &link.to {
-            To::DeepLink(name) => self.open_deep_link(name),
+            To::DeepLink { name, role } => self.open_deep_link(name, role.as_deref()),
             // Over whatever is up, a week link opens the week and does nothing else.
             To::Week(day) => self.calendar_open_week(day.unwrap_or_else(|| self.now.date())),
             To::Search { query, thread } => {
@@ -489,17 +492,21 @@ mod tests {
 
     #[test]
     fn deep_links_name_a_setting_and_maybe_an_account() {
+        let deep_link = |name: &str, role: Option<&str>| To::DeepLink {
+            name: name.into(),
+            role: role.map(str::to_owned),
+        };
         assert_eq!(
             parse("exo://deeplink/emoji-settings"),
-            link(None, To::DeepLink("emoji-settings".into()))
+            link(None, deep_link("emoji-settings", None))
         );
         assert_eq!(
             parse("exo://maya%40brightmoor.co/deeplink/split-library?role=sales"),
-            link(MAYA, To::DeepLink("split-library".into()))
+            link(MAYA, deep_link("split-library", Some("sales")))
         );
         assert_eq!(
             parse("EXO:///deeplink/reminder-settings/"),
-            link(None, To::DeepLink("reminder-settings".into()))
+            link(None, deep_link("reminder-settings", None))
         );
         assert_eq!(parse("mailto:maya@brightmoor.co"), None);
         assert_eq!(

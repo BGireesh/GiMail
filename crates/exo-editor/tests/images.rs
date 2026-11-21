@@ -6,7 +6,8 @@ use egui::{
 };
 use egui_kittest::Harness;
 use exo_editor::{
-    Editor, EditorStyle, Fit, ImageLoad, ImageSource, Picture, Pos, Selection, outgoing,
+    ContextMenu, Editor, EditorStyle, Fit, ImageLoad, ImageSource, Picture, Pos, Selection,
+    outgoing,
 };
 
 /// What the app answers for an image `width`×`height` at `retina` pixels a CSS pixel.
@@ -248,6 +249,7 @@ struct State {
     ready: bool,
     caret: Rect,
     height: f32,
+    menus: Vec<ContextMenu>,
 }
 
 fn harness(editor: Editor) -> Harness<'static, State> {
@@ -272,6 +274,7 @@ fn harness_sized(editor: Editor, height: f32) -> Harness<'static, State> {
                         let response = state.editor.ui(ui, &EditorStyle::default());
                         state.caret = response.caret;
                         state.height = response.response.rect.height();
+                        state.menus.extend(response.context_menu);
                         response.response.request_focus();
                     },
                 );
@@ -281,6 +284,7 @@ fn harness_sized(editor: Editor, height: f32) -> Harness<'static, State> {
                 ready: false,
                 caret: Rect::NOTHING,
                 height: 0.0,
+                menus: Vec::new(),
             },
         );
     harness.run_steps(3);
@@ -480,6 +484,48 @@ fn a_kept_tables_images_load_as_the_bodys_and_draw_in_it() {
         harness.state().height,
         before,
         "its box came from its attributes"
+    );
+}
+
+#[test]
+fn a_right_click_on_a_kept_tables_image_reports_the_image_and_its_link() {
+    let signature = r#"<div>Hi</div><table><tbody><tr><td><a href="https://maya.example/"><img src="" src-cid="logo" width="40" height="20"></a></td><td>Maya Raman</td></tr></tbody></table><div><br></div>"#;
+    let mut harness = harness(Editor::from_html(signature));
+    harness.state_mut().editor.image_requests();
+    let file = png(40, 20, [255, 0, 0]);
+    harness.state_mut().editor.set_image(
+        "cid:logo",
+        ImageLoad::Loaded(Picture {
+            pixels: ColorImage::filled([40, 20], Color32::RED),
+            natural: [40, 20],
+            retina: 1,
+            file: file.clone().into(),
+        }),
+    );
+    // The table's document has the logo's picture once it has decoded it.
+    let logo = pos2(ORIGIN.x + 20.0, ORIGIN.y + 24.0 + 13.0);
+    wait_for(&mut harness, |harness| {
+        harness.input_mut().events.push(Event::PointerMoved(logo));
+        for pressed in [true, false] {
+            harness.input_mut().events.push(Event::PointerButton {
+                pos: logo,
+                button: PointerButton::Secondary,
+                pressed,
+                modifiers: Modifiers::NONE,
+            });
+            harness.run_steps(1);
+        }
+        harness
+            .state()
+            .menus
+            .last()
+            .is_some_and(|menu| menu.image.is_some())
+    });
+    let menu = harness.state_mut().menus.pop().expect("a menu");
+    let image = menu.image.expect("the logo");
+    assert_eq!(
+        (image.src.as_str(), &*image.file, menu.link.as_deref()),
+        ("cid:logo", &file[..], Some("https://maya.example/"))
     );
 }
 

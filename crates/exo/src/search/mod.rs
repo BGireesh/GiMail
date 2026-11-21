@@ -103,6 +103,8 @@ pub(crate) struct Search {
     used_autocomplete: bool,
     /// The search whose results show.
     query: Option<String>,
+    /// The text the bar opened with when the list filled it in (`in:sent `), until a search runs.
+    opened_with: Option<String>,
     /// The search to run ahead once the bar has rested on it (instant search), and when that
     /// is once [`poll_instant`](Self::poll_instant) has seen it.
     instant: Option<(String, Option<f64>)>,
@@ -135,7 +137,7 @@ impl Search {
         let value = normalize_quotes(initial);
         Self {
             underlay: Some(value.clone()),
-            value,
+            value: value.clone(),
             lozenge_start: None,
             suggestions: None,
             selected: None,
@@ -143,6 +145,7 @@ impl Search {
             history_selected: None,
             used_autocomplete: false,
             query: None,
+            opened_with: Some(value.clone()).filter(|value| !value.trim().is_empty()),
             instant: None,
             book: None,
             book_asked: false,
@@ -160,6 +163,12 @@ impl Search {
     /// The search whose results show.
     pub fn query(&self) -> Option<&str> {
         self.query.as_deref()
+    }
+
+    /// The text the bar opened with when the list filled it in (`in:sent `), while no search has
+    /// run since.
+    pub fn opened_with(&self) -> Option<&str> {
+        self.opened_with.as_deref()
     }
 
     /// The bar's text.
@@ -564,6 +573,7 @@ impl Search {
         if !same {
             // The new results decide whom the contact pane shows.
             self.query = Some(self.value.clone());
+            self.opened_with = None;
             self.contact = None;
             effects.push(Effect::Run(self.value.clone()));
         }
@@ -980,6 +990,27 @@ mod tests {
         let effects = search.key(Key::Enter, &[]);
         assert_eq!(effects, [Effect::Run("an".into()), Effect::FocusList(None)]);
         assert_eq!(search.query(), Some("an"));
+    }
+
+    #[test]
+    fn a_bare_bang_word_is_quoted_before_searching() {
+        let mut bar = search();
+        bar.edit("!urgent report");
+        bar.key(Key::Enter, &[]);
+        assert_eq!(bar.query(), Some("\"!urgent\" report"));
+        assert_eq!(bar.text(), "\"!urgent\" report");
+        for (typed, searched) in [
+            // Inside a word, it isn't a word of its own.
+            ("hey!urgent", "hey!urgent"),
+            // A query with quotes of its own is left as typed.
+            ("!urgent \"q4\"", "!urgent \"q4\""),
+            ("!urgent it's", "!urgent it's"),
+        ] {
+            let mut bar = search();
+            bar.edit(typed);
+            bar.key(Key::Enter, &[]);
+            assert_eq!(bar.query(), Some(searched), "{typed}");
+        }
     }
 
     #[test]

@@ -52,8 +52,16 @@ impl Client {
     /// only a Gmail served from it (gmail-mock) asks for.
     pub(crate) fn new(timeout: Duration, loopback: bool) -> Self {
         Self {
-            http: http(timeout, loopback),
+            http: http(timeout, loopback, false),
             loopback,
+        }
+    }
+
+    /// [`new`](Self::new) on the public internet, over HTTPS only, redirects included.
+    pub(crate) fn https_only(timeout: Duration) -> Self {
+        Self {
+            http: http(timeout, false, true),
+            loopback: false,
         }
     }
 
@@ -63,6 +71,19 @@ impl Client {
         check(&url, self.loopback)?;
         let http = self.http.as_ref().ok_or(Error::Unavailable)?;
         Ok(http.get(url).send().await?)
+    }
+
+    /// The body at `url` ([`get`](Self::get)), or `None` when it's over `limit` bytes.
+    pub(crate) async fn bytes(&self, url: &str, limit: usize) -> Result<Option<Vec<u8>>, Error> {
+        let mut response = self.get(url).await?.error_for_status()?;
+        let mut bytes = Vec::new();
+        while let Some(chunk) = response.chunk().await? {
+            if bytes.len() + chunk.len() > limit {
+                return Ok(None);
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        Ok(Some(bytes))
     }
 }
 
@@ -76,8 +97,9 @@ pub(crate) fn serves_gmail_locally(endpoints: &gmail::Endpoints) -> bool {
     })
 }
 
-/// The HTTP client, whose resolver and redirects only reach the public internet.
-fn http(timeout: Duration, loopback: bool) -> Option<reqwest::Client> {
+/// The HTTP client, whose resolver and redirects only reach the public internet, and with
+/// `https_only`, only over HTTPS.
+fn http(timeout: Duration, loopback: bool, https_only: bool) -> Option<reqwest::Client> {
     let policy = reqwest::redirect::Policy::custom(move |attempt| {
         if attempt.previous().len() >= MAX_REDIRECTS {
             attempt.error("too many redirects")
@@ -91,6 +113,7 @@ fn http(timeout: Duration, loopback: bool) -> Option<reqwest::Client> {
         .timeout(timeout)
         .redirect(policy)
         .dns_resolver(Arc::new(PublicResolver { loopback }))
+        .https_only(https_only)
         // A proxy would resolve the name itself, past the resolver's check.
         .no_proxy()
         .build()

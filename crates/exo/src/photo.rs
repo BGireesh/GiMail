@@ -8,6 +8,7 @@ use std::{
 };
 
 use egui::{Color32, Mesh, Painter, Rect, Shape, TextureHandle, Vec2, pos2, vec2};
+use image::RgbImage;
 
 /// The largest texture side every backend takes (egui assumes no more before the first frame).
 /// The photos are bigger, so they're cut into tiles.
@@ -32,6 +33,8 @@ struct Tiles {
     size: Vec2,
     /// A small blurred copy, for a photo asked for with one.
     blurred: Option<TextureHandle>,
+    /// A small copy in memory, for [`Photo::sample`], likewise.
+    small: Option<RgbImage>,
     /// Each tile owns a range of the photo's columns and rows, and its texture holds one more
     /// texel on each inner side, so sampling at the seam blends the same texels as one big
     /// texture would.
@@ -101,6 +104,14 @@ impl Photo {
         photo
     }
 
+    /// Another handle on the same photo, for painting it from elsewhere.
+    pub fn share(&self) -> Self {
+        Self {
+            tiles: self.tiles.clone(),
+            decoding: None,
+        }
+    }
+
     /// Blocks until decoding is over, here or for another screen sharing the photo. A screen with
     /// a photo shows only once it can draw all of it.
     pub fn wait(&mut self) {
@@ -153,6 +164,9 @@ impl Photo {
 /// at twice that size, so a blur of `BLUR` texels is CSS's `blur(8px)` there.
 const BLURRED_WIDTH: u32 = 360;
 const BLUR: f32 = 2.0;
+/// The copy in memory's width, a quarter of a 2880px photo: two pixels to a point in a window of
+/// half its width.
+const SMALL_WIDTH: u32 = 720;
 
 impl Photo {
     /// Paints the blurred copy as [`Photo::paint`] paints the photo (a photo loaded with
@@ -183,6 +197,60 @@ impl Photo {
     }
 }
 
+impl Photo {
+    /// The photo as [`Photo::paint`] paints it over `rect`, in `region` of the screen cut into
+    /// `columns` × `rows` cells: each cell's mean color, row by row, from the copy in memory of a
+    /// photo loaded with [`Photo::load_blurred`]. None for another photo, or before it's decoded.
+    pub fn sample(
+        &self,
+        rect: Rect,
+        position: impl FnOnce(Vec2) -> Vec2,
+        region: Rect,
+        [columns, rows]: [usize; 2],
+    ) -> Option<Vec<[f32; 3]>> {
+        let photo = self.tiles.get()?.as_ref()?;
+        let small = photo.small.as_ref()?;
+        let scale = (rect.width() / photo.size.x).max(rect.height() / photo.size.y);
+        let origin = rect.min - position(photo.size * scale - rect.size());
+        // Points to the copy's pixels.
+        let per_point = small.width() as f32 / (photo.size.x * scale);
+        // The pixels under `from..to` (in the copy's pixels), at least one.
+        let span = |from: f32, to: f32, length: u32| {
+            let start = (from.floor().max(0.0) as u32).min(length - 1);
+            let end = (to.ceil().max(0.0) as u32).clamp(start + 1, length);
+            start..end
+        };
+        let mut cells = Vec::with_capacity(columns * rows);
+        for row in 0..rows {
+            let at = |i: usize| region.top() + region.height() * i as f32 / rows as f32;
+            let ys = span(
+                (at(row) - origin.y) * per_point,
+                (at(row + 1) - origin.y) * per_point,
+                small.height(),
+            );
+            for column in 0..columns {
+                let at = |i: usize| region.left() + region.width() * i as f32 / columns as f32;
+                let xs = span(
+                    (at(column) - origin.x) * per_point,
+                    (at(column + 1) - origin.x) * per_point,
+                    small.width(),
+                );
+                let mut sum = [0.0; 3];
+                for y in ys.clone() {
+                    for x in xs.clone() {
+                        for (sum, channel) in sum.iter_mut().zip(small.get_pixel(x, y).0) {
+                            *sum += f32::from(channel);
+                        }
+                    }
+                }
+                let count = (ys.len() * xs.len()) as f32;
+                cells.push(sum.map(|sum| sum / count));
+            }
+        }
+        Some(cells)
+    }
+}
+
 fn decode(ctx: &egui::Context, path: &Path, blurred: bool) -> Option<Tiles> {
     let decoded = std::fs::read(path)
         .ok()
@@ -191,6 +259,14 @@ fn decode(ctx: &egui::Context, path: &Path, blurred: bool) -> Option<Tiles> {
         log::warn!("no photo at {}", path.display());
         return None;
     };
+    let small = blurred.then(|| {
+        decoded
+            .thumbnail(
+                SMALL_WIDTH,
+                SMALL_WIDTH * decoded.height() / decoded.width().max(1),
+            )
+            .into_rgb8()
+    });
     let blurred = blurred.then(|| {
         let small = decoded
             .thumbnail(
@@ -256,6 +332,7 @@ fn decode(ctx: &egui::Context, path: &Path, blurred: bool) -> Option<Tiles> {
     Some(Tiles {
         size: vec2(width as f32, height as f32),
         blurred,
+        small,
         tiles,
     })
 }
@@ -271,6 +348,41 @@ fn spans(length: u32) -> Vec<Range<u32>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_sample_is_what_covers_its_cells() {
+        // A 1440×960 photo, red on its left half and blue on its right, covering a 720×360
+        // window: it's scaled by half and its middle third of rows shows.
+        let path =
+            std::env::temp_dir().join(format!("exo-photo-sample-{}.png", std::process::id()));
+        image::RgbImage::from_fn(1440, 960, |x, _| {
+            image::Rgb(if x < 720 { [255, 0, 0] } else { [0, 0, 255] })
+        })
+        .save(&path)
+        .expect("saved");
+        let ctx = egui::Context::default();
+        let mut photo = Photo::load_blurred(&ctx, path.clone());
+        photo.wait();
+        let window = Rect::from_min_size(pos2(0.0, 0.0), vec2(720.0, 360.0));
+        let centered = |free: Vec2| free * 0.5;
+        let cells = photo
+            .sample(window, centered, window, [4, 2])
+            .expect("decoded");
+        assert_eq!(cells.len(), 8);
+        for row in cells.chunks(4) {
+            assert_eq!(row[0], [255.0, 0.0, 0.0]);
+            assert_eq!(row[1], [255.0, 0.0, 0.0]);
+            assert_eq!(row[2], [0.0, 0.0, 255.0]);
+            assert_eq!(row[3], [0.0, 0.0, 255.0]);
+        }
+        // A cell across the middle mixes the two.
+        let middle = Rect::from_min_size(pos2(350.0, 100.0), vec2(20.0, 20.0));
+        let mixed = photo
+            .sample(window, centered, middle, [1, 1])
+            .expect("decoded");
+        assert!((mixed[0][0] - 127.5).abs() < 1.0, "{mixed:?}");
+        let _ = std::fs::remove_file(path);
+    }
 
     #[test]
     fn spans_fit_a_texture_with_their_neighbours_texels() {

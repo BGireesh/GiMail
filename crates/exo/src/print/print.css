@@ -106,6 +106,8 @@ body { margin: 0; padding-top: 41px; line-height: 0; color: #000; }
 .MessagePane-datetime .Status { font-weight: 700; letter-spacing: 0; }
 /* The paperclip prints black and whole, because its `opacity: .4` is screen-only. */
 .MessagePane-attachmentIcon { display: inline-block; margin-right: 8px; vertical-align: middle; line-height: 0; }
+/* So does the calendar of a message with an invite. */
+.MessagePane-calendarIcon { display: inline-block; margin-right: 14px; position: relative; top: 4px; margin-top: -5px; }
 
 .MessagePane-expanded { position: relative; margin: -12px 0 28px; padding: 12px 2rem 4px; }
 .MessagePane-header { display: flex; }
@@ -152,8 +154,54 @@ body { margin: 0; padding-top: 41px; line-height: 0; color: #000; }
  * view marks those bodies (`isShort`, `macos::BEFORE_PRINT`). */
 html { orphans: 2; widows: 2; }
 .MessagePane-iframe-wrapper { margin: 20px 0 12px; padding-bottom: 12px; border-bottom: 1px solid rgba(0, 0, 0, .05); }
-.MessagePane-iframe-wrapper.isShort { break-inside: avoid; }
+.MessagePane-iframe-wrapper.isShort, .Shadowbox.isShort { break-inside: avoid; }
 .Shadowbox { display: block; }
+
+/* An invitation's card, with the guest's note above it. Neither the card's background nor its
+ * photo prints, nor do its buttons (their row prints its name alone) or About's `Show more`. */
+.MessagePane-calendarNote {
+  margin-top: 1px;
+  padding-bottom: 16px;
+  font-family: "Exo Sans Email", sans-serif, "Apple Color Emoji";
+  -webkit-font-smoothing: antialiased;
+  font-size: 14px;
+  line-height: 1.7142857143;
+}
+.MessagePane-calendarNote a, .CalendarInvite-property a { color: #54acdc; }
+.CalendarInvite {
+  position: relative;
+  top: 1px;
+  margin-bottom: 16px;
+  font-family: "Exo Sans", sans-serif, "Apple Color Emoji";
+  -webkit-font-smoothing: antialiased;
+  font-size: 14px;
+  line-height: 24px;
+  color: rgba(0, 0, 0, .75);
+}
+.CalendarInvite-image { height: 176px; }
+.CalendarInvite-status-update {
+  position: absolute;
+  top: 16px;
+  left: 24px;
+  max-width: calc(100% - 24px);
+  margin-left: -7px;
+  padding: 4px 7px 0;
+  border: 1px solid rgba(0, 0, 0, .08);
+  border-radius: 4px;
+  font-weight: bold;
+  overflow-wrap: break-word;
+}
+.CalendarInvite-rows { padding: 28px 24px 24px; }
+.CalendarInvite-row { display: flex; margin-bottom: 16px; }
+.CalendarInvite-rows > .CalendarInvite-row:last-of-type { margin-bottom: 0; }
+.CalendarInvite-question { display: inline-block; min-width: 92px; font-weight: bold; }
+.CalendarInvite-property { padding-left: 12px; }
+.CalendarInvite-property > div { display: inline; white-space: pre-wrap; }
+.CalendarInvite-property-who { max-width: calc(100% - 92px); overflow-wrap: break-word; }
+.CalendarInvite-property-where, .CalendarInvite-property-about, .CalendarInvite-property-video-link { overflow-wrap: break-word; }
+.CalendarInvite-eventTime { white-space: nowrap; }
+.CalendarInvite-property-files > div { display: grid; grid-template-columns: repeat(3, minmax(120px, 154.16px)); grid-gap: 8px; }
+.CalendarInvite-property-files .Attachment { margin: 0; line-height: 0; }
 
 .AttachmentList { display: flex; flex-wrap: wrap; margin: 16px 0 12px -8px; }
 .Attachment { display: block; position: relative; flex: 0 1 calc(25% - 8px); min-width: 120px; max-width: 154.16px; margin: 0 4px 8px; break-inside: avoid; }
@@ -183,3 +231,65 @@ html { orphans: 2; widows: 2; }
   white-space: nowrap;
 }
 .Attachment-fileType-inner { margin-top: -4px; padding-top: 4px; }
+
+/* A draft open under a message, as its form prints: no buttons, no separator above it, and the
+ * form's 162px at least. Its header is `Draft to …`, or the recipient lists it shows, each a
+ * label and its chips. An invalid chip's background doesn't print, and its white name prints
+ * darkened. Under it, what's written, then the `…` of a quote or signature. */
+.ComposeForm { display: flex; flex-direction: column; min-height: 162px; }
+.ComposeForm-header { flex: 0 0 auto; min-height: 40px; margin: -12px -8px -4px; padding: 4px 8px; }
+.ComposeForm-collapsed-header, .RecipientList, .ComposeForm-quote {
+  font-family: "Exo Sans", sans-serif, "Apple Color Emoji";
+  -webkit-font-smoothing: antialiased;
+  font-size: 14px;
+}
+.ComposeForm-collapsed-header { position: relative; top: 1px; margin: 2px 0 8px; font-weight: 700; line-height: 24px; color: rgba(0, 0, 0, .8); }
+.ComposeForm-collapsed-header-text { position: relative; top: -1px; }
+.ComposeForm-draft { color: #6ebd77; }
+.RecipientList {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  align-items: baseline;
+  position: relative;
+  top: -1px;
+  margin-bottom: 4px;
+  padding-left: 50px;
+  font-weight: 700;
+  line-height: 20px;
+  color: rgba(0, 0, 0, .8);
+}
+.RecipientList-label { position: absolute; left: 0; margin-bottom: 1px; padding: 4px 0 1px; border: 1px solid transparent; }
+.RecipientList-input { min-width: 26px; height: 100%; align-self: normal; }
+.Recipient {
+  position: relative;
+  max-width: 100%;
+  margin: 0 1px 1px 0;
+  padding: 4px 16px 1px 6px;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.Recipient .tail { position: absolute; right: -14px; width: 30px; padding-left: 14px; transform: translateX(-6px); }
+.Recipient .cross { display: inline-block; width: 9px; height: 8px; line-height: 0; }
+.Recipient .separator { position: relative; left: -7px; color: rgba(0, 0, 0, .2); }
+.Recipient.hideSeparator .separator, .Recipient.isInvalid .separator { opacity: 0; }
+.Recipient.isInvalid { color: #fff; background-color: #ef8e8e; border-color: #e28686; }
+.Recipient.isInvalid .tail {
+  transform: translateX(-14px);
+  background: linear-gradient(to right, rgba(239, 142, 142, 0) 0, #ef8e8e 12px, #ef8e8e 100%) no-repeat;
+}
+.ComposeForm-body { flex: 1 1 auto; min-height: 32px; margin: 4px 0 8px; }
+.ComposeForm-editor {
+  min-height: 32px;
+  font-family: "Exo Sans Email", sans-serif, "Apple Color Emoji";
+  -webkit-font-smoothing: antialiased;
+  font-size: 14px;
+  line-height: 24px;
+  color: rgba(0, 0, 0, .9);
+  overflow-wrap: break-word;
+}
+.ComposeForm-quote { position: relative; width: 16px; height: 16px; margin-bottom: 8px; line-height: 16px; color: rgba(0, 0, 0, .75); }
+.ComposeForm-quote span { position: absolute; top: 0; left: -4px; width: 24px; height: 24px; padding-left: 4px; opacity: .4; }
+.ComposeForm-quote span::before { content: "…"; font-family: sans-serif; }

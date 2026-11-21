@@ -449,3 +449,30 @@ fn an_empty_line_in_the_middle_of_code_splits_it() {
     more.type_text("```js\n");
     assert!(!more.html().contains("<pre"), "{}", more.html());
 }
+
+#[test]
+fn a_url_pasted_over_a_link_keeps_the_form_its_text_had() {
+    // The text showed the host and path, so the new link's does.
+    let mut editor =
+        Editor::from_html(r#"<div>see <a href="https://old.com/a?x=1">old.com/a</a> now</div>"#);
+    select(&mut editor, (0, 3), (0, 14));
+    editor.paste_text("https://new.org/b?y=2");
+    assert_eq!(
+        editor.html(),
+        r#"<div>see <a href="https://new.org/b?y=2" target="_blank">new.org/b</a> now<br></div>"#
+    );
+    editor.undo();
+    assert_eq!(
+        editor.html(),
+        r#"<div>see <a href="https://old.com/a?x=1">old.com/a</a> now<br></div>"#,
+        "one undo step"
+    );
+    // Text that doesn't show its URL is only linked anew.
+    let mut editor = Editor::from_html(r#"<div><a href="https://old.com/a">our docs</a></div>"#);
+    select(&mut editor, (0, 0), (0, 8));
+    editor.paste_text("https://new.org/b");
+    assert_eq!(
+        editor.html(),
+        r#"<div><a href="https://new.org/b" target="_blank">our docs</a><br></div>"#
+    );
+}

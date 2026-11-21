@@ -18,7 +18,7 @@ const MUTED_CHIP: &str = "Muted";
 /// Gmail's spam label, and its chip's name.
 const SPAM: &str = "SPAM";
 const SPAM_CHIP: &str = "Spam";
-/// Gmail's trash label, and its chip's name (shown only in search results).
+/// Gmail's trash label, and its chip's name (shown in search results and the header).
 const TRASH: &str = "TRASH";
 const TRASH_CHIP: &str = "Trash";
 
@@ -232,8 +232,23 @@ impl Chips {
     }
 
     /// The open thread's header chips, which are like a row's but keep the label being viewed.
-    pub fn header_chips(&self, ids: &[String], muted: bool) -> Vec<String> {
-        self.for_thread(ids, muted, &ListId::Inbox)
+    /// `trash` and `spam` show only where the view shows Trash or Spam (the list, or a search
+    /// asking for them).
+    pub fn header_chips(
+        &self,
+        ids: &[String],
+        muted: bool,
+        trash: bool,
+        spam: bool,
+    ) -> Vec<String> {
+        let mut chips = self.sorted(ids, &ListId::Inbox);
+        for (id, chip, shown) in [(TRASH, TRASH_CHIP, trash), (SPAM, SPAM_CHIP, spam)] {
+            if shown && ids.iter().any(|label| label == id) {
+                chips.push((chip, chip));
+            }
+        }
+        chips.sort_by(|a, b| compare_label_names(a.0, b.0));
+        lead_with_muted(chips, muted)
     }
 
     /// A thread's chips in `list`: a leading `muted` chip outside Muted, then its labels in
@@ -437,6 +452,33 @@ mod tests {
         assert_eq!(
             chips.for_thread(&ids, true, &ListId::Muted),
             ["Clients", "hiring"]
+        );
+    }
+
+    #[test]
+    fn the_header_shows_trash_and_spam_only_where_the_view_does() {
+        let chips = Chips::new(&[Label {
+            id: "L1".into(),
+            name: "Receipts".into(),
+            kind: exo_store::LabelKind::User,
+            text_color: None,
+            background_color: None,
+            hidden: false,
+        }]);
+        let ids = ["L1", "TRASH", "SPAM"].map(String::from);
+        assert_eq!(chips.header_chips(&ids, false, false, false), ["Receipts"]);
+        assert_eq!(
+            chips.header_chips(&ids, false, true, false),
+            ["Receipts", "Trash"]
+        );
+        assert_eq!(
+            chips.header_chips(&ids, true, false, true),
+            ["Muted", "Receipts", "Spam"]
+        );
+        // Only a thread that has the label shows its chip.
+        assert_eq!(
+            chips.header_chips(&ids[..1], false, true, true),
+            ["Receipts"]
         );
     }
 

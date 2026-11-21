@@ -956,13 +956,29 @@ impl crate::Mail {
             Failure::Respond => self
                 .commands
                 .toast(Toast::new("Sorry! Failed to save your RSVP.").kind(ToastKind::Error)),
-            Failure::RespondToInvite { uid, thread, gone } => {
+            Failure::RespondToInvite {
+                uid,
+                thread,
+                status,
+                refusal,
+                links,
+            } => {
+                use exo_store::Refusal;
                 // The card shows the calendar's answer again.
                 self.calendar.answers.1.remove(&uid);
                 let elsewhere = thread
                     .clone()
                     .filter(|thread| self.thread.as_ref().is_none_or(|open| open.id() != thread));
-                if gone {
+                // An unknown sender's invitation, still open, is answered with its own link.
+                let answer = links
+                    .as_ref()
+                    .and_then(|links| links.answer(&status))
+                    .filter(|_| refusal == Refusal::UnknownSender && elsewhere.is_none())
+                    .map(str::to_owned);
+                let mark_known = links
+                    .filter(|_| refusal == Refusal::NonOrganizer)
+                    .map(|links| links.mark_sender_known);
+                if refusal == Refusal::Gone {
                     let mut toast = Toast::new("RSVP not saved because event has changed.");
                     if let Some(thread) = elsewhere {
                         toast = toast.action(
@@ -977,7 +993,14 @@ impl crate::Mail {
                     if let Some(open) = &mut self.thread {
                         open.blur_invite();
                     }
-                    self.pickers.rsvp_failed(thread);
+                    if let Some(link) = answer {
+                        self.open_url(&link);
+                        self.pickers.rsvp_faster_next_time(thread);
+                    } else if let Some(url) = mark_known {
+                        self.pickers.rsvp_unknown_sender(url, thread);
+                    } else {
+                        self.pickers.rsvp_failed(thread);
+                    }
                 } else {
                     self.commands.toast(
                         Toast::new("Failed to respond to a calendar invitation.")
@@ -1444,6 +1467,7 @@ impl crate::Mail {
             week_start: self.calendar_week_start_day(),
             conversation: &conversation,
             places: &places,
+            online: self.snapshot.connection.is_online(),
             chips: &chips,
         };
         let Some(form) = self.calendar.form.as_mut() else {
@@ -1486,7 +1510,7 @@ impl crate::Mail {
                 );
             });
         self.calendar_form_clicked(clicked, &now);
-        self.calendar_chip_clicked(ui.ctx());
+        self.calendar_tip_clicked(ui.ctx());
     }
 
     /// The right pane's new-event form: the form over a day of the calendar showing the draft,
@@ -1510,6 +1534,7 @@ impl crate::Mail {
             week_start: self.calendar_week_start_day(),
             conversation: &conversation,
             places: &places,
+            online: self.snapshot.connection.is_online(),
             chips: &chips,
         };
         let draft = self.calendar_draft(&now);
@@ -1633,19 +1658,20 @@ impl crate::Mail {
             }
         }
         self.calendar_form_clicked(clicked, &now);
-        self.calendar_chip_clicked(ui.ctx());
+        self.calendar_tip_clicked(ui.ctx());
         true
     }
 
-    /// A click on a guest's tooltip, which starts a new message to them or copies their address.
-    fn calendar_chip_clicked(&mut self, ctx: &egui::Context) {
+    /// A click on one of the form's copy tooltips, which starts a new message to a guest, opens
+    /// the meeting link or copies.
+    fn calendar_tip_clicked(&mut self, ctx: &egui::Context) {
         match self
             .calendar
             .form
             .as_mut()
-            .and_then(|form| form.chip_clicked.take())
+            .and_then(|form| form.tip_clicked.take())
         {
-            Some(form::ChipTip::Compose(address, pop_out)) => {
+            Some(form::TipClick::Compose(address, pop_out)) => {
                 let fields = crate::compose::Fields {
                     to: vec![address],
                     ..crate::compose::Fields::default()
@@ -1656,7 +1682,8 @@ impl crate::Mail {
                     self.compose_new(fields, None)
                 }
             }
-            Some(form::ChipTip::Copy(email)) => self.calendar_copy(ctx, email),
+            Some(form::TipClick::Open(link)) => self.open_url(&link),
+            Some(form::TipClick::Copy(text)) => self.calendar_copy(ctx, text),
             None => {}
         }
     }

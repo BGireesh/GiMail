@@ -30,13 +30,17 @@
 
 mod address_book;
 mod api;
+mod authentication;
+mod brands;
 mod bulk;
+mod bulk_log;
 mod calendar;
 mod connection;
 mod db;
 mod drafts;
 mod error;
 mod evict;
+mod google_contacts;
 mod ids;
 mod migrations;
 mod model;
@@ -62,8 +66,12 @@ mod unsubscribes;
 mod view;
 
 pub use address_book::ScoredContact;
+pub use brands::{BrandCheck, BrandRecord};
 pub use bulk::{BulkTarget, ListCutoff, Progress, Relabelled, Scope};
-pub use calendar::outbox::{CalendarChange, CalendarOutcome, Cut, QueuedCalendarChange};
+pub use bulk_log::{BulkRecord, BulkState, LoggedBulk};
+pub use calendar::outbox::{
+    CalendarChange, CalendarOutcome, Cut, InviteLinks, QueuedCalendarChange, Refusal,
+};
 pub use calendar::recurrence::{End as RecurrenceEnd, Frequency, Nth, Recurrence};
 pub use calendar::{AccountCalendar, StoredEvent};
 pub use connection::{Connection, Debounce, Outage};
@@ -73,6 +81,7 @@ pub use drafts::{
 };
 pub use error::{Error, Failing, Result, Unusable};
 pub use evict::{Evicted, Eviction};
+pub use google_contacts::{GoogleContact, GoogleContacts, GoogleList};
 pub use ids::{Filter, ListId, ThreadId};
 pub use model::{
     Alias, Attachment, Attachments, Body, Contact, Cursor, Header, Label, LabelKind, ListCount,

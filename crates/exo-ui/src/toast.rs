@@ -5,15 +5,18 @@
 //! 3px accent bar inset on the left (`box-shadow: inset 3px 0 0`), 12px/16px text padded `1.75rem`
 //! either side, bold uppercase actions padded `1rem`, and a 10px × at 30% opacity. The accent's
 //! `::before` glow is on a box with no height, so it never shows.
+//!
+//! Over a photo ([`Behind::for_toasts`]) the card is see-through: white at .2 over the photo
+//! blurred 12.5px, with white text.
 
 use egui::{
-    Area, Color32, Context, CornerRadius, Id, Order, Painter, Pos2, Rect, Response, Sense, Ui,
-    Vec2,
+    Area, Color32, Context, CornerRadius, Id, LayerId, Order, Painter, Pos2, Rect, Response, Sense,
+    Ui, Vec2,
     text::{LayoutJob, TextWrapping},
 };
 
 use crate::{
-    BoxShadow, Family, Font, KeyTooltip, TextStyle, motion, paint_icon, paint_job, palette,
+    Behind, BoxShadow, Family, Font, KeyTooltip, TextStyle, motion, paint_icon, paint_job, palette,
     pixel_snap, rem,
 };
 
@@ -38,6 +41,11 @@ const EXPANDER: f32 = 131.0;
 const SHADOW_CURVE: motion::CubicBezier = motion::CubicBezier::new(0.25, 0.46, 0.45, 0.94);
 /// The default stack offset from the bottom.
 pub const TOAST_BOTTOM: f32 = 32.0;
+/// A see-through card's blur of what's behind it, and its white.
+const BLUR: f32 = 12.5;
+const SEE_THROUGH: Color32 = Color32::from_rgba_premultiplied(51, 51, 51, 51);
+/// White at .75, a see-through card's text and actions.
+const SEE_THROUGH_TEXT: Color32 = Color32::from_rgba_premultiplied(191, 191, 191, 191);
 
 /// The toast's accent.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -86,6 +94,8 @@ impl Line {
 
 struct Layout {
     card: Rect,
+    /// What the card shows through, if it's see-through.
+    behind: Option<Behind>,
     text: Line,
     /// The percentage after the text, and the room it takes.
     percentage: Option<(Line, f32)>,
@@ -134,7 +144,56 @@ const PERCENTAGE_GAP: f32 = 4.0;
 /// Clickable text under the pointer, in both themes.
 const CLICKABLE_HOVER: Color32 = Color32::from_rgb(0x54, 0xac, 0xdc);
 
+/// The toasts' stack's cards are each an area of this order.
+const STACK: Order = Order::Foreground;
+
 impl ToastView<'_> {
+    /// The area a card of the toasts' stack is shown in.
+    pub fn area(id: Id) -> Area {
+        Area::new(id).order(STACK)
+    }
+
+    /// The layer a card of the toasts' stack shown with `id` is painted on.
+    pub fn layer(id: Id) -> LayerId {
+        LayerId::new(STACK, id)
+    }
+
+    /// Keeps the toasts' stack's `cards` (their [`ToastView::layer`]s) in this order, back to
+    /// front, however they came up, and with `over_the_rest` over the other areas of their order
+    /// (the dialogs), which leaves alone an area raised over them (the command palette). egui
+    /// raises an area when it shows, so a popup raised after the toast, or a dialog opened while
+    /// it shows, would otherwise cover it. Call it each frame, once they're painted: the first
+    /// card out of place goes back where it belongs, which puts a newly raised one right the
+    /// frame it shows.
+    pub fn stack(ctx: &Context, cards: &[LayerId], over_the_rest: bool) {
+        if over_the_rest {
+            // Raised together, they keep their order among themselves.
+            for &card in cards {
+                ctx.move_to_top(card);
+            }
+        }
+        let order: Vec<LayerId> = ctx.memory(|memory| {
+            memory
+                .layer_ids()
+                .filter(|layer| cards.contains(layer))
+                .collect()
+        });
+        if order.len() != cards.len() {
+            return;
+        }
+        match cards.iter().zip(&order).position(|(card, is)| card != is) {
+            // The back card goes under the rest (egui keeps a layer's sublayers in their order,
+            // just over it).
+            Some(0) => {
+                for &card in &cards[1..] {
+                    ctx.set_sublayer(cards[0], card);
+                }
+            }
+            Some(at) => ctx.set_sublayer(cards[at - 1], cards[at]),
+            None => {}
+        }
+    }
+
     /// Paints the toast at the bottom left of `area` (the window below the tab bar), its bottom
     /// edge `bottom` px above the area's ([`TOAST_BOTTOM`] normally), its card at `opacity` (it
     /// fades out by fading the card).
@@ -156,10 +215,13 @@ impl ToastView<'_> {
         };
         let left = area.left() + inset + 40.0 - 1.75 * rem + 6.0;
         let top = area.bottom() - bottom - HEIGHT;
+        let behind = Behind::for_toasts(ctx);
+        let see_through = behind.is_some();
 
         let text = {
             // The text: `rgba(0,0,0,.7)`, `hsla(0,0%,100%,.7)` in Carbon.
             let ink = match palette.theme {
+                _ if see_through => SEE_THROUGH_TEXT,
                 crate::Theme::Snow => Color32::from_black_alpha(179),
                 crate::Theme::Carbon => Color32::from_white_alpha(179),
             };
@@ -169,17 +231,20 @@ impl ToastView<'_> {
         };
         let percentage = self.percentage.map(|percent| {
             // `rgba(0,0,0,.3)`, `hsla(0,0%,100%,.3)` in Carbon.
+            let ink = if see_through {
+                SEE_THROUGH_TEXT
+            } else {
+                palette.ink(0.3, 0.3)
+            };
             let line = Line::new(
                 ctx,
-                LayoutJob::single_section(
-                    format!("{percent}%"),
-                    TEXT.format(palette.ink(0.3, 0.3)),
-                ),
+                LayoutJob::single_section(format!("{percent}%"), TEXT.format(ink)),
             );
             let room = PERCENTAGE_GAP + line.width.max(PERCENTAGE_MIN);
             (line, room)
         });
         let action_color = match self.kind {
+            _ if see_through => SEE_THROUGH_TEXT,
             ToastKind::Error => Color32::from_rgb(0xef, 0x8e, 0x8e),
             _ => palette.link_text_primary,
         };
@@ -187,18 +252,16 @@ impl ToastView<'_> {
         let actions: Vec<_> = self
             .actions
             .iter()
-            // A disabled action: black or white at .3.
+            // A disabled action: black or white at .3, white at .4 when see-through.
             .map(|action| {
+                let color = match (action.disabled, see_through) {
+                    (true, true) => Color32::from_white_alpha(102),
+                    (true, false) => palette.ink(0.3, 0.3),
+                    (false, _) => action_color,
+                };
                 Line::new(
                     ctx,
-                    LayoutJob::single_section(
-                        action.name.to_uppercase(),
-                        ACTION.format(if action.disabled {
-                            palette.ink(0.3, 0.3)
-                        } else {
-                            action_color
-                        }),
-                    ),
+                    LayoutJob::single_section(action.name.to_uppercase(), ACTION.format(color)),
                 )
             })
             .collect();
@@ -246,8 +309,7 @@ impl ToastView<'_> {
             + CLOSE_TRAILING;
         let card = Rect::from_min_size(Pos2::new(left, top), Vec2::new(width, HEIGHT));
 
-        Area::new(id)
-            .order(Order::Foreground)
+        Self::area(id)
             .fixed_pos(card.min)
             .show(ctx, |ui| {
                 let response = ui.allocate_rect(card, Sense::hover());
@@ -262,6 +324,7 @@ impl ToastView<'_> {
                     id,
                     Layout {
                         card,
+                        behind,
                         text,
                         percentage,
                         actions,
@@ -288,6 +351,7 @@ impl ToastView<'_> {
         let palette = palette(ctx);
         let Layout {
             card,
+            behind,
             text,
             percentage,
             actions,
@@ -302,13 +366,18 @@ impl ToastView<'_> {
         let snapped = pixel_snap(card);
         // Info and error toasts carry an extra faint shadow.
         let faint = matches!(self.kind, ToastKind::Info | ToastKind::Error);
-        paint_shadow(painter, snapped, shadow, faint);
-        // The card: `#fff`, `#464b53` in Carbon.
-        let background = match palette.theme {
-            crate::Theme::Snow => Color32::WHITE,
-            crate::Theme::Carbon => Color32::from_rgb(0x46, 0x4b, 0x53),
-        };
-        painter.rect_filled(snapped, 0.0, background);
+        paint_shadow(painter, snapped, shadow, faint, behind.is_some());
+        // The card: `#fff`, `#464b53` in Carbon, or see-through.
+        if let Some(behind) = &behind {
+            behind.paint(painter, snapped, BLUR);
+            painter.rect_filled(snapped, 0.0, SEE_THROUGH);
+        } else {
+            let background = match palette.theme {
+                crate::Theme::Snow => Color32::WHITE,
+                crate::Theme::Carbon => Color32::from_rgb(0x46, 0x4b, 0x53),
+            };
+            painter.rect_filled(snapped, 0.0, background);
+        }
         let accent = match self.kind {
             ToastKind::Info => palette.link_border_primary,
             ToastKind::Error => palette.border_critical_default,
@@ -437,11 +506,17 @@ impl ToastView<'_> {
                 * motion::transition(
                     ctx,
                     id.with("close_hover"),
-                    close.hovered(),
+                    close.hovered() || behind.is_some(),
                     0.15,
                     motion::CubicBezier::EASE,
                 );
         // The × is black (white in Carbon) at 30%, 50% hovered. Its 12px SVG is drawn at 10px.
+        // See-through, it's white at 50%.
+        let ink = if behind.is_some() {
+            Color32::WHITE
+        } else {
+            ink
+        };
         paint_icon(
             ui,
             "legacy/close",
@@ -455,21 +530,36 @@ impl ToastView<'_> {
 
 /// `0 6px 30px 2px rgba(0,0,0,.2)` (after `0 6px 30px 2px rgba(0,0,0,.04)` when `faint`),
 /// easing to `0 8px 30px 2px rgba(0,0,0,.1), 0 10px 30px 2px rgba(0,0,0,.3)` on hover
-/// (cross-faded, as an approximation of CSS's shadow interpolation).
-fn paint_shadow(painter: &Painter, card: Rect, hover: f32, faint: bool) {
-    let radius = CornerRadius::ZERO;
+/// (cross-faded, as an approximation of CSS's shadow interpolation). Under a see-through card
+/// it's only outside the card, as CSS clips a box-shadow.
+fn paint_shadow(painter: &Painter, card: Rect, hover: f32, faint: bool, see_through: bool) {
     let black = |alpha: f32| Color32::from_black_alpha((alpha * 255.0).round() as u8);
+    let paint = |shadow: BoxShadow| {
+        if see_through {
+            shadow.paint_outside(painter, card);
+        } else {
+            shadow.paint(painter, card, CornerRadius::ZERO);
+        }
+    };
     if hover < 1.0 {
         if faint {
-            BoxShadow::new([0.0, 6.0], 30.0, 2.0, black(0.04 * (1.0 - hover)))
-                .paint(painter, card, radius);
+            paint(BoxShadow::new(
+                [0.0, 6.0],
+                30.0,
+                2.0,
+                black(0.04 * (1.0 - hover)),
+            ));
         }
-        BoxShadow::new([0.0, 6.0], 30.0, 2.0, black(0.2 * (1.0 - hover)))
-            .paint(painter, card, radius);
+        paint(BoxShadow::new(
+            [0.0, 6.0],
+            30.0,
+            2.0,
+            black(0.2 * (1.0 - hover)),
+        ));
     }
     if hover > 0.0 {
-        BoxShadow::new([0.0, 8.0], 30.0, 2.0, black(0.1 * hover)).paint(painter, card, radius);
-        BoxShadow::new([0.0, 10.0], 30.0, 2.0, black(0.3 * hover)).paint(painter, card, radius);
+        paint(BoxShadow::new([0.0, 8.0], 30.0, 2.0, black(0.1 * hover)));
+        paint(BoxShadow::new([0.0, 10.0], 30.0, 2.0, black(0.3 * hover)));
     }
 }
 
@@ -519,4 +609,80 @@ fn show_action_tooltip(ui: &Ui, response: &Response, action: &ToastActionView<'_
         keys: action.keys,
     }
     .show_above(ui, response, 10.0);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Shows the stack's cards with these ids for a frame (and the areas `others`, after), then
+    /// keeps them in `order`.
+    fn frame(ctx: &Context, shown: &[Id], others: &[Id], order: &[Id], over_the_rest: bool) {
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            for &id in shown.iter().chain(others) {
+                ToastView::area(id).show(ui.ctx(), |ui| ui.allocate_space(Vec2::splat(10.0)));
+            }
+            let cards: Vec<LayerId> = order.iter().map(|&id| ToastView::layer(id)).collect();
+            ToastView::stack(ui.ctx(), &cards, over_the_rest);
+        });
+        output.textures_delta.clear();
+    }
+
+    /// Where each of `ids` is, back to front.
+    fn depths(ctx: &Context, ids: &[Id]) -> Vec<usize> {
+        let order: Vec<LayerId> = ctx.memory(|memory| memory.layer_ids().collect());
+        ids.iter()
+            .map(|&id| {
+                order
+                    .iter()
+                    .position(|layer| *layer == ToastView::layer(id))
+                    .expect("shown")
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_toast_stays_over_cards_raised_after_it() {
+        let ctx = Context::default();
+        let (toast, popup, file) = (Id::new("toast"), Id::new("popup"), Id::new("file"));
+        frame(&ctx, &[toast], &[], &[toast], true);
+        // A popup comes up after the toast, which egui raises over it.
+        frame(&ctx, &[toast, popup], &[], &[popup, toast], true);
+        let [toast_at, popup_at] = depths(&ctx, &[toast, popup])[..] else {
+            unreachable!()
+        };
+        assert!(toast_at > popup_at, "the toast is over the popup");
+        // Then a file notification: over the popup, under the toast.
+        frame(
+            &ctx,
+            &[toast, popup, file],
+            &[],
+            &[popup, file, toast],
+            true,
+        );
+        let depths = depths(&ctx, &[popup, file, toast]);
+        assert!(depths.is_sorted(), "{depths:?}");
+    }
+
+    #[test]
+    fn the_stack_goes_over_a_dialog_unless_told_to_leave_what_is_over_it() {
+        let ctx = Context::default();
+        let (toast, dialog) = (Id::new("toast"), Id::new("dialog"));
+        frame(&ctx, &[toast], &[], &[toast], true);
+        // A dialog opens while the toast shows.
+        frame(&ctx, &[toast], &[dialog], &[toast], true);
+        frame(&ctx, &[toast], &[dialog], &[toast], true);
+        let [toast_at, dialog_at] = depths(&ctx, &[toast, dialog])[..] else {
+            unreachable!()
+        };
+        assert!(toast_at > dialog_at, "the toast is over the dialog");
+        // The palette opens over it, and the toast stays under.
+        let palette = Id::new("palette");
+        frame(&ctx, &[toast], &[dialog, palette], &[toast], false);
+        frame(&ctx, &[toast], &[dialog, palette], &[toast], false);
+        let [toast_at, palette_at] = depths(&ctx, &[toast, palette])[..] else {
+            unreachable!()
+        };
+        assert!(palette_at > toast_at, "the palette is over the toast");
+    }
 }

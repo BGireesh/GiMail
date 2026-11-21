@@ -1,6 +1,6 @@
 //! Spelling in compose and the body's right-click menu, end to end on gmail-mock: a misspelled
-//! word's corrections, `Add to Dictionary`, the selection's `Search with Google`, and `Paste` of a
-//! screenshot.
+//! word's corrections, `Add to Dictionary`, the selection's `Search with Google`, `Paste` of a
+//! screenshot, and `Copy Image` of an inline image.
 
 mod support;
 
@@ -218,6 +218,39 @@ fn paste_in_the_menu_pastes_a_screenshot() {
         "{:?}",
         app.mail().compose_body()
     );
+}
+
+#[test]
+fn an_inline_images_menu_copies_the_image() {
+    let (mut app, menus) = reply_with("spelling-image", "Here ", &Words::default(), "Copy Image");
+    let png = |width, height| {
+        let image = image::RgbaImage::from_pixel(width, height, image::Rgba([40, 90, 200, 255]));
+        let mut png = Vec::new();
+        image::DynamicImage::ImageRgba8(image)
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .expect("encoded");
+        png
+    };
+    let paste = |app: &mut Fixture| {
+        app.harness
+            .input_mut()
+            .events
+            .push(Event::Paste(String::new()));
+        app.harness.run_steps(1);
+        app.wait(1.0);
+    };
+    exo::clipboard::capture_image(&app.harness.ctx, png(40, 20));
+    paste(&mut app);
+    // On the image, just before the caret. It's one of the draft's own files, so it has no URL to
+    // copy.
+    exo::clipboard::capture_image(&app.harness.ctx, png(7, 3));
+    app.right_click(caret(&app) - vec2(10.0, 0.0));
+    app.settle();
+    assert_eq!(last_menu(&menus), ["Copy Image"]);
+    // What it copied, rather than the 7×3 picture, pastes as a second image.
+    paste(&mut app);
+    let body = app.mail().compose_body().expect("a draft");
+    assert_eq!(body.matches(r#"width="40""#).count(), 2, "{body}");
 }
 
 /// The caret of the text field with the keyboard, on screen.

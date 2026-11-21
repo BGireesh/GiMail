@@ -26,9 +26,9 @@ use std::{
 
 use exo_store::{
     Alias, Attachment, AttachmentSource, Connection, DeviceSettings, Draft, DraftAttachment,
-    DraftFailure, Filter, GmailPage, Label, ListCount, ListId, Mutation, RECENT_THREADS,
-    ScoredContact, Search, SendFailure, SentDraft, Settings, Store, StoredDraft, ThreadDetail,
-    ThreadId, Undo,
+    DraftFailure, Filter, GmailPage, GoogleContacts, Label, ListCount, ListId, Mutation,
+    RECENT_THREADS, ScoredContact, Search, SendFailure, SentDraft, Settings, Store, StoredDraft,
+    ThreadDetail, ThreadId, Undo,
 };
 use futures::FutureExt as _;
 use gmail::TokenProvider;
@@ -91,6 +91,12 @@ const PRERENDER_EVERY: Duration = Duration::from_secs(10 * 60);
 /// empty this cache, and signing out and Clear Cache delete it.
 pub(crate) fn parts_cache(email: &str) -> Option<PathBuf> {
     std::env::home_dir().map(|home| home.join("Library/Caches/Exo").join(email).join("parts"))
+}
+
+/// Where the photos of `email`'s contacts are kept: `~/Library/Caches/Exo/<account>/photos`,
+/// which signing out and Clear Cache delete with the parts.
+pub(crate) fn photos_cache(email: &str) -> Option<PathBuf> {
+    std::env::home_dir().map(|home| home.join("Library/Caches/Exo").join(email).join("photos"))
 }
 
 /// Who an account is and how to reach its mail. Sign-in builds these from the account's grant, and
@@ -235,6 +241,9 @@ pub enum Event {
     DraftFailed(DraftFailure),
     /// A draft is waiting for the network.
     DraftsOffline,
+    /// Gmail didn't take a held send this time, for a reason other than the network, and it's
+    /// tried again later.
+    SendRetrying(String),
     /// Drafts, by id, that an earlier run saved without some of their files. Saving each again now
     /// that Gmail answers fetches the files, and writes the draft to Gmail once it has them all.
     Incomplete(Vec<String>),
@@ -262,6 +271,14 @@ pub enum Event {
     },
     /// What Gmail doesn't have yet, as [`Account::ask_unsent`] asked for.
     Unsent(exo_store::Unsent),
+    /// A conversation opened that the store didn't have couldn't be fetched: Gmail can't be reached
+    /// (`offline`), or doesn't have it.
+    Unavailable {
+        /// The conversation.
+        id: String,
+        /// Whether Gmail couldn't be reached.
+        offline: bool,
+    },
     /// The thread [`Account::read_thread`] read (its detail is `None` when it isn't stored).
     Thread {
         /// The thread asked for.
@@ -330,7 +347,12 @@ enum Request {
     FilesFetched(Vec<String>),
     Backfilled(ListId),
     /// From the account's own tasks, once the open thread's bodies were fetched (or couldn't be).
-    BodiesLoaded(ThreadId),
+    /// For a thread that wasn't stored, `unavailable` says it couldn't be had, and whether because
+    /// Gmail couldn't be reached.
+    BodiesLoaded {
+        thread: ThreadId,
+        unavailable: Option<bool>,
+    },
     /// Fetch this thread's bodies if they aren't stored, because the list's cursor rests on it.
     Prefetch(ThreadId),
     /// From the account's own tasks, when bringing back snoozed threads with no reminder failed.
@@ -373,10 +395,14 @@ enum Request {
     /// Read the address book, from stored mail now and from Google contacts in the background when
     /// those are missing or stale.
     LoadAddressBook,
+    /// Read the Google contacts listed last, and list them again in the background when they're
+    /// missing or stale.
+    LoadGoogleContacts,
     /// From the task that scored stored mail.
     MailContacts(Arc<Vec<ScoredContact>>),
-    /// From the task that listed Google contacts and "other contacts".
-    GoogleContacts(Arc<Vec<GoogleContact>>),
+    /// From the task that listed Google contacts, colleagues and "other contacts", and whether it
+    /// listed them all.
+    GoogleContacts(GoogleContacts, bool),
     /// On quitting, send every draft held for undo now, write the drafts saved on the way out, and
     /// say when done.
     SendHeldNow(tokio::sync::oneshot::Sender<()>),
@@ -744,7 +770,24 @@ impl Account {
         };
         let health = Arc::new(Health::new(repaint.clone()));
 
+        // On gmail-mock, the photos sit beside the store, as the parts do.
+        let photos = match photos_cache(&email) {
+            Some(cache) if !local_gmail => cache,
+            _ => dir.join(format!("{email}.photos")),
+        };
+        // Brand logos are looked up in DNS, but not for gmail-mock's made-up domains.
+        let brands =
+            crate::brands::Brands::new(&repaint.ctx, store.clone(), photos.clone(), !local_gmail);
         let guard = runtime.enter();
+        // The logos earlier runs validated show from the start, checked against their CAs'
+        // revocation lists then and each day after.
+        recovery::spawn(&restarts, {
+            let brands = brands.clone();
+            move || {
+                let brands = brands.clone();
+                async move { brands.watch().await }
+            }
+        });
         let files = store.draft_files().to_owned();
         let progress = store.sync_progress();
         let uploads = store.uploads();
@@ -758,6 +801,8 @@ impl Account {
         // What an earlier run left unsent goes now: a send held when Exo crashed, or when
         // Google signed the account out.
         flush.wake();
+        // The contact pane and the calendar show Google's people from the start.
+        requests.post(Request::LoadGoogleContacts);
         // A loop that runs again after a panic starts woken, as at opening, because its timers went
         // with it.
         recovery::spawn(&restarts, {
@@ -766,7 +811,7 @@ impl Account {
                 requests.clone(),
                 presence_receiver.clone(),
                 power_receiver,
-                (email.clone(), notifier_receiver.clone()),
+                (email.clone(), notifier_receiver.clone(), brands.clone()),
                 sync_now.clone(),
                 health.clone(),
             );
@@ -801,7 +846,7 @@ impl Account {
                 store.clone(),
                 clock.clone(),
                 flush.clone(),
-                (email.clone(), notifier_receiver.clone()),
+                (email.clone(), notifier_receiver.clone(), brands.clone()),
             );
             move || {
                 reminder_loop(
@@ -881,12 +926,25 @@ impl Account {
             repaint.clone(),
             &restarts,
         );
-        let bulk = crate::bulk::Jobs::start(store.clone(), repaint.clone(), &restarts);
+        // Before the first frame, so Bulk Actions lists them.
+        let logged = runtime.block_on(store.bulk_log()).unwrap_or_else(|error| {
+            log::error!("reading the bulk actions' log: {error}");
+            Vec::new()
+        });
+        let bulk = crate::bulk::Jobs::start(store.clone(), repaint.clone(), &restarts, logged);
         let worker = Worker {
             address_book: None,
             mail_contacts: None,
             google_contacts: None,
             listing_google: false,
+            brands: brands.clone(),
+            photos: crate::people::Photos::new(
+                &repaint.ctx,
+                &email,
+                loader.clone(),
+                photos,
+                local_gmail,
+            ),
             incomplete: HashMap::new(),
             fetching_files: false,
             changes: changes.clone(),
@@ -1380,7 +1438,7 @@ impl Account {
         self.shared.bulk.submit(token, request);
     }
 
-    /// This session's bulk actions, oldest first.
+    /// This session's bulk actions and those of the last week before it, oldest first.
     pub fn bulk_actions(&self) -> Vec<crate::bulk::Summary> {
         self.shared.bulk.summaries()
     }
@@ -1629,6 +1687,8 @@ impl Drop for Account {
 
 impl Drop for Shared {
     fn drop(&mut self) {
+        // Its people show no more, and what loads their photos lets go of the store.
+        crate::people::forget(&self.repaint.ctx, &self.email);
         // Queued mutations are in the store's outbox and go out on the next launch. Held sends go
         // now, for a few seconds at most, rather than wait for the next launch, and so do the
         // drafts the app saved on its way out and the calendar's changes still held for Undo. What
@@ -1670,9 +1730,13 @@ struct Worker {
     /// Stored mail's contacts, as last scored.
     mail_contacts: Option<Arc<Vec<ScoredContact>>>,
     /// Google contacts and when they were listed, once they have been.
-    google_contacts: Option<(Arc<Vec<GoogleContact>>, std::time::Instant)>,
+    google_contacts: Option<Arc<GoogleContacts>>,
     /// A Google listing is under way.
     listing_google: bool,
+    /// Where the photos of the Google contacts come from.
+    photos: crate::people::Photos,
+    /// The senders' brands, whose logos the contact pane shows.
+    brands: crate::brands::Brands,
     /// Drafts whose last save left attachments off, with that save (the message without its files)
     /// to make again once the files can be had. The save is `None` when retrying won't get them.
     incomplete: HashMap<String, Option<Box<(Draft, gmail::mime::Email)>>>,
@@ -1855,13 +1919,58 @@ impl Worker {
         }
     }
 
+    /// Brings Google contacts up to date in the background, unless that's under way or the last
+    /// listing is fresh. Google is slow and changes little, so they're listed once a session and
+    /// again when stale (only what changed, `people::listing`), and never waited for. Each listing
+    /// counts as busy only for its first moments, so the UI's quiet doesn't hang on it.
+    fn list_google_contacts(&mut self) {
+        let stale = self.google_contacts.as_ref().is_none_or(|google| {
+            jiff::Timestamp::now().duration_since(google.listed) > GOOGLE_CONTACTS_FRESH
+        });
+        if !stale || self.listing_google {
+            return;
+        }
+        self.listing_google = true;
+        let (store, requests, busy) = (
+            self.store.clone(),
+            self.requests.clone(),
+            self.requests.busy(),
+        );
+        let (account, kept) = (
+            self.photos.account().to_owned(),
+            self.google_contacts.clone(),
+        );
+        self.restarts
+            .spawn_task(&tokio::runtime::Handle::current(), async move {
+                let listed = jiff::Timestamp::now();
+                let listing =
+                    crate::people::listing::list(&store, &account, kept.as_deref(), listed);
+                tokio::pin!(listing);
+                let (contacts, complete) = tokio::select! {
+                    listing = &mut listing => listing,
+                    () = tokio::time::sleep(GOOGLE_CONTACTS_BUSY) => {
+                        drop(busy);
+                        listing.await
+                    }
+                };
+                requests.post(Request::GoogleContacts(contacts, complete));
+            });
+    }
+
+    /// Suggests `contacts` in compose, and shows their photos and companies.
+    fn show_google_contacts(&mut self, contacts: GoogleContacts) {
+        self.photos.publish(contacts.contacts());
+        self.google_contacts = Some(Arc::new(contacts));
+        self.merge_address_book();
+    }
+
     /// Publishes the address book from what's been read so far.
     fn merge_address_book(&mut self) {
         let Some(mail) = &self.mail_contacts else {
             return;
         };
         let book = match &self.google_contacts {
-            Some((google, _)) => merge_contacts(mail, google),
+            Some(google) => merge_contacts(mail, google.contacts()),
             None => mail.to_vec(),
         };
         self.address_book = Some(Arc::new(book));
@@ -1933,8 +2042,18 @@ impl Worker {
             Request::RemoveView(view) => {
                 self.views.remove(&view);
             }
-            Request::BodiesLoaded(thread) => {
+            Request::BodiesLoaded {
+                thread,
+                unavailable,
+            } => {
                 self.opening.remove(&thread);
+                if let Some(offline) = unavailable {
+                    let _ = self.events.send(Event::Unavailable {
+                        id: thread.as_str().to_owned(),
+                        offline,
+                    });
+                    self.repaint.request();
+                }
             }
             Request::Prefetch(thread) => {
                 if self.opening.contains(&thread) || !self.prefetching.insert(thread.clone()) {
@@ -2335,31 +2454,37 @@ impl Worker {
                         }
                         drop(busy);
                     });
-                // Google is slow and changes little, so its contacts are listed once a session,
-                // again when stale, and never waited for (nor counted as busy, so the UI's quiet
-                // doesn't hang on the listing).
-                let stale = self
-                    .google_contacts
-                    .as_ref()
-                    .is_none_or(|(_, at)| at.elapsed() > GOOGLE_CONTACTS_FRESH);
-                if stale && !self.listing_google {
-                    self.listing_google = true;
-                    let (store, requests) = (self.store.clone(), self.requests.clone());
-                    self.restarts
-                        .spawn_task(&tokio::runtime::Handle::current(), async move {
-                            let contacts = google_contacts(&store).await;
-                            requests.post(Request::GoogleContacts(Arc::new(contacts)));
-                        });
+                self.list_google_contacts();
+            }
+            Request::LoadGoogleContacts => {
+                if self.google_contacts.is_none() {
+                    match self.store.google_contacts().await {
+                        Ok(Some(saved)) => self.show_google_contacts(saved),
+                        Ok(None) => {}
+                        Err(error) => log::warn!("reading the Google contacts: {error}"),
+                    }
                 }
+                self.list_google_contacts();
             }
             Request::MailContacts(contacts) => {
                 self.mail_contacts = Some(contacts);
                 self.merge_address_book();
             }
-            Request::GoogleContacts(contacts) => {
+            Request::GoogleContacts(contacts, complete) => {
                 self.listing_google = false;
-                self.google_contacts = Some((contacts, std::time::Instant::now()));
-                self.merge_address_book();
+                if complete {
+                    if let Err(error) = self.store.save_google_contacts(&contacts).await {
+                        log::warn!("saving the Google contacts: {error}");
+                    }
+                    self.show_google_contacts(contacts);
+                } else if self.google_contacts.is_none() {
+                    // A listing that failed part way shows what it got, but isn't kept and doesn't
+                    // replace a whole one, and the next read of the address book lists again.
+                    self.show_google_contacts(GoogleContacts {
+                        listed: jiff::Timestamp::UNIX_EPOCH,
+                        ..contacts
+                    });
+                }
             }
             Request::SendHeldNow(done) => {
                 match self.store.drafts().await {
@@ -2580,6 +2705,17 @@ impl Worker {
     /// once, and asks Gmail for older ones the first time this session (they arrive as a store
     /// change).
     async fn show_contact(&mut self, view: ViewId, email: String) {
+        // Their brand's logo, earned by the newest mail they sent, shows once it's had. It's asked
+        // for each time they show until then, so a change to the images setting applies.
+        if crate::brands::logo(self.brands.ctx(), &email).is_none() {
+            let (store, brands, sender) = (self.store.clone(), self.brands.clone(), email.clone());
+            self.restarts
+                .spawn_task(&tokio::runtime::Handle::current(), async move {
+                    if let Ok(Some(headers)) = store.latest_headers_from(&sender).await {
+                        brands.logo_for(&headers).await;
+                    }
+                });
+        }
         if self.filled.insert(email.clone()) {
             let (store, requests, busy, email) = (
                 self.store.clone(),
@@ -2745,16 +2881,23 @@ impl Worker {
     }
 
     /// Fetches an open thread's bodies when they aren't stored (the thread was stored for its row
-    /// alone), unless they're on their way. Meanwhile, snapshots carry the thread with placeholders
-    /// for the messages that lack bodies.
+    /// alone), or the whole thread when it isn't stored at all (opened from a link or a
+    /// notification), unless they're on their way. Meanwhile, snapshots carry the thread with
+    /// placeholders for the messages that lack bodies, or with nothing.
     async fn load_bodies(&mut self, thread: ThreadId) {
         if self.opening.contains(&thread) {
             return;
         }
-        match self.store.bodies_stored(&thread).await {
-            Ok(true) => return,
-            Ok(false) => {}
+        let stored = match self.store.has_thread(&thread).await {
+            Ok(stored) => stored,
             Err(error) => return log::error!("reading thread {}: {error}", thread.as_str()),
+        };
+        if stored {
+            match self.store.bodies_stored(&thread).await {
+                Ok(true) => return,
+                Ok(false) => {}
+                Err(error) => return log::error!("reading thread {}: {error}", thread.as_str()),
+            }
         }
         self.opening.insert(thread.clone());
         let (store, requests, busy) = (
@@ -2764,10 +2907,24 @@ impl Worker {
         );
         self.restarts
             .spawn_task(&tokio::runtime::Handle::current(), async move {
-                if let Err(error) = store.load_bodies(&thread).await {
-                    log::warn!("fetching the bodies of thread {}: {error}", thread.as_str());
-                }
-                requests.post(Request::BodiesLoaded(thread));
+                let unavailable = if stored {
+                    if let Err(error) = store.load_bodies(&thread).await {
+                        log::warn!("fetching the bodies of thread {}: {error}", thread.as_str());
+                    }
+                    None
+                } else {
+                    match store.load_thread(&thread).await {
+                        Ok(found) => (!found).then_some(false),
+                        Err(error) => {
+                            log::warn!("fetching thread {}: {error}", thread.as_str());
+                            Some(matches!(error, exo_store::Error::Offline(_)))
+                        }
+                    }
+                };
+                requests.post(Request::BodiesLoaded {
+                    thread,
+                    unavailable,
+                });
                 drop(busy);
             });
     }
@@ -2984,7 +3141,18 @@ impl Loader {
         attachment: &Attachment,
         done: impl FnOnce(Result<Vec<u8>, exo_store::Error>) + Send + 'static,
     ) {
-        self.fetch(attachment, None, done);
+        self.fetch(attachment, None, false, done);
+    }
+
+    /// [`attachment`](Self::attachment) for an image a body shows (`cid:`), which waits out a
+    /// rate-limit pause however long it lasts and then tries again: nobody would see it fail, and
+    /// the body never asks for it again. While it waits, the account isn't busy.
+    pub fn inline_image(
+        &self,
+        attachment: &Attachment,
+        done: impl FnOnce(Result<Vec<u8>, exo_store::Error>) + Send + 'static,
+    ) {
+        self.fetch(attachment, None, true, done);
     }
 
     /// [`attachment`](Self::attachment), telling `progress` the percentage of Gmail's answer
@@ -2999,27 +3167,44 @@ impl Loader {
         self.fetch(
             attachment,
             Some(Arc::new(move |transfer| progress(percent(transfer, size)))),
+            false,
             done,
         );
     }
 
+    /// Fetches `attachment`, and with `patient`, again whenever a rate-limit pause made it fail.
     fn fetch(
         &self,
         attachment: &Attachment,
         progress: Option<gmail::Progress>,
+        patient: bool,
         done: impl FnOnce(Result<Vec<u8>, exo_store::Error>) + Send + 'static,
     ) {
-        let (store, attachment, busy) =
-            (self.store.clone(), attachment.clone(), self.requests.busy());
+        let (store, attachment, requests) = (
+            self.store.clone(),
+            attachment.clone(),
+            self.requests.clone(),
+        );
+        let mut busy = requests.busy();
         self.restarts.spawn_task(&self.runtime, async move {
-            let bytes = store
-                .download_part(
-                    &attachment.message_id,
-                    attachment.attachment_id.as_deref(),
-                    &attachment.part_id,
-                    progress,
-                )
-                .await;
+            let bytes = loop {
+                let bytes = store
+                    .download_part(
+                        &attachment.message_id,
+                        attachment.attachment_id.as_deref(),
+                        &attachment.part_id,
+                        progress.clone(),
+                    )
+                    .await;
+                match bytes {
+                    Err(exo_store::Error::Throttled { until }) if patient => {
+                        drop(busy);
+                        tokio::time::sleep(until_then(until)).await;
+                        busy = requests.busy();
+                    }
+                    bytes => break bytes,
+                }
+            };
             if let Err(error) = &bytes {
                 log::warn!(
                     "loading an attachment of {}: {error}",
@@ -3054,31 +3239,32 @@ impl Loader {
     /// Fetches `url` (http or https) from the public internet (`crate::remote_content`) and hands
     /// the body to `done` (`None` on any failure, or past [`MAX_DOWNLOAD`]).
     pub fn url(&self, url: &str, done: impl FnOnce(Option<Vec<u8>>) + Send + 'static) {
-        let (http, url, busy) = (self.http.clone(), url.to_owned(), self.requests.busy());
+        let (loader, url, busy) = (self.clone(), url.to_owned(), self.requests.busy());
         self.restarts.spawn_task(&self.runtime, async move {
-            let bytes = async {
-                let mut response = http.get(&url).await?.error_for_status()?;
-                let mut bytes = Vec::new();
-                while let Some(chunk) = response.chunk().await? {
-                    if bytes.len() + chunk.len() > MAX_DOWNLOAD {
-                        log::debug!("loading remote content: over {MAX_DOWNLOAD} bytes");
-                        return Ok(None);
-                    }
-                    bytes.extend_from_slice(&chunk);
-                }
-                Ok(Some(bytes))
-            };
-            done(
-                bytes
-                    .await
-                    .unwrap_or_else(|error: crate::remote_content::Error| {
-                        log::debug!("loading remote content: {error}");
-                        None
-                    }),
-            );
+            done(loader.get(&url).await);
             drop(busy);
         });
     }
+
+    /// [`url`](Self::url)'s fetch, awaited where it's asked for.
+    pub(crate) async fn get(&self, url: &str) -> Option<Vec<u8>> {
+        match self.http.bytes(url, MAX_DOWNLOAD).await {
+            Ok(Some(bytes)) => Some(bytes),
+            Ok(None) => {
+                log::debug!("loading remote content: over {MAX_DOWNLOAD} bytes");
+                None
+            }
+            Err(error) => {
+                log::debug!("loading remote content: {error}");
+                None
+            }
+        }
+    }
+}
+
+/// How long until `at`, or nothing when it's past.
+fn until_then(at: jiff::Timestamp) -> Duration {
+    Duration::try_from(at.duration_since(jiff::Timestamp::now())).unwrap_or_default()
 }
 
 /// The files [`attach`] couldn't put on a message.
@@ -3244,7 +3430,7 @@ async fn sync_loop(
     requests: Requests,
     mut pace: Pace,
     mut now: Wakes,
-    notify: (String, watch::Receiver<Option<Notifier>>),
+    notify: Notify,
     synced: watch::Sender<bool>,
     health: Arc<Health>,
 ) {
@@ -3366,11 +3552,7 @@ async fn prerender_loop(store: Store, requests: Requests, mut first_sync: watch:
 /// Notifies about `thread`, which a reminder just brought back, in the account `notify` names. The
 /// notification is for its newest message, even though it's been read, unless the thread is muted
 /// or out of the inbox, notifications are off, or the message is the user's own.
-async fn notify_returned(
-    store: &Store,
-    (account, notifier): &(String, watch::Receiver<Option<Notifier>>),
-    thread: &ThreadId,
-) {
+async fn notify_returned(store: &Store, (account, notifier, brands): &Notify, thread: &ThreadId) {
     let notifier = notifier.borrow().clone();
     let Some(notifier) = notifier else { return };
     let found = async {
@@ -3384,11 +3566,46 @@ async fn notify_returned(
         Ok((Some(arrival), settings, device))
             if mail_notifications::notifies(&arrival, &settings, &device, true) =>
         {
-            notifier.post(vec![mail_notifications::notice(&arrival, account)])
+            notifier.post(vec![mail_notice(store, &arrival, account, brands).await])
         }
         Ok(_) => {}
         Err(error) => log::warn!("notifying about a reminder: {error}"),
     }
+}
+
+/// Where an account's notifications go: its address, the app's notifier once there is one, and
+/// the senders' brands, whose context has the senders' photos ([`crate::people`]).
+type Notify = (
+    String,
+    watch::Receiver<Option<Notifier>>,
+    crate::brands::Brands,
+);
+
+/// The notification for `arrival` in `account`, with the sender's photo when they have one, else
+/// their brand's logo, either within [`crate::people::NOTIFICATION_WAIT`].
+async fn mail_notice(
+    store: &Store,
+    arrival: &exo_store::Arrival,
+    account: &str,
+    brands: &crate::brands::Brands,
+) -> crate::notifications::Notice {
+    let mut notice = mail_notifications::notice(arrival, account);
+    let Some(from) = &arrival.from else {
+        return notice;
+    };
+    notice.image = crate::people::notification_photo(brands.ctx(), &from.email, &notice.key).await;
+    if notice.image.is_none() {
+        let logo = async {
+            let headers = store.headers(&arrival.message).await.ok()??;
+            brands.logo_for(&headers).await
+        };
+        let logo = tokio::time::timeout(crate::people::NOTIFICATION_WAIT, logo).await;
+        notice.image = logo
+            .ok()
+            .flatten()
+            .and_then(|png| crate::people::notification_copy(&png, &notice.key));
+    }
+    notice
 }
 
 /// Posts the notifications a sync's new mail calls for in the account `notify` names, when the
@@ -3396,7 +3613,7 @@ async fn notify_returned(
 /// ([`mail_notifications::notifying`]).
 async fn notify_arrivals(
     store: &Store,
-    (account, notifier): &(String, watch::Receiver<Option<Notifier>>),
+    (account, notifier, brands): &Notify,
     arrived: &[exo_store::Arrival],
     gap: bool,
 ) {
@@ -3414,12 +3631,11 @@ async fn notify_arrivals(
         Ok(settings) => settings,
         Err(error) => return log::warn!("reading notification settings: {error}"),
     };
-    notifier.post(
-        mail_notifications::notifying(arrived, &settings, &device, gap)
-            .into_iter()
-            .map(|arrival| mail_notifications::notice(arrival, account))
-            .collect(),
-    );
+    // The photos come together, so the round waits at most one photo's time.
+    let notices = mail_notifications::notifying(arrived, &settings, &device, gap)
+        .into_iter()
+        .map(|arrival| mail_notice(store, arrival, account, brands));
+    notifier.post(futures::future::join_all(notices).await);
 }
 
 /// Brings threads back when their reminders come due, on the device. Threads due while Exo was
@@ -3433,7 +3649,7 @@ async fn reminder_loop(
     mut first_sync: watch::Receiver<bool>,
     mut wakes: Wakes,
     flush: Wake,
-    notify: (String, watch::Receiver<Option<Notifier>>),
+    notify: Notify,
 ) {
     if first_sync.wait_for(|synced| *synced).await.is_err() {
         return;
@@ -3517,78 +3733,16 @@ async fn connection_loop(
 }
 
 /// How long a listing of Google contacts is used before it's listed again.
-const GOOGLE_CONTACTS_FRESH: Duration = Duration::from_secs(60 * 60);
-
-/// A Google contact or "other contact", with an address and its display name.
-#[derive(Debug)]
-struct GoogleContact {
-    email: String,
-    name: Option<String>,
-}
-
-/// Google contacts and "other contacts" (at most five pages of each), best-effort, so a listing
-/// that fails gives what it has so far. A listing that gets no answer shows the offline bar.
-async fn google_contacts(store: &Store) -> Vec<GoogleContact> {
-    const FIELDS: &str = "names,emailAddresses";
-    let mut people = Vec::new();
-    for other in [false, true] {
-        let mut query = gmail::people::PeopleQuery {
-            page_size: Some(1000),
-            ..gmail::people::PeopleQuery::default()
-        };
-        for _ in 0..5 {
-            let page = if other {
-                store
-                    .google(1, |client| client.people().other_contacts(FIELDS, &query))
-                    .await
-                    .map(|page| (page.other_contacts, page.next_page_token))
-            } else {
-                store
-                    .google(1, |client| client.people().connections(FIELDS, &query))
-                    .await
-                    .map(|page| (page.connections, page.next_page_token))
-            };
-            match page {
-                Ok((page, next)) => {
-                    people.extend(page);
-                    match next {
-                        Some(token) => query.page_token = Some(token),
-                        None => break,
-                    }
-                }
-                Err(error) => {
-                    log::warn!(
-                        "listing Google {}: {error}",
-                        if other { "other contacts" } else { "contacts" }
-                    );
-                    break;
-                }
-            }
-        }
-    }
-    people
-        .into_iter()
-        .flat_map(|person| {
-            let name = person
-                .names
-                .first()
-                .and_then(|name| name.display_name.clone())
-                .filter(|name| !name.is_empty());
-            person
-                .email_addresses
-                .into_iter()
-                .filter_map(|address| address.value)
-                .map(move |email| GoogleContact {
-                    email,
-                    name: name.clone(),
-                })
-        })
-        .collect()
-}
-
+const GOOGLE_CONTACTS_FRESH: jiff::SignedDuration = jiff::SignedDuration::from_hours(1);
+/// A listing counts as work under way for this long at most, so screenshots and tests wait for a
+/// quick answer without hanging on a People that doesn't answer.
+const GOOGLE_CONTACTS_BUSY: Duration = Duration::from_secs(5);
 /// Mail's contacts with Google's added (unscored, unless mail scored them) and lending their
 /// names to addresses mail has none for.
-fn merge_contacts(mail: &[ScoredContact], google: &[GoogleContact]) -> Vec<ScoredContact> {
+fn merge_contacts<'a>(
+    mail: &[ScoredContact],
+    google: impl IntoIterator<Item = &'a exo_store::GoogleContact>,
+) -> Vec<ScoredContact> {
     let mut book = mail.to_vec();
     let mut known: std::collections::HashMap<String, usize> = book
         .iter()
@@ -3622,9 +3776,13 @@ fn events_for_drafts(
     sent: Vec<SentDraft>,
     failed: Vec<DraftFailure>,
     offline: bool,
+    retrying: Vec<String>,
 ) {
     for id in saved {
         let _ = events.send(Event::DraftSaved(id));
+    }
+    for id in retrying {
+        let _ = events.send(Event::SendRetrying(id));
     }
     for sent in sent {
         let _ = events.send(Event::DraftSent(sent));
@@ -3649,6 +3807,7 @@ async fn write_drafts_now(store: &Store, events: &std::sync::mpsc::Sender<Event>
             report.sent,
             report.failed,
             report.offline,
+            report.retrying,
         ),
         Err(error) => log::error!("writing drafts now: {error}"),
     }
@@ -3710,6 +3869,7 @@ async fn flush_loop(
                 let notable = !report.saved.is_empty()
                     || !report.sent.is_empty()
                     || !report.failed.is_empty()
+                    || !report.retrying.is_empty()
                     || report.offline;
                 // A held send's reminder queued its label, so flush again at once.
                 let reminded = report.reminded.then(jiff::Timestamp::now);
@@ -3719,6 +3879,7 @@ async fn flush_loop(
                     report.sent,
                     report.failed,
                     report.offline,
+                    report.retrying,
                 );
                 if notable {
                     repaint.request();
@@ -3742,6 +3903,20 @@ mod tests {
     use std::time::Instant;
 
     use super::*;
+
+    #[test]
+    fn a_pause_is_waited_out_until_it_ends() {
+        let left = until_then(jiff::Timestamp::now() + jiff::SignedDuration::from_secs(40));
+        assert!(
+            (Duration::from_secs(39)..=Duration::from_secs(40)).contains(&left),
+            "{left:?}"
+        );
+        assert_eq!(
+            until_then(jiff::Timestamp::now() - jiff::SignedDuration::from_secs(1)),
+            Duration::ZERO,
+            "already over"
+        );
+    }
 
     /// Waits for `account` to be idle.
     fn settle(account: &Account) {
@@ -4047,6 +4222,182 @@ mod tests {
         );
         sync();
         assert_eq!(mail().len(), 1, "once");
+        drop(account);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_notification_shows_the_senders_photo_fetched_if_need_be() {
+        let runtime = Runtime::new().expect("runtime");
+        let config = gmail_mock::Config {
+            contact_photos: true,
+            ..gmail_mock::Config::default()
+        };
+        let server = runtime
+            .block_on(gmail_mock::MockServer::start(config))
+            .expect("mock starts");
+        let dir = std::env::temp_dir().join(format!("exo-account-photo-{}", std::process::id()));
+        let credentials = Credentials {
+            email: "maya@brightmoor.co".into(),
+            endpoints: server.endpoints(),
+            tokens: Arc::new(gmail::StaticToken(gmail_mock::DEV_ACCESS_TOKEN.into())),
+        };
+        let ctx = egui::Context::default();
+        let account = Account::open(&dir, credentials, ctx.clone()).expect("opens");
+        let notifier = Notifier::recording(crate::desktop::Launcher::default());
+        account.set_notifier(Some(notifier.clone()));
+        settle(&account);
+        // Priya's photo is asked for, as the contact pane does, which saves it. Tom's isn't.
+        let started = Instant::now();
+        while crate::people::photo(&ctx, "priya@brightmoor.co").is_none() {
+            assert!(started.elapsed() < Duration::from_secs(10), "no photo");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        for from in [
+            "Priya Raman <priya@brightmoor.co>",
+            "Tom Becker <tom@brightmoor.co>",
+            "Yusuf Karaca <yusuf@tinkerform.io>",
+        ] {
+            runtime.block_on(async {
+                reqwest::Client::new()
+                    .post(server.url().join("/__mock/deliver").expect("path"))
+                    .json(&serde_json::json!({ "from": from, "subject": "Launch", "text": "3?" }))
+                    .send()
+                    .await
+                    .expect("delivered")
+            });
+        }
+        account.set_presence(Presence::Visible);
+        account.set_presence(Presence::Focused);
+        settle(&account);
+        let images: Vec<(String, Option<Vec<u8>>)> = notifier
+            .posted()
+            .into_iter()
+            .filter(|notice| notice.key.starts_with("EMAIL-"))
+            .map(|notice| {
+                let image = notice
+                    .image
+                    .map(|file| std::fs::read(file).expect("a copy"));
+                (notice.title, image)
+            })
+            .collect();
+        let shown: Vec<(&str, bool)> = images
+            .iter()
+            .map(|(title, image)| (title.as_str(), image.is_some()))
+            .collect();
+        assert_eq!(shown.len(), 3, "a notification for each: {shown:?}");
+        for (title, photo) in [
+            ("Priya Raman", true),
+            ("Tom Becker", true),
+            ("Yusuf Karaca", false),
+        ] {
+            let image = images
+                .iter()
+                .find(|(shown, _)| shown == title)
+                .and_then(|(_, image)| image.as_deref());
+            assert_eq!(
+                image.is_some_and(|image| image::load_from_memory(image).is_ok()),
+                photo,
+                "{title}: {shown:?}"
+            );
+        }
+        // Tom's, fetched for his notification, is saved and drawn too.
+        assert!(crate::people::photo(&ctx, "tom@brightmoor.co").is_some());
+        drop(account);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_stale_listing_asks_google_only_for_what_changed_until_the_token_expires() {
+        let runtime = Runtime::new().expect("runtime");
+        let server = runtime
+            .block_on(gmail_mock::MockServer::start(gmail_mock::Config::default()))
+            .expect("mock starts");
+        let dir = std::env::temp_dir().join(format!("exo-account-sync-{}", std::process::id()));
+        let open = || {
+            let credentials = Credentials {
+                email: "maya@brightmoor.co".into(),
+                endpoints: server.endpoints(),
+                tokens: Arc::new(gmail::StaticToken(gmail_mock::DEV_ACCESS_TOKEN.into())),
+            };
+            let account =
+                Account::open(&dir, credentials, egui::Context::default()).expect("opens");
+            settle(&account);
+            account
+        };
+        let kept = |account: &Account| {
+            runtime
+                .block_on(account.shared.loader.store.google_contacts())
+                .expect("reads")
+                .expect("kept")
+        };
+        let emails = |list: &exo_store::GoogleList| -> Vec<String> {
+            list.contacts
+                .iter()
+                .map(|contact| contact.email.clone())
+                .collect()
+        };
+        let change = |body: serde_json::Value| {
+            runtime.block_on(async {
+                reqwest::Client::new()
+                    .post(server.url().join("/__mock/people").expect("path"))
+                    .json(&body)
+                    .send()
+                    .await
+                    .expect("changed")
+            });
+        };
+        // Kept as stale, with an entry Google never listed, which only a full listing drops.
+        let age = |account: &Account| {
+            let mut listing = kept(account);
+            listing.listed -= jiff::SignedDuration::from_hours(2);
+            listing.directory.contacts.push(exo_store::GoogleContact {
+                person: "people/kept".into(),
+                email: "kept@brightmoor.co".into(),
+                ..exo_store::GoogleContact::default()
+            });
+            runtime
+                .block_on(account.shared.loader.store.save_google_contacts(&listing))
+                .expect("saves");
+        };
+
+        let account = open();
+        let listing = kept(&account);
+        assert!(listing.saved.sync_token.is_some() && listing.directory.sync_token.is_some());
+        assert!(emails(&listing.directory).contains(&"noor@brightmoor.co".to_owned()));
+        change(serde_json::json!({ "list": "directory", "put": {
+            "resourceName": "people/9001",
+            "names": [{ "displayName": "Ivy Chen" }],
+            "emailAddresses": [{ "value": "ivy@brightmoor.co" }],
+        } }));
+        change(serde_json::json!({ "list": "directory", "remove": "noor@brightmoor.co" }));
+        age(&account);
+        drop(account);
+
+        let account = open();
+        let directory = emails(&kept(&account).directory);
+        assert!(
+            directory.contains(&"ivy@brightmoor.co".to_owned()),
+            "{directory:?}"
+        );
+        assert!(!directory.contains(&"noor@brightmoor.co".to_owned()));
+        assert!(
+            directory.contains(&"kept@brightmoor.co".to_owned()),
+            "only the changes were asked for"
+        );
+        change(serde_json::json!({ "expire": true }));
+        age(&account);
+        drop(account);
+
+        let account = open();
+        let listing = kept(&account);
+        let directory = emails(&listing.directory);
+        assert!(
+            !directory.contains(&"kept@brightmoor.co".to_owned()),
+            "listed in full once the token expired"
+        );
+        assert!(directory.contains(&"ivy@brightmoor.co".to_owned()));
+        assert!(listing.directory.sync_token.is_some());
         drop(account);
         let _ = std::fs::remove_dir_all(dir);
     }

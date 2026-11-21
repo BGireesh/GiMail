@@ -7,8 +7,9 @@ use crate::{
 };
 
 /// Prepares a paste's HTML (a whole clipboard document) and returns its body's content: Word's
-/// lists rebuilt, Excel's sheet inlined, Google Docs' wrapper gone, blank lines kept between
-/// spaced paragraphs, hidden content dropped, and colours that wouldn't read snapped.
+/// lists rebuilt, Excel's sheet inlined (with what it styles kept from the restyle), Google Docs'
+/// wrapper gone, blank lines kept between spaced paragraphs, hidden content dropped, and colours
+/// that wouldn't read snapped.
 pub fn prepare_paste(html: &str) -> String {
     let document = dom::parse(html);
     let Some(body) = dom::body(&document) else {
@@ -38,6 +39,7 @@ pub fn prepare_paste(html: &str) -> String {
     }
     if from("excel", ["xmlns:o", "xmlns:v", "xmlns:x"]) {
         inline_sheet(&document, &body);
+        preserve_styles(&body);
     }
     if from("word", ["xmlns:o", "xmlns:w", "xmlns:m"]) {
         word_lists(&body);
@@ -106,7 +108,7 @@ fn snap_colors(element: &NodeRef) {
 }
 
 /// Excel's styles. Each rule of the sheet's first `<style>` is appended to the style of what it
-/// selects. Excel writes simple selectors (`td`, `.xl65`, `br`), which are what's matched.
+/// selects ([`Selector`]), so the cells keep their look once the sheet is gone.
 fn inline_sheet(document: &NodeRef, body: &NodeRef) {
     let Some(sheet) = dom::select_first(document, |node| dom::is(node, "style")) else {
         return;
@@ -122,24 +124,8 @@ fn inline_sheet(document: &NodeRef, body: &NodeRef) {
         if declarations.is_empty() || selectors.trim_start().starts_with('@') {
             continue;
         }
-        for selector in selectors.split(',').map(str::trim) {
-            let (tag, class) = selector
-                .split_once('.')
-                .map_or((selector, None), |(tag, class)| (tag, Some(class)));
-            let simple = |part: &str| {
-                part.chars()
-                    .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
-            };
-            if selector.is_empty()
-                || !simple(tag)
-                || class.is_some_and(|class| class.is_empty() || !simple(class))
-            {
-                continue;
-            }
-            for element in dom::select(body, |node| {
-                (tag.is_empty() || dom::is(node, &tag.to_ascii_lowercase()))
-                    && class.is_none_or(|class| dom::has_class(node, class))
-            }) {
+        for selector in selectors.split(',').filter_map(Selector::parse) {
+            for element in dom::select(body, |node| selector.matches(node)) {
                 let existing = dom::attr(&element, "style").unwrap_or_default();
                 let joined = if existing.trim().is_empty() {
                     declarations.to_owned()
@@ -149,6 +135,166 @@ fn inline_sheet(document: &NodeRef, body: &NodeRef) {
                 dom::set_attr(&element, "style", &joined);
             }
         }
+    }
+}
+
+/// A selector of the kinds a sheet's rules use: compound selectors (an element name or `*`,
+/// classes, an id, `:link` and `:visited`) joined by descendant and child combinators. A rule
+/// with anything else is left out. `:visited` matches nothing, as a page's queries never see
+/// which links were visited.
+struct Selector {
+    /// The compound selectors, the rightmost (the element's own) last, each with whether it must
+    /// be the parent of the one after it (`>`) rather than any ancestor.
+    parts: Vec<(Compound, bool)>,
+}
+
+#[derive(Default)]
+struct Compound {
+    tag: Option<String>,
+    classes: Vec<String>,
+    id: Option<String>,
+    /// `:link` (`Some(true)`) or `:visited` (`Some(false)`).
+    link: Option<bool>,
+}
+
+impl Selector {
+    fn parse(selector: &str) -> Option<Self> {
+        let mut parts: Vec<(Compound, bool)> = Vec::new();
+        let mut child = false;
+        for token in selector.replace('>', " > ").split_whitespace() {
+            if token == ">" {
+                child = true;
+                continue;
+            }
+            parts.push((Compound::parse(token)?, child));
+            child = false;
+        }
+        (!parts.is_empty() && !child).then_some(Self { parts })
+    }
+
+    fn matches(&self, node: &NodeRef) -> bool {
+        let Some(((last, _), rest)) = self.parts.split_last() else {
+            return false;
+        };
+        last.matches(node) && Self::ancestors_match(rest, node, self.parts[rest.len()].1)
+    }
+
+    /// Whether `parts` match `node`'s ancestors, the last of them its parent when `child`.
+    fn ancestors_match(parts: &[(Compound, bool)], node: &NodeRef, child: bool) -> bool {
+        let Some(((compound, _), rest)) = parts.split_last() else {
+            return true;
+        };
+        let mut ancestor = dom::parent(node);
+        while let Some(current) = ancestor {
+            if compound.matches(&current)
+                && Self::ancestors_match(rest, &current, parts[rest.len()].1)
+            {
+                return true;
+            }
+            if child {
+                return false;
+            }
+            ancestor = dom::parent(&current);
+        }
+        false
+    }
+}
+
+impl Compound {
+    fn parse(token: &str) -> Option<Self> {
+        /// The name `text` starts with, and the rest.
+        fn name(text: &str) -> (&str, &str) {
+            let end = text
+                .find(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '-' || ch == '_'))
+                .unwrap_or(text.len());
+            text.split_at(end)
+        }
+        let mut compound = Self::default();
+        let rest = token.strip_prefix('*').unwrap_or(token);
+        let (tag, mut rest) = name(rest);
+        if !tag.is_empty() {
+            compound.tag = Some(tag.to_ascii_lowercase());
+        }
+        while let Some(sign) = rest.chars().next() {
+            let (part, after) = name(&rest[sign.len_utf8()..]);
+            if part.is_empty() {
+                return None;
+            }
+            match sign {
+                '.' => compound.classes.push(part.to_owned()),
+                '#' => compound.id = Some(part.to_owned()),
+                ':' if part.eq_ignore_ascii_case("link") => compound.link = Some(true),
+                ':' if part.eq_ignore_ascii_case("visited") => compound.link = Some(false),
+                _ => return None,
+            }
+            rest = after;
+        }
+        Some(compound)
+    }
+
+    fn matches(&self, node: &NodeRef) -> bool {
+        dom::is_element(node)
+            && self.tag.as_deref().is_none_or(|tag| dom::is(node, tag))
+            && self.classes.iter().all(|class| dom::has_class(node, class))
+            && self
+                .id
+                .as_deref()
+                .is_none_or(|id| dom::attr(node, "id").as_deref() == Some(id))
+            && self.link.is_none_or(|link| {
+                link && (dom::is(node, "a") || dom::is(node, "area")) && dom::has_attr(node, "href")
+            })
+    }
+}
+
+/// The properties a pasted sheet's cells keep against the body's own look, and the `<font>`
+/// attributes that set them.
+const PRESERVED: [&str; 4] = ["color", "font-family", "font-size", "line-height"];
+const FONT_ATTRIBUTES: [(&str, &str); 3] = [
+    ("color", "color"),
+    ("face", "font-family"),
+    ("size", "font-size"),
+];
+
+/// Marks what a pasted sheet styles itself, so the body's restyle leaves it: an element whose
+/// style (or `<font>` attribute) sets one of [`PRESERVED`], and everything inside it, gets
+/// `exo-preserve-{property}`. A link without a colour of its own takes the body's link colour, so
+/// when a child is one, none of the children inherit `color`.
+fn preserve_styles(body: &NodeRef) {
+    let mut queue = std::collections::VecDeque::from([(body.clone(), Vec::<&str>::new())]);
+    while let Some((node, inherited)) = queue.pop_front() {
+        let mut preserved = inherited;
+        let style = Style::of(&node);
+        for property in PRESERVED {
+            if !style.get(property).is_empty() && !preserved.contains(&property) {
+                preserved.push(property);
+            }
+        }
+        if dom::is(&node, "font") {
+            for (attribute, property) in FONT_ATTRIBUTES {
+                if dom::has_attr(&node, attribute) && !preserved.contains(&property) {
+                    preserved.push(property);
+                }
+            }
+        }
+        if !preserved.is_empty() {
+            let classes: Vec<String> = preserved
+                .iter()
+                .map(|property| format!("exo-preserve-{property}"))
+                .collect();
+            dom::add_class(
+                &node,
+                &classes.iter().map(String::as_str).collect::<Vec<_>>(),
+            );
+        }
+        let children = dom::element_children(&node);
+        if children.iter().any(|child| {
+            dom::is(child, "a")
+                && dom::has_attr(child, "href")
+                && Style::of(child).get("color").is_empty()
+        }) {
+            preserved.retain(|property| *property != "color");
+        }
+        queue.extend(children.into_iter().map(|child| (child, preserved.clone())));
     }
 }
 
@@ -364,6 +510,56 @@ mod tests {
                 r##"<span style="color: rgb(0, 0, 0)">a</span><span style="color: #fefefe">b</span><span style="color: #c00">c</span><font color="#000">d</font>"##
             ),
             r##"<span>a</span><span>b</span><span style="color: #c00">c</span><font>d</font>"##
+        );
+    }
+
+    /// `body` pasted from Excel with `sheet` as its `<style>`.
+    fn from_excel(sheet: &str, body: &str) -> String {
+        prepare_paste(&format!(
+            r#"<html xmlns:x="urn:schemas-microsoft-com:office:excel"><head><style><!-- {sheet} --></style></head><body>{body}</body></html>"#
+        ))
+    }
+
+    #[test]
+    fn excel_rules_beyond_simple_selectors_are_inlined() {
+        let html = from_excel(
+            "a:link {color:#0563C1} a:visited {color:#954F72} td.xl67 {padding:2px} table td > span {font-weight:700} td:hover {color:red} td→ {color:red}",
+            r#"<table><tr><td class=xl67><a href="https://x.io/">x</a><span>y</span></td><td><a>z</a></td></tr></table>"#,
+        );
+        assert!(
+            html.contains(r#"<td class="xl67" style="padding:2px">"#)
+                && html.contains(r#"<a href="https://x.io/" style="color:#0563C1""#)
+                && html.contains(r#"<span style="font-weight:700""#)
+                && html.contains("<td><a>z</a></td>"),
+            "`:link` takes a link, never `:visited`, and an unknown pseudo-class leaves its rule \
+             out: {html}"
+        );
+    }
+
+    #[test]
+    fn what_a_sheet_styles_keeps_its_own_look() {
+        let html = from_excel(
+            "td {font-family:Calibri, sans-serif; font-size:12pt}",
+            r#"<table><tr><td>a<b>b</b></td><td><a href="https://x.io/">c</a></td><td><font face="Arial">d</font></td></tr></table>"#,
+        );
+        let preserved = "exo-preserve-font-family exo-preserve-font-size";
+        assert!(
+            html.contains(&format!(
+                r#"class="{preserved}">a<b class="{preserved}">b</b>"#
+            )) && html.contains(&format!(
+                r#"<a href="https://x.io/" class="{preserved}">c</a>"#
+            )) && html.contains(&format!(
+                r#"<font face="Arial" class="{preserved}">d</font>"#
+            )),
+            "the cells and what's in them: {html}"
+        );
+        let html = from_excel(
+            "td {color:#c00}",
+            r#"<table><tr><td><a href="https://x.io/">c</a><span>d</span></td></tr></table>"#,
+        );
+        assert!(
+            html.contains(r#"<a href="https://x.io/">c</a><span>d</span>"#),
+            "a link without its own colour keeps the children from inheriting the cell's: {html}"
         );
     }
 

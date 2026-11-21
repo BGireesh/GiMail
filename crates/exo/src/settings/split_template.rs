@@ -526,7 +526,11 @@ impl TemplateForm {
         if ui.rect_contains_pointer(viewport) {
             self.scroll -= ui.input(|input| input.smooth_scroll_delta.y);
         }
+        // Find scrolls at once to a match out of view.
+        let find = exo_ui::id(&ctx, "split-template-find");
+        self.scroll += exo_ui::find::reveal(&ctx, find).map_or(0.0, |delta| delta.y);
         self.scroll = self.scroll.clamp(0.0, (natural - room).max(0.0));
+        let find = exo_ui::find::Scope::begin(&ctx, find, viewport, self.scroll);
 
         // The hero, behind the dialog's header from the card's top.
         let hero = Rect::from_min_size(
@@ -776,6 +780,7 @@ impl TemplateForm {
                 y += 16.0;
             }
         }
+        drop(find);
 
         // The sticky footer: a rule (none for Inbox), the tertiary button at the left, the rest
         // at the right.

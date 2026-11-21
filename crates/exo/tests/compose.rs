@@ -121,6 +121,46 @@ fn a_new_message_is_kept_as_a_gmail_draft_and_sends_with_undo_send() {
 }
 
 #[test]
+fn the_first_send_shows_the_undo_send_alert_until_got_it() {
+    let mut app = support::start_with_settings("compose-undo-alert", &|settings| {
+        settings.do_show_undo_send_ftue = true
+    });
+    write_new_message(&mut app, "First one");
+    app.press(Key::Enter, COMMAND);
+    assert_eq!(
+        app.mail().compose_alert(),
+        Some("Your message is sent!\u{2029}You can hit Z within 10 seconds to undo send.")
+    );
+    // While it's open, the send waits.
+    app.wait(1.5);
+    assert!(!sent_subjects(&app).contains(&"First one".to_owned()));
+    assert_eq!(app.mail().toast_text(), Some("Message sent."));
+    // Got it, and the alert is done with.
+    app.key(Key::Enter);
+    assert_eq!(app.mail().compose_alert(), None);
+    assert!(!app.mail().account().settings().do_show_undo_send_ftue);
+    write_new_message(&mut app, "Second one");
+    app.press(Key::Enter, COMMAND);
+    assert_eq!(app.mail().compose_alert(), None, "once");
+}
+
+#[test]
+fn z_in_the_undo_send_alert_undoes_the_send() {
+    let mut app = support::start_with_settings("compose-undo-alert-z", &|settings| {
+        settings.do_show_undo_send_ftue = true
+    });
+    write_new_message(&mut app, "Take it back");
+    app.press(Key::Enter, COMMAND);
+    assert!(app.mail().compose_alert().is_some());
+    app.key(Key::Z);
+    app.wait(0.5);
+    assert_eq!(app.mail().compose_alert(), None);
+    assert!(app.mail().compose_pane_open(), "the draft reopens");
+    assert!(!app.mail().account().settings().do_show_undo_send_ftue);
+    assert!(!sent_subjects(&app).contains(&"Take it back".to_owned()));
+}
+
+#[test]
 fn undo_send_takes_the_message_back_into_compose() {
     let mut app = start("compose-undo");
     write_new_message(&mut app, "Undo me");
@@ -141,6 +181,32 @@ fn undo_send_takes_the_message_back_into_compose() {
             .any(|(subject, _)| subject == "Undo me"),
         "still a draft"
     );
+}
+
+#[test]
+fn a_send_gmail_hasnt_taken_yet_is_still_sending_and_can_be_undone() {
+    let mut app = start("compose-still-sending");
+    write_new_message(&mut app, "Retry me");
+    // Gmail turns the draft's writes away for a minute.
+    let at = jiff::Timestamp::now() + jiff::SignedDuration::from_mins(1);
+    for method in ["POST", "PUT"] {
+        app.fault(Some(serde_json::json!({
+            "method": method,
+            "path": "/upload/gmail/v1/users/me/drafts",
+            "status": 429,
+            "message": format!("User-rate limit exceeded.  Retry after {at}"),
+            "reason": "rateLimitExceeded",
+            "times": 100,
+        })));
+    }
+    app.press(Key::Enter, COMMAND);
+    app.wait(1.0);
+    assert_eq!(app.mail().toast_text(), Some("Still sending…"));
+    app.fault(None);
+    app.key(Key::Z);
+    app.wait(0.5);
+    assert!(app.mail().compose_pane_open(), "Undo brings it back");
+    assert!(!sent_subjects(&app).contains(&"Retry me".to_owned()));
 }
 
 #[test]
@@ -812,6 +878,11 @@ fn the_from_list_chooses_among_send_as_aliases() {
     app.key(Key::ArrowDown);
     app.key(Key::Enter);
     app.wait(1.5);
+    assert_eq!(
+        app.mail().contact_pane_email(),
+        Some("hello@mayaokafor.com"),
+        "the alias chosen shows in the contact pane"
+    );
     let from = || draft_header(&app, "From check", "From").unwrap_or_default();
     assert!(
         in_gmail(|| from().contains("hello@mayaokafor.com")),
@@ -1591,7 +1662,7 @@ fn a_gmail_draft_taken_over_offline_stays_one_draft_with_its_files() {
     let (thread, message) = open_gmail_web_draft_with_a_file(&mut app);
     // Offline for the draft's file and for Gmail's drafts, Exo takes the draft up.
     app.fault(Some(serde_json::json!({"method": "GET", "path": format!("/gmail/v1/users/me/messages/{message}"), "status": 404, "times": 1000})));
-    app.fault(Some(serde_json::json!({"method": "GET", "path": "/gmail/v1/users/me/drafts", "status": 404, "times": 1000})));
+    app.fault(Some(serde_json::json!({"method": "GET", "path": "/upload/gmail/v1/users/me/drafts", "status": 404, "times": 1000})));
     app.key(Key::R);
     app.type_text(" Thanks!");
     app.wait(1.5);

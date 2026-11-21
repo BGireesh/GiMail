@@ -131,6 +131,45 @@ fn get_me_to_zero_marks_old_mail_done_keeping_unread_and_undo_brings_it_back() {
 }
 
 #[test]
+fn the_first_runs_get_me_to_zero_leaves_the_keyboard_on_the_first_conversation() {
+    let mut app = start("get-me-to-zero-first");
+    let first = app.subjects()[0].clone();
+    app.key(Key::J);
+    app.mail_mut().open_first_get_me_to_zero();
+    app.settle();
+    assert!(app.mail().get_me_to_zero_open());
+    app.key(Key::Escape);
+    assert!(!app.mail().get_me_to_zero_open());
+    assert_eq!(app.cursor(), first);
+    // Any other Get Me To Zero leaves the cursor where it was.
+    app.key(Key::J);
+    let second = app.cursor();
+    palette(&mut app, "get me to zero");
+    app.key(Key::Escape);
+    assert!(!app.mail().get_me_to_zero_open());
+    assert_eq!(app.cursor(), second);
+}
+
+#[test]
+fn the_welcome_lasts_until_a_get_me_to_zero_that_shows_it_closes() {
+    let mut app = start("get-me-to-zero-welcome");
+    let welcomes = |app: &Fixture| app.mail().account().settings().show_first_time_gmtz;
+    let first = app.subjects()[0].clone();
+    app.mail_mut().open_first_get_me_to_zero();
+    app.settle();
+    assert!(welcomes(&app));
+    // Quitting with it up keeps the welcome, so the next Get Me To Zero has it, from anywhere.
+    app.relaunch();
+    assert!(!app.mail().get_me_to_zero_open() && welcomes(&app));
+    app.key(Key::J);
+    palette(&mut app, "get me to zero");
+    assert!(app.mail().get_me_to_zero_open());
+    app.key(Key::Escape);
+    assert!(!welcomes(&app), "shown and closed");
+    assert_eq!(app.cursor(), first, "as the welcome closes");
+}
+
+#[test]
 fn bulk_actions_undoes_get_me_to_zero() {
     let mut app = start("bulk-actions");
     let inbox = count(&app, "in:inbox");
@@ -142,6 +181,40 @@ fn bulk_actions_undoes_get_me_to_zero() {
     app.key(Key::Enter);
     app.key(Key::Enter);
     assert!(count(&app, "in:inbox") < inbox);
+    palette(&mut app, "bulk actions");
+    // The row's Undo, then Undo in `Undo action`.
+    app.key(Key::Enter);
+    app.key(Key::Enter);
+    assert_eq!(count(&app, "in:inbox"), inbox);
+}
+
+#[test]
+fn bulk_actions_lists_get_me_to_zero_after_a_relaunch_and_still_undoes_it() {
+    let mut app = start("bulk-actions-relaunch");
+    let inbox = count(&app, "in:inbox");
+    palette(&mut app, "get me to zero");
+    for _ in 0..3 {
+        app.key(Key::Tab);
+    }
+    app.key(Key::Enter);
+    app.key(Key::Enter);
+    assert!(count(&app, "in:inbox") < inbox);
+
+    app.relaunch();
+    let listed: Vec<(String, Option<String>)> = app
+        .mail()
+        .account()
+        .bulk_actions()
+        .into_iter()
+        .map(|action| (action.name, action.query))
+        .collect();
+    assert_eq!(
+        listed,
+        [(
+            "Get Me To Zero".to_owned(),
+            Some("before:2026/11/10".to_owned())
+        )]
+    );
     palette(&mut app, "bulk actions");
     // The row's Undo, then Undo in `Undo action`.
     app.key(Key::Enter);

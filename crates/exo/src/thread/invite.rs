@@ -1032,11 +1032,8 @@ pub(super) fn note(invite: &Invite, calendar: Option<&exo_mail::CalendarData>) -
     })
 }
 
-/// The note's lines in a column `width` wide, with its URLs made links.
-fn note_lines(ctx: &egui::Context, note: &str, width: f32) -> Vec<Vec<(Piece, f32)>> {
-    if note.is_empty() {
-        return Vec::new();
-    }
+/// The note's pieces, with its URLs made links.
+fn note_pieces(note: &str) -> Vec<Piece> {
     let mut pieces = Vec::new();
     let mut at = 0;
     for (range, url) in exo_mail::links(note) {
@@ -1048,7 +1045,62 @@ fn note_lines(ctx: &egui::Context, note: &str, width: f32) -> Vec<Vec<(Piece, f3
     }
     pieces.push(Piece::text(&note[at..]));
     pieces.retain(|piece| !piece.text.is_empty());
-    wrap_in(ctx, &pieces, width, |_| NOTE)
+    pieces
+}
+
+/// The note's lines in a column `width` wide, with its URLs made links.
+fn note_lines(ctx: &egui::Context, note: &str, width: f32) -> Vec<Vec<(Piece, f32)>> {
+    if note.is_empty() {
+        return Vec::new();
+    }
+    wrap_in(ctx, &note_pieces(note), width, |_| NOTE)
+}
+
+/// The card as it prints, with the guest's note above it: as on screen, About as far as it's
+/// open, and the rows of buttons without them.
+pub(super) fn printout(
+    invite: &Invite,
+    context: &Context,
+    note: Option<&str>,
+) -> crate::print::Invite {
+    use crate::print::{InviteRow, InviteValue, Run};
+    let runs = |pieces: Vec<Piece>| -> Vec<Run> {
+        pieces
+            .into_iter()
+            .map(|piece| Run {
+                text: piece.text,
+                link: piece.link,
+                bold: piece.bold,
+            })
+            .collect()
+    };
+    let rows = rows(invite, context)
+        .into_iter()
+        .map(|row| InviteRow {
+            question: row.question,
+            value: match row.value {
+                Value::Text(lines) | Value::About(lines, _) => InviteValue::Text(
+                    lines
+                        .into_iter()
+                        .map(|(indent, pieces)| (indent, runs(pieces)))
+                        .collect(),
+                ),
+                Value::When(when) => InviteValue::When(when),
+                Value::Rsvp(_) | Value::AddToCalendar(_) => InviteValue::Buttons,
+                Value::Files(files) => InviteValue::Files(
+                    files
+                        .iter()
+                        .map(|file| crate::print::File::of(&file.name, &file.mime))
+                        .collect(),
+                ),
+            },
+        })
+        .collect();
+    crate::print::Invite {
+        note: note.map(|note| runs(note_pieces(note))),
+        status: status(invite, context),
+        rows,
+    }
 }
 
 /// The height the note takes above the card in a column `width` wide.
@@ -1081,6 +1133,7 @@ pub(super) fn show_note(
             NOTE.paint_line(ui.painter(), pos2(x, y), &piece.text, color, None);
             if let Some(url) = piece.link {
                 let rect = Rect::from_min_size(pos2(x, y), vec2(advance, NOTE.line_height));
+                exo_ui::link_box(ui.ctx(), rect, &url);
                 if ui
                     .interact(
                         rect,
@@ -1178,7 +1231,8 @@ pub(super) fn show(
         .ctx()
         .pointer_hover_pos()
         .filter(|_| ui.ui_contains_pointer());
-    let link = |rect: Rect, key: &str| {
+    let link = |rect: Rect, key: &str, href: &str| {
+        exo_ui::link_box(ui.ctx(), rect, href);
         ui.interact(
             rect,
             id.with(("link", key, rect.min.x as i32, rect.min.y as i32)),
@@ -1221,6 +1275,7 @@ pub(super) fn show(
                                         vec2(advance, TEXT.line_height),
                                     ),
                                     row.question,
+                                    url,
                                 )
                             {
                                 shown.clicked = Some(CardAction::Open(url.clone()));
@@ -1868,5 +1923,31 @@ mod tests {
         };
         assert_eq!(about(false), Some((8, Some(false))));
         assert_eq!(about(true), Some((10, Some(true))));
+    }
+
+    #[test]
+    fn prints_its_rows_without_the_buttons() {
+        use crate::print::{InviteValue, Run};
+        let invite = parse(ICS).expect("an event");
+        let now: Zoned = "2026-11-17T09:00:00[America/New_York]"
+            .parse()
+            .expect("valid");
+        let message = message("Invitation: Coffee with Grace");
+        let printed = printout(&invite, &context(&message, &now), Some("See you there"));
+        assert_eq!(
+            printed.note,
+            Some(vec![Run {
+                text: "See you there".into(),
+                ..Run::default()
+            }])
+        );
+        assert_eq!(printed.status, None);
+        let questions: Vec<&str> = printed.rows.iter().map(|row| row.question).collect();
+        assert_eq!(questions, ["RSVP", "When", "Where", "Who"]);
+        assert_eq!(printed.rows[0].value, InviteValue::Buttons);
+        assert_eq!(
+            printed.rows[1].value,
+            InviteValue::When("Wednesday, November 25th, 2026 at 9:00 AM – 9:45 AM EST".into())
+        );
     }
 }

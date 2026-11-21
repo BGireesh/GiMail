@@ -6,31 +6,46 @@ use egui::{Color32, Context, LayerId};
 use exo_store::{Contact, MessageDetail, ThreadDetail};
 
 use super::{
-    Entry, Item, ThreadView, attachments, markers,
-    message::{self, DATE, FROM, FROM_MIN_WIDTH, FROM_PADDING, SNIPPET, STATUS, State, Status},
+    Entry, Item, ThreadView, attachments, invite, markers,
+    message::{
+        self, DATE, DATE_ICON, FROM, FROM_MIN_WIDTH, FROM_PADDING, SNIPPET, STATUS, State, Status,
+    },
 };
 use crate::{
     body::Bodies,
     format::dates,
-    print::{Conversation, File, Header, Message, Page, Row, When},
+    print::{Conversation, Draft, File, Header, Message, Page, Printout, Row, When},
 };
 
-/// The 19px paperclip and its 8px margin.
-const PAPERCLIP: f32 = 19.0 + 8.0;
+/// A collapsed row's snippet before it's cut to a page: its whole text, and the width its sender
+/// and date take beside it.
+struct Snippet {
+    text: String,
+    beside: f32,
+}
+
+/// `text`'s width in `style`, on one line.
+fn width(painter: &egui::Painter, style: &exo_ui::TextStyle, text: &str) -> f32 {
+    style
+        .single_line(painter, text, Color32::PLACEHOLDER, None)
+        .size()
+        .x
+}
 
 impl ThreadView {
-    /// The conversation as it prints on `page`, titled `title`. `None` before it has loaded.
-    /// `ctx` measures the collapsed rows' text, to cut their snippets where the screen would at
-    /// the page's width.
+    /// The conversation as it prints, titled `title`, with `drafts` (each by the message it hangs
+    /// under). `None` before it has loaded. `ctx` measures the collapsed rows' text, to cut their
+    /// snippets where the screen would at a page's width.
     pub(crate) fn printout(
         &self,
         ctx: &Context,
         bodies: &Bodies,
         title: String,
-        page: Page,
-    ) -> Option<Conversation> {
+        drafts: Vec<(String, Draft)>,
+    ) -> Option<Printout> {
         let detail = self.detail.as_deref()?;
-        let messages = self
+        let mut snippets = Vec::new();
+        let messages: Vec<Message> = self
             .order(detail)
             .into_iter()
             .filter_map(|entry| {
@@ -70,10 +85,17 @@ impl ThreadView {
                     full_names: self.full_names,
                     reply_labels: false,
                 };
+                let draft = drafts
+                    .iter()
+                    .find(|(under, _)| *under == item.id)
+                    .map(|(_, draft)| draft.clone());
                 Some(if item.expanded {
-                    self.print_expanded(item, message, detail, &state, bodies)
+                    self.print_expanded(item, message, detail, &state, bodies, draft)
                 } else {
-                    self.print_collapsed(ctx, item, message, detail, &state, bodies, page)
+                    let (row, snippet) =
+                        self.print_collapsed(ctx, item, message, detail, &state, bodies);
+                    snippets.push(snippet);
+                    row
                 })
             })
             .collect();
@@ -88,21 +110,39 @@ impl ThreadView {
                     .cloned()
             })
             .collect();
-        Some(Conversation {
-            title,
+        let conversation = Conversation {
+            title: title.clone(),
             subject: detail.subject.clone(),
             labels: self.chips.clone(),
             scrolled: self.scroll > 0.0,
             messages,
             inline,
-            page,
-        })
+            page: Page::default(),
+        };
+        let ctx = ctx.clone();
+        Some(Printout::new(title, move |page| {
+            let painter = ctx.layer_painter(LayerId::background());
+            let mut conversation = conversation.clone();
+            let collapsed = conversation
+                .messages
+                .iter_mut()
+                .filter_map(|message| match message {
+                    Message::Collapsed { snippet, .. } => Some(snippet),
+                    _ => None,
+                });
+            for (cut, Snippet { text, beside }) in collapsed.zip(&snippets) {
+                // The snippet: `flex: 1 1 0; margin-right: .5rem`.
+                let available = (page.message_width() - beside - 0.5 * page.rem()).max(0.0);
+                *cut = message::cut_snippet(text.clone(), available, |text| {
+                    width(&painter, &SNIPPET, text) > available
+                });
+            }
+            conversation.page = page;
+            conversation
+        }))
     }
 
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "one row, from the thread's state"
-    )]
+    /// A collapsed row, its snippet left for [`Printout::on`] to cut to the page.
     fn print_collapsed(
         &self,
         ctx: &Context,
@@ -111,15 +151,9 @@ impl ThreadView {
         detail: &ThreadDetail,
         state: &State,
         bodies: &Bodies,
-        page: Page,
-    ) -> Message {
+    ) -> (Message, Snippet) {
         let painter = ctx.layer_painter(LayerId::background());
-        let width = |style: &exo_ui::TextStyle, text: &str| {
-            style
-                .single_line(&painter, text, Color32::PLACEHOLDER, None)
-                .size()
-                .x
-        };
+        let width = |style: &exo_ui::TextStyle, text: &str| width(&painter, style, text);
         let from = message::participants(message, detail, false, self.full_names);
         let (when, date_width) = match Status::of(message, state) {
             Some(status) => {
@@ -139,20 +173,29 @@ impl ThreadView {
                 (When::Date(date), measured)
             }
         };
-        let files = attachments::listed(message).next().is_some();
+        // A failed, offline or scheduled send's status has no icon.
+        let icon = match when {
+            When::Date(_) => attachments::kind(message),
+            When::Status { .. } => exo_store::Attachments::None,
+        };
         let from_box = (width(&FROM, &from) + FROM_PADDING).max(FROM_MIN_WIDTH);
-        let date_box = date_width + if files { PAPERCLIP } else { 0.0 };
-        // The snippet: `flex: 1 1 0; margin-right: .5rem`.
-        let available = (page.message_width() - from_box - date_box - 0.5 * page.rem()).max(0.0);
-        let snippet = message::snippet(bodies.facts(&item.id), available, |text| {
-            width(&SNIPPET, text) > available
-        });
-        Message::Collapsed {
+        let date_box = date_width
+            + if icon == exo_store::Attachments::None {
+                0.0
+            } else {
+                DATE_ICON
+            };
+        let snippet = Snippet {
+            text: message::snippet_text(bodies.facts(&item.id)),
+            beside: from_box + date_box,
+        };
+        let row = Message::Collapsed {
             from,
-            snippet,
-            files,
+            snippet: String::new(),
+            icon,
             when,
-        }
+        };
+        (row, snippet)
     }
 
     fn print_expanded(
@@ -162,6 +205,7 @@ impl ThreadView {
         detail: &ThreadDetail,
         state: &State,
         bodies: &Bodies,
+        draft: Option<Draft>,
     ) -> Message {
         let status = Status::of(message, state);
         let header = if item.header_expanded {
@@ -205,27 +249,28 @@ impl ThreadView {
             }
         };
         let files = attachments::listed(message)
-            .map(|attachment| {
-                let (name, kind) = attachment
-                    .filename
-                    .rsplit_once('.')
-                    .map_or((attachment.filename.as_str(), ""), |(stem, extension)| {
-                        (stem, extension)
-                    });
-                File {
-                    name: name.to_owned(),
-                    kind: kind.to_uppercase(),
-                    color: exo_ui::attachment_badge_color(
-                        &attachment.filename,
-                        &attachment.mime_type,
-                    ),
-                }
-            })
+            .map(|attachment| File::of(&attachment.filename, &attachment.mime_type))
             .collect();
+        let calendar = bodies.facts(&item.id).map(|facts| &facts.calendar);
+        let invite = self
+            .invites
+            .get(&item.id)
+            .zip(self.invite_context(&item.id, calendar))
+            .map(|(parsed, context)| {
+                invite::printout(parsed, &context, invite::note(parsed, calendar).as_deref())
+            });
+        // A notification the card stands in for doesn't print either.
+        let body = if self.hides_body(&item.id, bodies) {
+            None
+        } else {
+            bodies.printable(&item.id, item.show_quoted)
+        };
         Message::Expanded {
             header,
-            body: bodies.printable(&item.id, item.show_quoted),
+            invite,
+            body,
             files,
+            draft,
         }
     }
 }

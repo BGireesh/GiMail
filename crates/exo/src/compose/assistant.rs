@@ -233,10 +233,16 @@ pub(super) fn register_use_emoji(commands: &mut Commands<commands::Action>) {
     );
 }
 
-/// `Use Emoji` gives the body the keyboard (with the caret at the end unless the body already
-/// had the keyboard) and types `:hello`, which opens the picker. A space goes first if the caret
-/// follows a character. It works from the subject too, which has no `:` picker of its own.
+/// `Use Emoji` types `:hello`, which opens the picker. In a new message's subject it goes in at
+/// the caret ([`super::subject::use_emoji`]). Otherwise the body gets the keyboard (with the caret
+/// at the end unless the body already had the keyboard), and a space goes first if the caret
+/// follows a character.
 pub(super) fn use_emoji(open: &mut Open, now: f64) {
+    if open.state.field == super::Field::Subject && open.is_new_email() {
+        super::subject::use_emoji(open);
+        open.touch(now);
+        return;
+    }
     if open.state.field != super::Field::Body {
         let end = open.editor.document().end();
         open.editor.set_selection(exo_editor::Selection::caret(end));
@@ -858,14 +864,19 @@ pub(super) fn show(ui: &Ui, open: &mut Open, within: egui::Rangef, id: Id) -> Op
         ),
         Rows::Contacts(people) => {
             let shown: Vec<(String, String)> = people.iter().map(row_text).collect();
-            contact_list(
+            let response = contact_list(
                 &ctx,
                 &shown,
                 &trigger.query,
                 Some(*index),
                 pos2(left, top),
                 id,
-            )
+            );
+            // The pointer moving onto a row highlights it.
+            if let Some(hovered) = response.hovered {
+                *index = hovered;
+            }
+            response.pressed
         }
         Rows::NewAddress { text, valid } => {
             let shown = vec![(String::new(), text.clone())];
@@ -878,6 +889,7 @@ pub(super) fn show(ui: &Ui, open: &mut Open, within: egui::Rangef, id: Id) -> Op
                 pos2(left, top),
                 id,
             )
+            .pressed
         }
         Rows::None => None,
     }
@@ -1047,7 +1059,7 @@ fn contact_list(
     highlight: Option<usize>,
     at: egui::Pos2,
     id: Id,
-) -> Option<usize> {
+) -> exo_ui::ContactListResponse {
     let [name_width, email_width] = contact_widths(ctx, rows);
     let shown: Vec<ContactRow<'_>> = rows
         .iter()
@@ -1074,15 +1086,13 @@ fn contact_list(
         },
         force_snow: false,
     };
-    ContactSelectorList::new(&shown, query, highlight, style)
-        .show(
-            ctx,
-            id,
-            at,
-            name_width + email_width,
-            egui::Order::Foreground,
-        )
-        .pressed
+    ContactSelectorList::new(&shown, query, highlight, style).show(
+        ctx,
+        id,
+        at,
+        name_width + email_width,
+        egui::Order::Foreground,
+    )
 }
 
 #[cfg(test)]

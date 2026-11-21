@@ -9,6 +9,7 @@
 mod alert;
 mod attachment;
 mod avatar;
+mod behind;
 mod calendar;
 mod checkbox;
 mod color_picker;
@@ -20,6 +21,7 @@ mod emoji;
 pub use emoji::picture as paint_emoji;
 mod field;
 pub mod find;
+mod focus_order;
 mod fonts;
 mod form;
 pub mod gradient;
@@ -35,6 +37,7 @@ mod message_bar;
 mod misspelling;
 pub mod motion;
 mod quick_tips_bar;
+mod right_click;
 mod scrollbar;
 mod shadow;
 mod slider;
@@ -43,6 +46,7 @@ pub mod text_drag;
 mod text_selection;
 mod theme;
 mod thread_status;
+mod title;
 mod toast;
 mod tooltip;
 
@@ -51,15 +55,18 @@ use std::{collections::HashMap, sync::Arc};
 use egui::{Id, epaint::FontColorTransferFunction};
 
 pub use alert::{
-    ALERT_PARAGRAPH_GAP, ALERT_TEXT, ALERT_TEXT_INK, ALERT_TEXT_WIDTH, Alert, PARAGRAPH,
-    paint_radio, wbrise,
+    ALERT_PARAGRAPH_GAP, ALERT_TEXT, ALERT_TEXT_INK, ALERT_TEXT_WIDTH, Alert, AlertClick, AlertRun,
+    PARAGRAPH, paint_radio, wbrise,
 };
 pub use attachment::{
     CARD_MARGIN_BOTTOM, CARD_MARGIN_X, SMALL_CARD_SIZE, SmallAttachmentCard,
     attachment_badge_color, attachment_badge_width, attachment_bottom_row, attachment_grid,
     paint_attachment_card, paint_attachment_progress, small_card_download,
 };
-pub use avatar::{AvatarPhoto, paint_initial_avatar, paint_photo_avatar};
+pub use avatar::{
+    AvatarPhoto, paint_default_avatar, paint_initial_avatar, paint_photo, paint_photo_avatar,
+};
+pub use behind::Behind;
 pub use calendar::{BlockColors, BlockPalette, CalendarColor};
 pub use checkbox::{
     CHECKBOX_SIZE, paint_checkbox, paint_checkbox_inks, paint_legacy_checkbox,
@@ -76,13 +83,14 @@ pub use date_picker::{
 };
 pub use dialog::{DIALOG_WIDTH, Dialog, DialogResponse, paint_close};
 pub use field::{FieldMenu, field_index, field_x, focus_field, take_field_menu, text_field};
+pub use focus_order::{hold_arrows, list_keys, tab_order, tab_within};
 pub use fonts::{Face, Family, Font};
 pub use form::{ActionKind, DIALOG_ACTION_HEIGHT, DialogAction, DialogInput};
 pub use hover_intent::HoverIntent;
 pub use icon_button::IconButton;
 pub use icons::{
     icon_rect, icon_size, icon_svg, paint_icon, paint_icon_on, paint_icon_rotated,
-    paint_icon_stroked, paint_icon_two_tone, paint_spinner,
+    paint_icon_stroked, paint_icon_two_tone, paint_icon_two_tone_on, paint_spinner,
 };
 pub use keycap::{KEYCAP_ARROW, KEYCAP_BASELINE, KEYCAP_GAP, KeycapColors, Keycaps, keycap_label};
 pub use label_chip::{LABEL_CHIP_HEIGHT, LabelChip, chip_hover, label_colors};
@@ -94,6 +102,7 @@ pub use menu::{
 pub use message_bar::{MESSAGE_BAR_HEIGHT, MessageBar, MessageBarColor, MessageBarRun};
 pub use misspelling::{misspelling_top, paint_misspelling};
 pub use quick_tips_bar::{QuickTipsBar, TipPart};
+pub use right_click::{claim_right_click, link_at, link_box, right_click_claimed};
 pub use scrollbar::Scrollbar;
 pub use shadow::{BoxShadow, paint_carbon_highlight, paint_fade_in, scroll_shadow};
 pub use slider::{SLIDER_SIZE, SliderColors, paint_slider};
@@ -104,6 +113,7 @@ pub use thread_status::{
     Star, Status, Unread, animated_star, animated_status, paint_failed_status, paint_status,
     paint_thread_status,
 };
+pub use title::{Title, take_titles, title};
 pub use toast::{TOAST_BOTTOM, ToastActionView, ToastKind, ToastResponse, ToastView};
 pub use tooltip::{
     ComposeKeysTooltip, DescribedTooltip, DismissableClick, DismissableTooltip, HintTooltip,

@@ -32,6 +32,7 @@ pub(crate) fn paint(ui: &mut Ui, backdrop: &Backdrop, alert: exo_ui::Alert<'_>) 
         ui,
         chrome::Tab {
             title: "Exo",
+            email: None,
             login_screen: false,
             account_color: None,
         },

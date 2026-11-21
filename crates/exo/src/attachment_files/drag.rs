@@ -1,11 +1,11 @@
 //! Dragging a card out of the window. The card goes out as a native drag of a file promise, which
 //! Finder (or any app that takes files) fulfils by asking for the file where it was dropped. Exo
-//! fetches the part (from the parts cache first) when the promise is called in.
+//! fetches the part (from the parts cache first), or reads the kept file, when the promise is
+//! called in.
 
 use std::path::PathBuf;
 
 use block2::RcBlock;
-use exo_store::Attachment;
 use objc2::{
     AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send,
     rc::Retained, runtime::ProtocolObject,
@@ -20,11 +20,12 @@ use objc2_foundation::{
     NSURL, ns_string,
 };
 
+use super::Part;
 use crate::account::Loader;
 
 /// What a promise needs to keep: the file and how to fetch it.
 pub(crate) struct Promise {
-    attachment: Attachment,
+    part: Part,
     loader: Loader,
 }
 
@@ -74,7 +75,7 @@ define_class!(
             _provider: &NSFilePromiseProvider,
             _file_type: &NSString,
         ) -> Retained<NSString> {
-            NSString::from_str(&super::file_name(&self.ivars().attachment.filename))
+            NSString::from_str(&super::file_name(self.ivars().part.name()))
         }
 
         // Called on the main queue (there's no `operationQueueForFilePromiseProvider:`), so it
@@ -91,15 +92,23 @@ define_class!(
                 fail(&completion);
                 return;
             };
-            let Promise { attachment, loader } = self.ivars();
-            loader.attachment(attachment, move |bytes| {
-                let written = bytes.ok().is_some_and(|bytes| write(&path, &bytes));
-                if written {
+            let done = move |bytes: Option<Vec<u8>>| {
+                if bytes.is_some_and(|bytes| write(&path, &bytes)) {
                     completion.0.call((std::ptr::null_mut(),))
                 } else {
                     fail(&completion)
                 }
-            });
+            };
+            let Promise { part, loader } = self.ivars();
+            match part {
+                Part::Gmail(attachment) => {
+                    loader.attachment(attachment, move |bytes| done(bytes.ok()))
+                }
+                Part::Kept(_, kept) => {
+                    let kept = kept.clone();
+                    std::thread::spawn(move || done(std::fs::read(kept).ok()));
+                }
+            }
         }
     }
 );
@@ -124,12 +133,12 @@ fn fail(completion: &Completion) {
     completion.0.call((Retained::as_ptr(&error).cast_mut(),));
 }
 
-/// Starts dragging `attachment` from `at` (egui points in the window) and returns the drag's
+/// Starts dragging file `part` from `at` (egui points in the window) and returns the drag's
 /// source, which must live until the drop has been written. Returns `None` off the main thread or
 /// without a window.
 pub(crate) fn start(
     loader: &Loader,
-    attachment: &Attachment,
+    part: Part,
     at: egui::Pos2,
     zoom: f32,
 ) -> Option<Retained<Source>> {
@@ -137,8 +146,10 @@ pub(crate) fn start(
     let app = NSApplication::sharedApplication(mtm);
     let window = app.keyWindow().or_else(|| app.mainWindow())?;
     let view = window.contentView()?;
+    let icon = NSWorkspace::sharedWorkspace()
+        .iconForFile(&NSString::from_str(&super::file_name(part.name())));
     let source = Source::alloc(mtm).set_ivars(Promise {
-        attachment: attachment.clone(),
+        part,
         loader: loader.clone(),
     });
     // SAFETY: `NSObject`'s designated initializer.
@@ -155,8 +166,6 @@ pub(crate) fn start(
     // The content view's coordinates start at its bottom left, in points (egui's are zoomed).
     let height = view.frame().size.height;
     let point = NSPoint::new(f64::from(at.x * zoom), height - f64::from(at.y * zoom));
-    let icon = NSWorkspace::sharedWorkspace()
-        .iconForFile(&NSString::from_str(&super::file_name(&attachment.filename)));
     // SAFETY: an `NSImage` is what a dragging item's contents may be.
     unsafe {
         item.setDraggingFrame_contents(

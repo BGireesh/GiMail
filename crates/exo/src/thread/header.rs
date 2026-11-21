@@ -24,10 +24,25 @@ pub(super) const SUBJECT_LINE: f32 = 32.0;
 const SUBJECT: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 21.0, SUBJECT_LINE);
 const SUBJECT_NUDGE: f32 = 3.0;
 const SUBJECT_MARGIN: f32 = 12.0;
-/// The actions, floated right: five 24px buttons with `margin: 11px -4px -3px 0` around their
-/// 16px height. Their margin box is 24px tall, so only the subject's first line starts beside it
-/// and stops at it.
-const ACTIONS_WIDTH: f32 = 120.0;
+/// The actions, floated right: 117px of buttons with `margin: 11px -4px -3px 0` around their
+/// 16px height, so a margin box 113px wide and 24px tall. Only the subject's first line starts
+/// beside it and stops at it, unless the subject is clamped, whose block keeps beside it all the
+/// way down.
+const ACTIONS_MARGIN_BOX: f32 = 113.0;
+/// Mark Done's share of the actions, which a view where conversations can't be marked done (Spam)
+/// leaves out.
+const DONE_WIDTH: f32 = 23.0;
+/// A subject longer than this many UTF-16 units, or than [`LONG`] in a window up to
+/// [`CLAMP_WINDOW`] wide, is a block of at most [`CLAMP_LINES`] lines, the last one cut with an
+/// ellipsis (`-webkit-line-clamp: 4`).
+const VERY_LONG: usize = 140;
+const LONG: usize = 96;
+const CLAMP_WINDOW: f32 = 800.0;
+const CLAMP_LINES: usize = 4;
+const ELLIPSIS: &str = "…";
+/// The chips follow a clamped subject on a line of their own. Without chips, that line is the
+/// empty line of the label's 12px font, 4px tall (measured).
+const CLAMPED_EMPTY_LINE: f32 = 4.0;
 /// The status line: 12px/16px bold, `padding: 8px 0 1px; margin-bottom: 3px`.
 const STATUS: TextStyle = TextStyle::new(Font::new(Family::Sans, 700), 12.0, 16.0);
 const STATUS_HEIGHT: f32 = 8.0 + 16.0 + 1.0 + 3.0;
@@ -94,13 +109,15 @@ impl Control {
     }
 }
 
-/// The header's controls for its `status` line, in tab order.
-pub(super) fn controls(status: Option<&Status>) -> Vec<Control> {
+/// The header's controls for its `status` line, in tab order, Done only where conversations can
+/// be marked done (`archivable`).
+pub(super) fn controls(status: Option<&Status>, archivable: bool) -> Vec<Control> {
     let status =
         matches!(status, Some(Status::Unsubscribe | Status::Action(_))).then_some(Control::Status);
     status
         .into_iter()
-        .chain([Control::Done, Control::Remind, Control::Command])
+        .chain(archivable.then_some(Control::Done))
+        .chain([Control::Remind, Control::Command])
         .collect()
 }
 
@@ -135,9 +152,54 @@ pub(super) fn title(detail: &ThreadDetail) -> &str {
     if subject.is_empty() { "-" } else { subject }
 }
 
-/// Breaks `text` into lines the way the subject wraps: at spaces, the first line stopping at the
-/// floating actions, and the last line leaving room for the subject's right margin.
-fn wrap(ui: &Ui, text: &str, first: f32, full: f32) -> Vec<String> {
+/// `text` cut after each place a line may break: a run of spaces, and a hyphen between letters
+/// (not one before a digit).
+fn break_points(text: &str) -> Vec<&str> {
+    let chars: Vec<(usize, char)> = text.char_indices().collect();
+    let mut pieces = Vec::new();
+    let mut start = 0;
+    for (at, &(offset, c)) in chars.iter().enumerate() {
+        let before = at.checked_sub(1).map(|before| chars[before].1);
+        let after = chars.get(at + 1).map(|&(_, c)| c);
+        let breaks = match c {
+            ' ' => after != Some(' '),
+            '-' => {
+                before.is_some_and(|before| before != ' ')
+                    && after
+                        .is_some_and(|after| !matches!(after, ' ' | '-') && !after.is_ascii_digit())
+            }
+            _ => false,
+        };
+        if breaks {
+            let end = offset + c.len_utf8();
+            pieces.push(&text[start..end]);
+            start = end;
+        }
+    }
+    if start < text.len() {
+        pieces.push(&text[start..]);
+    }
+    pieces
+}
+
+/// How many bytes of `text` fit in `limit` px: at least its first character, for a word broken
+/// anywhere.
+fn fitting(text: &str, limit: f32, width: impl Fn(&str) -> f32) -> usize {
+    let ends: Vec<usize> = text
+        .char_indices()
+        .skip(1)
+        .map(|(at, _)| at)
+        .chain([text.len()])
+        .collect();
+    let fits = ends.partition_point(|&end| width(&text[..end]) <= limit);
+    ends[fits.saturating_sub(1)]
+}
+
+/// Breaks `text` into lines the way the subject wraps: where a line may break, the first line
+/// stopping at the floating actions, and a word too long for a line of its own broken anywhere
+/// (`overflow-wrap: break-word`). The last line leaves room for `margin`, the subject's right
+/// margin while it's inline.
+fn wrap(ui: &Ui, text: &str, first: f32, full: f32, margin: f32) -> Vec<String> {
     let painter = ui.painter();
     let width = |line: &str| {
         SUBJECT
@@ -147,19 +209,31 @@ fn wrap(ui: &Ui, text: &str, first: f32, full: f32) -> Vec<String> {
     };
     let limit = |line: usize| if line == 0 { first } else { full };
     let mut lines: Vec<String> = vec![String::new()];
-    for word in text.split_inclusive(' ') {
+    for piece in break_points(text) {
         let index = lines.len() - 1;
-        let current = &mut lines[index];
-        let candidate = format!("{current}{word}");
-        if current.is_empty() || width(&candidate) <= limit(index) {
-            *current = candidate;
-        } else {
-            lines.push(word.to_owned());
+        let candidate = format!("{}{piece}", lines[index]);
+        if width(&candidate) <= limit(index) {
+            lines[index] = candidate;
+            continue;
+        }
+        if !lines[index].is_empty() {
+            lines.push(String::new());
+        }
+        let mut rest = piece;
+        loop {
+            let index = lines.len() - 1;
+            if width(rest) <= limit(index) {
+                lines[index] = rest.to_owned();
+                break;
+            }
+            let cut = fitting(rest, limit(index), width);
+            lines[index] = rest[..cut].to_owned();
+            rest = &rest[cut..];
+            lines.push(String::new());
         }
     }
-    // The margin after the subject has to fit on its last line too.
     let last = lines.len() - 1;
-    if width(&lines[last]) + SUBJECT_MARGIN > limit(last)
+    if width(&lines[last]) + margin > limit(last)
         && let Some(cut) = lines[last].trim_end().rfind(' ')
     {
         let moved = lines[last][cut + 1..].to_owned();
@@ -169,26 +243,79 @@ fn wrap(ui: &Ui, text: &str, first: f32, full: f32) -> Vec<String> {
     lines
 }
 
+/// Cuts `lines`, `limit` px wide, to [`CLAMP_LINES`], making room on the last one for an
+/// ellipsis by taking as many characters as it needs. Returns whether it cut anything, so that
+/// the ellipsis follows the last line (as a glyph run of its own, unkerned).
+fn clamp(ui: &Ui, lines: &mut Vec<String>, limit: f32) -> bool {
+    if lines.len() <= CLAMP_LINES {
+        return false;
+    }
+    lines.truncate(CLAMP_LINES);
+    let width = |line: &str| {
+        SUBJECT
+            .single_line(ui.painter(), line, Color32::PLACEHOLDER, None)
+            .size()
+            .x
+    };
+    let room = limit - width(ELLIPSIS);
+    let last = &mut lines[CLAMP_LINES - 1];
+    let mut kept = last.trim_end().to_owned();
+    while kept.chars().count() > 1 && width(&kept) > room {
+        kept.pop();
+    }
+    *last = kept;
+    true
+}
+
 /// Where the subject's lines and the label chips after them go.
 struct Arrangement {
     lines: Vec<String>,
+    /// The last line was cut, and an ellipsis follows it.
+    ellipsis: bool,
     /// Each chip's name, line and left edge.
     chips: Vec<(String, usize, f32)>,
-    /// Lines in all, chips included.
-    line_count: usize,
+    /// The subject's and chips' height.
+    height: f32,
 }
 
-fn arrange(ui: &Ui, layout: &Layout, detail: &ThreadDetail, chips: &[String]) -> Arrangement {
+/// Where the subject and `chips` go, beside actions that have Mark Done when `archivable`.
+fn arrange(
+    ui: &Ui,
+    layout: &Layout,
+    detail: &ThreadDetail,
+    chips: &[String],
+    archivable: bool,
+) -> Arrangement {
     let painter = ui.painter();
     let label = layout.label;
-    let float_left = label.width() - ACTIONS_WIDTH + 4.0;
-    let lines = wrap(ui, title(detail), float_left, label.width());
-    let mut line = lines.len() - 1;
-    let end = SUBJECT
-        .single_line(painter, lines[line].trim_end(), Color32::PLACEHOLDER, None)
-        .size()
-        .x;
-    let mut x = label.left() + end + SUBJECT_MARGIN;
+    let title = title(detail);
+    let length = crate::format::measure::utf16_len(title);
+    let clamped = length > VERY_LONG || (length > LONG && layout.window_width() <= CLAMP_WINDOW);
+    let actions = if archivable {
+        ACTIONS_MARGIN_BOX
+    } else {
+        ACTIONS_MARGIN_BOX - DONE_WIDTH
+    };
+    let float_left = label.width() - actions;
+    let (lines, ellipsis) = if clamped {
+        let mut lines = wrap(ui, title, float_left, float_left, 0.0);
+        let cut = clamp(ui, &mut lines, float_left);
+        (lines, cut)
+    } else {
+        // The margin after the subject has to fit on its last line too.
+        let lines = wrap(ui, title, float_left, label.width(), SUBJECT_MARGIN);
+        (lines, false)
+    };
+    let (mut line, mut x) = if clamped {
+        (lines.len(), label.left())
+    } else {
+        let last = lines.len() - 1;
+        let end = SUBJECT
+            .single_line(painter, lines[last].trim_end(), Color32::PLACEHOLDER, None)
+            .size()
+            .x;
+        (last, label.left() + end + SUBJECT_MARGIN)
+    };
     let mut placed = Vec::new();
     for name in chips {
         let width = LabelChip::new(painter, name, false).width();
@@ -204,10 +331,36 @@ fn arrange(ui: &Ui, layout: &Layout, detail: &ThreadDetail, chips: &[String]) ->
         placed.push((name.clone(), line, x));
         x += width + CHIP_MARGIN;
     }
+    let height = match (clamped, placed.last()) {
+        (true, None) => lines.len() as f32 * SUBJECT_LINE + CLAMPED_EMPTY_LINE,
+        (_, Some((_, last, _))) => (last + 1) as f32 * SUBJECT_LINE,
+        (false, None) => lines.len() as f32 * SUBJECT_LINE,
+    };
     Arrangement {
         lines,
+        ellipsis,
         chips: placed,
-        line_count: line + 1,
+        height,
+    }
+}
+
+impl Arrangement {
+    /// Each line's text and where its ellipsis goes, if it has one.
+    fn painted<'a>(
+        &'a self,
+        painter: &egui::Painter,
+    ) -> impl Iterator<Item = (&'a str, Option<f32>)> {
+        let last = self.lines.len() - 1;
+        self.lines.iter().enumerate().map(move |(at, line)| {
+            let text = line.trim_end();
+            let ellipsis = (self.ellipsis && at == last).then(|| {
+                SUBJECT
+                    .single_line(painter, text, Color32::PLACEHOLDER, None)
+                    .size()
+                    .x
+            });
+            (text, ellipsis)
+        })
     }
 }
 
@@ -218,21 +371,22 @@ pub(super) fn subject_rect(
     layout: &Layout,
     detail: &ThreadDetail,
     chips: &[String],
+    archivable: bool,
 ) -> Option<Rect> {
     if detail.subject.trim().is_empty() {
         return None;
     }
-    let arrangement = arrange(ui, layout, detail, chips);
+    let arrangement = arrange(ui, layout, detail, chips, archivable);
     let painter = ui.painter();
+    let width = |text: &str| {
+        SUBJECT
+            .single_line(painter, text, Color32::PLACEHOLDER, None)
+            .size()
+            .x
+    };
     let width = arrangement
-        .lines
-        .iter()
-        .map(|line| {
-            SUBJECT
-                .single_line(painter, line.trim_end(), Color32::PLACEHOLDER, None)
-                .size()
-                .x
-        })
+        .painted(painter)
+        .map(|(text, ellipsis)| ellipsis.map_or(width(text), |at| at + width(ELLIPSIS)))
         .fold(0.0, f32::max);
     let label = layout.label;
     let top = label.top() + SUBJECT_NUDGE + 3.0;
@@ -251,18 +405,19 @@ pub(super) fn height(
     layout: &Layout,
     detail: &ThreadDetail,
     chips: &[String],
+    archivable: bool,
     has_status: bool,
 ) -> f32 {
-    let lines = arrange(ui, layout, detail, chips).line_count as f32;
     PADDING_TOP
-        + lines * SUBJECT_LINE
+        + arrange(ui, layout, detail, chips, archivable).height
         + if has_status { STATUS_HEIGHT } else { 0.0 }
         + PADDING_BOTTOM
 }
 
 /// Paints the header over the messages' top and handles its clicks. Once the messages have
-/// scrolled under it, it gets a background and a bottom border. `typing` says one of the thread's
-/// drafts has the keyboard, and `focus` is the control the keyboard is on.
+/// scrolled under it, it gets a background and a bottom border. Its actions have Mark Done when
+/// `archivable`. `typing` says one of the thread's drafts has the keyboard, and `focus` is the
+/// control the keyboard is on.
 #[expect(
     clippy::too_many_arguments,
     reason = "one header, drawn from the thread view's state; a struct would only rename them"
@@ -272,6 +427,7 @@ pub(super) fn show(
     layout: &Layout,
     detail: &ThreadDetail,
     chips: &[String],
+    archivable: bool,
     height: f32,
     status: Option<&Status>,
     scrolled: bool,
@@ -310,7 +466,8 @@ pub(super) fn show(
     }
     let label = layout.label;
 
-    // The actions float right: Done, Remind Me, ⌘K, then Previous and Next thread.
+    // The actions float right: Done (unless the view can't mark done), Remind Me, ⌘K, then
+    // Previous and Next thread, each in its place either way.
     let id = ui.id().with("thread-header");
     let right = label.right();
     let done = detail.labels.iter().all(|label| label != "INBOX");
@@ -340,7 +497,10 @@ pub(super) fn show(
         (CHEVRON_UP, 40.0, Vec2::splat(16.0), Action::Navigate(-1)),
         (CHEVRON_DOWN, 16.0, Vec2::splat(16.0), Action::Navigate(1)),
     ];
-    for (icon, from_right, size, action) in buttons {
+    for (icon, from_right, size, action) in buttons
+        .into_iter()
+        .filter(|(.., action)| archivable || *action != Action::ToggleDone)
+    {
         let icon_rect = Rect::from_min_size(pos2(right - from_right, label.top() + 11.0), size);
         // A focused button lights its glyph as hovering does.
         let lit = focus.is_some_and(|focus| focus.action(status) == action);
@@ -406,7 +566,7 @@ pub(super) fn show(
     }
 
     // The subject, its star and its labels.
-    let arrangement = arrange(ui, layout, detail, chips);
+    let arrangement = arrange(ui, layout, detail, chips, archivable);
     let starred = detail
         .messages
         .iter()
@@ -422,27 +582,39 @@ pub(super) fn show(
     } else {
         exo_ui::paint_thread_status(painter, status_at, exo_ui::Unread::No, star);
     }
-    for (at, line) in arrangement.lines.iter().enumerate() {
+    for (at, (line, ellipsis)) in arrangement.painted(painter).enumerate() {
         let line_top = label.top() + at as f32 * SUBJECT_LINE;
         // The subject is selectable. Its selection fills the line box, which the subject's
-        // `top: 3px` doesn't move.
-        let galley = SUBJECT.single_line(painter, line.trim_end(), Color32::PLACEHOLDER, None);
+        // `top: 3px` doesn't move. A line broken inside a word joins the next without a space.
+        let galley = SUBJECT.single_line(painter, line, Color32::PLACEHOLDER, None);
+        let broken = at
+            .checked_sub(1)
+            .is_some_and(|previous| !arrangement.lines[previous].ends_with(' '));
         selection.add(
             painter,
             pos2(label.left(), line_top),
             galley,
             SUBJECT_LINE,
             super::SELECTED_SUBJECT,
-            " ",
+            if broken { "" } else { " " },
             palette.text_selection_default,
         );
         SUBJECT.paint_line(
             painter,
             pos2(label.left(), line_top + SUBJECT_NUDGE),
-            line.trim_end(),
+            line,
             palette.text_base_default,
             None,
         );
+        if let Some(x) = ellipsis {
+            SUBJECT.paint_line(
+                painter,
+                pos2(label.left() + x, line_top + SUBJECT_NUDGE),
+                ELLIPSIS,
+                palette.text_base_default,
+                None,
+            );
+        }
     }
     for (name, line, x) in arrangement.chips {
         let chip = LabelChip::new(painter, &name, false);
@@ -459,6 +631,7 @@ pub(super) fn show(
             response.hovered(),
             response.is_pointer_button_down_on(),
         );
+        chip.title(pos2(x, line_top + CHIP_TOP), &response);
         chip.paint(painter, pos2(x, line_top + CHIP_TOP), hover);
         if response.clicked() {
             actions.push(Action::ShowLabel(name.clone()));
@@ -467,7 +640,7 @@ pub(super) fn show(
 
     // The status line under the subject: a button with a tooltip when it does something, plain
     // text otherwise.
-    let status_top = label.top() + arrangement.line_count as f32 * SUBJECT_LINE + 1.0;
+    let status_top = label.top() + arrangement.height + 1.0;
     match status {
         Some(status @ (Status::Unsubscribe | Status::Action(_))) => {
             let (text, keys) = match status {
@@ -788,8 +961,7 @@ pub(super) fn back_button(ui: &Ui, layout: &Layout, hovered: bool, focused: bool
                 BoxShadow::new([0.0, 0.0], 0.5, 0.0, glow(0.4)),
             ],
             // In Carbon, these are the shadows over the button itself. Over the rest of the
-            // gutter, the button takes the gutter's own shadows, without the gutter's inset
-            // highlight.
+            // gutter, the button takes the gutter's own shadows and inset highlight.
             exo_ui::Theme::Carbon if on_button => [
                 BoxShadow::new([0.0, 0.0], 6.0, 0.0, ink(0.2)),
                 BoxShadow::new([0.0, 0.0], 6.0, 0.0, ink(0.25)),
@@ -814,6 +986,25 @@ pub(super) fn back_button(ui: &Ui, layout: &Layout, hovered: bool, focused: bool
             CornerRadius::same(16),
             palette.background_elevated_default,
         );
+        // The gutter's `0 1px 0 0 hsla(0, 0%, 100%, .1) inset` in Carbon: white along the top,
+        // where the button moved 1px down doesn't cover it. Below the middle the moved circle
+        // pokes out, so only the top half is painted.
+        if !focused && !on_button && exo_ui::theme(ui.ctx()) == exo_ui::Theme::Carbon {
+            let top = lifted.with_clip_rect(Rect::from_min_max(
+                circle.min,
+                pos2(circle.right(), circle.center().y),
+            ));
+            top.rect_filled(
+                circle,
+                CornerRadius::same(16),
+                Color32::from_white_alpha(26),
+            );
+            top.rect_filled(
+                circle.translate(vec2(0.0, 1.0)),
+                CornerRadius::same(16),
+                palette.background_elevated_default,
+            );
+        }
     }
     // Only the button itself lights the arrow.
     let color = if on_button {
@@ -829,4 +1020,17 @@ pub(super) fn back_button(ui: &Ui, layout: &Layout, hovered: bool, focused: bool
     );
     // The gutter around it takes the click.
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lines_break_after_spaces_and_hyphens_between_letters() {
+        assert_eq!(
+            break_points("follow-ups  on 2026-11 -x a--b"),
+            ["follow-", "ups  ", "on ", "2026-11 ", "-x ", "a--", "b"]
+        );
+    }
 }

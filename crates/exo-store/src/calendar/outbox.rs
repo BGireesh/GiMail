@@ -78,13 +78,51 @@ pub enum CalendarChange {
     },
     /// Answers an invite on `calendar` from conversation `thread`. `invite` is its event as the
     /// `.ics` describes it. The answer goes to the calendar's event with the invite's UID, which
-    /// is imported first when there's none.
+    /// is imported first when there's none, unless the invitation mail has `links` for a sender
+    /// Calendar doesn't know.
     RespondToInvite {
         calendar: String,
         invite: Event,
         status: String,
         thread: Option<String>,
+        links: Option<InviteLinks>,
     },
+}
+
+/// The links of an invitation from a sender Calendar doesn't know, which it keeps off the
+/// calendar: the one that marks the sender as known, and the answers' own.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InviteLinks {
+    pub mark_sender_known: String,
+    pub accepted: Option<String>,
+    pub declined: Option<String>,
+    pub tentative: Option<String>,
+}
+
+impl InviteLinks {
+    /// The link that answers `status` (`accepted`, `declined`, `tentative`).
+    pub fn answer(&self, status: &str) -> Option<&str> {
+        match status {
+            "accepted" => self.accepted.as_deref(),
+            "declined" => self.declined.as_deref(),
+            "tentative" => self.tentative.as_deref(),
+            _ => None,
+        }
+    }
+}
+
+/// Why Calendar refused a change.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Refusal {
+    /// The event it's for has been deleted or cancelled.
+    Gone,
+    /// An answer to an invite from a sender Calendar doesn't know, whose event it doesn't have
+    /// ([`InviteLinks`]).
+    UnknownSender,
+    /// Only the event's organizer can make it (`forbiddenForNonOrganizer`).
+    NonOrganizer,
+    /// Anything else.
+    Other,
 }
 
 /// Where "this and following" cuts a series: an all-day series at an instance's day, any other
@@ -113,9 +151,8 @@ pub enum CalendarOutcome {
     Sent,
     /// Offline, signed out or rate limited, so the change waits and goes again later.
     Postponed,
-    /// Calendar refused it with this error, so it's given up and its overlay is gone. `gone`
-    /// says whether the event it's for has been deleted or cancelled.
-    Refused { error: String, gone: bool },
+    /// Calendar refused it with this error, so it's given up and its overlay is gone.
+    Refused { error: String, refusal: Refusal },
 }
 
 impl Cut {
@@ -459,25 +496,36 @@ impl Store {
             Error::Offline(_) | Error::Unauthorized(_) => None,
             Error::Gmail(error) => {
                 log::warn!("Calendar refused a change, giving it up: {error}");
-                let gone = matches!(error.status(), Some(404 | 410));
+                let organizer_only = matches!(&error, gmail::Error::Api(api)
+                    if api.errors.iter().any(|item| item.reason == "forbiddenForNonOrganizer"));
+                let refusal = match error.status() {
+                    Some(404 | 410) => Refusal::Gone,
+                    Some(403) if organizer_only => Refusal::NonOrganizer,
+                    _ => Refusal::Other,
+                };
                 return self
                     .dequeue(
                         queued.id,
                         CalendarOutcome::Refused {
                             error: error.to_string(),
-                            gone,
+                            refusal,
                         },
                     )
                     .await;
             }
-            Error::EventCancelled => {
-                log::warn!("giving up an answer to a cancelled event");
+            error @ (Error::EventCancelled | Error::UnknownSender) => {
+                log::warn!("giving up an answer to an invite: {error}");
+                let refusal = if matches!(error, Error::EventCancelled) {
+                    Refusal::Gone
+                } else {
+                    Refusal::UnknownSender
+                };
                 return self
                     .dequeue(
                         queued.id,
                         CalendarOutcome::Refused {
-                            error: Error::EventCancelled.to_string(),
-                            gone: true,
+                            error: error.to_string(),
+                            refusal,
                         },
                     )
                     .await;
@@ -625,6 +673,7 @@ impl Store {
                 calendar,
                 invite,
                 status,
+                links,
                 ..
             } => {
                 let uid = invite.ical_uid.clone().unwrap_or_default();
@@ -633,6 +682,8 @@ impl Store {
                         return Err(Error::EventCancelled);
                     }
                     Some(event) => event,
+                    // Calendar won't take an unknown sender's event, which the mail answers.
+                    None if links.is_some() => return Err(Error::UnknownSender),
                     None => self.import_event(calendar, invite).await?,
                 };
                 self.respond(

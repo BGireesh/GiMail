@@ -38,8 +38,16 @@ static SRCSET_URL: LazyLock<Regex> =
 
 /// `render`'s body as it prints: the markup that goes inside the message's shadow root. It has its
 /// quoted part when `show_quoted` (the `…` itself doesn't print), and loads nothing remote when
-/// `block_remote_content`.
-pub fn printable_body(render: &Render, show_quoted: bool, block_remote_content: bool) -> String {
+/// `block_remote_content`. A body shown shrunk to fit its column ([`BodyView::zoom`]) prints
+/// shrunk as much, `zoom`.
+///
+/// [`BodyView::zoom`]: crate::BodyView::zoom
+pub fn printable_body(
+    render: &Render,
+    show_quoted: bool,
+    block_remote_content: bool,
+    zoom: f32,
+) -> String {
     let options = ViewOptions {
         theme: Theme::Light,
         show_quoted,
@@ -62,7 +70,7 @@ pub fn printable_body(render: &Render, show_quoted: bool, block_remote_content: 
     if let Some(style) = &mut printed.body_attributes.style {
         *style = rewrite_css(style, block_remote_content);
     }
-    view::shadow_root(&printed, show_quoted, &root_class, "", PRINT_CSS)
+    view::shadow_root(&printed, show_quoted, &root_class, "", PRINT_CSS, zoom)
 }
 
 /// `html` (a fragment) with its remote URLs rewritten, and with `block`, its remote images
@@ -224,7 +232,7 @@ mod tests {
             },
             ..Render::default()
         };
-        let folded = printable_body(&render, false, false);
+        let folded = printable_body(&render, false, false, 1.0);
         assert!(
             folded.contains("ShadowHTML Theme-light Theme-snow"),
             "{folded}"
@@ -241,10 +249,18 @@ mod tests {
             folded.ends_with(&format!("<style>{PRINT_CSS}</style></div></div>")),
             "print rules come last"
         );
-        let open = printable_body(&render, true, false);
+        let open = printable_body(&render, true, false, 1.0);
         assert!(
             open.contains("Old") && open.contains("Exo-quoting-ellipsis isOpen"),
             "{open}"
+        );
+        assert!(!open.contains("zoom"), "{open}");
+        let shrunk = printable_body(&render, false, false, 0.8);
+        assert!(
+            shrunk.contains(
+                "ShadowWrapper styleQuotedContent styleUnquotedContent\" style=\"zoom: 0.8\""
+            ),
+            "shrunk as on screen: {shrunk}"
         );
     }
 }

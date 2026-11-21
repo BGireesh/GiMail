@@ -358,6 +358,9 @@ pub struct DraftReport {
     pub failed: Vec<DraftFailure>,
     /// Some draft is waiting for the network.
     pub offline: bool,
+    /// Held sends whose write or send Gmail didn't take this time, for a reason other than the
+    /// network, which are tried again later.
+    pub retrying: Vec<String>,
     /// When to push again: a backoff ending, or a held send coming due.
     pub retry_at: Option<Timestamp>,
     /// A held send's reminder went on its thread, and its label is queued for a flush.
@@ -851,8 +854,13 @@ impl Store {
             }
             let id = row.id.clone();
             let failures = row.failures;
+            let held = row.send_at.is_some();
             if let Err(failure) = inner.push(row, now, &mut report).await? {
-                report.offline |= matches!(failure, Failure::Offline(_));
+                let offline = matches!(failure, Failure::Offline(_));
+                report.offline |= offline;
+                if held && !offline {
+                    report.retrying.push(id.clone());
+                }
                 let at = match failure {
                     Failure::Throttled(until) | Failure::SendingLimited(until) => until,
                     _ => inner.api.postpone(failures),

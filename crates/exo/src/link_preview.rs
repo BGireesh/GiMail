@@ -1,5 +1,5 @@
 //! The hovered link's URL at the window's bottom-left. It's elided to fit, shows the full URL
-//! after 1.5s, and fades out over 1.5s once the pointer leaves the link.
+//! after 1.5s, and fades out over 1.5s once the pointer leaves the link, or find opens over it.
 
 use egui::{Color32, CornerRadius, Painter, Rect, pos2, vec2};
 use exo_ui::{BoxShadow, Family, Font, TextStyle, motion::CubicBezier};
@@ -26,12 +26,27 @@ pub struct LinkPreview {
     /// When the pointer arrived on it, or left it.
     since: f64,
     visible: bool,
+    /// The link it was hidden over, which shows it again only once the pointer comes back to it.
+    hidden_over: Option<String>,
 }
 
 impl LinkPreview {
+    /// Starts fading out, as when the pointer leaves the link, though it hasn't (find opened).
+    pub fn hide(&mut self, now: f64) {
+        if self.visible {
+            self.visible = false;
+            self.since = now;
+            self.hidden_over = Some(self.url.clone());
+        }
+    }
+
     /// Shows `hovered` (or starts fading out without one) and paints the preview at the bottom
     /// left of `window`.
     pub fn show(&mut self, painter: &Painter, window: Rect, hovered: Option<&str>, now: f64) {
+        if self.hidden_over.as_deref() != hovered {
+            self.hidden_over = None;
+        }
+        let hovered = hovered.filter(|_| self.hidden_over.is_none());
         match hovered {
             Some(url) if !self.visible || url != self.url => {
                 self.url = url.to_owned();

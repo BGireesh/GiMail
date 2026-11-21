@@ -316,7 +316,7 @@ pub fn register(commands: &mut Commands<Action>, settings: &Settings, visible_sp
         Command::new(
             "SPLIT_INBOX_LIBRARY",
             "Split Inbox Library",
-            Action::Settings(settings::Action::SplitLibrary),
+            Action::Settings(settings::Action::SplitLibrary { role: None }),
         )
         .aliases(["Split Inbox Templates"])
         .icon("data/settings")

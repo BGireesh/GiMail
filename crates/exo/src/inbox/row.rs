@@ -137,6 +137,8 @@ pub(super) enum Hit {
     /// A card in the strip, for the file at this index, to preview or, with its download button, to
     /// save.
     File { index: usize, download: bool },
+    /// The pointer is over the strip's card for the file at this index, and nothing was clicked.
+    FileHovered(usize),
     /// The strip's arrow in that direction (-1, 1).
     Page(isize),
 }
@@ -297,8 +299,12 @@ pub(super) fn paint(
     for label in &thread.labels {
         let chip = LabelChip::new(painter, label, state.selected);
         let width = chip.width();
-        // A label's clickable fills the row's height, so the whole strip is clickable.
-        let strip = Rect::from_min_size(pos2(x, rect.top()), vec2(width, rect.height()));
+        // A label's clickable fills the first line's 36px, so the whole strip is clickable but a
+        // search result's file cards under it aren't covered.
+        let strip = Rect::from_min_size(
+            pos2(x, rect.top()),
+            vec2(width, rect.height().min(super::ROW_HEIGHT)),
+        );
         let response = ui.interact(strip, id.with(("label", label)), Sense::click());
         let hover = chip_hover(
             ui.ctx(),
@@ -306,6 +312,7 @@ pub(super) fn paint(
             response.hovered(),
             response.is_pointer_button_down_on(),
         );
+        chip.title(pos2(x, first_row), &response);
         chip.paint(painter, pos2(x, first_row), hover);
         if response.clicked() {
             hit = Some(Hit::Label(label.clone()));
@@ -429,6 +436,7 @@ fn strip(
     )
     .floor();
     let mut hit = None;
+    let mut over = None;
     for (index, file) in thread.files.iter().enumerate() {
         let card = Rect::from_min_size(
             pos2(
@@ -468,6 +476,7 @@ fn strip(
         .paint(ui, &clip, card);
         if hovered {
             ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
+            over = Some(index);
         }
         if download.clicked() && hovered {
             hit = Some(Hit::File {
@@ -608,7 +617,7 @@ fn strip(
             }
         }
     }
-    hit
+    hit.or(over.map(Hit::FileHovered))
 }
 
 /// A strip button's chevron: the 8×14 path of `-left-chevron-icon` / `-right-chevron-icon`, a
@@ -1072,16 +1081,7 @@ fn actions(
             _ => Rect::from_min_size(button.min + vec2(5.0, 5.0), Vec2::splat(14.0)),
         };
         let response = if done && matches!(action, Hit::Done) {
-            let response = ui
-                .interact(button, id.with(icon), Sense::click())
-                .on_hover_cursor(egui::CursorIcon::PointingHand);
-            let color = if response.hovered() {
-                Color32::from_rgb(0x5f, 0x74, 0xaa)
-            } else {
-                exo_ui::palette(ui.ctx()).actions_done_default
-            };
-            exo_ui::paint_icon_stroked(ui, icon, exo_ui::pixel_snap(icon_rect), color, 2.0);
-            response
+            done_check(ui, id.with(icon), button, icon_rect)
         } else if icon == REMIND_SET_ICON {
             IconButton::new(icon)
                 .colors(
@@ -1138,7 +1138,22 @@ fn actions(
 }
 
 /// The done check.
-const DONE_ICON: &str = "legacy/DEPRECATED_threadActionsDone";
+pub(super) const DONE_ICON: &str = "legacy/DEPRECATED_threadActionsDone";
+
+/// The check of a done selection, which is Mark not Done, in `button` with its glyph at `icon`:
+/// `#8892b9` and 2 units wide, `#5f74aa` while hovered.
+pub(super) fn done_check(ui: &Ui, id: egui::Id, button: Rect, icon: Rect) -> egui::Response {
+    let response = ui
+        .interact(button, id, Sense::click())
+        .on_hover_cursor(egui::CursorIcon::PointingHand);
+    let color = if response.hovered() {
+        Color32::from_rgb(0x5f, 0x74, 0xaa)
+    } else {
+        exo_ui::palette(ui.ctx()).actions_done_default
+    };
+    exo_ui::paint_icon_stroked(ui, DONE_ICON, exo_ui::pixel_snap(icon), color, 2.0);
+    response
+}
 /// The clock, bolder when a reminder is set.
 pub(crate) const REMIND_ICON: &str = "legacy/DEPRECATED_threadActionsRemind-unset";
 pub(crate) const REMIND_SET_ICON: &str = "legacy/DEPRECATED_threadActionsRemind";

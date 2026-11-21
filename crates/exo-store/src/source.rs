@@ -4,29 +4,82 @@
 
 use std::fmt;
 
+use futures::future;
 use serde::de::{Deserialize, Deserializer, MapAccess, SeqAccess, Visitor};
 
-use crate::{error::Result, parse::unescape_html, quota::Lane, store::Store};
+use crate::{
+    error::Result, parse::unescape_html, quota::Lane, store::Store, sync::MESSAGES_AT_ONCE,
+};
 
 impl Store {
     /// Thread `id`'s source for the raw source viewer, from `threads.get` (format `full`, 10
-    /// units).
+    /// units). A thread too large for one answer is its `format=minimal` answer with each message
+    /// in full from `messages.get`, as sync fetches it.
     ///
     /// # Errors
     /// [`crate::Error::Offline`] without a network; [`crate::Error::Gmail`] when Gmail refuses.
     pub async fn thread_source(&self, id: &str) -> Result<String> {
-        let mut thread: Json = self
-            .inner
-            .api
-            .call(Lane::Act, 3, |gmail| {
-                gmail
-                    .thread(id, gmail::Format::Full, &[])
-                    .returning::<Json>()
+        let api = &self.inner.api;
+        let get = |format| {
+            api.call(Lane::Act, ATTEMPTS, move |gmail| {
+                gmail.thread(id, format, &[]).returning::<Json>()
             })
-            .await?;
+        };
+        let mut thread = match get(gmail::Format::Full).await {
+            Err(failure) if failure.is_too_large() => {
+                let mut thread = get(gmail::Format::Minimal).await?;
+                let mut messages = Vec::new();
+                for chunk in message_ids(&mut thread).chunks(MESSAGES_AT_ONCE) {
+                    messages.extend(
+                        future::try_join_all(chunk.iter().map(|message| {
+                            api.call(Lane::Act, ATTEMPTS, |gmail| {
+                                gmail
+                                    .message(message, gmail::Format::Full, &[])
+                                    .returning::<Json>()
+                            })
+                        }))
+                        .await?,
+                    );
+                }
+                if let Some(slot) = messages_mut(&mut thread) {
+                    *slot = messages;
+                }
+                thread
+            }
+            fetched => fetched?,
+        };
         normalize(&mut thread);
         Ok(thread.to_string())
     }
+}
+
+/// Tries per call, since someone is waiting.
+const ATTEMPTS: u32 = 3;
+
+/// A thread's `messages`.
+fn messages_mut(thread: &mut Json) -> Option<&mut Vec<Json>> {
+    let Json::Object(members) = thread else {
+        return None;
+    };
+    members.iter_mut().find_map(|(key, value)| match value {
+        Json::Array(messages) if key == "messages" => Some(messages),
+        _ => None,
+    })
+}
+
+/// The `id` of each of a thread's messages.
+fn message_ids(thread: &mut Json) -> Vec<String> {
+    let messages = messages_mut(thread).map_or(&[][..], |messages| messages.as_slice());
+    messages
+        .iter()
+        .filter_map(|message| match message {
+            Json::Object(fields) => fields.iter().find_map(|(key, value)| match value {
+                Json::String(id) if key == "id" => Some(id.clone()),
+                _ => None,
+            }),
+            _ => None,
+        })
+        .collect()
 }
 
 /// JSON with its members in the order they came, which `serde_json::Value` doesn't keep.

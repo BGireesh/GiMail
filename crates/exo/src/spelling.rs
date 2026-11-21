@@ -30,7 +30,7 @@ impl Mail {
         let misspelling = menu.misspelling.as_ref();
         let target = Target {
             link: menu.link.clone(),
-            image: None,
+            image: menu.image.as_ref().map(|image| image.src.clone()),
             editable: Some(Editable {
                 misspelled: misspelling.map(|word| word.word.clone()),
                 suggestions: misspelling
@@ -81,6 +81,7 @@ impl Mail {
             selection: field.selected,
             selection_baseline: field.baseline,
             text_size: field.text_size,
+            image: None,
         };
         let Some(choice) = self.editable_menu(&menu) else {
             return;
@@ -202,7 +203,7 @@ pub(crate) fn field_choice(
 }
 
 /// The items an editor and a field do alike: what the keys would do for the widget with the
-/// keyboard, Look Up, and links to open.
+/// keyboard, Look Up, links to open, and an image's.
 fn shared_choice(ctx: &egui::Context, menu: &ContextMenu, choice: Choice) -> Done {
     match choice {
         Choice::LookUp => {
@@ -225,12 +226,25 @@ fn shared_choice(ctx: &egui::Context, menu: &ContextMenu, choice: Choice) -> Don
             ctx.input_mut(|input| input.events.push(event));
         }
         Choice::CopyText(text) => ctx.copy_text(text),
+        Choice::CopyImage => {
+            if let Some(image) = menu.image.as_ref().and_then(|image| decoded(&image.file)) {
+                crate::clipboard::write_image(ctx, &image);
+            }
+        }
         Choice::OpenLink(url) | Choice::Search(url) => return Done::Open(url),
-        // Editable menus offer no image's items. The spelling ones are each widget's.
-        Choice::CopyImage
-        | Choice::Correct(_)
-        | Choice::AddToDictionary(_)
-        | Choice::IgnoreSpelling(_) => {}
+        // The spelling items are each widget's.
+        Choice::Correct(_) | Choice::AddToDictionary(_) | Choice::IgnoreSpelling(_) => {}
     }
     Done::Nothing
+}
+
+/// An image file's picture at its own size (the first frame of an animation), as the clipboard
+/// takes it.
+fn decoded(file: &[u8]) -> Option<exo_mail::Image> {
+    let rgba = image::load_from_memory(file).ok()?.into_rgba8();
+    Some(exo_mail::Image {
+        width: rgba.width(),
+        height: rgba.height(),
+        rgba: rgba.into_raw(),
+    })
 }

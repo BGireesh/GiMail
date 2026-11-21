@@ -40,6 +40,10 @@ struct Args {
     /// `picture`), served at `/__mock/photo/…`. Without it, it has Google's generated avatar.
     #[arg(long)]
     photo: bool,
+    /// Give the saved contacts and the directory's colleagues photos of their own, served at
+    /// `/__mock/photo/…`. Without it, they have Google's generated avatar.
+    #[arg(long)]
+    contact_photos: bool,
 }
 
 /// Instants without a zone keep the default zone (America/New_York).
@@ -61,6 +65,7 @@ async fn main() -> anyhow::Result<()> {
         latency: std::time::Duration::from_millis(args.latency),
         quota: args.quota,
         photo: args.photo,
+        contact_photos: args.contact_photos,
         ..gmail_mock::Config::default()
     };
     if let Some(now) = args.now {

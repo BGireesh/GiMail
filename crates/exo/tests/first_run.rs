@@ -11,6 +11,8 @@ use support::{Fixture, start_new_account};
 const CALENDAR_ROW: egui::Pos2 = pos2(300.0, 345.0);
 const CALENDAR_SWITCH: egui::Pos2 = pos2(523.0, 355.0);
 const CONTINUE: egui::Pos2 = pos2(341.0, 755.0);
+/// The step's title.
+const TITLE: egui::Pos2 = pos2(200.0, 125.0);
 
 fn calendar_on(app: &Fixture) -> bool {
     app.mail()
@@ -123,6 +125,30 @@ fn the_welcome_splash_gives_way_to_account_setup() {
     assert!(
         !mail.account().settings().do_show_tutorial
             && mail.account().device_settings().account_setup_pending
+    );
+}
+
+#[test]
+fn space_on_the_content_scrolls_it_a_page_in_a_short_window() {
+    let mut app = setup("account-setup-space");
+    app.harness.set_size(egui::vec2(1280.0, 440.0));
+    app.settle();
+    assert_eq!(app.mail().account_setup_scroll(), Some(0.0));
+    // A click on the title focuses the content, as a click anywhere on the page does.
+    app.click(TITLE);
+    app.key(Key::Space);
+    app.wait(0.2);
+    assert!(app.mail().account_setup_scroll() > Some(0.0), "a page down");
+    app.press(Key::Space, egui::Modifiers::SHIFT);
+    app.wait(0.2);
+    assert_eq!(
+        app.mail().account_setup_scroll(),
+        Some(0.0),
+        "⇧Space goes back"
+    );
+    assert!(
+        app.mail().account_setup_open() && calendar_on(&app),
+        "and it pressed nothing"
     );
 }
 

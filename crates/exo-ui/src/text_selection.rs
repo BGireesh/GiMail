@@ -177,6 +177,75 @@ impl TextSelection {
         )
     }
 
+    /// A right-click at `at`, as a Mac takes it: on the selection, the selection stays; on a word
+    /// of the text, that word is selected; elsewhere on the text, nothing is. Off the text it
+    /// does nothing.
+    pub fn select_word_at(&mut self, at: Pos2) {
+        let Some(index) = self
+            .pieces
+            .iter()
+            .position(|piece| piece.bounds().contains(at))
+        else {
+            return;
+        };
+        let piece = &self.pieces[index];
+        let under = piece.char_under(at);
+        if self
+            .range_in(index, piece)
+            .is_some_and(|(from, to)| from <= under && under < to)
+        {
+            return;
+        }
+        let chars: Vec<char> = piece.galley.text().chars().collect();
+        let is_word = |at: usize| {
+            chars
+                .get(at)
+                .is_some_and(|ch| ch.is_alphanumeric() || matches!(ch, '\'' | '’'))
+        };
+        if !is_word(under) {
+            return self.clear();
+        }
+        let start = (0..under)
+            .rev()
+            .take_while(|at| is_word(*at))
+            .last()
+            .unwrap_or(under);
+        let end = (under..chars.len())
+            .take_while(|at| is_word(*at))
+            .last()
+            .map_or(under, |last| last + 1);
+        (self.anchor, self.focus) = (Some((index, start)), Some((index, end)));
+    }
+
+    /// Where the selection starts on screen, on its text's baseline, and that text's size, for
+    /// Look Up's popover to line up with it.
+    pub fn start(&self) -> Option<(Pos2, f32)> {
+        let (start, _) = self.ordered()?;
+        let piece = self.pieces.get(start.0)?;
+        let galley = &piece.galley;
+        let mut before = 0;
+        let row = galley
+            .rows
+            .iter()
+            .position(|row| {
+                before += row.char_count_including_newline().0;
+                start.1 < before
+            })
+            .unwrap_or(galley.rows.len().saturating_sub(1));
+        let glyph = galley.rows.first()?.glyphs.first()?;
+        // CSS puts the baseline half the leading below the line box's top, then the ascent.
+        let baseline = piece.origin.y
+            + row as f32 * piece.line_height
+            + (piece.line_height + 2.0 * glyph.font_ascent - glyph.font_height) / 2.0;
+        let x = piece.origin.x
+            + galley
+                .pos_from_cursor(egui::text::CCursor::new(start.1))
+                .min
+                .x;
+        let size = galley.job.sections.first()?.format.font_id.size;
+        Some((pos2(x, baseline), size))
+    }
+
     /// Clears the selection.
     pub fn clear(&mut self) {
         (self.anchor, self.focus) = (None, None);
@@ -229,6 +298,23 @@ impl Piece {
             + rows.get(row).map_or(0, |placed| {
                 placed.char_at(at.x - self.origin.x - placed.pos.x).0
             })
+    }
+
+    /// The character under `at`: the one before the boundary [`Self::char_at`] finds when `at` is
+    /// left of that boundary.
+    fn char_under(&self, at: Pos2) -> usize {
+        let index = self.char_at(at);
+        let boundary = self.origin.x
+            + self
+                .galley
+                .pos_from_cursor(egui::text::CCursor::new(index))
+                .min
+                .x;
+        if index > 0 && at.x < boundary {
+            index - 1
+        } else {
+            index
+        }
     }
 
     /// The selection's boxes for characters `from..to`, one per line box they're on.

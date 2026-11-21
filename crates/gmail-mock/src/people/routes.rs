@@ -11,6 +11,7 @@ use serde_json::{Map, Value};
 use crate::error::{Failure, Result};
 use crate::http::extract::Params;
 use crate::oauth::Identity;
+use crate::people::{Directory, Kind};
 use crate::world::App;
 
 type Shared = State<Arc<App>>;
@@ -93,29 +94,39 @@ fn masked(person: &Person, fields: &[String]) -> Value {
     Value::Object(kept)
 }
 
-/// Pagination and sync shared by the list endpoints: `(page, nextPageToken, nextSyncToken)`.
+/// Pagination and sync shared by the list endpoints: `(page, nextPageToken, nextSyncToken)`. With a
+/// `syncToken`, the pages hold what changed on `kind` since it, deleted people with
+/// `metadata.deleted`.
 fn list(
-    people: &[Person],
-    revision: u64,
+    directory: &Directory,
+    kind: Kind,
     params: &Params,
     fields: &[String],
 ) -> Result<(Vec<Value>, Option<String>, Option<String>)> {
-    let sync_token = format!("^MockSync{revision}");
-    if let Some(token) = params.text("syncToken") {
-        if token != sync_token {
-            let mut failure = Failure::failed_precondition(
-                "Sync token is expired. Clear local cache and retry call without the sync token.",
-            );
-            failure.error.details = vec![serde_json::json!({
-                "@type": "type.googleapis.com/google.rpc.ErrorInfo",
-                "reason": "EXPIRED_SYNC_TOKEN",
-                "domain": "people.googleapis.com",
-            })];
-            return Err(failure);
+    let sync_token = format!("^MockSync{}", directory.revision);
+    let changes;
+    let people = match params.text("syncToken") {
+        Some(token) => {
+            let since = token
+                .strip_prefix("^MockSync")
+                .and_then(|revision| revision.parse::<u64>().ok())
+                .filter(|&since| (directory.floor..=directory.revision).contains(&since));
+            let Some(since) = since else {
+                let mut failure = Failure::failed_precondition(
+                    "Sync token is expired. Clear local cache and retry call without the sync token.",
+                );
+                failure.error.details = vec![serde_json::json!({
+                    "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+                    "reason": "EXPIRED_SYNC_TOKEN",
+                    "domain": "people.googleapis.com",
+                })];
+                return Err(failure);
+            };
+            changes = directory.changes_since(kind, since);
+            &changes[..]
         }
-        // Nothing changes between revisions, so an up-to-date token sees no changes.
-        return Ok((Vec::new(), None, Some(sync_token)));
-    }
+        None => directory.list(kind),
+    };
     let size = params
         .u32("pageSize")?
         .filter(|&n| n > 0)
@@ -134,7 +145,8 @@ fn list(
         .map(|person| masked(person, fields))
         .collect();
     let next = (offset + size < people.len()).then(|| (offset + size).to_string());
-    let sync = (next.is_none() && params.bool("requestSyncToken")?).then_some(sync_token);
+    let asked = params.bool("requestSyncToken")? || params.text("syncToken").is_some();
+    let sync = (next.is_none() && asked).then_some(sync_token);
     Ok((page, next, sync))
 }
 
@@ -191,7 +203,7 @@ async fn connections(State(app): Shared, params: Params) -> Reply {
     let fields = mask(&params, "personFields")?;
     let world = app.lock();
     let people = &world.people;
-    let (page, next, sync) = list(&people.contacts, people.revision, &params, &fields)?;
+    let (page, next, sync) = list(people, Kind::Contacts, &params, &fields)?;
     let total = Value::from(people.contacts.len());
     let body = Map::from_iter([
         ("totalPeople".into(), total.clone()),
@@ -204,7 +216,7 @@ async fn other_contacts(State(app): Shared, params: Params) -> Reply {
     let fields = mask(&params, "readMask")?;
     let world = app.lock();
     let people = &world.people;
-    let (page, next, sync) = list(&people.other_contacts, people.revision, &params, &fields)?;
+    let (page, next, sync) = list(people, Kind::OtherContacts, &params, &fields)?;
     let body = Map::from_iter([("totalSize".into(), Value::from(people.other_contacts.len()))]);
     respond(body, page, "otherContacts", next, sync)
 }
@@ -219,7 +231,7 @@ async fn directory(State(app): Shared, params: Params) -> Reply {
     }
     let world = app.lock();
     let people = &world.people;
-    let (page, next, sync) = list(&people.directory, people.revision, &params, &fields)?;
+    let (page, next, sync) = list(people, Kind::Directory, &params, &fields)?;
     respond(Map::new(), page, "people", next, sync)
 }
 

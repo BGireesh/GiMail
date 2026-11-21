@@ -1,6 +1,6 @@
 //! Label chips: a label's name, lower-cased, on a colored pill. The color comes from hashing the
 //! name, not from Gmail's label color. Classic's eight colors take white text, or `#27292d` in
-//! Carbon.
+//! Carbon. The name as it is titles the chip, so the system's tooltip shows a long one in full.
 
 use egui::{
     Color32, CornerRadius, Painter, Pos2, Rect, pos2,
@@ -67,6 +67,7 @@ pub fn label_colors(name: &str, theme: Theme) -> (Color32, Color32) {
 
 /// A label chip, laid out and ready to paint.
 pub struct LabelChip {
+    name: String,
     job: LayoutJob,
     fill: Color32,
     width: f32,
@@ -88,12 +89,25 @@ impl LabelChip {
         // maximum and the text ends in an ellipsis inside it.
         let width = (painter.layout_job(job.clone()).size().x + 2.0 * PADDING_X).min(MAX_WIDTH);
         job.wrap = TextWrapping::truncate_at_width(MAX_WIDTH - 2.0 * PADDING_X);
-        Self { job, fill, width }
+        Self {
+            name: name.to_owned(),
+            job,
+            fill,
+            width,
+        }
     }
 
     /// The chip's width, padding included.
     pub fn width(&self) -> f32 {
         self.width
+    }
+
+    /// Titles the chip at `top_left` with the label's name ([`crate::title`]). `response` is the
+    /// chip's clickable, which can be bigger than the chip, so the title is the chip's alone.
+    pub fn title(&self, top_left: Pos2, response: &egui::Response) {
+        let rect = Rect::from_min_size(top_left, vec2(self.width, LABEL_CHIP_HEIGHT));
+        let hovered = response.hover_pos().is_some_and(|at| rect.contains(at));
+        crate::title(&response.ctx, rect, &self.name, hovered);
     }
 
     /// Paints the chip with its top left at `top_left`. `hover` (0–1) is the hover shadow's

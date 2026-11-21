@@ -9,6 +9,8 @@ mod history;
 
 pub use arrivals::Arrival;
 pub use backfill::RECENT_THREADS;
+#[cfg(test)]
+pub(crate) use backfill::WARMED;
 pub(crate) use backfill::{LIST_CAP, selection};
 
 use std::collections::{HashMap, HashSet};
@@ -35,11 +37,13 @@ use crate::view::{Identity, Router};
 pub(crate) const ATTEMPTS: u32 = 5;
 /// The largest `text/html` body Gmail moved to an attachment that's put back in its part.
 const MAX_INLINED_BODY: u32 = 5 * 1024 * 1024;
+/// `messages.get` calls in flight at once for a thread fetched message by message.
+pub(crate) const MESSAGES_AT_ONCE: usize = 10;
 /// The headers a message's row reads (for lists, splits, the search index, the contact pane and
 /// replies), which are all that `format=metadata` asks for. `Content-Type` stands in for the
 /// top-level MIME type if Gmail leaves `mimeType` out, and `Content-Class` marks Exchange's
 /// invites ([`needs_structure`]).
-pub(crate) const ROW_HEADERS: [&str; 15] = [
+pub(crate) const ROW_HEADERS: [&str; 16] = [
     "From",
     "To",
     "Cc",
@@ -55,6 +59,8 @@ pub(crate) const ROW_HEADERS: [&str; 15] = [
     "Delivered-To",
     "Content-Type",
     "Content-Class",
+    // What Gmail found of the sender's DMARC, which a brand's logo needs.
+    "Authentication-Results",
 ];
 /// Top-level MIME types whose message holds no file or invite, so its row needs none of its
 /// structure. Anything else (`multipart/mixed`, `multipart/related`, `text/calendar`, …) may.
@@ -404,8 +410,8 @@ impl Inner {
     }
 }
 
-/// `threads.get` in full for `lane`, with large HTML bodies inlined. `None` when the thread
-/// is gone.
+/// `threads.get` in full for `lane`, with large HTML bodies inlined. A thread too large for one
+/// answer comes [message by message](fetch_by_message). `None` when the thread is gone.
 pub(crate) async fn fetch_thread(
     api: &Api,
     lane: Lane,
@@ -415,12 +421,54 @@ pub(crate) async fn fetch_thread(
     let fetched = api
         .call(lane, attempts, |gmail| gmail.thread(id, Format::Full, &[]))
         .await;
-    let Some(mut thread) = found(fetched)? else {
-        return Ok(None);
+    let mut thread = match fetched {
+        Err(failure) if failure.is_too_large() => {
+            return fetch_by_message(api, lane, attempts, id).await;
+        }
+        fetched => match found(fetched)? {
+            Some(thread) => thread,
+            None => return Ok(None),
+        },
     };
     for message in &mut thread.messages {
         inline_bodies(api, lane, attempts, message).await?;
     }
+    Ok(Some(thread))
+}
+
+/// Thread `id` as [`fetch_thread`] has it, for a thread Gmail won't send in one answer: its
+/// message ids (`format=minimal`), then each message in full, [`MESSAGES_AT_ONCE`] at a time.
+/// A message gone meanwhile is left out.
+async fn fetch_by_message(
+    api: &Api,
+    lane: Lane,
+    attempts: u32,
+    id: &str,
+) -> Result<Option<gmail::Thread>, Failure> {
+    let fetched = api
+        .call(lane, attempts, |gmail| {
+            gmail.thread(id, Format::Minimal, &[])
+        })
+        .await;
+    let Some(mut thread) = found(fetched)? else {
+        return Ok(None);
+    };
+    let ids: Vec<String> = thread
+        .messages
+        .iter()
+        .filter_map(|message| message.id.clone())
+        .collect();
+    let mut messages = Vec::with_capacity(ids.len());
+    for chunk in ids.chunks(MESSAGES_AT_ONCE) {
+        let fetched = future::try_join_all(
+            chunk
+                .iter()
+                .map(|id| fetch_message(api, lane, attempts, id)),
+        )
+        .await?;
+        messages.extend(fetched.into_iter().flatten());
+    }
+    thread.messages = messages;
     Ok(Some(thread))
 }
 

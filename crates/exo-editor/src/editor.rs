@@ -176,6 +176,26 @@ fn autolink_element(href: &str) -> Element {
     Element::with("a", &[("href", href), ("target", "_blank")])
 }
 
+/// The `href` a link to `url` gets: `url`, or `http://` and `url` without a scheme. `None` for a
+/// `chrome://` URL, which is ignored, and a `data:` URL, which the sanitizer would strip from the
+/// draft.
+fn link_href(url: &str) -> Option<String> {
+    if url.starts_with("chrome://") || url.starts_with("chrome-extension://") {
+        return None;
+    }
+    const SCHEMES: [&str; 13] = [
+        "about:", "data:", "file:///", "ftp://", "http://", "https://", "irc://", "mailto:",
+        "ssh://", "tel:", "ws://", "wss://", "chrome:",
+    ];
+    let href = if SCHEMES.iter().any(|scheme| url.starts_with(scheme)) {
+        url.to_owned()
+    } else {
+        format!("http://{url}")
+    };
+    // The one scheme on the list that the sanitizer takes off a link.
+    (!href.starts_with("data:")).then_some(href)
+}
+
 /// Options that change what typing does, and where the editor is.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Settings {
@@ -1129,22 +1149,9 @@ impl Editor {
         if url.is_empty() {
             return self.remove_link();
         }
-        if url.starts_with("chrome://") || url.starts_with("chrome-extension://") {
+        let Some(href) = link_href(url) else {
             return;
-        }
-        const SCHEMES: [&str; 13] = [
-            "about:", "data:", "file:///", "ftp://", "http://", "https://", "irc://", "mailto:",
-            "ssh://", "tel:", "ws://", "wss://", "chrome:",
-        ];
-        let href = if SCHEMES.iter().any(|scheme| url.starts_with(scheme)) {
-            url.to_owned()
-        } else {
-            format!("http://{url}")
         };
-        // The one scheme on the list DOMPurify takes off a link.
-        if href.starts_with("data:") {
-            return;
-        }
         self.undo.save(&self.doc, self.selection);
         if self.selection.is_collapsed() {
             let text = plain(
@@ -1160,6 +1167,70 @@ impl Editor {
             Some(Element::with("a", &[("href", &href), ("target", "_blank")])),
             |mark| mark.is("a"),
         );
+    }
+
+    /// `url` pasted over a selection that's exactly a link's text, white space around it aside.
+    /// The link goes to `url`, and its text shows the new URL as it showed the old one (the whole
+    /// URL, its origin, or its host and some of what follows), in one undo step. Text that didn't
+    /// show its URL is only linked anew. Returns whether the link was rewritten.
+    fn relink(&mut self, url: &str) -> bool {
+        let (start, end) = (self.selection.start(), self.selection.end());
+        if start.block != end.block {
+            return false;
+        }
+        let index = start.block;
+        let block = &self.doc.blocks[index];
+        let chars: Vec<char> = block.text().chars().collect();
+        let (mut from, mut to) = (start.offset, end.offset);
+        while from < to && chars[from].is_whitespace() {
+            from += 1;
+        }
+        while to > from && chars[to - 1].is_whitespace() {
+            to -= 1;
+        }
+        let runs = block.slice(from..to);
+        let Some(link) = runs
+            .first()
+            .and_then(|run| run.marks.iter().find(|mark| mark.is("a")))
+            .cloned()
+        else {
+            return false;
+        };
+        let linked = |offset: usize| {
+            block
+                .slice(offset..offset + 1)
+                .first()
+                .is_some_and(|run| run.marks.contains(&link))
+        };
+        let whole = runs.iter().all(|run| run.marks.contains(&link))
+            && !(from > 0 && linked(from - 1))
+            && !(to < block.len() && linked(to));
+        if !whole {
+            return false;
+        }
+        // The link's own text is what's linked anew.
+        self.selection = Selection::new(Pos::new(index, from), Pos::new(index, to));
+        let old = link
+            .attr("href")
+            .and_then(|href| url::Url::parse(href).ok());
+        let Some(href) = link_href(url) else {
+            return false;
+        };
+        let text = old.zip(url::Url::parse(&href).ok()).and_then(|(old, new)| {
+            crate::url_form::matched(&new, &old, &chars[from..to].iter().collect::<String>())
+        });
+        let Some(text) = text else {
+            return false;
+        };
+        self.undo.save(&self.doc, self.selection);
+        let mut marks = runs[0].marks.clone();
+        marks.retain(|mark| !mark.is("a"));
+        marks.push(Element::with("a", &[("href", &href), ("target", "_blank")]));
+        self.doc.blocks[index].remove(from..to);
+        let end = self.doc.insert_text(Pos::new(index, from), &text, marks);
+        self.selection = Selection::new(Pos::new(index, from), end);
+        self.changed();
+        true
     }
 
     /// The whole link the caret is in: its block, its range there and its element.
@@ -1436,7 +1507,8 @@ impl Editor {
     }
 
     /// Pastes plain text as a block per line, less one trailing newline. A single URL pasted over
-    /// a selection links it instead.
+    /// a selection links it instead, rewriting a link's text that showed its old URL
+    /// ([`Self::relink`]).
     pub fn paste_text(&mut self, text: &str) {
         let trimmed = text.trim();
         if !self.selection.is_collapsed()
@@ -1446,7 +1518,10 @@ impl Editor {
                 || trimmed.starts_with("https://")
                 || trimmed.starts_with("www."))
         {
-            return self.set_link(trimmed);
+            if !self.relink(trimmed) {
+                self.set_link(trimmed);
+            }
+            return;
         }
         self.insert_fragment(plain_fragment(text), true);
     }

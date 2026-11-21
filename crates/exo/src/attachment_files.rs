@@ -72,6 +72,49 @@ const PREVIEW_CLEARS_AFTER: f64 = 1.5;
 /// An image card's thumbnail, decoded for the attachment under its key.
 type Thumbnail = (Key, Option<egui::ColorImage>);
 
+/// Where a file comes from.
+#[derive(Clone)]
+pub(crate) enum Part {
+    /// A Gmail message's part.
+    Gmail(Attachment),
+    /// A file kept on disk, under its name.
+    Kept(String, PathBuf),
+}
+
+impl Part {
+    /// Where draft file `file` comes from: kept in `folder` (the draft files), or else still in
+    /// Gmail. `None` for a file of this Mac's that isn't kept.
+    pub(crate) fn of_draft(file: &exo_store::DraftAttachment, folder: &Path) -> Option<Self> {
+        let kept = folder.join(&file.uuid);
+        match &file.source {
+            _ if kept.is_file() => Some(Self::Kept(file.name.clone(), kept)),
+            exo_store::AttachmentSource::Gmail {
+                message_id,
+                attachment_id,
+                part_id,
+            } => Some(Self::Gmail(Attachment {
+                message_id: message_id.clone(),
+                attachment_id: attachment_id.clone(),
+                part_id: part_id.clone(),
+                filename: file.name.clone(),
+                mime_type: file.mime_type.clone(),
+                size: u32::try_from(file.size).unwrap_or(u32::MAX),
+                content_id: None,
+                inline: false,
+            })),
+            exo_store::AttachmentSource::Local => None,
+        }
+    }
+
+    /// The file's name.
+    pub(crate) fn name(&self) -> &str {
+        match self {
+            Self::Gmail(attachment) => &attachment.filename,
+            Self::Kept(name, _) => name,
+        }
+    }
+}
+
 /// Something a fetch sends back to the UI thread.
 enum Update {
     /// This much of the file has arrived, in percent.
@@ -179,6 +222,8 @@ pub(crate) struct AttachmentFiles {
     updates: (mpsc::Sender<Update>, mpsc::Receiver<Update>),
     /// Image cards' thumbnails as they're decoded, `None` for an image without one.
     thumbnails: (mpsc::Sender<Thumbnail>, mpsc::Receiver<Thumbnail>),
+    /// The same for a read-only snippet's cards.
+    snippet_thumbnails: (mpsc::Sender<Thumbnail>, mpsc::Receiver<Thumbnail>),
     /// Messages whose `Download all` is zipping.
     zipping: HashSet<String>,
     /// Exo's viewer, while it's open.
@@ -199,6 +244,7 @@ impl AttachmentFiles {
             downloads: Vec::new(),
             updates: mpsc::channel(),
             thumbnails: mpsc::channel(),
+            snippet_thumbnails: mpsc::channel(),
             zipping: HashSet::new(),
             viewer: None,
             #[cfg(target_os = "macos")]
@@ -441,19 +487,13 @@ impl AttachmentFiles {
         events
     }
 
-    /// Drags `attachment`'s card out from `at` (in egui points, which `zoom` scales to the
+    /// Drags the card of file `part` out from `at` (in egui points, which `zoom` scales to the
     /// window's). The drag carries a promise of the file for wherever it's dropped.
     #[cfg(target_os = "macos")]
-    pub(crate) fn drag(
-        &mut self,
-        loader: &Loader,
-        attachment: &Attachment,
-        at: egui::Pos2,
-        zoom: f32,
-    ) {
+    pub(crate) fn drag(&mut self, loader: &Loader, part: Part, at: egui::Pos2, zoom: f32) {
         /// Promises kept for drops that haven't asked yet. A drop asks at once, so a few will do.
         const KEPT: usize = 8;
-        if let Some(source) = drag::start(loader, attachment, at, zoom) {
+        if let Some(source) = drag::start(loader, part, at, zoom) {
             if self.drags.len() == KEPT {
                 self.drags.pop_front();
             }
@@ -463,14 +503,7 @@ impl AttachmentFiles {
 
     /// Off macOS, cards don't drag out.
     #[cfg(not(target_os = "macos"))]
-    pub(crate) fn drag(
-        &mut self,
-        _loader: &Loader,
-        _attachment: &Attachment,
-        _at: egui::Pos2,
-        _zoom: f32,
-    ) {
-    }
+    pub(crate) fn drag(&mut self, _loader: &Loader, _part: Part, _at: egui::Pos2, _zoom: f32) {}
 
     /// Saves `bytes` as `name` in the download folder, with a notification, the way a message's
     /// attachments download.

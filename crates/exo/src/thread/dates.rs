@@ -56,8 +56,13 @@ pub(crate) fn resolve(text: &str, sent: &Zoned) -> Option<Date> {
                 piece(2)?.parse().ok()?,
             ))
         } else {
-            // en-US writes the month first, but a first number over 12 can only be a day.
-            let (mut month, mut day): (i8, i8) = (piece(0)?.parse().ok()?, piece(1)?.parse().ok()?);
+            // In the locale's order, but a month over 12 can only be a day.
+            let (first, second): (i8, i8) = (piece(0)?.parse().ok()?, piece(1)?.parse().ok()?);
+            let (mut month, mut day) = if crate::format::locale::current().month_first() {
+                (first, second)
+            } else {
+                (second, first)
+            };
             if month > 12 && day <= 12 {
                 (month, day) = (day, month);
             }
@@ -209,6 +214,20 @@ mod tests {
         );
         let last = on("last Friday").expect("a day");
         assert_eq!(last, "2026-11-13");
+    }
+
+    #[test]
+    fn reads_numeric_dates_in_the_locales_order() {
+        assert_eq!(on("1/12/2026").as_deref(), Some("2026-01-12"));
+        assert_eq!(on("25/11/2026").as_deref(), Some("2026-11-25"));
+        crate::format::locale::pinned(crate::format::locale::Locale::en_gb(), || {
+            assert_eq!(on("1/12/2026").as_deref(), Some("2026-12-01"));
+            assert_eq!(
+                on("11/25/2026").as_deref(),
+                Some("2026-11-25"),
+                "a month over 12 can only be a day"
+            );
+        });
     }
 
     #[test]

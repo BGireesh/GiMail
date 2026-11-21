@@ -5,7 +5,7 @@
 
 mod support;
 
-use exo_store::{CalendarChange, CalendarOutcome, StoredEvent};
+use exo_store::{CalendarChange, CalendarOutcome, InviteLinks, Refusal, StoredEvent};
 use gmail::calendar::{CalendarListEntry, Event, EventDateTime};
 use jiff::{SignedDuration, Timestamp, ToSpan, civil::date, tz::TimeZone};
 use support::{ACCOUNT, Harness};
@@ -759,7 +759,10 @@ async fn a_refused_change_is_given_up_and_the_calendar_shows_calendars_copy() {
     assert!(
         matches!(
             &outcomes[..],
-            [CalendarOutcome::Refused { gone: false, .. }]
+            [CalendarOutcome::Refused {
+                refusal: Refusal::Other,
+                ..
+            }]
         ),
         "{outcomes:?}"
     );
@@ -882,6 +885,7 @@ async fn an_answer_to_a_cancelled_invite_is_refused_as_gone() {
         invite,
         status: "accepted".into(),
         thread: Some("t1".into()),
+        links: None,
     };
     harness
         .store
@@ -890,10 +894,100 @@ async fn an_answer_to_a_cancelled_invite_is_refused_as_gone() {
         .expect("queues");
     let outcomes = flush(&harness).await;
     assert!(
-        matches!(&outcomes[..], [CalendarOutcome::Refused { gone: true, .. }]),
+        matches!(
+            &outcomes[..],
+            [CalendarOutcome::Refused {
+                refusal: Refusal::Gone,
+                ..
+            }]
+        ),
         "not imported again: {outcomes:?}"
     );
     assert_eq!(friday_titled(&harness, "Review").await, 0);
+}
+
+#[tokio::test]
+async fn an_unknown_senders_invite_is_not_imported() {
+    let harness = Harness::start().await;
+    let invite = Event {
+        ical_uid: Some("pitch-1120@juniperpartners.vc".into()),
+        summary: Some("Pitch".into()),
+        start: Some(friday_at(11)),
+        end: Some(friday_at(12)),
+        ..Event::default()
+    };
+    let links = InviteLinks {
+        mark_sender_known: "https://calendar.google.com/calendar/marksenderasknown?eid=x".into(),
+        accepted: Some("https://calendar.google.com/calendar/event?rst=1".into()),
+        ..InviteLinks::default()
+    };
+    let answer = CalendarChange::RespondToInvite {
+        calendar: ACCOUNT.into(),
+        invite,
+        status: "accepted".into(),
+        thread: Some("t1".into()),
+        links: Some(links),
+    };
+    harness
+        .store
+        .queue_calendar_change(1, answer, None)
+        .await
+        .expect("queues");
+    let outcomes = flush(&harness).await;
+    assert!(
+        matches!(
+            &outcomes[..],
+            [CalendarOutcome::Refused {
+                refusal: Refusal::UnknownSender,
+                ..
+            }]
+        ),
+        "{outcomes:?}"
+    );
+    assert_eq!(friday_titled(&harness, "Pitch").await, 0, "not imported");
+}
+
+#[tokio::test]
+async fn an_answer_only_the_organizer_may_give_is_refused_as_such() {
+    let harness = Harness::start().await;
+    let review = Event {
+        id: Some("e0event0006".into()),
+        ical_uid: Some("e0event0006@google.com".into()),
+        summary: Some("Review".into()),
+        start: Some(friday_at(9)),
+        end: Some(friday_at(10)),
+        ..Event::default()
+    };
+    harness
+        .gmail
+        .calendar()
+        .insert_event(ACCOUNT, &review, None)
+        .await
+        .expect("inserts");
+    harness.fault(serde_json::json!({"method": "PATCH", "path": "/calendar/v3/calendars/", "status": 403, "message": "Forbidden", "reason": "forbiddenForNonOrganizer"})).await;
+    let answer = CalendarChange::RespondToInvite {
+        calendar: ACCOUNT.into(),
+        invite: review,
+        status: "accepted".into(),
+        thread: Some("t1".into()),
+        links: None,
+    };
+    harness
+        .store
+        .queue_calendar_change(1, answer, None)
+        .await
+        .expect("queues");
+    let outcomes = flush(&harness).await;
+    assert!(
+        matches!(
+            &outcomes[..],
+            [CalendarOutcome::Refused {
+                refusal: Refusal::NonOrganizer,
+                ..
+            }]
+        ),
+        "{outcomes:?}"
+    );
 }
 
 /// Another Google account of the user's, signed in for its calendars (gmail-mock gives it a

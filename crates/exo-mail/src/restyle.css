@@ -5,8 +5,9 @@
  * marketing mail. The `:is()` groups have the specificity of a two-class selector.
  *
  * Exo's classes are prefixed `exo-`. Senders' signatures can carry `sh-preserve-*` classes, so
- * those keep a signature's own color, face, size and line height here too. Exo itself marks only
- * `exo-preserve-color` and `exo-preserve-font-family`.
+ * those keep a signature's own color, face, size and line height here too. Exo marks
+ * `exo-preserve-color` and `exo-preserve-font-family` in mail, and all four `exo-preserve-*` on a
+ * pasted sheet.
  */
 
 .Exo-quoting-ellipsis {
@@ -46,32 +47,32 @@ div.ShadowHTML, div.ShadowBody, div.ShadowWrapper { --exo-original-color: #000; 
   -webkit-font-smoothing: antialiased !important;
   font-feature-settings: initial !important;
 }
-:is(.styleUnquotedContent .unquoted-content, .styleQuotedContent .sh-quoted-content, .sh-signature) *:not(.sh-preserve-font-size, .fake-selection, .fake-original-selection) {
+:is(.styleUnquotedContent .unquoted-content, .styleQuotedContent .sh-quoted-content, .sh-signature) *:not(.exo-preserve-font-size, .sh-preserve-font-size, .fake-selection, .fake-original-selection) {
   font-size: 14px !important;
 }
-:where(.ShadowHTML.at-1x) :is(.styleUnquotedContent .unquoted-content, .styleQuotedContent .sh-quoted-content, .sh-signature) *:not(.sh-preserve-font-size, .fake-selection, .fake-original-selection) {
+:where(.ShadowHTML.at-1x) :is(.styleUnquotedContent .unquoted-content, .styleQuotedContent .sh-quoted-content, .sh-signature) *:not(.exo-preserve-font-size, .sh-preserve-font-size, .fake-selection, .fake-original-selection) {
   font-size: 15px !important;
   letter-spacing: 0;
 }
-:is(.styleUnquotedContent .unquoted-content, .styleQuotedContent .sh-quoted-content, .sh-signature) *:not(.sh-preserve-font-size, .fake-selection, .fake-original-selection) h1 { font-size: 19px !important; position: relative !important; top: 2px; }
-:is(.styleUnquotedContent .unquoted-content, .styleQuotedContent .sh-quoted-content, .sh-signature) *:not(.sh-preserve-font-size, .fake-selection, .fake-original-selection) h1 * { font-size: 19px !important; }
-:is(.styleUnquotedContent .unquoted-content, .styleQuotedContent .sh-quoted-content, .sh-signature) *:not(.sh-preserve-font-size, .fake-selection, .fake-original-selection) h2 { font-size: 17px !important; position: relative !important; top: 3px; }
-:is(.styleUnquotedContent .unquoted-content, .styleQuotedContent .sh-quoted-content, .sh-signature) *:not(.sh-preserve-font-size, .fake-selection, .fake-original-selection) h2 * { font-size: 17px !important; }
-:is(.styleUnquotedContent .unquoted-content, .styleQuotedContent .sh-quoted-content, .sh-signature) *:not(.sh-preserve-font-size, .fake-selection, .fake-original-selection) h3 { font-size: 15px !important; position: relative !important; top: 0; }
-:is(.styleUnquotedContent .unquoted-content, .styleQuotedContent .sh-quoted-content, .sh-signature) *:not(.sh-preserve-font-size, .fake-selection, .fake-original-selection) h3 * { font-size: 15px !important; }
-:is(.styleUnquotedContent .unquoted-content, .styleQuotedContent .sh-quoted-content, .sh-signature) *:not(.sh-preserve-font-size, .fake-selection, .fake-original-selection) h5 { font-style: italic; }
-:is(.styleUnquotedContent .unquoted-content, .styleQuotedContent .sh-quoted-content, .sh-signature) *:not(.sh-preserve-font-size, .fake-selection, .fake-original-selection) h6 { font-size: 13px !important; position: relative !important; top: 0; font-style: italic; }
-:is(.styleUnquotedContent .unquoted-content, .styleQuotedContent .sh-quoted-content, .sh-signature) *:not(.sh-preserve-font-size, .fake-selection, .fake-original-selection) h6 * { font-size: 13px !important; }
-:is(.styleUnquotedContent .unquoted-content, .styleQuotedContent .sh-quoted-content, .sh-signature) *:not(.sh-preserve-line-height) { line-height: 24px !important; }
-:is(.styleUnquotedContent .unquoted-content, .styleQuotedContent .sh-quoted-content, .sh-signature) .sh-preserve-font-size h1 { font-size: 19px; position: relative; top: 2px; }
-:is(.styleUnquotedContent .unquoted-content, .styleQuotedContent .sh-quoted-content, .sh-signature) .sh-preserve-font-size h1 * { font-size: 19px; }
-:is(.styleUnquotedContent .unquoted-content, .styleQuotedContent .sh-quoted-content, .sh-signature) .sh-preserve-font-size h2 { font-size: 17px; position: relative; top: 3px; }
-:is(.styleUnquotedContent .unquoted-content, .styleQuotedContent .sh-quoted-content, .sh-signature) .sh-preserve-font-size h2 * { font-size: 17px; }
-:is(.styleUnquotedContent .unquoted-content, .styleQuotedContent .sh-quoted-content, .sh-signature) .sh-preserve-font-size h3 { font-size: 15px; position: relative; top: 0; }
-:is(.styleUnquotedContent .unquoted-content, .styleQuotedContent .sh-quoted-content, .sh-signature) .sh-preserve-font-size h3 * { font-size: 15px; }
-:is(.styleUnquotedContent .unquoted-content, .styleQuotedContent .sh-quoted-content, .sh-signature) .sh-preserve-font-size h5 { font-style: italic; }
-:is(.styleUnquotedContent .unquoted-content, .styleQuotedContent .sh-quoted-content, .sh-signature) .sh-preserve-font-size h6 { font-size: 13px; position: relative; top: 0; font-style: italic; }
-:is(.styleUnquotedContent .unquoted-content, .styleQuotedContent .sh-quoted-content, .sh-signature) .sh-preserve-font-size h6 * { font-size: 13px; }
+:is(.styleUnquotedContent .unquoted-content, .styleQuotedContent .sh-quoted-content, .sh-signature) *:not(.exo-preserve-font-size, .sh-preserve-font-size, .fake-selection, .fake-original-selection) h1 { font-size: 19px !important; position: relative !important; top: 2px; }
+:is(.styleUnquotedContent .unquoted-content, .styleQuotedContent .sh-quoted-content, .sh-signature) *:not(.exo-preserve-font-size, .sh-preserve-font-size, .fake-selection, .fake-original-selection) h1 * { font-size: 19px !important; }
+:is(.styleUnquotedContent .unquoted-content, .styleQuotedContent .sh-quoted-content, .sh-signature) *:not(.exo-preserve-font-size, .sh-preserve-font-size, .fake-selection, .fake-original-selection) h2 { font-size: 17px !important; position: relative !important; top: 3px; }
+:is(.styleUnquotedContent .unquoted-content, .styleQuotedContent .sh-quoted-content, .sh-signature) *:not(.exo-preserve-font-size, .sh-preserve-font-size, .fake-selection, .fake-original-selection) h2 * { font-size: 17px !important; }
+:is(.styleUnquotedContent .unquoted-content, .styleQuotedContent .sh-quoted-content, .sh-signature) *:not(.exo-preserve-font-size, .sh-preserve-font-size, .fake-selection, .fake-original-selection) h3 { font-size: 15px !important; position: relative !important; top: 0; }
+:is(.styleUnquotedContent .unquoted-content, .styleQuotedContent .sh-quoted-content, .sh-signature) *:not(.exo-preserve-font-size, .sh-preserve-font-size, .fake-selection, .fake-original-selection) h3 * { font-size: 15px !important; }
+:is(.styleUnquotedContent .unquoted-content, .styleQuotedContent .sh-quoted-content, .sh-signature) *:not(.exo-preserve-font-size, .sh-preserve-font-size, .fake-selection, .fake-original-selection) h5 { font-style: italic; }
+:is(.styleUnquotedContent .unquoted-content, .styleQuotedContent .sh-quoted-content, .sh-signature) *:not(.exo-preserve-font-size, .sh-preserve-font-size, .fake-selection, .fake-original-selection) h6 { font-size: 13px !important; position: relative !important; top: 0; font-style: italic; }
+:is(.styleUnquotedContent .unquoted-content, .styleQuotedContent .sh-quoted-content, .sh-signature) *:not(.exo-preserve-font-size, .sh-preserve-font-size, .fake-selection, .fake-original-selection) h6 * { font-size: 13px !important; }
+:is(.styleUnquotedContent .unquoted-content, .styleQuotedContent .sh-quoted-content, .sh-signature) *:not(.exo-preserve-line-height, .sh-preserve-line-height) { line-height: 24px !important; }
+:is(.styleUnquotedContent .unquoted-content, .styleQuotedContent .sh-quoted-content, .sh-signature) :is(.exo-preserve-font-size, .sh-preserve-font-size) h1 { font-size: 19px; position: relative; top: 2px; }
+:is(.styleUnquotedContent .unquoted-content, .styleQuotedContent .sh-quoted-content, .sh-signature) :is(.exo-preserve-font-size, .sh-preserve-font-size) h1 * { font-size: 19px; }
+:is(.styleUnquotedContent .unquoted-content, .styleQuotedContent .sh-quoted-content, .sh-signature) :is(.exo-preserve-font-size, .sh-preserve-font-size) h2 { font-size: 17px; position: relative; top: 3px; }
+:is(.styleUnquotedContent .unquoted-content, .styleQuotedContent .sh-quoted-content, .sh-signature) :is(.exo-preserve-font-size, .sh-preserve-font-size) h2 * { font-size: 17px; }
+:is(.styleUnquotedContent .unquoted-content, .styleQuotedContent .sh-quoted-content, .sh-signature) :is(.exo-preserve-font-size, .sh-preserve-font-size) h3 { font-size: 15px; position: relative; top: 0; }
+:is(.styleUnquotedContent .unquoted-content, .styleQuotedContent .sh-quoted-content, .sh-signature) :is(.exo-preserve-font-size, .sh-preserve-font-size) h3 * { font-size: 15px; }
+:is(.styleUnquotedContent .unquoted-content, .styleQuotedContent .sh-quoted-content, .sh-signature) :is(.exo-preserve-font-size, .sh-preserve-font-size) h5 { font-style: italic; }
+:is(.styleUnquotedContent .unquoted-content, .styleQuotedContent .sh-quoted-content, .sh-signature) :is(.exo-preserve-font-size, .sh-preserve-font-size) h6 { font-size: 13px; position: relative; top: 0; font-style: italic; }
+:is(.styleUnquotedContent .unquoted-content, .styleQuotedContent .sh-quoted-content, .sh-signature) :is(.exo-preserve-font-size, .sh-preserve-font-size) h6 * { font-size: 13px; }
 
 /* Near-black text is drawn at 90% black, and backgrounds are dropped. */
 :is(.styleUnquotedContent .unquoted-content, .styleQuotedContent .sh-quoted-content, .sh-signature) .exo-color-black:not(.exo-preserve-color, .sh-preserve-color) {
@@ -87,7 +88,7 @@ div.ShadowHTML, div.ShadowBody, div.ShadowWrapper { --exo-original-color: #000; 
 :is(.styleUnquotedContent .unquoted-content, .styleQuotedContent .sh-quoted-content, .sh-signature) :is(.exo-preserve-color, .sh-preserve-color) > a:is(:link, :visited) { color: inherit; }
 :is(.styleUnquotedContent .unquoted-content, .styleQuotedContent .sh-quoted-content, .sh-signature) span.colour:not(.exo-color-black) a[href]:not(.exo-preserve-color, .sh-preserve-color) { color: inherit !important; }
 
-:is(.styleUnquotedContent .unquoted-content, .styleQuotedContent .sh-quoted-content, .sh-signature) :is(sub, sup):not(.sh-preserve-font-size) {
+:is(.styleUnquotedContent .unquoted-content, .styleQuotedContent .sh-quoted-content, .sh-signature) :is(sub, sup):not(.exo-preserve-font-size, .sh-preserve-font-size) {
   font-size: 66% !important;
   line-height: 0 !important;
   position: relative !important;

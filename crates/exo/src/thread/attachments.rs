@@ -8,7 +8,7 @@ use egui::{
     Color32, ColorImage, CornerRadius, Rect, Sense, TextureHandle, TextureOptions, Ui, Vec2, pos2,
     vec2,
 };
-use exo_store::{Attachment, MessageDetail};
+use exo_store::{Attachment, Attachments, MessageDetail};
 use exo_ui::{CARD_MARGIN_BOTTOM, CARD_MARGIN_X, Family, Font, TextStyle};
 
 use crate::attachment_files::Key;
@@ -124,6 +124,22 @@ pub(crate) fn listed(message: &MessageDetail) -> impl Iterator<Item = &Attachmen
         .attachments
         .iter()
         .filter(|attachment| !attachment.inline && !is_invite(attachment))
+}
+
+/// What a collapsed message shows before its date: the paperclip for its files, else the calendar
+/// for its invite.
+pub(crate) fn kind(message: &MessageDetail) -> Attachments {
+    if listed(message).next().is_some() {
+        Attachments::Files
+    } else if message
+        .attachments
+        .iter()
+        .any(|attachment| !attachment.inline && is_invite(attachment))
+    {
+        Attachments::CalendarInvite
+    } else {
+        Attachments::None
+    }
 }
 
 /// Whether `attachment` is a calendar invite (`.ics`).

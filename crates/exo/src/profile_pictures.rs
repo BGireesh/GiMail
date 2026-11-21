@@ -29,9 +29,10 @@ const ATTEMPTS: u32 = 7;
 const FIRST_WAIT: Duration = Duration::from_secs(1);
 const LONGEST_WAIT: Duration = Duration::from_secs(32);
 
-/// The photos decoded so far, by address, which the avatars draw. It lives in the context's
-/// data, so whatever draws an avatar can find it ([`photo`]).
-type Shown = Arc<Mutex<HashMap<String, AvatarPhoto>>>;
+/// The photos decoded so far, by address, which the avatars draw, with the files they were
+/// decoded from. It lives in the context's data, so whatever draws an avatar can find it
+/// ([`photo`]), and so can a notification ([`saved`]).
+type Shown = Arc<Mutex<HashMap<String, (AvatarPhoto, Arc<[u8]>)>>>;
 
 fn shown_id() -> egui::Id {
     egui::Id::new("exo::profile_pictures")
@@ -41,7 +42,14 @@ fn shown_id() -> egui::Id {
 pub fn photo(ctx: &egui::Context, email: &str) -> Option<AvatarPhoto> {
     let shown = ctx.data(|data| data.get_temp::<Shown>(shown_id()))?;
     let shown = shown.lock().unwrap_or_else(PoisonError::into_inner);
-    shown.get(email).cloned()
+    shown.get(email).map(|(photo, _)| photo.clone())
+}
+
+/// The file `email`'s profile photo was decoded from, once there's one to show.
+pub(crate) fn saved(ctx: &egui::Context, email: &str) -> Option<Arc<[u8]>> {
+    let shown = ctx.data(|data| data.get_temp::<Shown>(shown_id()))?;
+    let shown = shown.lock().unwrap_or_else(PoisonError::into_inner);
+    shown.get(email).map(|(_, file)| file.clone())
 }
 
 /// Shows saved photos, refreshes them from Google and lets them go.
@@ -173,7 +181,8 @@ impl ProfilePictures {
                         .inspect_err(|error| log::warn!("reading a profile photo: {error}"))
                         .ok()
                         .flatten();
-                    let texture = photo.and_then(|photo| decode(&ctx, &photo));
+                    let texture =
+                        photo.and_then(|photo| Some((decode(&ctx, &photo)?, Arc::from(photo))));
                     let mut shown = shown.lock().unwrap_or_else(PoisonError::into_inner);
                     match texture {
                         Some(texture) => shown.insert(email, texture),

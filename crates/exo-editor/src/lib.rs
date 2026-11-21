@@ -71,6 +71,7 @@ mod spelling;
 mod toolbar;
 mod trigger;
 mod undo;
+mod url_form;
 mod view;
 
 pub use autocorrect::{GREETING_LANGUAGES, MarkedWord, Named, People, SuggestionKind, Suggestions};
@@ -88,4 +89,4 @@ pub use spelling::{Misspelling, Spelling};
 pub use toolbar::ToolbarAction;
 pub use trigger::{Trigger, TriggerKind, find as find_trigger, is_trigger_char};
 pub use undo::UndoMark;
-pub use view::{BodyText, ContextMenu, EditorResponse, EditorStyle, KeyEffect};
+pub use view::{BodyText, ContextMenu, EditorResponse, EditorStyle, KeyEffect, MenuImage};

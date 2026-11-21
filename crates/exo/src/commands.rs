@@ -27,6 +27,8 @@ const GO_TO: &[Region] = &[
     Region::ReadOnlySnippet,
     Region::LabelSwitcher,
 ];
+/// Where `g` sequences also work, closing the week view first.
+const WEEK_GO_TO: &[Region] = &[Region::SeeYourWeek, Region::SeeYourWeekSidebar];
 
 /// Where the thread view's message keys live.
 const THREAD_MESSAGES: &[Region] = &[Region::ThreadMessages];
@@ -119,6 +121,9 @@ pub enum Action {
     ThreadBack,
     /// `g u`: back to the list from a thread.
     LeaveThread,
+    /// A `g` sequence in the week view: closes the week, then does its action. It does nothing
+    /// while a new event is being made.
+    FromWeek(Box<Action>),
     /// J / K in a thread: the next (1) or previous (-1) conversation.
     NextConversation(isize),
     /// N / P: the next (1) or previous (-1) message.
@@ -289,6 +294,7 @@ pub fn register_thread(commands: &mut Commands<Action>, cx: &ThreadContext) {
             .key("g u")
             .regions(GO_TO),
     );
+    commands.add(from_week("GO_TO_LIST", &["g u"], Action::LeaveThread));
     commands.add(
         Command::shortcut("NEXT_CONVERSATION", Action::NextConversation(1))
             .key("j")
@@ -1185,6 +1191,9 @@ fn go_to(commands: &mut Commands<Action>, cx: &Context<'_>) {
     };
     for system in lists::system_go_tos(cx.unified) {
         commands.add(go(&system));
+        if !system.keys.is_empty() {
+            commands.add(from_week(system.id, system.keys, Action::Go(system.list)));
+        }
     }
     for label in lists::listed_labels(cx.labels) {
         let command = Command::new(
@@ -1206,6 +1215,9 @@ fn go_to(commands: &mut Commands<Action>, cx: &Context<'_>) {
     }
     for late in lists::late_go_tos() {
         commands.add(go(&late));
+        if !late.keys.is_empty() {
+            commands.add(from_week(late.id, late.keys, Action::Go(late.list)));
+        }
     }
     // `g i` goes home and `g o` to Other. With the unified inbox, both go to the Inbox.
     commands.add(
@@ -1223,6 +1235,23 @@ fn go_to(commands: &mut Commands<Action>, cx: &Context<'_>) {
             .keys(["g l", "g f"])
             .regions(GO_TO),
     );
+    commands.add(from_week("GO_HOME", &["g i"], Action::Go(cx.home.clone())));
+    commands.add(from_week(
+        "GO_TO_OTHER",
+        &["g o"],
+        Action::Go(cx.other.clone()),
+    ));
+    commands.add(from_week("GO_TO_LABEL", &["g l", "g f"], Action::GoToLabel));
+}
+
+/// The week view's twin of `g` sequence `id`: `keys` there close the week, then do `action`.
+pub(crate) fn from_week(id: &str, keys: &[&'static str], action: Action) -> Command<Action> {
+    Command::shortcut(
+        format!("{id}_FROM_WEEK"),
+        Action::FromWeek(Box::new(action)),
+    )
+    .keys(keys.iter().copied())
+    .regions(WEEK_GO_TO)
 }
 
 /// What the toast says after `mutation`.

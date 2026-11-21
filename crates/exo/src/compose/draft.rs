@@ -450,6 +450,15 @@ impl Open {
                 || signature::of(self.record.from.as_ref(), aliases).is_some())
     }
 
+    /// The draft's Send later time, unless a reply called the send off.
+    pub fn scheduled_at(&self) -> Option<jiff::Timestamp> {
+        self.record
+            .send_later
+            .as_ref()
+            .filter(|_| self.unscheduled_by.is_none())
+            .map(|later| later.at)
+    }
+
     /// Every recipient, To, Cc then Bcc.
     pub fn recipients(&self) -> impl Iterator<Item = &Address> {
         self.record

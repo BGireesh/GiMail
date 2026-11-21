@@ -179,6 +179,8 @@ pub struct Shown<'a> {
     pub rule: Option<String>,
     /// A guest's event, which takes 20px more under the rows (`padding-bottom: 20px`).
     pub guest: bool,
+    /// Whether Exo is online, which a new call's link waits for.
+    pub online: bool,
 }
 
 impl Details {
@@ -271,12 +273,18 @@ impl Details {
                     Sense::click_and_drag(),
                 );
 
-                // The body scrolls under the header.
+                // The body scrolls under the header, with the wheel and at once to a match find
+                // moves to.
+                let find = exo_ui::id(ui.ctx(), "calendar-details-find");
+                let mut wheel = exo_ui::find::reveal(ui.ctx(), find).map_or(0.0, |delta| -delta.y);
                 if ui.rect_contains_pointer(viewport) {
-                    let wheel = ui.input(|input| input.smooth_scroll_delta.y);
+                    wheel += ui.input(|input| input.smooth_scroll_delta.y);
+                }
+                if wheel != 0.0 {
                     self.scroll =
                         (self.scroll - wheel).clamp(0.0, (body - viewport.height()).max(0.0));
                 }
+                let found = exo_ui::find::Scope::begin(ui.ctx(), find, viewport, self.scroll);
                 let body_painter = painter.with_clip_rect(viewport);
                 let mut top = viewport.top() - self.scroll;
                 let mut hovered_tip = None;
@@ -332,6 +340,7 @@ impl Details {
                     }
                     top += height + ROW_GAP;
                 }
+                drop(found);
                 self.scrollbar.show(
                     &ui,
                     exo_ui::id(ui.ctx(), "calendar-details-scrollbar"),
@@ -651,8 +660,9 @@ enum Row {
         copy: String,
         join: &'static str,
     },
-    /// While Calendar makes the call, the conference row has its message alone.
-    ConferencePending,
+    /// While Calendar makes the call, the conference row has its message alone, which says
+    /// whether Exo is online.
+    ConferencePending(&'static str),
     Where(Vec<Run>),
     Who(Vec<Guest>),
     About(Vec<Line>),
@@ -720,7 +730,7 @@ impl Row {
             Row::Where(_) => Some(Field::Location),
             Row::Who(_) => Some(Field::Guests),
             Row::About(_) => Some(Field::About),
-            Row::Conference { .. } | Row::ConferencePending => Some(Field::Meeting),
+            Row::Conference { .. } | Row::ConferencePending(_) => Some(Field::Meeting),
             Row::Files(_) | Row::Calendar(_) | Row::Organizer { .. } | Row::Private => None,
         }
     }
@@ -732,7 +742,7 @@ impl Row {
             Row::Who(_) | Row::Organizer { .. } => "legacy/DEPRECATED_guest",
             Row::About(_) => "legacy/DEPRECATED_description",
             Row::Calendar(_) => "legacy/DEPRECATED_calendar",
-            Row::Conference { .. } | Row::ConferencePending => "legacy/DEPRECATED_conference",
+            Row::Conference { .. } | Row::ConferencePending(_) => "legacy/DEPRECATED_conference",
             Row::Files(_) => "legacy/DEPRECATED_paperclip",
             Row::Private => "legacy/DEPRECATED_padlock",
         }
@@ -741,7 +751,7 @@ impl Row {
     fn height(&self, ctx: &egui::Context) -> f32 {
         let lines = match self {
             Row::Who(guests) => return guests.len() as f32 * GUEST,
-            Row::Conference { .. } | Row::ConferencePending => 1,
+            Row::Conference { .. } | Row::ConferencePending(_) => 1,
             Row::Files(files) => {
                 return files.len().div_ceil(2) as f32 * (FILE_HEIGHT + FILE_GAP) - FILE_GAP + 2.0;
             }
@@ -859,6 +869,7 @@ impl Row {
                 let mut events = Vec::new();
                 let width = ROW_TEXT.width(ctx, label).min(VALUE_WIDTH - 120.0);
                 let link = Rect::from_min_size(text, vec2(width, ROW_TEXT.line_height));
+                exo_ui::link_box(ctx, link.intersect(clip), uri);
                 let hit = ui
                     .interact(link.intersect(clip), id.with("link"), Sense::click())
                     .on_hover_cursor(egui::CursorIcon::PointingHand);
@@ -925,9 +936,9 @@ impl Row {
                 }
                 events
             }
-            // `Link will be added momentarily` (held changes go out once online).
-            Row::ConferencePending => {
-                ROW_TEXT.paint_line(painter, text, "Link will be added momentarily", color, None);
+            // Held changes go out once online.
+            Row::ConferencePending(message) => {
+                ROW_TEXT.paint_line(painter, text, message, color, None);
                 Vec::new()
             }
             Row::Files(files) => {
@@ -1027,6 +1038,7 @@ impl Row {
                     paint_avatar(
                         painter,
                         pos2(origin.x + GUEST_LEFT, top + 2.0),
+                        &guest.email,
                         guest.answer,
                         palette,
                     );
@@ -1164,6 +1176,7 @@ fn paint_runs(
         }
         let mut hovered = false;
         for (piece, rect) in pieces.iter().enumerate() {
+            exo_ui::link_box(ui.ctx(), rect.intersect(clip), link);
             let response = ui
                 .interact(
                     rect.intersect(clip),
@@ -1190,70 +1203,40 @@ fn paint_runs(
     clicked
 }
 
-/// A 20px default avatar (the subdued icon colour, a figure in it mixed 50% with white) and, for
-/// an answer, its 12px badge at (12, 9).
-fn paint_avatar(
+/// `email`'s 20px avatar, their photo when Google has one, and, for an answer, its 12px badge at
+/// (12, 9), as the details' and the form's guests have them.
+pub(super) fn paint_avatar(
     painter: &egui::Painter,
     at: Pos2,
+    email: &str,
     answer: Option<Rsvp>,
     palette: &exo_ui::Palette,
 ) {
-    let scale = AVATAR / 56.0;
-    let circle = Rect::from_min_size(at, Vec2::splat(AVATAR));
-    let figure = motion::mix(palette.icon_base_subdued, Color32::WHITE, 0.5);
-    let clipped = painter.with_clip_rect(circle.intersect(painter.clip_rect()));
-    clipped.circle_filled(circle.center(), AVATAR / 2.0, palette.icon_base_subdued);
-    clipped.add(egui::Shape::ellipse_filled(
-        at + vec2(28.0, 48.5) * scale,
-        vec2(21.5, 18.5) * scale,
-        figure,
-    ));
-    clipped.circle_filled(at + vec2(28.0, 16.5) * scale, 8.5 * scale, figure);
-    let (fill, glyph) = match answer {
-        Some(Rsvp::Accepted) => (palette.actions_draft, Glyph::Check),
-        Some(Rsvp::Declined) => (palette.actions_reject, Glyph::Cross),
-        Some(Rsvp::Tentative) => (palette.actions_star, Glyph::Question),
+    crate::people::paint_avatar(
+        painter,
+        Rect::from_min_size(at, Vec2::splat(AVATAR)),
+        email,
+        true,
+    );
+    // The answer's badge: its disc `#6ac074`, `#fa7a7a` or `#ffd84f`, the mark in `#f8f8f8`,
+    // Carbon `#383b40`.
+    let (icon, disc) = match answer {
+        Some(Rsvp::Accepted) => ("legacy/DEPRECATED_rsvpAccepted", (0x6a, 0xc0, 0x74)),
+        Some(Rsvp::Declined) => ("legacy/DEPRECATED_rsvpDeclined", (0xfa, 0x7a, 0x7a)),
+        Some(Rsvp::Tentative) => ("legacy/DEPRECATED_rsvpTentative", (0xff, 0xd8, 0x4f)),
         Some(Rsvp::NeedsAction) | None => return,
     };
-    let badge = Rect::from_min_size(at + vec2(12.0, 9.0), Vec2::splat(BADGE));
-    // `viewBox="0 0 11 11"`: a 10px circle stroked 1px in the card's colour.
-    let unit = BADGE / 11.0;
-    painter.circle_filled(badge.center(), 5.5 * unit, popup::fill(palette.theme));
-    painter.circle_filled(badge.center(), 4.5 * unit, fill);
-    let stroke = Stroke::new(0.97 * unit, palette.icon_base_inverse);
-    let p = |x: f32, y: f32| badge.min + vec2(x, y) * unit;
-    match glyph {
-        Glyph::Check => painter.add(egui::Shape::line(
-            vec![p(2.64, 5.78), p(4.58, 7.72), p(8.46, 3.84)],
-            stroke,
-        )),
-        Glyph::Cross => {
-            painter.line_segment([p(3.19, 3.19), p(7.64, 7.64)], stroke);
-            painter.line_segment([p(7.64, 3.19), p(3.19, 7.64)], stroke)
-        }
-        Glyph::Question => {
-            painter.add(egui::Shape::line(
-                vec![
-                    p(4.0, 4.0),
-                    p(4.3, 3.2),
-                    p(5.4, 2.9),
-                    p(6.6, 3.3),
-                    p(6.9, 4.1),
-                    p(6.3, 5.0),
-                    p(5.6, 5.4),
-                    p(5.4, 6.2),
-                ],
-                stroke,
-            ));
-            painter.circle_filled(p(5.42, 7.78), 0.65 * unit, palette.icon_base_inverse)
-        }
+    let mark = match palette.theme {
+        exo_ui::Theme::Snow => Color32::from_rgb(0xf8, 0xf8, 0xf8),
+        exo_ui::Theme::Carbon => Color32::from_rgb(0x38, 0x3b, 0x40),
     };
-}
-
-enum Glyph {
-    Check,
-    Cross,
-    Question,
+    exo_ui::paint_icon_two_tone_on(
+        painter,
+        icon,
+        Rect::from_min_size(at + vec2(12.0, 9.0), Vec2::splat(BADGE)),
+        mark,
+        Color32::from_rgb(disc.0, disc.1, disc.2),
+    );
 }
 
 /// Whether `attendee` is me.
@@ -1285,7 +1268,11 @@ fn rows(shown: &Shown<'_>) -> Vec<Row> {
     } else if source.conference_data.as_ref().is_some_and(|data| {
         data.get("createRequest").is_some() && data.get("entryPoints").is_none()
     }) {
-        rows.push(Row::ConferencePending);
+        rows.push(Row::ConferencePending(if shown.online {
+            "Link will be added momentarily"
+        } else {
+            "Link will be added when online"
+        }));
     }
     // A place that's only the call's link isn't said twice.
     if let Some(location) = source.location.as_deref().filter(|location| {

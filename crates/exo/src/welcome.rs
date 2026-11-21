@@ -166,6 +166,7 @@ impl Welcome {
                 };
                 let tab = chrome::Tab {
                     title: tab.title,
+                    email: tab.email,
                     login_screen: self.covers() || tab.login_screen,
                     account_color: tab.account_color.filter(|_| !self.covers()),
                 };
@@ -182,9 +183,11 @@ impl crate::Mail {
     pub fn welcome_first_time(&mut self) {
         self.account
             .update_device_settings(|device| device.splash_pending = true);
-        // A new account starts out with the tutorial to show.
-        self.account
-            .update_settings(|settings| settings.do_show_tutorial = true);
+        // A new account starts out with the tutorial to show, and the Undo Send alert.
+        self.account.update_settings(|settings| {
+            settings.do_show_tutorial = true;
+            settings.do_show_undo_send_ftue = true;
+        });
         self.resume_welcome();
     }
 
@@ -219,6 +222,7 @@ impl crate::Mail {
             .and_then(|account| account.name.as_deref());
         let tab = chrome::Tab {
             title,
+            email: Some(self.account.email()),
             login_screen: false,
             account_color: Some(account_color),
         };

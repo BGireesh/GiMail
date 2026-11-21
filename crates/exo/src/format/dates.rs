@@ -1,6 +1,7 @@
 //! The list's dates: the row timestamp and the date separators between rows.
 //!
-//! Both are computed in `now`'s time zone. Formats are the en-US ones.
+//! Both are computed in `now`'s time zone. Formats are the en-US ones, except that a row's date
+//! puts the day first outside US English (`17 NOV`).
 
 use jiff::{Timestamp, ToSpan as _, Zoned, civil::Date, tz::TimeZone};
 
@@ -46,18 +47,27 @@ pub(crate) fn sentinel(at: Timestamp) -> Option<&'static str> {
     }
 }
 
-/// A row's timestamp: the time today, `NOV 15` this year, `3/7/2024` before.
+/// A row's timestamp: the time today, `NOV 15` this year, `3/7/2024` before. Outside US English,
+/// the day comes first: `15 NOV`, `7/3/2024`.
 pub fn row(at: Timestamp, now: &Zoned) -> String {
     if let Some(name) = sentinel(at) {
         return name.into();
     }
     let at = at.to_zoned(now.time_zone().clone());
+    let en_us = super::locale::current().en_us;
     if at.date() == now.date() {
         time(&at)
     } else if at.year() == now.year() {
-        format!("{} {}", month_name(at.date())[..3].to_uppercase(), at.day())
-    } else {
+        let month = month_name(at.date())[..3].to_uppercase();
+        if en_us {
+            format!("{month} {}", at.day())
+        } else {
+            format!("{} {month}", at.day())
+        }
+    } else if en_us {
         format!("{}/{}/{}", at.month(), at.day(), at.year())
+    } else {
+        format!("{}/{}/{}", at.day(), at.month(), at.year())
     }
 }
 
@@ -528,6 +538,22 @@ mod tests {
         assert_eq!(row(at("2026-11-17T00:05"), &now()), "12:05 AM");
         assert_eq!(row(at("2026-11-16T17:54"), &now()), "NOV 16");
         assert_eq!(row(at("2025-03-07T12:00"), &now()), "3/7/2025");
+    }
+
+    #[test]
+    fn row_dates_outside_us_english_put_the_day_first() {
+        crate::format::locale::pinned(crate::format::locale::Locale::en_gb(), || {
+            assert_eq!(row(at("2026-11-17T08:10"), &now()), "8:10 AM");
+            assert_eq!(row(at("2026-11-16T17:54"), &now()), "16 NOV");
+            assert_eq!(row(at("2025-03-07T12:00"), &now()), "7/3/2025");
+            assert_eq!(
+                row(
+                    Timestamp::from_millisecond(SOMEDAY).expect("a time"),
+                    &now()
+                ),
+                "Someday"
+            );
+        });
     }
 
     #[test]

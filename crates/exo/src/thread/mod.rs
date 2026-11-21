@@ -9,6 +9,7 @@ pub(crate) mod dates;
 mod focus;
 mod footer;
 mod header;
+mod highlight;
 pub(crate) mod invite;
 mod markers;
 mod message;
@@ -225,6 +226,8 @@ pub struct ThreadView {
     chips: Vec<String>,
     /// The body under the pointer this frame.
     hovered_body: Option<String>,
+    /// The wheel gesture under way, and the body it scrolls sideways if any.
+    gesture: overflow::Gesture,
     /// The messages' scrollbar.
     scrollbar: exo_ui::Scrollbar,
     /// Calendar invites read from messages' `.ics` attachments, and the ones asked for.
@@ -269,6 +272,8 @@ pub struct ThreadView {
     /// The view includes Trash (the Trash list, or a search), so trashed messages show as any
     /// other.
     trash_shown: bool,
+    /// The view is Spam ([`Self::set_spam_view`]).
+    spam_view: bool,
     /// Which part of the thread has the keyboard.
     zone: focus::Zone,
     /// The modifiers held as the last press in a body went down, for what it hits.
@@ -282,8 +287,9 @@ pub struct ThreadView {
     /// The column's entries as last laid out, and where its content ends.
     entries: Vec<Placed>,
     end: f32,
-    /// The intro hint's first name, under the only message.
-    intro: Option<String>,
+    /// The hint under the last message: the intro hint under the only one, else the calendar
+    /// tip.
+    hint: Option<footer::Hint>,
     /// The `mailto:` link the pointer is settling on, for hover intent.
     mailto_intent: exo_ui::HoverIntent<String>,
     /// A contact to show in the right pane, once this frame's done.
@@ -298,6 +304,8 @@ pub struct ThreadView {
     /// Messages whose bodies are too wide for the column, with the width
     /// each is laid out at once the column widens for it.
     wide: HashMap<String, f32>,
+    /// The bar that slides to the focused message.
+    highlight: highlight::Highlight,
     /// How far the widened column is scrolled sideways, and how far it could be last frame.
     scroll_x: f32,
     max_scroll_x: f32,
@@ -334,6 +342,7 @@ impl ThreadView {
             clicks: None,
             chips: Vec::new(),
             hovered_body: None,
+            gesture: overflow::Gesture::default(),
             scrollbar: exo_ui::Scrollbar::default(),
             invites: HashMap::new(),
             files: attachments::Files::default(),
@@ -357,6 +366,7 @@ impl ThreadView {
             has_new: false,
             admitted: HashSet::new(),
             trash_shown: false,
+            spam_view: false,
             zone: focus::Zone::Messages,
             click_modifiers: egui::Modifiers::NONE,
             clicks_in_a_row: (0, 0),
@@ -364,7 +374,7 @@ impl ThreadView {
             header_tab: 1,
             entries: Vec::new(),
             end: 0.0,
-            intro: None,
+            hint: None,
             mailto_intent: exo_ui::HoverIntent::default(),
             contact: None,
             named: Vec::new(),
@@ -372,6 +382,7 @@ impl ThreadView {
             tooltips: tooltips::Tooltips::default(),
             selection: exo_ui::TextSelection::default(),
             wide: HashMap::new(),
+            highlight: highlight::Highlight::default(),
             scroll_x: 0.0,
             max_scroll_x: 0.0,
             scrollbar_x: exo_ui::Scrollbar::default(),
@@ -391,13 +402,19 @@ impl ThreadView {
 
     /// The header's controls, in tab order.
     fn header_controls(&self) -> Vec<header::Control> {
-        header::controls(self.status.as_ref())
+        header::controls(self.status.as_ref(), !self.spam_view)
     }
 
     /// Whether the view includes Trash (the Trash list, a search), in which case its trashed
     /// messages show as any other. Set before the thread's first copy.
     pub fn set_trash_shown(&mut self, shown: bool) {
         self.trash_shown = shown;
+    }
+
+    /// Whether the view is Spam (the list, or a search asking for it), where conversations can't
+    /// be marked done, so the header has no Mark Done.
+    pub fn set_spam_view(&mut self, spam: bool) {
+        self.spam_view = spam;
     }
 
     /// What the header's status line needs from the rest of the app: the bulk action the
@@ -704,6 +721,14 @@ impl ThreadView {
             .as_deref()
             .map(|id| self.actions_of(&[id], bodies))
             .unwrap_or_default()
+    }
+
+    /// The message whose invite has UID `uid`.
+    pub fn invite_message(&self, uid: &str) -> Option<&str> {
+        self.invites
+            .iter()
+            .find(|(_, parsed)| parsed.uid == uid)
+            .map(|(id, _)| id.as_str())
     }
 
     /// The UIDs of the thread's invites.
@@ -1213,14 +1238,30 @@ impl ThreadView {
             self.conversation_action(bodies),
             &self.own_domains,
         );
-        let header_height =
-            header::height(ui, &layout, &detail, &self.chips, self.status.is_some());
+        let header_height = header::height(
+            ui,
+            &layout,
+            &detail,
+            &self.chips,
+            !self.spam_view,
+            self.status.is_some(),
+        );
         let messages_top = layout.header.top() + header_height + MESSAGES_MARGIN_TOP;
 
         // Find scrolls at once to a match out of view (Chromium's `ScrollRectToVisible`), down the
         // messages and across a widened column.
         let find = ui.id().with("thread-find");
         let reveal = exo_ui::find::reveal(&ctx, find);
+
+        // The wheel's gesture goes to a body that scrolls sideways or to the thread, which takes
+        // only the axis it runs along.
+        let wheel = self.gesture.update(
+            ui.input(|input| input.time),
+            ui.input(|input| input.smooth_scroll_delta),
+            self.hovered_body
+                .as_deref()
+                .map(|id| (id, bodies.scroll_x(id), bodies.overflow(id))),
+        );
 
         // A wide body widens the column, which the wheel scrolls sideways as one (a body that
         // still scrolls on its own keeps the gesture). Not beside a popped-out draft, which
@@ -1232,13 +1273,8 @@ impl ThreadView {
                 self.scroll_x = (self.scroll_x + reveal.x).round();
             }
             layout.widen(rect, thread_right, widest, self.scroll_x);
-            let body_scrolls = self
-                .hovered_body
-                .as_deref()
-                .is_some_and(|id| bodies.overflow(id) > 0.0);
-            let delta = ui.input(|input| input.smooth_scroll_delta.x);
+            let delta = wheel.x;
             if delta != 0.0
-                && !body_scrolls
                 && ui.rect_contains_pointer(layout.viewport(messages_top, rect.bottom()))
             {
                 // Whole CSS px, so the bodies' subpixel phase (and their layout) stays put.
@@ -1251,7 +1287,8 @@ impl ThreadView {
         self.viewport = messages.height();
 
         // The back gutter: all of its clickable goes back, and hovering it lights the back
-        // button, with a pointer cursor.
+        // button, with a pointer cursor. The rail's back area lights it too, even while the
+        // gutter has the keyboard.
         let gutter_rect = layout.gutter_target();
         let gutter = ui
             .interact(
@@ -1260,8 +1297,13 @@ impl ThreadView {
                 Sense::click(),
             )
             .on_hover_cursor(egui::CursorIcon::PointingHand);
-        let compact_clicked =
-            header::back_button(ui, &layout, gutter.hovered(), region == Region::ActionPane);
+        let rail = crate::shell::back_area_hovered(&ctx);
+        let compact_clicked = header::back_button(
+            ui,
+            &layout,
+            gutter.hovered() || rail,
+            region == Region::ActionPane && !rail,
+        );
         if gutter.clicked() || compact_clicked {
             actions.push(Action::Back);
         }
@@ -1278,13 +1320,26 @@ impl ThreadView {
                 item.expanded = true;
             }
         }
-        // The intro hint goes under the only message, without a draft.
-        self.intro = match self.items.as_slice() {
-            [only] if !with_drafts.contains(&only.id) => {
-                self.message(&only.id).and_then(footer::intro)
-            }
-            _ => None,
-        };
+        // The hint goes under the last message, without a draft.
+        self.hint = self
+            .items
+            .last()
+            .filter(|last| !with_drafts.contains(&last.id))
+            .and_then(|_| {
+                let messages: Vec<_> = self
+                    .items
+                    .iter()
+                    .filter_map(|item| Some((self.message(&item.id)?, bodies.facts(&item.id))))
+                    .collect();
+                match messages.as_slice() {
+                    [(only, _)] => footer::intro(only).map(footer::Hint::Intro),
+                    _ => None,
+                }
+                .or_else(|| {
+                    footer::calendar_event(&messages, &self.now)
+                        .then_some(footer::Hint::CalendarEvent)
+                })
+            });
         let order = self.order(&detail);
         let mut draft_heights = HashMap::new();
         let mut entries = Vec::with_capacity(order.len());
@@ -1343,7 +1398,7 @@ impl ThreadView {
                         collapsed_before += 1;
                     }
                     seen_expanded |= item.expanded;
-                    if self.intro.is_some() {
+                    if self.hint.is_some() && item.expanded && at + 1 == self.items.len() {
                         // The hint's -16px margin under the card's 28px, then the hint.
                         (
                             card + collapse(margin, footer::MARGIN_TOP) + footer::HEIGHT,
@@ -1465,7 +1520,7 @@ impl ThreadView {
             }
         }
         if ui.rect_contains_pointer(messages) {
-            let delta = ui.input(|input| input.smooth_scroll_delta.y);
+            let delta = wheel.y;
             let pointer = ui.input(|input| input.pointer.hover_pos());
             // A reply at its max height scrolls its own body first.
             let form = pointer
@@ -1506,6 +1561,7 @@ impl ThreadView {
             drafts,
             &draft_heights,
         );
+        self.paint_highlight(&list, &layout, messages, region);
         if layout.is_wide() {
             layout.paint_edges(ui, messages.top(), messages.bottom());
             self.scrollbar_x.show_horizontal(
@@ -1541,6 +1597,7 @@ impl ThreadView {
                 &layout,
                 &detail,
                 &self.chips,
+                !self.spam_view,
                 header_height,
                 self.status.as_ref(),
                 scrolled,
@@ -1592,6 +1649,17 @@ impl ThreadView {
         self.selection.text()
     }
 
+    /// A right-click at `at`, which on the header's selectable text selects the word under it,
+    /// unless it's on the selection.
+    pub(crate) fn select_word_at(&mut self, at: egui::Pos2) {
+        self.selection.select_word_at(at);
+    }
+
+    /// Where the header's selection starts on screen, on its baseline, and its text's size.
+    pub(crate) fn selection_start(&self) -> Option<(egui::Pos2, f32)> {
+        self.selection.start()
+    }
+
     /// The participants' and the subject's tooltips, and the contact of a name the pointer
     /// settles on.
     fn header_tooltips(
@@ -1625,7 +1693,7 @@ impl ThreadView {
                 contact.email.clone(),
             ));
         }
-        let subject = header::subject_rect(ui, layout, detail, &self.chips)
+        let subject = header::subject_rect(ui, layout, detail, &self.chips, !self.spam_view)
             .map(|rect| (rect, header::title(detail)));
         match self
             .tooltips
@@ -1637,6 +1705,26 @@ impl ThreadView {
             Some(tooltips::Clicked::Copied(text)) => actions.push(Action::Copied(text)),
             None => {}
         }
+    }
+
+    /// Paints the bar that slides to the focused message, over its card.
+    fn paint_highlight(&mut self, ui: &Ui, layout: &Layout, messages: Rect, region: Region) {
+        let Some(focus) = self.focus.clone() else {
+            return;
+        };
+        let Some((at, placed)) = self.entries.iter().find_map(|placed| match placed.entry {
+            Entry::Message(at) if self.items[at].id == focus => Some((at, placed)),
+            _ => None,
+        }) else {
+            return;
+        };
+        // Cards start at the column's left edge, as wide as the message's layout makes them.
+        let card = Rect::from_min_size(
+            pos2(layout.card.left(), placed.top),
+            vec2(self.item_layout(layout, at).card.width(), placed.card),
+        );
+        let origin = messages.top() - self.scroll;
+        self.highlight.paint(ui, &focus, card, origin, region);
     }
 
     /// What the messages column lists, in order: the messages, a trashed one folded into its
@@ -1788,7 +1876,8 @@ impl ThreadView {
                         vec2(layout.inner.width(), height),
                     )
                 });
-                let pointed = body.map(|body| overflow::scroll(ui, bodies, &item.id, body));
+                let pointed =
+                    body.map(|body| overflow::scroll(ui, bodies, &self.gesture, &item.id, body));
                 let hit = message::expanded(
                     ui,
                     card,
@@ -1908,13 +1997,13 @@ impl ThreadView {
                             .map(Action::Compose),
                     );
                 }
-                if let Some(name) = &self.intro {
-                    footer::paint_intro(
+                if let Some(hint) = self.hint.as_ref().filter(|_| at + 1 == self.items.len()) {
+                    footer::paint_hint(
                         ui,
                         layout,
                         card.bottom()
                             + collapse(message::EXPANDED_MARGIN_BOTTOM, footer::MARGIN_TOP),
-                        name,
+                        hint,
                     );
                 }
                 match hit {
@@ -2145,6 +2234,7 @@ impl ThreadView {
                 .interact_pointer_pos()
                 .filter(|at| body.contains(*at))
         {
+            exo_ui::claim_right_click(ui.ctx());
             bodies.context_menu(id, local(at), at);
         }
         if response.clicked()
@@ -2360,7 +2450,8 @@ pub(crate) fn card_pane<T>(
             Sense::click(),
         )
         .on_hover_cursor(egui::CursorIcon::PointingHand);
-    let compact_clicked = header::back_button(ui, &layout, gutter.hovered(), false);
+    let hovered = gutter.hovered() || crate::shell::back_area_hovered(ui.ctx());
+    let compact_clicked = header::back_button(ui, &layout, hovered, false);
     if gutter.clicked() || compact_clicked {
         actions.push(Action::Back);
     }
@@ -2545,6 +2636,8 @@ const NARROW_RIGHT: f32 = 4.0;
 pub(crate) struct Layout {
     rem: f32,
     popped_out: bool,
+    /// The window's width, which some rules follow (`@media (max-width: …)`).
+    window_width: f32,
     /// The list layout's left pane width, which the back gutter's hover gradient spans 75% of.
     left_pane: f32,
     /// The left back gutter.
@@ -2616,6 +2709,7 @@ impl Layout {
         Self {
             rem,
             popped_out,
+            window_width,
             left_pane,
             action_pane,
             header,
@@ -2629,6 +2723,10 @@ impl Layout {
 
     pub(super) fn rem(&self) -> f32 {
         self.rem
+    }
+
+    pub(super) fn window_width(&self) -> f32 {
+        self.window_width
     }
 
     /// Whether the pane is beside a popped-out draft.

@@ -79,24 +79,32 @@ impl BoxShadow {
     }
 
     /// The shadow of `rect` (already offset and spread) as a mesh. A Gaussian-blurred box is the
-    /// product of its blurred edges along each axis, sampled every σ/2 out to 3σ, less the box
-    /// `hole` (whose edges join the grid). Corners are square, which the blur hides (the dense
-    /// shadows are glows round 2px corners).
+    /// product of its blurred edges along each axis, sampled every σ/2 within 3σ of them (flat
+    /// between), less the box `hole` (whose edges join the grid). Corners are square, which the
+    /// blur hides (the dense shadows are glows round 2px corners).
     fn sampled(&self, rect: Rect, sigma: f32, hole: Option<Rect>) -> Shape {
         let edge = |t: f32, lo: f32, hi: f32| {
             0.5 * (erf((hi - t) / (std::f32::consts::SQRT_2 * sigma))
                 - erf((lo - t) / (std::f32::consts::SQRT_2 * sigma)))
         };
+        // From `from` to `to` every σ/2 or a little less.
+        let every = |from: f32, to: f32| {
+            let count = ((to - from) / (sigma / 2.0)).ceil().max(1.0) as u32;
+            (0..=count).map(move |i| from + (to - from) * i as f32 / count as f32)
+        };
         let steps = |lo: f32, hi: f32, cuts: [f32; 2]| {
-            let count = ((hi - lo + 6.0 * sigma) / (sigma / 2.0)).ceil() as u32;
-            let mut steps: Vec<f32> = (0..=count)
-                .map(|i| lo - 3.0 * sigma + (hi - lo + 6.0 * sigma) * i as f32 / count as f32)
-                .collect();
+            let mut steps: Vec<f32> = if hi - lo > 6.0 * sigma {
+                every(lo - 3.0 * sigma, lo + 3.0 * sigma)
+                    .chain(every(hi - 3.0 * sigma, hi + 3.0 * sigma))
+                    .collect()
+            } else {
+                every(lo - 3.0 * sigma, hi + 3.0 * sigma).collect()
+            };
             if hole.is_some() {
                 steps.extend(cuts);
-                steps.sort_by(f32::total_cmp);
-                steps.dedup();
             }
+            steps.sort_by(f32::total_cmp);
+            steps.dedup();
             steps
         };
         let hole_x = hole.map_or([0.0; 2], |hole| [hole.left(), hole.right()]);

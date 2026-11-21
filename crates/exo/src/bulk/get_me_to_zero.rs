@@ -1,5 +1,6 @@
 //! Get Me To Zero: marks Done every inbox conversation older than an age the user picks, keeping
-//! the unread or starred ones if asked, as one bulk action.
+//! the unread or starred ones if asked, as one bulk action. From the first run's end until one
+//! has closed, it welcomes the user to their inbox first.
 
 use egui::{Context, Rect, Sense, Stroke, Ui, Vec2, pos2, vec2};
 use exo_ui::{
@@ -120,6 +121,8 @@ pub(crate) struct State {
     /// The button marked `selected` (filled and glowing), which is `Let's go!` at first, then
     /// whichever button last had the keyboard.
     selected: Focus,
+    /// Whether it welcomes the user, with its own title, lead and confirm button.
+    first_time: bool,
 }
 
 impl Default for State {
@@ -132,6 +135,7 @@ impl Default for State {
             menu: None,
             focus: Focus::Range,
             selected: Focus::Confirm,
+            first_time: false,
         }
     }
 }
@@ -164,6 +168,21 @@ pub enum Event {
 }
 
 impl State {
+    /// The dialog that welcomes the user, from the first run's end until one has closed:
+    /// `Welcome to your Inbox 👋`, `Now let's get you to Inbox Zero!` and `Get me to zero! ✨`,
+    /// with the same choices.
+    pub(crate) fn first_time() -> Self {
+        Self {
+            first_time: true,
+            ..Self::default()
+        }
+    }
+
+    /// Whether it welcomes the user.
+    pub(crate) fn is_first_time(&self) -> bool {
+        self.first_time
+    }
+
     /// Applies `event`. Returns what's left for the app (choices it acts on, or closing).
     pub(crate) fn handle(&mut self, event: Event) -> Option<Event> {
         match event {
@@ -262,12 +281,18 @@ pub(crate) fn show(
     state: &State,
 ) -> DialogResponse<Option<Event>> {
     let extra = if state.more { OPTIONS_EXTRA } else { 0.0 };
-    Dialog::new("get-me-to-zero", "Get Me To Zero", BODY_HEIGHT + extra).show(
-        ctx,
-        area,
-        open,
-        |ui, body| draw(ui, body, state),
-    )
+    let dialog = if state.first_time {
+        // The title's waving hand is an image.
+        Dialog::new(
+            "get-me-to-zero",
+            "Welcome to your Inbox",
+            BODY_HEIGHT + extra,
+        )
+        .header_emoji("👋")
+    } else {
+        Dialog::new("get-me-to-zero", "Get Me To Zero", BODY_HEIGHT + extra)
+    };
+    dialog.show(ctx, area, open, |ui, body| draw(ui, body, state))
 }
 
 fn draw(ui: &mut Ui, body: Rect, state: &State) -> Option<Event> {
@@ -276,7 +301,8 @@ fn draw(ui: &mut Ui, body: Rect, state: &State) -> Option<Event> {
     let (left, top) = (body.left(), body.top());
     let mut event = None;
 
-    // The subheader: three paragraphs (`rgba(0, 0, 0, .85)`), the lead with a sparkle.
+    // The subheader: three paragraphs (`rgba(0, 0, 0, .85)`), the lead with a sparkle but the
+    // first run's.
     let line = |y: f32, text: &str| {
         TEXT.paint_line(
             &painter,
@@ -286,7 +312,20 @@ fn draw(ui: &mut Ui, body: Rect, state: &State) -> Option<Event> {
             None,
         )
     };
-    line(LEAD_TOP, "Let's get you to Inbox Zero! ✨");
+    if state.first_time {
+        line(LEAD_TOP, "Now let's get you to Inbox Zero!");
+    } else {
+        // The sparkle is a 12px image on the baseline, 1px lower (`top: 1px`).
+        let width = line(LEAD_TOP, "Let's get you to Inbox Zero! ");
+        let image = Rect::from_min_size(
+            pos2(
+                left + width,
+                top + LEAD_TOP + TEXT.baseline(ui.ctx()) - 12.0 + 1.0,
+            ),
+            Vec2::splat(12.0),
+        );
+        exo_ui::paint_emoji(&painter, "✨", image);
+    }
     line(
         MOVE_TOP,
         "We'll move old emails from your Inbox to the Done folder.",
@@ -413,10 +452,17 @@ fn draw(ui: &mut Ui, body: Rect, state: &State) -> Option<Event> {
         }
     }
 
-    // `Do this later` and `Let's go! ✨`, right-aligned. The confirm button is always filled, and
-    // the selected one glows (the secondary never fills here).
+    // `Do this later` and `Let's go! ✨` (the first run's `Get me to zero! ✨`), right-aligned.
+    // The confirm button is always filled, and the selected one glows (the secondary never fills
+    // here).
     let actions_top = top + ACTIONS_TOP + if state.more { OPTIONS_EXTRA } else { 0.0 };
-    let confirm = DialogAction::new("Let's go! ✨", ActionKind::Primary)
+    let confirm_label = if state.first_time {
+        "Get me to zero!"
+    } else {
+        "Let's go!"
+    };
+    let confirm = DialogAction::new(confirm_label, ActionKind::Primary)
+        .emoji("✨")
         .focused(state.selected == Focus::Confirm);
     let later = DialogAction::new("Do this later", ActionKind::Plain)
         .unfilled()

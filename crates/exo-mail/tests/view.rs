@@ -346,13 +346,18 @@ fn plays_animated_gifs_frame_by_frame() {
         "<img src=\"{}\" style=\"display:block;width:20px;height:20px\">",
         gif(&[RED, BLUE], 50, true)
     ));
+    eprintln!(
+        "HTML {}",
+        &body.unquoted_html[..body.unquoted_html.len().min(300)]
+    );
     let mut view = BodyView::new(
         &body,
         ViewOptions::default(),
         &fonts(),
         Some(Arc::new(Deferred::default())),
     );
-    view.layout(100.0, 2.0);
+    eprintln!("H {}", view.layout(100.0, 2.0));
+    eprintln!("C {:?}", image_color(&mut view));
     assert_eq!(view.animations(), [[0.0, 0.0, 20.0, 20.0]]);
     assert_eq!(image_color(&mut view), RED);
     // The clock starts when the image first shows. Nothing moves off screen.
@@ -392,6 +397,88 @@ fn plays_animated_gifs_frame_by_frame() {
     let over = view.animate(ms(200), 0.0..100.0);
     assert!(over.changed.is_empty() && over.next.is_none(), "{over:?}");
     assert_eq!(image_color(&mut view), BLUE);
+}
+
+/// An animated GIF plays as a CSS background too, on its element's box. (The box is between two
+/// lines, since a body loses empty content at its edges.)
+#[test]
+fn plays_animated_backgrounds() {
+    use base64::Engine as _;
+    use std::time::Duration;
+    const RED: [u8; 4] = [255, 0, 0, 255];
+    const BLUE: [u8; 4] = [0, 0, 255, 255];
+    let ms = Duration::from_millis;
+    let body = rendered(
+        "<div>Above</div><div style=\"width:20px;height:20px;background-image:url(https://x.example/bg.gif);background-size:cover\"></div><div>Below</div>",
+    );
+    let fetch = Arc::new(Deferred::default());
+    let mut view = BodyView::new(&body, ViewOptions::default(), &fonts(), Some(fetch.clone()));
+    view.layout(100.0, 2.0);
+    let (url, done) = fetch
+        .0
+        .lock()
+        .unwrap()
+        .pop()
+        .expect("the background's request");
+    assert_eq!(url, "https://x.example/bg.gif");
+    let gif = gif(&[RED, BLUE], 50, true);
+    done.finish(
+        base64::engine::general_purpose::STANDARD
+            .decode(gif.trim_start_matches("data:image/gif;base64,"))
+            .unwrap(),
+    );
+    assert!(view.poll());
+    let color = |view: &mut BodyView| {
+        let region = Region {
+            top: 24.0,
+            height: 20.0,
+            left: 0.0,
+            width: 20.0,
+            phase: [0.0; 2],
+        };
+        let image = view.paint(region, [255; 4]);
+        <[u8; 4]>::try_from(&image.rgba[(20 * image.width as usize + 20) * 4..][..4]).unwrap()
+    };
+    assert_eq!(color(&mut view), RED);
+    assert_eq!(view.animations(), [[0.0, 24.0, 20.0, 20.0]]);
+    assert!(view.animate(ms(0), 0.0..100.0).changed.is_empty());
+    assert_eq!(
+        view.animate(ms(50), 0.0..100.0).changed,
+        [[0.0, 24.0, 20.0, 20.0]]
+    );
+    assert_eq!(color(&mut view), BLUE);
+}
+
+/// A CSS background's `data:` image shows with the first layout, though it's asked for while the
+/// styles resolve.
+#[test]
+fn shows_data_backgrounds_at_once() {
+    // A 1×1 red GIF.
+    let red = "data:image/gif;base64,R0lGODlhAQABAIAAAP8AAP///yH5BAAAAAAALAAAAAABAAEAAAICRAEAOw==";
+    let body = rendered(&format!(
+        "<div>Above</div><div style=\"width:20px;height:20px;background-image:url({red})\"></div><div>Below</div>"
+    ));
+    let mut view = BodyView::new(
+        &body,
+        ViewOptions::default(),
+        &fonts(),
+        Some(Arc::new(Deferred::default())),
+    );
+    view.layout(100.0, 2.0);
+    let image = view.paint(
+        Region {
+            top: 24.0,
+            height: 20.0,
+            left: 0.0,
+            width: 20.0,
+            phase: [0.0; 2],
+        },
+        [255; 4],
+    );
+    assert_eq!(
+        image.rgba[(20 * image.width as usize + 20) * 4..][..4],
+        [255, 0, 0, 255]
+    );
 }
 
 #[test]
@@ -511,6 +598,50 @@ fn link_text_breaks_at_word_break_opportunities() {
             .collect()
     });
     assert_eq!(found.len(), 1);
+}
+
+/// Between ASCII characters, lines break only where Chromium breaks them: never after a `/`
+/// (`2026/11/21`, a path), but after a `-` or a space. Text that breaks anywhere still does.
+/// (`word-break: normal`, since bodies break overflowing words anywhere.)
+#[test]
+fn text_breaks_where_chromium_breaks_it() {
+    let height = |html: &str| {
+        let body = rendered(&html.replace("width: 40px", "width: 40px; word-break: normal"));
+        BodyView::new(&body, ViewOptions::default(), &fonts(), None).layout(640.0, 2.0)
+    };
+    assert_eq!(
+        height("<div style=\"width: 40px\">aaaa/bbbb</div>"),
+        24.0,
+        "one word"
+    );
+    assert_eq!(height("<div style=\"width: 40px\">aaaa-bbbb</div>"), 48.0);
+    assert_eq!(height("<div style=\"width: 40px\">aaaa bbbb</div>"), 48.0);
+    assert!(
+        height(
+            "<div style=\"width: 40px\"><span style=\"word-break: break-all\">aaaa/bbbb</span></div>"
+        ) > 24.0,
+        "break-all"
+    );
+}
+
+/// A `<wbr>` is a line break opportunity even where the text doesn't wrap, as in Chromium:
+/// nothing else breaks this line, but it breaks at the `<wbr>`.
+#[test]
+fn a_wbr_breaks_a_line_that_doesnt_wrap() {
+    let height = |html: &str| {
+        let body = rendered(html);
+        BodyView::new(&body, ViewOptions::default(), &fonts(), None).layout(640.0, 2.0)
+    };
+    let nowrap = "<div style=\"width: 60px; white-space: nowrap\">";
+    assert_eq!(
+        height(&format!("{nowrap}aaaaaaaa<wbr>bbbbbbbb and more</div>")),
+        48.0
+    );
+    assert_eq!(
+        height(&format!("{nowrap}aaaaaaaa bbbbbbbb and more</div>")),
+        24.0,
+        "spaces don't"
+    );
 }
 
 /// Paints the body's first `height` CSS px, 640px wide at 2×, on white.

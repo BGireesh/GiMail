@@ -145,6 +145,8 @@ pub fn notice(reminder: &Reminder<'_>, account: &str, now: Timestamp, tz: &TimeZ
             relative_compact(start, now),
             calendar_range_compact(start, reminder.end, tz)
         ),
+        // The app's icon, as Exo's own reminder.
+        image: None,
         button: provider.map(|_| open(link)),
         click: open(None),
     }

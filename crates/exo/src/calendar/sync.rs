@@ -24,7 +24,8 @@ use std::{
 };
 
 use exo_store::{
-    AccountCalendar, CalendarChange, CalendarOutcome, Connection, Outage, Store, StoredEvent,
+    AccountCalendar, CalendarChange, CalendarOutcome, Connection, InviteLinks, Outage, Refusal,
+    Store, StoredEvent,
 };
 use gmail::calendar::Event;
 use jiff::{SignedDuration, Timestamp, civil::Date, tz::TimeZone};
@@ -110,12 +111,14 @@ pub enum GuestEvents {
 pub enum Failure {
     /// An answer to an event.
     Respond,
-    /// An answer to the invite with this UID, from conversation `thread`, with `gone` when the
-    /// event has been deleted or cancelled.
+    /// Answer `status` to the invite with this UID, from conversation `thread`, refused for
+    /// `refusal`. `links` are the invitation mail's for a sender Calendar doesn't know.
     RespondToInvite {
         uid: String,
         thread: Option<String>,
-        gone: bool,
+        status: String,
+        refusal: Refusal,
+        links: Option<InviteLinks>,
     },
     /// A new event, queued under `token`.
     Create {
@@ -130,9 +133,9 @@ pub enum Failure {
 }
 
 impl Failure {
-    /// What it means for the UI that `change`, queued under `token`, failed. `gone` says its event
-    /// has been deleted or cancelled.
-    fn of(token: u64, change: CalendarChange, gone: bool) -> Self {
+    /// What it means for the UI that Calendar refused `change`, queued under `token`, for
+    /// `refusal`.
+    fn of(token: u64, change: CalendarChange, refusal: Refusal) -> Self {
         match change {
             CalendarChange::Create { calendar, event } => Self::Create {
                 token,
@@ -142,10 +145,18 @@ impl Failure {
             CalendarChange::Edit { .. } | CalendarChange::Split { .. } => Self::Edit,
             CalendarChange::Delete { .. } | CalendarChange::Truncate { .. } => Self::Delete,
             CalendarChange::Respond { .. } => Self::Respond,
-            CalendarChange::RespondToInvite { invite, thread, .. } => Self::RespondToInvite {
+            CalendarChange::RespondToInvite {
+                invite,
+                thread,
+                status,
+                links,
+                ..
+            } => Self::RespondToInvite {
                 uid: invite.ical_uid.unwrap_or_default(),
                 thread,
-                gone,
+                status,
+                refusal,
+                links,
             },
         }
     }
@@ -868,8 +879,8 @@ impl Task {
                 let calendar = queued.change.calendar().to_owned();
                 match self.store.send_calendar_change(&queued).await {
                     Ok(CalendarOutcome::Sent) => changed.push(calendar),
-                    Ok(CalendarOutcome::Refused { gone, .. }) => {
-                        self.fail(Failure::of(queued.token, queued.change, gone));
+                    Ok(CalendarOutcome::Refused { refusal, .. }) => {
+                        self.fail(Failure::of(queued.token, queued.change, refusal));
                         changed.push(calendar);
                     }
                     outcome => {

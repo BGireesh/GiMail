@@ -16,7 +16,7 @@ use egui::{Event, Key, Modifiers};
 use exo_store::{Filter, ListId};
 use jiff::civil::Date;
 
-use crate::{Mail, Screen, account::Account, chrome::Pill, history::Place};
+use crate::{Mail, Screen, account::Account, chrome::Pill};
 
 /// The most tabs a window holds.
 pub(crate) const MAX_TABS: usize = 20;
@@ -83,7 +83,7 @@ pub(crate) enum Parked {
 
 impl Parked {
     /// The account it shows, if it's an account's mail.
-    fn email(&self) -> Option<&str> {
+    pub(crate) fn email(&self) -> Option<&str> {
         match self {
             Self::Page(page) => Some(page.account().email()),
             Self::Route(route) => Some(&route.email),
@@ -349,6 +349,7 @@ impl Tabs {
                 Tab {
                     pill: Pill {
                         title: "Exo".to_owned(),
+                        email: tab.route.as_ref().map(|route| route.email.clone()),
                         login_screen: tab.route.is_none(),
                         ..Pill::default()
                     },
@@ -647,10 +648,7 @@ impl crate::Mail {
                 None => self.close_thread(),
             }
         } else {
-            self.go_to(Place {
-                list,
-                thread: route.thread.clone(),
-            });
+            self.go_to_list(list, route.thread.clone());
             if route.view == View::List && route.filter != self.filter {
                 self.filter_set(route.filter);
             }
@@ -662,6 +660,21 @@ impl crate::Mail {
                 now,
             ),
             View::List | View::Search(_) | View::Week(_) | View::Snippets => {}
+        }
+    }
+
+    /// Shows `list` with conversation `thread` open, or none.
+    fn go_to_list(&mut self, list: ListId, thread: Option<String>) {
+        if list != self.list {
+            self.close_thread();
+            self.show(list);
+        }
+        match thread {
+            Some(id) if self.thread.as_ref().is_none_or(|open| open.id() != id) => {
+                self.open_thread(id)
+            }
+            Some(_) => {}
+            None => self.close_thread(),
         }
     }
 

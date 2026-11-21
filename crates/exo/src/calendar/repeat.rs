@@ -420,6 +420,11 @@ impl Custom {
             .fixed_pos(card.min)
             .constrain(false)
             .show(ctx, |ui| {
+                // Tab goes through the fields in order, round again, closing an open list.
+                if exo_ui::tab_within(ctx, &self.tab_order(ctx)).is_some() {
+                    self.open = None;
+                }
+                let focused = |id: Id| ctx.memory(|memory| memory.has_focus(id));
                 ui.allocate_rect(card, Sense::click());
                 let painter = ui.painter().clone();
                 for (offset, blur, alpha) in [
@@ -461,9 +466,17 @@ impl Custom {
                     Unit::Month(_) => "month",
                     Unit::Year => "year",
                 };
+                let frequency_id = exo_ui::id(ui.ctx(), "calendar-repeat-frequency");
+                let unit_row = match self.unit {
+                    Unit::Day => 0,
+                    Unit::Week => 1,
+                    Unit::Month(_) => 2,
+                    Unit::Year => 3,
+                };
+                self.list_keys(ctx, frequency_id, Open::Frequency, 4, unit_row);
                 let frequency = dropdown(
                     ui,
-                    exo_ui::id(ui.ctx(), "calendar-repeat-frequency"),
+                    frequency_id,
                     pos2(number.rect.right() + 4.0, y + TEXT_TOP),
                     unit_name,
                     carbon,
@@ -498,9 +511,15 @@ impl Custom {
                         .iter()
                         .find(|(id, _)| *id == chosen)
                         .map_or_else(String::new, |(_, name)| name.clone());
+                    let monthly_id = exo_ui::id(ui.ctx(), "calendar-repeat-monthly");
+                    let chosen_row = patterns
+                        .iter()
+                        .position(|(id, _)| *id == chosen)
+                        .unwrap_or(0);
+                    self.list_keys(ctx, monthly_id, Open::Monthly, patterns.len(), chosen_row);
                     let button = dropdown(
                         ui,
-                        exo_ui::id(ui.ctx(), "calendar-repeat-monthly"),
+                        monthly_id,
                         pos2(left + ROW_LABEL + 8.0, y + TEXT_TOP),
                         &name,
                         carbon,
@@ -541,6 +560,21 @@ impl Custom {
                                 Sense::click(),
                             )
                             .on_hover_cursor(egui::CursorIcon::PointingHand);
+                        // With the keyboard, a 5px ring of `#aeb1dd` (Carbon's white at `.1`).
+                        if response.has_focus() {
+                            exo_ui::hold_arrows(ctx, response.id);
+                            let ring = if carbon {
+                                Color32::from_white_alpha(26)
+                            } else {
+                                Color32::from_rgb(0xae, 0xb1, 0xdd)
+                            };
+                            painter.rect_stroke(
+                                chip.expand(2.5),
+                                CornerRadius::same(11),
+                                Stroke::new(5.0, ring),
+                                egui::StrokeKind::Middle,
+                            );
+                        }
                         let selected = self.days.contains(day);
                         // A day's chip, picked or not.
                         let (fill, text, weight) = match (selected, carbon) {
@@ -575,7 +609,9 @@ impl Custom {
                             text,
                             None,
                         );
-                        if response.clicked() {
+                        // Space toggles a focused day, as a checkbox's; Enter doesn't.
+                        let enter = ui.input(|input| input.key_pressed(egui::Key::Enter));
+                        if response.clicked() && !(response.has_focus() && enter) {
                             if selected {
                                 self.days.retain(|known| known != day)
                             } else {
@@ -610,6 +646,15 @@ impl Custom {
                             Sense::click(),
                         )
                         .on_hover_cursor(egui::CursorIcon::PointingHand);
+                    // With the keyboard, a 22px halo of black at `.05` behind the radio.
+                    if response.has_focus() {
+                        exo_ui::hold_arrows(ctx, response.id);
+                        painter.circle_filled(
+                            pos2(radios, line) + Vec2::splat(RADIO / 2.0),
+                            11.0,
+                            Color32::from_black_alpha(13),
+                        );
+                    }
                     paint_radio(&painter, pos2(radios, line), self.ends == ends, carbon);
                     FIELD.paint_line(&painter, pos2(radios + RADIO + 8.0, line), label, ink, None);
                     if response.clicked() {
@@ -711,8 +756,10 @@ impl Custom {
                     } else {
                         exo_ui::ActionKind::Plain
                     };
+                    let id = exo_ui::id(ui.ctx(), ("calendar-repeat-action", label));
                     let button = exo_ui::DialogAction::new(label, kind)
                         .enabled(!primary || self.can_finish())
+                        .focused(focused(id))
                         .dark(carbon && !primary);
                     let width = button.width(ctx);
                     let rect = Rect::from_min_size(
@@ -720,14 +767,7 @@ impl Custom {
                         vec2(width, exo_ui::DIALOG_ACTION_HEIGHT),
                     );
                     right = rect.left() - 8.0;
-                    if button
-                        .show(
-                            ui,
-                            exo_ui::id(ui.ctx(), ("calendar-repeat-action", label)),
-                            rect,
-                        )
-                        .clicked()
-                    {
+                    if button.show(ui, id, rect).clicked() {
                         action = Some(if primary {
                             self.done().map_or(CustomAction::Cancel, CustomAction::Done)
                         } else {
@@ -764,6 +804,50 @@ impl Custom {
                 }
             });
         action
+    }
+
+    /// The fields in Tab's order: Every's count and unit, the monthly pattern or the days, the
+    /// Ends radios with their inputs, then Cancel, and Done while it can.
+    fn tab_order(&self, ctx: &egui::Context) -> Vec<Id> {
+        let id = |source: &'static str| exo_ui::id(ctx, source);
+        let mut order = vec![
+            id("calendar-repeat-interval"),
+            id("calendar-repeat-frequency"),
+        ];
+        match self.unit {
+            Unit::Month(_) => order.push(id("calendar-repeat-monthly")),
+            Unit::Week => {
+                order.extend((0..7).map(|index| exo_ui::id(ctx, ("calendar-repeat-day", index))))
+            }
+            Unit::Day | Unit::Year => {}
+        }
+        order.extend([
+            exo_ui::id(ctx, ("calendar-repeat-ends", 0)),
+            exo_ui::id(ctx, ("calendar-repeat-ends", 1)),
+            id("calendar-repeat-end-date"),
+            exo_ui::id(ctx, ("calendar-repeat-ends", 2)),
+            id("calendar-repeat-count"),
+            exo_ui::id(ctx, ("calendar-repeat-action", "Cancel")),
+        ]);
+        if self.can_finish() {
+            order.push(exo_ui::id(ctx, ("calendar-repeat-action", "Done")));
+        }
+        order
+    }
+
+    /// List `which`'s keys while its trigger `id` has the keyboard ([`exo_ui::list_keys`]),
+    /// `current` its row for what's chosen.
+    fn list_keys(&mut self, ctx: &egui::Context, id: Id, which: Open, rows: usize, current: usize) {
+        let mut highlighted = self
+            .open
+            .filter(|(open, _)| *open == which)
+            .map(|(_, row)| row);
+        let picked = exo_ui::list_keys(ctx, id, &mut highlighted, rows, current);
+        if let Some(row) = picked {
+            self.pick(which, row);
+        } else if let Some(row) = highlighted {
+            self.open = Some((which, row));
+        }
     }
 
     fn toggle(&mut self, which: Open) {
@@ -825,39 +909,53 @@ const RADIO: f32 = 12.0;
 const TITLE: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 16.0, 24.0);
 const FIELD: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 12.0, 16.0);
 
-/// A Classic radio, with its ring white at `.4` in Carbon.
+/// A Classic radio: a ring of black at `.4` (Carbon's white), and when selected a 3px dot of
+/// `#57adda`, the dialog's radios' own.
 fn paint_radio(painter: &egui::Painter, at: Pos2, selected: bool, carbon: bool) {
-    if !carbon {
-        return exo_ui::paint_radio(painter, at, selected);
-    }
     let center = at + Vec2::splat(RADIO / 2.0);
-    painter.circle_stroke(
-        center,
-        5.5,
-        Stroke::new(1.0, Color32::from_white_alpha(102)),
-    );
+    let ring = if carbon {
+        Color32::from_white_alpha(102)
+    } else {
+        Color32::from_black_alpha(102)
+    };
+    painter.circle_stroke(center, 5.5, Stroke::new(1.0, ring));
     if selected {
-        painter.circle_filled(center, 3.0, Color32::from_rgb(0x6f, 0xbe, 0xea));
+        painter.circle_filled(center, 3.0, Color32::from_rgb(0x57, 0xad, 0xda));
     }
 }
 
 /// A dropdown's button: `value`, then 10px on its caret (a 12px icon, black, Carbon's white at
-/// `.6`), 3px down the line and fitted to its 12×6.7 viewBox.
+/// `.6`), 3px down the line and fitted to its 12×6.7 viewBox. It takes the keyboard on Tab.
 fn dropdown(ui: &egui::Ui, id: Id, at: Pos2, value: &str, carbon: bool) -> egui::Response {
     let palette = exo_ui::palette(ui.ctx());
     let width = FIELD.paint_line(ui.painter(), at, value, palette.ink(0.9, 0.9), None);
+    // With the keyboard, `#aeb1dd` 2px under the value and the caret at `.5`.
+    let focused = ui.memory(|memory| memory.has_focus(id));
+    if focused {
+        exo_ui::hold_arrows(ui.ctx(), id);
+        ui.painter().rect_filled(
+            Rect::from_min_size(at + vec2(0.0, FIELD.line_height), vec2(width, 2.0)),
+            0.0,
+            Color32::from_rgb(0xae, 0xb1, 0xdd),
+        );
+    }
     let caret = Rect::from_min_size(
         at + vec2(width + 10.0, 3.0 + (12.0 - 6.7) / 2.0),
         vec2(12.0, 6.7),
     );
+    let caret_ink = if carbon {
+        Color32::from_white_alpha(153)
+    } else {
+        Color32::BLACK
+    };
     exo_ui::paint_icon(
         ui,
         "legacy/DEPRECATED_downCaret",
         caret,
-        if carbon {
-            Color32::from_white_alpha(153)
+        if focused {
+            caret_ink.gamma_multiply(0.5)
         } else {
-            Color32::BLACK
+            caret_ink
         },
     );
     let rect = Rect::from_min_size(at, vec2(width + 10.0 + 12.0, 20.0));

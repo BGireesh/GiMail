@@ -229,5 +229,4 @@ fn statistics_are_abbreviated_to_k_and_m() {
     ] {
         assert_eq!(abbreviated(value), shown, "{value}");
     }
-    assert_eq!(grouped(1_234_567), "1,234,567");
 }

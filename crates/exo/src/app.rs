@@ -404,6 +404,8 @@ impl App {
         crate::desktop::drag::begin(&ctx);
         self.screen_frame(ui);
         crate::desktop::drag::end(&ctx);
+        // Titles the screen drew show as macOS's tooltips.
+        crate::desktop::titles::end(&ctx);
         // What the screen's strip showed and what was clicked in it.
         let (action, shown) = chrome::take(&ctx);
         if let Some(pill) = shown {
@@ -815,9 +817,18 @@ impl App {
             .sign_in
             .as_ref()
             .is_some_and(|sign_in| !sign_in.has_store(email));
+        // A new account's notifications start as another account's are on this Mac.
+        let notifications_off = self
+            .handles()
+            .find(|account| account.email() != email)
+            .map(|account| account.device_settings().disable_notifications);
         match self.page_for(ctx, email, true) {
             Ok(mut mail) => {
                 if first_time {
+                    if let Some(off) = notifications_off {
+                        mail.account_mut()
+                            .update_device_settings(|device| device.disable_notifications = off);
+                    }
                     mail.welcome_first_time();
                 }
                 drop(self.show(Screen::Mail(mail)));
@@ -986,7 +997,10 @@ impl App {
         if let Some(sign_in) = &self.sign_in {
             sign_in.delete_store(email);
         }
-        for cache in std::iter::once(previews).chain(crate::account::parts_cache(email)) {
+        let caches = std::iter::once(previews)
+            .chain(crate::account::parts_cache(email))
+            .chain(crate::account::photos_cache(email));
+        for cache in caches {
             if let Err(error) = std::fs::remove_dir_all(&cache)
                 && error.kind() != std::io::ErrorKind::NotFound
             {
@@ -1187,6 +1201,7 @@ impl App {
         let title = active.split('-').nth(1).unwrap_or(active).to_owned();
         let pill = chrome::Pill {
             title,
+            email: parked.email().map(str::to_owned),
             login_screen: matches!(parked, Parked::SignIn),
             account_color: None,
         };
@@ -1494,11 +1509,14 @@ fn launch(
     })
 }
 
-/// Deletes `email`'s attachment previews and kept parts, which are caches like the mail in its
-/// store.
+/// Deletes `email`'s attachment previews, kept parts and contact photos, which are caches like
+/// the mail in its store.
 fn remove_previews(email: &str) {
     let previews = crate::attachment_files::default_cache(email);
-    for cache in std::iter::once(previews).chain(crate::account::parts_cache(email)) {
+    let caches = std::iter::once(previews)
+        .chain(crate::account::parts_cache(email))
+        .chain(crate::account::photos_cache(email));
+    for cache in caches {
         if let Err(error) = std::fs::remove_dir_all(&cache)
             && error.kind() != std::io::ErrorKind::NotFound
         {

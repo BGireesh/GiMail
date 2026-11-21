@@ -1,9 +1,9 @@
 //! The app shell around the list: the column layout, the left rail with the Mail/Calendar
-//! switcher, and the right pane's footer.
+//! switcher and its back area, and the right pane's footer.
 
 use egui::{
-    Color32, CornerRadius, Mesh, Painter, Pos2, Rect, Shape, Stroke, Ui, Vec2, epaint::Vertex,
-    pos2, vec2,
+    Color32, CornerRadius, Mesh, Painter, Pos2, Rect, Sense, Shape, Stroke, Ui, Vec2,
+    epaint::Vertex, pos2, vec2,
 };
 use exo_ui::{BoxShadow, Family, Font, IconButton, KeyTooltip, Placement, TextStyle, Theme};
 
@@ -97,12 +97,15 @@ pub enum RailAction {
     Mail,
     /// Clicked Calendar (opens See Your Week).
     Calendar,
+    /// Clicked the empty rail under the switcher, which goes back.
+    Back,
 }
 
 /// The left rail, with the Mail/Calendar switcher and its knob under Calendar while `calendar`
-/// (the week view is up). At Inbox Zero (`zero`) it's see-through over the photo, at once.
-/// Carbon's border goes (`border-right: 1px solid transparent`), and Snow's stays, black at .09.
-pub fn rail(ui: &Ui, rect: Rect, zero: bool, calendar: bool) -> Option<RailAction> {
+/// (the week view is up). While there's somewhere to go `back` to, the rest of the rail under the
+/// switcher goes back. At Inbox Zero (`zero`) it's see-through over the photo, at once. Carbon's
+/// border goes (`border-right: 1px solid transparent`), and Snow's stays, black at .09.
+pub fn rail(ui: &Ui, rect: Rect, zero: bool, calendar: bool, back: bool) -> Option<RailAction> {
     let palette = exo_ui::palette(ui.ctx());
     let painter = ui.painter();
     let border = match (zero, palette.theme) {
@@ -229,7 +232,37 @@ pub fn rail(ui: &Ui, rect: Rect, zero: bool, calendar: bool) -> Option<RailActio
             action = Some(app);
         }
     }
+
+    // The back area: from 12px under the switcher to the rail's bottom, 2px short of the border
+    // (`width: 100%; margin-right: 2px`, centred in the rail). It has a pointer cursor, and while
+    // the pointer is on it the back button lights up ([`back_area_hovered`]).
+    let hovered = back && {
+        let area = Rect::from_min_max(
+            pos2(rect.left(), switcher.bottom() + 12.0),
+            pos2(rect.right() - 2.0, rect.bottom()),
+        );
+        let response = ui
+            .interact(area, ui.id().with("rail-back"), Sense::click())
+            .on_hover_cursor(egui::CursorIcon::PointingHand);
+        if response.clicked() {
+            action = Some(RailAction::Back);
+        }
+        response.hovered()
+    };
+    let id = back_area_id(ui.ctx());
+    ui.data_mut(|data| data.insert_temp(id, hovered));
     action
+}
+
+fn back_area_id(ctx: &egui::Context) -> egui::Id {
+    exo_ui::id(ctx, "exo::shell::back-area")
+}
+
+/// Whether the pointer is on the rail's back area this frame, which lights the back button as
+/// though the back gutter were hovered. The rail draws before the content pane.
+pub fn back_area_hovered(ctx: &egui::Context) -> bool {
+    let id = back_area_id(ctx);
+    ctx.data(|data| data.get_temp(id)).unwrap_or(false)
 }
 
 /// What the user did in the footer.

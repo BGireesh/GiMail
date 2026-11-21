@@ -286,6 +286,12 @@ impl<A: Clone + 'static> Commands<A> {
         self.feedback.toast_hovered()
     }
 
+    /// The layer the showing toast is painted on, for keeping the toasts' stack in order
+    /// ([`exo_ui::ToastView::stack`]).
+    pub fn toast_layer(&self, ctx: &Context) -> Option<egui::LayerId> {
+        self.feedback.toast_layer(ctx)
+    }
+
     /// Places the toast `bottom` px above the area's bottom edge: [`exo_ui::TOAST_BOTTOM`]
     /// (32px) normally, 68px at Inbox Zero. The app animates it (`transition: bottom 150ms ease`).
     pub fn set_toast_bottom(&mut self, bottom: f32) {

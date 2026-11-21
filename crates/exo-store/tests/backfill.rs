@@ -147,26 +147,30 @@ async fn summaries_carry_what_the_list_shows() {
 #[tokio::test]
 async fn lists_show_only_their_backfilled_range() {
     let harness = Harness::synced().await;
-    // Starred has no pass of its own yet, so only All Mail's 31 days cover it.
-    let starred_gmail = harness.gmail_ids(label("STARRED")).await;
-    let starred_local = harness.ids(&ListId::Starred).await;
-    assert!(starred_local.is_subset(&starred_gmail));
-    let page = harness
-        .store
-        .list(&ListId::Starred, None, 100)
-        .await
-        .unwrap();
+    // A user label has no pass of its own, so only All Mail's 31 days cover it.
+    let mut reaching = None;
+    for label in harness.store.labels().await.unwrap() {
+        let list = ListId::Label(label.id.clone());
+        let gmail = harness.gmail_ids(self::label(&label.id)).await;
+        if label.id.starts_with("Label_") && harness.ids(&list).await != gmail {
+            reaching = Some((list, gmail));
+            break;
+        }
+    }
+    let (list, gmail) = reaching.expect("a label with mail before All Mail's 31 days");
+    assert!(harness.ids(&list).await.is_subset(&gmail));
+    let page = harness.store.list(&list, None, 100).await.unwrap();
     assert!(page.more_remote);
     let oldest_all = harness.all(&ListId::All).await.last().unwrap().date;
     assert!(page.threads.iter().all(|thread| thread.date >= oldest_all));
 
     // Backfilling the list itself covers it completely.
-    while harness.store.backfill(&ListId::Starred, 10).await.unwrap() {}
-    assert_eq!(harness.ids(&ListId::Starred).await, starred_gmail);
+    while harness.store.backfill(&list, 10).await.unwrap() {}
+    assert_eq!(harness.ids(&list).await, gmail);
     assert!(
         !harness
             .store
-            .list(&ListId::Starred, None, 1)
+            .list(&list, None, 1)
             .await
             .unwrap()
             .more_remote
@@ -184,6 +188,55 @@ async fn lists_show_only_their_backfilled_range() {
         &expected - &done_local
     );
     assert!(done_local.is_disjoint(&harness.ids(&ListId::Inbox).await));
+}
+
+#[tokio::test]
+async fn the_lists_people_open_most_fill_at_start() {
+    let harness = Harness::synced().await;
+    let query = |q: &str| ListQuery {
+        q: Some(q.to_owned()),
+        ..ListQuery::default()
+    };
+    for (list, gmail) in [
+        (ListId::Sent, label("SENT")),
+        (ListId::Starred, label("STARRED")),
+        (ListId::Done, query("-in:INBOX")),
+        (ListId::Drafts, label("DRAFT")),
+    ] {
+        let gmail = harness.gmail_ids(gmail).await;
+        let stored = harness.all(&list).await;
+        assert!(
+            stored.len() >= gmail.len().min(50),
+            "{list:?} has two screens, or all Gmail has: {} of {}",
+            stored.len(),
+            gmail.len()
+        );
+    }
+    // Starred reaches back past All Mail's 31 days.
+    assert_eq!(
+        harness.ids(&ListId::Starred).await,
+        harness.gmail_ids(label("STARRED")).await
+    );
+
+    // Once they're full, a round asks Gmail for nothing more of them.
+    let before = harness
+        .admin(
+            reqwest::Method::GET,
+            "/__mock/quota",
+            serde_json::Value::Null,
+        )
+        .await["methods"]["threads.list"]["calls"]
+        .as_u64();
+    assert!(!harness.store.sync().await.unwrap().backfilling);
+    let after = harness
+        .admin(
+            reqwest::Method::GET,
+            "/__mock/quota",
+            serde_json::Value::Null,
+        )
+        .await["methods"]["threads.list"]["calls"]
+        .as_u64();
+    assert_eq!(before, after);
 }
 
 #[tokio::test]

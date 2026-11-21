@@ -862,6 +862,30 @@ fn adding_an_account_signs_it_in_or_goes_back() {
 }
 
 #[test]
+fn a_new_account_has_notifications_off_when_another_account_on_this_mac_does() {
+    let device = Device::new("add-account-notifications");
+    device.sign_in();
+    let mut app = device.launch(choosing(BEA));
+    run_until(&mut app, "the inbox", inbox_shows);
+    app.state_mut()
+        .mail_mut()
+        .unwrap()
+        .account_mut()
+        .update_device_settings(|device| device.disable_notifications = true);
+    press_with(&mut app, Key::Num0, CTRL);
+    press(&mut app, Key::Enter);
+    run_until(&mut app, "Bea's mail", |app| on_screen(app) == Some(BEA));
+    assert!(
+        app.state()
+            .mail()
+            .unwrap()
+            .account()
+            .device_settings()
+            .disable_notifications
+    );
+}
+
+#[test]
 fn switching_accounts_keeps_see_your_weeks_week() {
     let device = Device::new("switch-week");
     device.sign_in();
@@ -1239,6 +1263,36 @@ fn gmail_messages(device: &Device, query: &str) -> Vec<(String, String)> {
         .collect()
 }
 
+/// The mock's drafts whose messages match `query`, as `(draft id, snippet)`. Each is fetched by
+/// its draft's id, which a write keeps, where its message's goes with the message Exo replaces.
+fn gmail_drafts(device: &Device, query: &str) -> Vec<(String, String)> {
+    let gmail = gmail::Client::new(
+        device.server.endpoints(),
+        gmail::StaticToken(gmail_mock::DEV_ACCESS_TOKEN.into()),
+    );
+    let list = gmail::DraftQuery {
+        q: Some(query.into()),
+        ..gmail::DraftQuery::default()
+    };
+    let drafts = device
+        .runtime
+        .block_on(gmail.gmail().drafts(&list).into_future())
+        .expect("drafts.list")
+        .drafts;
+    drafts
+        .into_iter()
+        .map(|draft| {
+            let id = draft.id.expect("an id");
+            let full = device
+                .runtime
+                .block_on(gmail.gmail().draft(&id, gmail::Format::Full).into_future())
+                .expect("drafts.get");
+            let snippet = full.message.and_then(|message| message.snippet);
+            (id, snippet.unwrap_or_default())
+        })
+        .collect()
+}
+
 #[test]
 fn switching_away_saves_a_drafts_last_keystrokes() {
     let device = Device::new("switch-draft");
@@ -1260,7 +1314,7 @@ fn switching_away_saves_a_drafts_last_keystrokes() {
     settle(&mut app);
     // Gmail has the draft, so its next write would wait 5 s.
     run_until(&mut app, "the draft in Gmail", |_| {
-        !gmail_messages(&device, "subject:\"Switched mid-word\" in:drafts").is_empty()
+        !gmail_drafts(&device, "subject:\"Switched mid-word\"").is_empty()
     });
     // Type within the second that compose waits between saves, then switch away.
     type_text(&mut app, "The last keystroke");
@@ -1268,7 +1322,7 @@ fn switching_away_saves_a_drafts_last_keystrokes() {
     press_with(&mut app, Key::Num1, CTRL);
     run_until(&mut app, "Bea's mail", |app| on_screen(app) == Some(BEA));
     let written = || {
-        gmail_messages(&device, "subject:\"Switched mid-word\" in:drafts")
+        gmail_drafts(&device, "subject:\"Switched mid-word\"")
             .iter()
             .any(|(_, snippet)| snippet.contains("The last keystroke"))
     };
@@ -1278,7 +1332,7 @@ fn switching_away_saves_a_drafts_last_keystrokes() {
         "written at once, not when its pace allowed: {:?}",
         switched.elapsed()
     );
-    let drafts = gmail_messages(&device, "subject:\"Switched mid-word\" in:drafts");
+    let drafts = gmail_drafts(&device, "subject:\"Switched mid-word\"");
     assert_eq!(drafts.len(), 1, "one Gmail draft: {drafts:?}");
     assert!(
         drafts[0].1.contains("The last keystroke"),
@@ -1304,7 +1358,7 @@ fn signing_out_right_after_typing_writes_the_draft_rather_than_ask() {
     press(&mut app, Key::Tab);
     type_text(&mut app, "First");
     run_until(&mut app, "the draft in Gmail", |_| {
-        !gmail_messages(&device, "subject:\"Signed out mid-word\" in:drafts").is_empty()
+        !gmail_drafts(&device, "subject:\"Signed out mid-word\"").is_empty()
     });
     // An edit that waits out the pace, kept on the device as compose closes.
     type_text(&mut app, " and last");
@@ -1317,7 +1371,7 @@ fn signing_out_right_after_typing_writes_the_draft_rather_than_ask() {
         "the sign-in screen, with nothing left to ask about",
         |app| log_in(app).is_some(),
     );
-    let drafts = gmail_messages(&device, "subject:\"Signed out mid-word\" in:drafts");
+    let drafts = gmail_drafts(&device, "subject:\"Signed out mid-word\"");
     assert_eq!(drafts.len(), 1, "one Gmail draft: {drafts:?}");
     assert!(
         drafts[0].1.contains("First and last"),
@@ -2463,6 +2517,10 @@ fn answer_yes(app: &mut Harness<'_, App>) {
     press(app, Key::Enter);
     run_until(app, "Add Calendar", |app| {
         add_calendar(app).as_deref() == Some(BEA)
+    });
+    // Tab goes to the invite card, which shows once the invitation is read.
+    run_until(app, "the invite card", |app| {
+        app.mail().and_then(exo::Mail::invite_answer).is_some()
     });
     press(app, Key::Tab);
     press(app, Key::Enter);

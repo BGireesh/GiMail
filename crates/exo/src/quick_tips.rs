@@ -21,6 +21,8 @@ pub enum Context {
     SearchBar,
     /// A conversation.
     Thread,
+    /// A conversation whose reply was just sent, until Gmail's copy takes its place.
+    SentReply,
     /// A draft: a new message or a reply.
     Draft,
     /// A snippet being written.
@@ -123,6 +125,14 @@ impl Context {
                 Keys(&["⌘", "K"]),
                 Text("for Exo Command"),
             ],
+            Self::SentReply => &[
+                Text("Hit"),
+                Keys(&["E"]),
+                Text("if it's done"),
+                Dot,
+                Keys(&["H"]),
+                Text("to set a follow-up reminder"),
+            ],
             Self::Draft => &[
                 Text("Hit"),
                 Keys(&["⌘", "enter"]),
@@ -210,6 +220,7 @@ impl crate::Mail {
             calendar,
             Some(
                 Region::ShareAvailability
+                    | Region::ShareAvailabilitySidebar
                     | Region::ShareAvailabilitySidebarAttendees
                     | Region::ShareAvailabilitySidebarTimezoneInput
             )
@@ -246,6 +257,15 @@ impl crate::Mail {
             }
             Region::ComposeForm | Region::PopOutComposeForm | Region::RecipientList => {
                 Context::Draft
+            }
+            Region::ThreadMessages | Region::ThreadMessageCalendarInvite
+                if self
+                    .thread
+                    .as_ref()
+                    .and_then(|view| view.focused())
+                    .is_some_and(|message| self.compose.is_sent_reply(message)) =>
+            {
+                Context::SentReply
             }
             Region::ThreadMessages | Region::ThreadMessageCalendarInvite | Region::ActionPane => {
                 Context::Thread

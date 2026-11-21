@@ -1,6 +1,6 @@
 //! The first-run flow after the welcome splash: account setup's loading screen and split step,
-//! then Get Me To Zero for an inbox of more than ten conversations, or `Welcome to Exo`. Setup
-//! ends the flow.
+//! then Get Me To Zero for an inbox of more than ten conversations (`Welcome to your Inbox 👋`),
+//! or `Welcome to Exo`. Setup ends the flow.
 //!
 //! It runs once for an account the first time it opens on this Mac (`do_show_tutorial`, set with
 //! the splash), in Snow whatever the theme. Quitting in account setup opens it again at the next
@@ -209,6 +209,11 @@ impl crate::Mail {
         )
     }
 
+    /// How far account setup's split step has scrolled its content. For tests.
+    pub fn account_setup_scroll(&self) -> Option<f32> {
+        Some(self.first_run.setup.as_ref()?.splits()?.scroll)
+    }
+
     /// Account setup is up. For tests.
     pub fn account_setup_open(&self) -> bool {
         self.first_run.setup.is_some()
@@ -314,7 +319,7 @@ impl crate::Mail {
         {
             self.first_run.count = None;
             if ends_in_get_me_to_zero(count) {
-                self.bulk_run(crate::bulk::Action::OpenGetMeToZero);
+                self.open_first_get_me_to_zero();
             } else {
                 self.first_run.welcome = true;
             }
@@ -344,6 +349,7 @@ impl crate::Mail {
                         &mut strip,
                         crate::chrome::Tab {
                             title: tab.title,
+                            email: tab.email,
                             login_screen: tab.login_screen,
                             account_color: tab.account_color,
                         },

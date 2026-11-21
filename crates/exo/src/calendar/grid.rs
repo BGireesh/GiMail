@@ -3,7 +3,11 @@
 
 use egui::{Color32, Painter, Rect, Sense, Stroke, Ui, Vec2, pos2, vec2};
 use exo_ui::{Family, Font, Scrollbar, TextStyle};
-use jiff::{SignedDuration, ToSpan, Zoned, civil::Date, tz::TimeZone};
+use jiff::{
+    SignedDuration, ToSpan, Zoned,
+    civil::{Date, Weekday},
+    tz::TimeZone,
+};
 
 use super::{
     block::{self, Look},
@@ -369,7 +373,11 @@ impl GridView {
         if variant == Variant::Week {
             paint_day_headers(&painter, &frame, grid);
         }
+        // Find scrolls the hours to a match out of view, in the axis or an event.
+        let find = ui.id().with(("calendar-find", variant == Variant::Week));
+        let scope = exo_ui::find::Scope::begin(ui.ctx(), find, frame.bodies, self.scroll);
         self.paint_axis(&painter, &frame, grid, hovered);
+        drop(scope);
         // Under the events, which take their own clicks.
         let band = Rect::from_min_max(
             frame.all_day.min,
@@ -405,7 +413,12 @@ impl GridView {
             }
             None => self.paint_all_day(ui, &painter, &frame, grid, &rows, &mut actions),
         }
+        let scope = exo_ui::find::Scope::begin(ui.ctx(), find, frame.bodies, self.scroll);
         self.paint_columns(ui, &frame, grid, hovered, &mut actions);
+        drop(scope);
+        if variant == Variant::Week && self.draft_anchor.is_none() {
+            self.draft_anchor = self.hidden_day_anchor(&frame, grid);
+        }
         self.expand_column(ui, &mut actions);
         self.follow_drag(ui, &frame, grid, &mut actions);
         self.scrollbar.show(
@@ -428,6 +441,33 @@ impl GridView {
             }
         }
         actions
+    }
+
+    /// Where the form goes for a draft on a weekend day the week leaves out: a line at the
+    /// columns' left edge for a day before the first shown, else at their right edge, from the
+    /// draft's start time to its end time (none past midnight).
+    fn hidden_day_anchor(&self, frame: &Frame, grid: &Grid<'_>) -> Option<Rect> {
+        let draft = grid.draft?;
+        let day = draft.start.date();
+        let weekend = matches!(day.weekday(), Weekday::Saturday | Weekday::Sunday);
+        if !weekend || grid.days.contains(&day) {
+            return None;
+        }
+        let x = if grid.days.first().is_some_and(|first| day < *first) {
+            frame.columns.left()
+        } else {
+            frame.columns.right()
+        };
+        let fraction = |at: &Zoned| {
+            at.time()
+                .duration_since(jiff::civil::Time::midnight())
+                .as_secs_f32()
+                / 86_400.0
+        };
+        let start = fraction(&draft.start);
+        let top = frame.columns.top() - self.scroll + start * DAY_HEIGHT;
+        let height = (fraction(&draft.end) - start).max(0.0) * DAY_HEIGHT;
+        Some(Rect::from_x_y_ranges(x..=x, top..=top + height))
     }
 
     /// The day column under `x` and the minutes from its midnight at `y` (unsnapped).
@@ -810,10 +850,17 @@ impl GridView {
         }
     }
 
-    /// The wheel over the bodies scrolls the columns and the time axis together.
+    /// The wheel over the bodies scrolls the columns and the time axis together, as find does to
+    /// bring a match into view.
     fn scroll(&mut self, ui: &Ui, frame: &Frame) {
         if ui.rect_contains_pointer(frame.bodies) {
             self.scroll -= ui.input(|input| input.smooth_scroll_delta.y);
+        }
+        let find = ui
+            .id()
+            .with(("calendar-find", frame.variant == Variant::Week));
+        if let Some(delta) = exo_ui::find::reveal(ui.ctx(), find) {
+            self.scroll += delta.y;
         }
         let scale = ui.ctx().pixels_per_point();
         self.scroll = ((self
@@ -963,11 +1010,13 @@ impl GridView {
         );
         let right = axis.right() - 1.0 - AXIS_PADDING_RIGHT;
         let quarters = (1..96).filter(|quarter| quarter % 4 == 0 || hovered == Some(quarter * 15));
+        // While find searches, the labels out of view are painted too, for it to find.
+        let searching = exo_ui::find::searching(painter.ctx());
         for quarter in quarters {
             // A label sits at the bottom of its 11px row, nudged down 7px.
             let row_bottom = axis.top() - self.scroll + quarter as f32 * SLOT;
             let top = row_bottom - AXIS_TEXT.line_height + AXIS_TEXT_TOP;
-            if top > axis.bottom() || top + AXIS_TEXT.line_height < axis.top() {
+            if !searching && (top > axis.bottom() || top + AXIS_TEXT.line_height < axis.top()) {
                 continue;
             }
             let label = hour_label(quarter / 4, quarter % 4 * 15);
@@ -1326,8 +1375,10 @@ impl GridView {
                         .invite
                         .is_some_and(|uid| event.ical_uid.as_deref() == Some(uid))
                         || grid.selected == Some(event.key.as_str());
+                    let lifted = (hovered || active) && !focused;
                     let look = Look {
-                        glowing: block::glow(ui.ctx(), id, (hovered || active) && !focused),
+                        glowing: block::glow(ui.ctx(), id, lifted),
+                        lifted,
                         past: event.end < *grid.now,
                         all_day: true,
                         preview: grid.form,
@@ -1424,12 +1475,10 @@ impl GridView {
                         .invite
                         .is_some_and(|uid| event.ical_uid.as_deref() == Some(uid))
                         || grid.selected == Some(event.key.as_str());
+                    let lifted = (response.hovered() || active) && !focused && !collapsed;
                     let look = Look {
-                        glowing: block::glow(
-                            ui.ctx(),
-                            id,
-                            (response.hovered() || active) && !focused && !collapsed,
-                        ),
+                        glowing: block::glow(ui.ctx(), id, lifted),
+                        lifted,
                         past: event.end < *grid.now,
                         all_day: true,
                         preview: grid.form,
@@ -1609,7 +1658,7 @@ impl GridView {
                     unaccepted: event.style() == super::event::Style::Bordered,
                     create: preview,
                     past: event.end.timestamp().min(day_end) < grid.now.timestamp(),
-                    focused: false,
+                    ..exo_ui::BlockPalette::default()
                 };
                 (*rect, event.color.block(theme, palette).fill)
             })
@@ -1710,12 +1759,10 @@ impl GridView {
                 || grid.selected == Some(event.key.as_str());
             let start = event.start.timestamp().max(midnight.timestamp());
             let end = event.end.timestamp().min(day_end);
+            let lifted = (hovered || active) && !focused && event.share.is_none();
             let look = Look {
-                glowing: block::glow(
-                    ui.ctx(),
-                    id,
-                    (hovered || active) && !focused && event.share.is_none(),
-                ),
+                glowing: block::glow(ui.ctx(), id, lifted),
+                lifted,
                 past: end < grid.now.timestamp(),
                 time_on_same_line,
                 // With slots picked, the rest are previews.

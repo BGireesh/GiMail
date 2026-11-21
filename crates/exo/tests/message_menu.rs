@@ -1,6 +1,7 @@
-//! A message body's right-click menu, end to end on gmail-mock. A right-clicked word is selected
-//! and offers Look Up, Search with Google and Copy. A link offers Copy Link and Open Link, and an
-//! address link offers Copy Email Address.
+//! The shell's right-click menu, end to end on gmail-mock, in a message body and on the rest of
+//! the page. A right-clicked word is selected and offers Look Up, Search with Google and Copy. A
+//! link offers Copy Link and Open Link, and an address link offers Copy Email Address. Elsewhere,
+//! the menu has `Copy`, off with nothing selected.
 
 mod support;
 
@@ -23,12 +24,14 @@ impl Menus {
         app.mail_mut().set_context_menu(move |items, _| {
             let titles: Vec<String> = items
                 .iter()
-                .map(|item| {
-                    if let MenuItem::Item { title, .. } = item {
-                        title.clone()
-                    } else {
-                        "—".to_owned()
-                    }
+                .map(|item| match item {
+                    MenuItem::Item {
+                        title,
+                        enabled: true,
+                        ..
+                    } => title.clone(),
+                    MenuItem::Item { title, .. } => format!("({title})"),
+                    MenuItem::Separator => "—".to_owned(),
                 })
                 .collect();
             let choose = menus.choose.lock().expect("not poisoned").clone();
@@ -155,4 +158,48 @@ fn a_bodys_word_and_links_have_the_shells_menu() {
         Some("ann+work@example.com"),
         "decoded, without its query"
     );
+}
+
+#[test]
+fn the_rest_of_the_page_has_the_shells_menu() {
+    let mut app = start("page-menu");
+    let menus = Menus::default();
+    menus.install(&mut app);
+    // The list's header, which is no text to select.
+    let (titles, _) = menus.right_click(&mut app, pos2(900.0, 60.0), "");
+    assert_eq!(titles, ["(Copy)"]);
+    // The contact pane's domain, a link, the last thing in it that takes a click.
+    app.wait(1.0);
+    let domain = (250..600)
+        .rev()
+        .step_by(2)
+        .map(|y| pos2(1040.0, y as f32))
+        .find(|at| app.hover(*at) == CursorIcon::PointingHand)
+        .expect("the contact's domain")
+        // egui's hit test reaches 5pt past the link's box.
+        - egui::vec2(0.0, 8.0);
+    let (titles, copied) = menus.right_click(&mut app, domain, "Copy Link");
+    assert_eq!(titles, ["Copy Link", "Open Link"], "{domain:?}");
+    assert!(
+        copied.is_some_and(|link| link.starts_with("https://")),
+        "the domain's address"
+    );
+
+    // The subject: the word under the pointer is selected, and is what the menu acts on.
+    app.key(Key::Enter);
+    let subject = (40..200)
+        .step_by(2)
+        .map(|y| pos2(300.0, y as f32))
+        .find(|at| app.hover(*at) == CursorIcon::Text)
+        .expect("the subject");
+    let (titles, copied) = menus.right_click(&mut app, subject + egui::vec2(0.0, 6.0), "Copy");
+    assert_eq!(titles.len(), 4, "{titles:?}");
+    assert!(titles[0].starts_with("Look Up \""), "{titles:?}");
+    assert_eq!(titles[1..], ["Search with Google", "—", "Copy"]);
+    let word = copied.expect("the word is copied");
+    assert!(
+        !word.is_empty() && word.chars().all(char::is_alphanumeric),
+        "{word:?}"
+    );
+    assert_eq!(titles[0], format!("Look Up \"{word}\""));
 }

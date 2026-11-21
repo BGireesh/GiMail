@@ -90,13 +90,14 @@ impl ThreadView {
         match key {
             HeaderKey::Escape => self.zone = Zone::Messages,
             // ↑ from the status line gives the actions the keyboard, on Done, and the tab index to
-            // come back to becomes 1.
+            // come back to becomes 1. Without Done (in Spam) the keyboard stays.
             HeaderKey::Up if control == Some(Control::Status) => {
-                self.zone = Zone::Header(
-                    controls
-                        .iter()
-                        .position(|control| *control == Control::Done),
-                );
+                if let Some(done) = controls
+                    .iter()
+                    .position(|control| *control == Control::Done)
+                {
+                    self.zone = Zone::Header(Some(done));
+                }
                 self.header_tab = 1;
             }
             HeaderKey::Up => {}

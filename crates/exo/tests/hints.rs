@@ -114,6 +114,23 @@ fn quick_tips_follow_the_keyboard_and_close_with_their_hint() {
 }
 
 #[test]
+fn quick_tips_after_a_reply_say_what_to_do_with_the_conversation() {
+    let mut app = start_with_settings("hints-quick-tips-sent", &|settings| {
+        settings.quick_tips.show = true
+    });
+    app.key(Key::Enter);
+    app.key(Key::R);
+    app.type_text("Sounds good");
+    app.press(Key::Enter, CMD);
+    assert_eq!(app.mail().quick_tips(), Some(Context::SentReply));
+    // Once Gmail's copy takes the reply's place (Instant Send), the conversation's tips are back.
+    app.press(Key::Z, CMD.plus(Modifiers::SHIFT));
+    app.wait(0.5);
+    app.sync();
+    assert_eq!(app.mail().quick_tips(), Some(Context::Thread));
+}
+
+#[test]
 fn the_palette_turns_quick_tips_on_and_off() {
     let mut app = start("hints-quick-tips-palette");
     assert_eq!(app.mail().quick_tips(), None, "off for a new account");

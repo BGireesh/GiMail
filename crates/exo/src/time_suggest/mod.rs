@@ -42,7 +42,8 @@ pub struct Options {
     pub skip_prepositions: bool,
     /// Days are weekdays: `in 3 weekdays`.
     pub business_days_only: bool,
-    /// The locale writes the month before the day, so `8/7` is August 7th. Exo's dates are en-US.
+    /// The locale writes the month before the day, so `8/7` is August 7th. By default, the
+    /// order the Mac's locale writes dates in.
     pub month_first: bool,
     /// What blank input lists: each phrase's best parse.
     pub defaults: &'static [&'static str],
@@ -56,7 +57,7 @@ impl Default for Options {
             allow_past: false,
             skip_prepositions: false,
             business_days_only: false,
-            month_first: true,
+            month_first: crate::format::locale::current().month_first(),
             defaults: &[],
         }
     }

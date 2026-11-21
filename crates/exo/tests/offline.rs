@@ -1,5 +1,6 @@
 //! The offline bar at the bottom of the window: what it says while Gmail can't be reached, rate
-//! limits the account or says it has no mail.
+//! limits the account or says it has no mail. And a conversation the store doesn't have, fetched
+//! when it's opened, or not available offline.
 
 mod support;
 
@@ -103,6 +104,113 @@ fn a_conversation_opened_offline_fills_in_once_gmail_answers() {
     );
     app.key(Key::R);
     assert_eq!(app.mail().thread_drafts(), 1, "and a reply starts");
+}
+
+#[test]
+fn a_conversation_the_store_doesnt_have_is_fetched_when_opened() {
+    let mut app = start("unstored-online");
+    // Mail out of the inbox that hasn't synced, so the store doesn't have it.
+    let gmail = app.gmail();
+    let email = gmail::mime::Email {
+        from: Some(gmail::mime::Mailbox::address("dana@contoso.example")),
+        to: vec![gmail::mime::Mailbox::address("maya@brightmoor.co")],
+        subject: "Quarterly numbers".into(),
+        text: Some("The numbers are in.".into()),
+        ..gmail::mime::Email::default()
+    };
+    let options = gmail::InsertOptions {
+        label_ids: vec!["CATEGORY_UPDATES".into()],
+        ..gmail::InsertOptions::default()
+    };
+    let message = app
+        .block_on(async {
+            gmail
+                .gmail()
+                .insert_message(email.to_rfc822(), &options)
+                .await
+        })
+        .expect("messages.insert");
+    let thread = message.thread_id.expect("a thread");
+    let open = |app: &mut support::Fixture, thread: &str| {
+        let link = exo::links::parse(&format!("exo://maya@brightmoor.co/thread/{thread}"))
+            .expect("one of Exo's links");
+        app.mail_mut().open_link(&link);
+    };
+    open(&mut app, &thread);
+    let shown = |app: &support::Fixture| {
+        app.mail()
+            .account()
+            .snapshot()
+            .thread
+            .as_ref()
+            .and_then(|detail| detail.messages.first()?.body.text.clone())
+    };
+    for _ in 0..20 {
+        if shown(&app).is_some() {
+            break;
+        }
+        app.wait(0.25);
+    }
+    assert!(
+        shown(&app).is_some_and(|text| text.contains("The numbers are in.")),
+        "fetched whole"
+    );
+    assert_eq!(
+        app.mail().thread().map(|view| view.id().to_owned()),
+        Some(thread)
+    );
+
+    // One Gmail doesn't have goes back to the list, with no alert.
+    open(&mut app, "19af00000000beef");
+    for _ in 0..20 {
+        if app.mail().thread().is_none() {
+            break;
+        }
+        app.wait(0.25);
+    }
+    assert!(app.mail().thread().is_none());
+    assert_eq!(app.mail().alert(), None);
+}
+
+#[test]
+fn a_conversation_the_store_doesnt_have_isnt_available_offline() {
+    let mut app = start("offline-unavailable");
+    let home = app.mail().list().clone();
+    app.disconnect();
+    app.mail().account().network_changed();
+    app.settle();
+    let link = exo::links::parse("exo://maya@brightmoor.co/label/sent/thread/19af00000000beef")
+        .expect("one of Exo's links");
+    app.mail_mut().open_link(&link);
+    for _ in 0..20 {
+        if app.mail().alert().is_some() {
+            break;
+        }
+        app.wait(0.25);
+    }
+    assert_eq!(
+        app.mail().alert(),
+        Some((
+            "Sorry!",
+            "This conversation is not available offline.\nPlease check your connection and try again."
+        ))
+    );
+    assert!(app.mail().thread().is_none(), "back to the list");
+    assert_eq!(*app.mail().list(), exo_store::ListId::Sent);
+    // OK, then back: the list stands for the conversation that didn't open.
+    app.key(Key::Enter);
+    assert_eq!(app.mail().alert(), None);
+    app.press(
+        Key::OpenBracket,
+        Modifiers::MAC_CMD.plus(Modifiers::COMMAND),
+    );
+    assert_eq!(*app.mail().list(), home);
+    assert!(app.mail().thread().is_none());
+    // A conversation the store has opens as ever.
+    app.key(Key::Enter);
+    app.wait(1.0);
+    assert!(app.mail().thread().is_some());
+    assert_eq!(app.mail().alert(), None);
 }
 
 #[test]

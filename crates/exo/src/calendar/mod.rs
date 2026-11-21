@@ -137,6 +137,8 @@ pub enum Action {
     FormFormat(FormatCommand),
     /// `Add Google Meet Link` / `Remove Google Meet Link`.
     FormMeet,
+    /// ⌘C on the event's own meeting link, which copies it.
+    FormCopyLink,
     /// `Edit event in Google Calendar` and the rest that open Google Calendar's editor.
     FormExternal,
     /// An alert's or dialog's action, by index.
@@ -308,6 +310,7 @@ impl crate::Mail {
             Some(match share.typing {
                 Some(share::Input::Who) => Region::ShareAvailabilitySidebarAttendees,
                 Some(share::Input::Zone) => Region::ShareAvailabilitySidebarTimezoneInput,
+                None if share.control => Region::ShareAvailabilitySidebar,
                 None => Region::ShareAvailability,
             })
         } else if let Some(week) = &self.calendar.week {
@@ -448,6 +451,11 @@ impl crate::Mail {
         ))
     }
 
+    /// Whether the open form asks for a new Meet link.
+    pub fn calendar_form_new_meet(&self) -> Option<bool> {
+        Some(self.calendar.form.as_ref()?.values.meeting == Meeting::NewMeet)
+    }
+
     /// The open form's calendar.
     pub fn calendar_form_calendar(&self) -> Option<&str> {
         Some(&self.calendar.form.as_ref()?.values.calendar)
@@ -513,6 +521,7 @@ impl crate::Mail {
                     create: form.mode == Mode::Create,
                     all_day: form.values.all_day,
                     meet: form.values.meeting == Meeting::NewMeet,
+                    link_focused: form.meeting_link_focused(),
                     about,
                 }
             }),
@@ -766,6 +775,19 @@ impl crate::Mail {
                     } else {
                         Meeting::None
                     };
+                }
+            }
+            Action::FormCopyLink => {
+                let calendars = self.calendar_writable();
+                if let Some(link) = self
+                    .calendar
+                    .form
+                    .as_ref()
+                    .and_then(|form| form.meeting_link(&calendars, self.account.email()))
+                {
+                    self.commands
+                        .hint(Hint::new().text(format!("\"{link}\" copied to clipboard.")));
+                    self.ctx.copy_text(link);
                 }
             }
             Action::FormExternal => self.calendar_open_external(),
@@ -1501,6 +1523,7 @@ impl crate::Mail {
             editable: event.editable,
             rule,
             guest,
+            online: self.snapshot.connection.is_online(),
         };
         let Some(details) = self.calendar.details.as_mut() else {
             return;
@@ -1747,6 +1770,10 @@ impl crate::Mail {
                 |invite| self.calendar_invite_account(invite),
             );
             let thread = self.thread.as_ref().map(|thread| thread.id().to_owned());
+            let links = source
+                .ical_uid
+                .as_deref()
+                .and_then(|uid| self.calendar_invite_links(uid));
             self.account
                 .calendar()
                 .queue(exo_store::CalendarChange::RespondToInvite {
@@ -1754,6 +1781,7 @@ impl crate::Mail {
                     invite: source,
                     status: status.to_owned(),
                     thread,
+                    links,
                 });
             if let Some(invite) = &mut self.calendar.invite {
                 invite.answer(&calendar, answer.into());
@@ -1777,6 +1805,19 @@ impl crate::Mail {
             "RSVP will be sent when online.".to_owned()
         };
         self.commands.toast(Toast::new(text));
+    }
+
+    /// The links of the mail with invite `uid`, in the open conversation, when the invitation is
+    /// from a sender Calendar doesn't know (it carries a link that marks them as known).
+    fn calendar_invite_links(&self, uid: &str) -> Option<exo_store::InviteLinks> {
+        let message = self.thread.as_ref()?.invite_message(uid)?;
+        let calendar = &self.bodies.facts(message)?.calendar;
+        Some(exo_store::InviteLinks {
+            mark_sender_known: calendar.mark_sender_known.clone()?,
+            accepted: calendar.rsvp_links.accepted.clone(),
+            declined: calendar.rsvp_links.declined.clone(),
+            tentative: calendar.rsvp_links.tentative.clone(),
+        })
     }
 
     /// An invite card's answer, given to the calendar's event with its UID, which is added from
@@ -1828,6 +1869,7 @@ impl crate::Mail {
                 invite: invite_event(&invite),
                 status: response.status().to_owned(),
                 thread,
+                links: self.calendar_invite_links(&invite.uid),
             });
         if self
             .calendar
@@ -2160,6 +2202,8 @@ pub(crate) struct FormState {
     create: bool,
     all_day: bool,
     meet: bool,
+    /// The event's own meeting link has the keyboard.
+    link_focused: bool,
     /// While About has the keyboard, the formatting keys that apply to it, by their place in
     /// [`FormatCommand::ALL`], and whether the editor takes Escape and Tab.
     about: Option<(u16, bool, bool)>,
@@ -2674,6 +2718,13 @@ fn register_form(commands: &mut Commands<AppAction>, form: FormState) {
             .regions(FORM),
         );
     }
+    if form.link_focused {
+        commands.add(
+            Command::shortcut("CALENDAR_CREATE_COPY_LINK", action(Action::FormCopyLink))
+                .key("mod+c")
+                .regions(FORM),
+        );
+    }
     commands.add(
         Command::shortcut("CALENDAR_CREATE_DISCARD", action(Action::Discard))
             .keys(["mod+shift+,", "mod+shift+."])
@@ -2878,11 +2929,13 @@ pub(crate) fn share_availability_command(action: AppAction) -> Command<AppAction
 fn register_share(commands: &mut Commands<AppAction>) {
     const PAGE: &[Region] = &[Region::ShareAvailability];
     const FIELDS: &[Region] = &[
+        Region::ShareAvailabilitySidebar,
         Region::ShareAvailabilitySidebarAttendees,
         Region::ShareAvailabilitySidebarTimezoneInput,
     ];
     const ALL: &[Region] = &[
         Region::ShareAvailability,
+        Region::ShareAvailabilitySidebar,
         Region::ShareAvailabilitySidebarAttendees,
         Region::ShareAvailabilitySidebarTimezoneInput,
     ];

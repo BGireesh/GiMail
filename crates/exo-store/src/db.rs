@@ -335,6 +335,24 @@ pub(crate) struct CalendarChangeRow {
     pub not_before: Option<jiff::Timestamp>,
 }
 
+/// A bulk action of the last week ([`crate::bulk_log`]). Not provider truth, like the outbox.
+#[derive(Debug, toasty::Model)]
+#[table = "bulk_actions"]
+pub(crate) struct BulkRow {
+    /// Insertion order, which is the order they started in.
+    #[key]
+    #[auto]
+    pub id: u64,
+    /// When it started, in epoch milliseconds.
+    pub started_at: i64,
+    #[column(type = text)]
+    pub record: Json<crate::BulkRecord>,
+    /// What it has changed, which its undo puts back. Kept apart from `record` because a running
+    /// action writes it as it goes.
+    #[column(type = text)]
+    pub changed: Json<crate::Relabelled>,
+}
+
 /// Small persistent values: the history cursor, the account's identity.
 #[derive(Debug, toasty::Model)]
 #[table = "kv"]
@@ -408,14 +426,15 @@ pub(crate) async fn clear(path: &Path) -> Result<()> {
 
 /// What Clear Cache and Restart copies from the old database, which is what Gmail doesn't have: the
 /// settings, the drafts (held and scheduled sends among them), the queued changes, the reminders'
-/// schedule and the calendar's queued changes. `every_table_is_kept_or_refilled` in
-/// `tests/clear_cache.rs` lists the rest.
-const KEPT_TABLES: [&str; 5] = [
+/// schedule, the calendar's queued changes and the bulk actions' log.
+/// `every_table_is_kept_or_refilled` in `tests/clear_cache.rs` lists the rest.
+const KEPT_TABLES: [&str; 6] = [
     "settings",
     "drafts",
     "outbox",
     "reminders",
     "calendar_changes",
+    "bulk_actions",
 ];
 /// The `kv` entries kept with them, Exo's own records: which held sends gave their reminder, and
 /// the unsubscribes still to retry.

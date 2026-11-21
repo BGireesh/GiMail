@@ -5,7 +5,8 @@
 //! then gives each emoji the room Chromium gives it, and [`paint`] paints each emoji cluster's
 //! picture (fastframe-emoji, the platform's own artwork) in the font's cell at the start of that
 //! room. The cell is one em wide and ascent plus descent tall, on the line's baseline, which is
-//! the box CoreText draws the emoji in. Pictures are drawn at the cell's size in device pixels and
+//! the box CoreText draws the emoji in. An emoji takes its text color's alpha, as Chromium's do,
+//! so one in faded text is faded too. Pictures are drawn at the cell's size in device pixels and
 //! kept per context.
 
 use std::{collections::HashMap, sync::Arc};
@@ -163,7 +164,7 @@ fn cluster_of<'a>(clusters: &[(usize, &'a str)], glyph: &Glyph) -> Option<&'a st
 }
 
 /// Paints the pictures of the emoji in `galley`, with its top left at `origin` and its glyphs on
-/// their line's baseline ([`crate::align_baselines`]).
+/// their line's baseline ([`crate::align_baselines`]), each at its text color's alpha.
 pub(crate) fn paint(painter: &Painter, origin: Pos2, galley: &Galley) {
     let clusters = clusters(&galley.job.text);
     if clusters.is_empty() {
@@ -186,7 +187,19 @@ pub(crate) fn paint(painter: &Painter, origin: Pos2, galley: &Galley) {
                 ),
                 vec2(cell.advance * em, (cell.ascent + cell.descent) * em),
             );
-            picture(painter, cluster, rect);
+            let alpha = galley
+                .job
+                .sections
+                .iter()
+                .find(|section| {
+                    section
+                        .byte_range
+                        .contains(&egui::text::ByteIndex(glyph.cluster as usize))
+                })
+                .map(|section| section.format.color)
+                .filter(|color| *color != Color32::PLACEHOLDER)
+                .map_or(u8::MAX, |color| color.a());
+            draw(painter, cluster, rect, Color32::from_white_alpha(alpha));
         }
     }
 }
@@ -194,6 +207,11 @@ pub(crate) fn paint(painter: &Painter, origin: Pos2, galley: &Galley) {
 /// Paints `cluster`'s picture filling `rect`, drawing it first if this context hasn't yet. This is
 /// for an emoji as an image (an `<img>` of one), not a glyph in a run of text.
 pub fn picture(painter: &Painter, cluster: &str, rect: Rect) {
+    draw(painter, cluster, rect, Color32::WHITE);
+}
+
+/// [`picture`], multiplied by `tint`.
+fn draw(painter: &Painter, cluster: &str, rect: Rect, tint: Color32) {
     let ctx = painter.ctx();
     let height = (rect.height() * painter.pixels_per_point())
         .round()
@@ -222,7 +240,7 @@ pub fn picture(painter: &Painter, cluster: &str, rect: Rect) {
             texture.id(),
             rect,
             Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)),
-            Color32::WHITE,
+            tint,
         );
     }
 }

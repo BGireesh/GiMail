@@ -47,6 +47,10 @@ const COLUMN_WIDTHS: (f32, f32) = (416.0, 514.0);
 const COLUMN_SHORTER: f32 = 134.0;
 /// The content's `padding-bottom: 25px`, and Classic's 36px sides.
 const CONTENT_BOTTOM: f32 = 25.0;
+/// Space on the focused content scrolls it by seven eighths of what shows (whole pixels), over
+/// 150ms, easing in and out, as Chromium pages a scroller.
+const PAGE_STEP: f32 = 0.875;
+const PAGE_TIME: f64 = 0.15;
 const SIDES: f32 = 36.0;
 /// `h1`: 21px/32px, `.2px` apart, ligatures off, `top: 3px`, `margin-bottom: 2px`.
 const HEADER: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 21.0, 32.0)
@@ -360,7 +364,12 @@ pub(crate) struct Splits {
     tab: Tab,
     /// When the tab on screen was picked, which is when its rows enter.
     tab_since: f64,
-    scroll: f32,
+    pub(super) scroll: f32,
+    /// A page Space is scrolling: from where, to where, and since when.
+    paging: Option<(f32, f32, f64)>,
+    /// The content's height on screen, and how far it scrolls, as of the last frame.
+    viewport: f32,
+    max_scroll: f32,
     /// What has the keyboard, and whether it shows (`:focus-visible`, once a key is pressed).
     focus: Option<Focus>,
     focus_visible: bool,
@@ -418,6 +427,9 @@ impl Splits {
             tab: Tab::Important,
             tab_since: now,
             scroll: 0.0,
+            paging: None,
+            viewport: 0.0,
+            max_scroll: 0.0,
             focus: Some(Focus::Continue),
             focus_visible: false,
         };
@@ -502,8 +514,27 @@ impl Splits {
         self.focus_visible = false;
     }
 
-    /// A key on the step: Tab moves the focus, and Enter (down) or Space (up) on a focused button
-    /// clicks it.
+    /// Space (⇧Space up) on the focused content: a page down, from where a page under way is
+    /// going.
+    fn page(&mut self, up: bool, now: f64) {
+        let from = self.scroll_at(now);
+        let target = self.paging.map_or(from, |(_, to, _)| to);
+        let step = (self.viewport * PAGE_STEP).floor();
+        let to = (target + if up { -step } else { step }).clamp(0.0, self.max_scroll);
+        self.paging = Some((from, to, now));
+    }
+
+    /// Where the content is scrolled at `now`, a page under way included.
+    fn scroll_at(&self, now: f64) -> f32 {
+        let Some((from, to, since)) = self.paging else {
+            return self.scroll;
+        };
+        let t = ((now - since) / PAGE_TIME).clamp(0.0, 1.0) as f32;
+        from + (to - from) * CubicBezier::EASE_IN_OUT.at(t)
+    }
+
+    /// A key on the step: Tab moves the focus, Enter (down) or Space (up) on a focused button
+    /// clicks it, and Space (down) on the focused content scrolls it a page.
     pub(crate) fn press(&mut self, press: Press, now: f64) -> Option<Event> {
         let Press {
             key,
@@ -516,6 +547,10 @@ impl Splits {
         match (key, pressed) {
             (Key::Tab, true) => {
                 self.focus = tab_from(self.focus, self.tab, shift);
+                None
+            }
+            (Key::Space, true) if self.focus == Some(Focus::Content) => {
+                self.page(shift, now);
                 None
             }
             (Key::Enter, true) | (Key::Space, false) => match self.focus? {
@@ -866,9 +901,20 @@ fn show_splits(
     let mut clicked = None;
 
     // The content scrolls under the buttons.
+    splits.scroll = splits.scroll_at(now);
+    if splits
+        .paging
+        .is_some_and(|(_, _, since)| now - since < PAGE_TIME)
+    {
+        ctx.request_repaint();
+    } else {
+        splits.paging = None;
+    }
     let response = ui.interact(content, id.with("content"), Sense::hover());
-    if response.hovered() {
-        splits.scroll -= ui.input(|input| input.smooth_scroll_delta.y);
+    let wheel = ui.input(|input| input.smooth_scroll_delta.y);
+    if response.hovered() && wheel != 0.0 {
+        splits.scroll -= wheel;
+        splits.paging = None;
     }
     let text = content.shrink2(vec2(SIDES, 0.0));
     let subcopy = SUBCOPY.wrap(&ctx, SUBTITLE, text.width());
@@ -884,7 +930,8 @@ fn show_splits(
         + FOOTER_MARGIN
         + FOOTER.line_height
         + CONTENT_BOTTOM;
-    let scroll = splits.scroll.clamp(0.0, (full - content.height()).max(0.0));
+    let max_scroll = (full - content.height()).max(0.0);
+    let scroll = splits.scroll.clamp(0.0, max_scroll);
     let clipped = painter.with_clip_rect(content.intersect(painter.clip_rect()));
     let top = content.top() - scroll;
     HEADER.paint_line(
@@ -1004,6 +1051,8 @@ fn show_splits(
     }
 
     splits.scroll = scroll;
+    splits.viewport = content.height();
+    splits.max_scroll = max_scroll;
     let right = Rect::from_min_max(pos2(pane.right(), page.top()), page.max);
     match show_preview(
         ui,

@@ -22,7 +22,8 @@ pub(crate) struct Problem {
 pub(crate) enum Kind {
     /// `OK` only. For From problems, `OK` then expands the header to From.
     Ok { focus_from: bool },
-    /// `Send anyway` (skipping this check) or `Cancel`.
+    /// `Send anyway` (`Schedule anyway` with a Send later time), skipping this check, or
+    /// `Cancel`.
     SendAnyway(Bypass),
 }
 
@@ -32,6 +33,16 @@ pub(crate) struct Bypass {
     pub subject: bool,
     pub attachments: bool,
     pub variables: bool,
+}
+
+/// The action that waves a check through: `Send anyway`, or `Schedule anyway` for a draft with a
+/// Send later time.
+pub(crate) fn anyway(open: &Open) -> &'static str {
+    if open.scheduled_at().is_some() {
+        "Schedule anyway"
+    } else {
+        "Send anyway"
+    }
 }
 
 /// The first problem with sending `open` as `html` at `now`. `from_ok` says whether its From is
@@ -265,6 +276,20 @@ mod tests {
             panic!("send anyway")
         };
         assert_eq!(first(&draft, bypass), None);
+    }
+
+    #[test]
+    fn a_scheduled_draft_is_scheduled_anyway() {
+        let mut draft = open("", &["ann@x.com"], "Hi");
+        assert_eq!(anyway(&draft), "Send anyway");
+        draft.record.send_later = Some(exo_store::SendLater {
+            at: jiff::Timestamp::now() + jiff::SignedDuration::from_hours(1),
+            abort_on_reply: true,
+            current_message_ids: Vec::new(),
+        });
+        assert_eq!(anyway(&draft), "Schedule anyway");
+        draft.unscheduled_by = Some("Ann".into());
+        assert_eq!(anyway(&draft), "Send anyway", "a reply called it off");
     }
 
     #[test]

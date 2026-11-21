@@ -1,5 +1,6 @@
-//! The right pane's contact card, from what the account's own mail says: name, address, recent
-//! conversations and the company domain.
+//! The right pane's contact card, from what the account's own mail says (name, address, recent
+//! conversations and the company domain) and, for a saved contact or a colleague, what Google
+//! says: their photo, company and title. Under the name, what's too tall for the pane scrolls.
 
 use egui::{Color32, Id, Painter, Rect, Sense, Ui, Vec2, pos2, vec2};
 use exo_ui::{BoxShadow, Family, Font, IconButton, TextStyle};
@@ -16,6 +17,20 @@ const DATA: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 12.0, 16.0)
 const MAIL_ROWS: usize = 4;
 /// Row pitch in the Mail section: 16px lines with collapsed 8px margins.
 const MAIL_PITCH: f32 = 24.0;
+/// The header's photo.
+const PHOTO: f32 = 56.0;
+/// The name's row, `padding: 32px 2rem 24px` around its 24px line, over what scrolls.
+const NAME_ROW: f32 = 80.0;
+
+/// How far the card has scrolled under its name. It's one pane whoever it shows, so the next
+/// contact keeps the scroll as far as it reaches.
+#[derive(Clone, Default)]
+struct Scroll {
+    offset: f32,
+    /// How tall what scrolls was last drawn.
+    content: f32,
+    bar: exo_ui::Scrollbar,
+}
 
 /// What the user did in the contact pane.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -36,7 +51,7 @@ pub enum ContactAction {
 /// `current` (the thread the cursor is on) from its conversations, which say how long ago they
 /// were before `now` while hovered. `is_me` hides the Mail section for the account's own address.
 pub fn show(
-    ui: &Ui,
+    ui: &mut Ui,
     pane: Rect,
     rem: f32,
     card: &ContactCard,
@@ -44,6 +59,11 @@ pub fn show(
     is_me: bool,
     now: jiff::Timestamp,
 ) -> Option<ContactAction> {
+    // What's under the name scrolls (`.ContactPane-overlay`), clipped to its box.
+    let overlay = Rect::from_min_max(pos2(pane.left(), pane.top() + NAME_ROW), pane.max);
+    let mut content_ui = ui.new_child(egui::UiBuilder::new().max_rect(overlay));
+    content_ui.set_clip_rect(overlay.intersect(ui.clip_rect()));
+    let ui: &Ui = ui;
     let palette = exo_ui::palette(ui.ctx());
     // The name and the section headers: `rgba(0, 0, 0, .8)`, `hsla(0, 0%, 100%, .85)` in Carbon.
     let ink = palette.ink(0.8, 0.85);
@@ -62,7 +82,7 @@ pub fn show(
     let name_rect = Rect::from_min_size(pos2(left, pane.top() + 32.0), vec2(name_width, 24.0));
     let name_row = Rect::from_min_max(
         pos2(pane.left(), pane.top()),
-        pos2(pane.right(), pane.top() + 80.0),
+        pos2(pane.right(), pane.top() + NAME_ROW),
     );
     if click(ui, exo_ui::id(ui.ctx(), "contact-name"), name_rect) {
         action = Some(ContactAction::Search(name.to_owned()));
@@ -78,18 +98,53 @@ pub fn show(
         action = Some(ContactAction::Copied(name.to_owned()));
     }
 
-    // Contact details: the address, 4px below the overlay's top, in `rgba(0, 0, 0, .55)`, Carbon
-    // `hsla(0, 0%, 100%, .65)`.
-    let details_ink = palette.ink(0.55, 0.65);
+    // The rest scrolls under the name, with the wheel, and at once to a match find moves to.
+    let pane_ui = ui;
+    let scroll_id = exo_ui::id(ui.ctx(), "contact-pane-scroll");
+    let find = scroll_id.with("find");
+    let mut scroll = ui
+        .ctx()
+        .data(|data| data.get_temp::<Scroll>(scroll_id))
+        .unwrap_or_default();
+    if ui.rect_contains_pointer(overlay) {
+        scroll.offset -= ui.input(|input| input.smooth_scroll_delta.y);
+    }
+    scroll.offset += exo_ui::find::reveal(ui.ctx(), find).map_or(0.0, |delta| delta.y);
+    scroll.offset = scroll
+        .offset
+        .clamp(0.0, (scroll.content - overlay.height()).max(0.0));
+    let ui = &content_ui;
+    let painter = ui.painter().clone();
+    let found = exo_ui::find::Scope::begin(ui.ctx(), find, overlay, scroll.offset);
+    // Where the pane's top would be, scrolled.
+    let top = pane.top() - scroll.offset;
+
+    // Someone Google knows, or whose brand has a verified logo, has a 60px header: their photo
+    // (else the logo), with the address 13px beside it in the pane's ink. Otherwise the contact
+    // details are the address alone, in `rgba(0, 0, 0, .55)` (Carbon `hsla(0, 0%, 100%, .65)`).
+    // Either way it's 4px below the overlay's top.
+    let person = crate::people::person(ui.ctx(), &card.person.email);
+    let has_header =
+        person.is_some() || crate::brands::logo(ui.ctx(), &card.person.email).is_some();
+    let (email_left, details_ink, details_bottom) = if has_header {
+        (left + PHOTO + 13.0, ink, 140.0)
+    } else {
+        (left, palette.ink(0.55, 0.65), 124.0)
+    };
     let details = Rect::from_min_max(
-        pos2(pane.left(), pane.top() + 80.0),
-        pos2(pane.right(), pane.top() + 124.0),
+        pos2(pane.left(), top + NAME_ROW),
+        pos2(pane.right(), top + details_bottom),
     );
     let email_width = BOLD
-        .single_line(&painter, &card.person.email, ink, Some(width))
+        .single_line(
+            &painter,
+            &card.person.email,
+            ink,
+            Some(width - (email_left - left)),
+        )
         .size()
         .x;
-    let email_rect = Rect::from_min_size(pos2(left, pane.top() + 89.0), vec2(email_width, 16.0));
+    let email_rect = Rect::from_min_size(pos2(email_left, top + 89.0), vec2(email_width, 16.0));
     if click(ui, exo_ui::id(ui.ctx(), "contact-email"), email_rect) {
         action = Some(ContactAction::Compose(card.person.email.clone()));
     }
@@ -107,20 +162,32 @@ pub fn show(
         email_rect.min,
         &card.person.email,
         details_ink,
-        Some(width),
+        Some(width - (email_left - left)),
     );
+    // The glyph 10px after the address (the button's `padding: 10px`).
     if copy_button(
         ui,
         &painter,
         details,
-        pos2(email_rect.right() + 8.0, pane.top() + 88.0),
+        pos2(email_rect.right() + 8.5, top + 88.0),
         &card.person.email,
     ) {
         action = Some(ContactAction::Copied(card.person.email.clone()));
     }
 
+    let mut section_top = top + 124.0;
+    if has_header {
+        // The photo, 4px down, over the default avatar, which shows until it loads.
+        let photo = Rect::from_min_size(pos2(left, top + 84.0), Vec2::splat(PHOTO));
+        crate::people::paint_avatar(&painter, photo, &card.person.email, false);
+        // The header's 60px and its 16px bottom padding.
+        section_top = top + 156.0;
+    }
+    if let Some(person) = &person {
+        section_top += company(ui, &painter, left, width, section_top, person);
+    }
+
     // Mail: the latest conversations with them, besides the current one.
-    let mut section_top = pane.top() + 124.0;
     let recent: Vec<_> = card
         .recent
         .iter()
@@ -196,11 +263,88 @@ pub fn show(
             &domain,
             area,
         );
+        exo_ui::link_box(ui.ctx(), rect, &format!("https://{domain}"));
         if click(ui, exo_ui::id(ui.ctx(), "contact-domain"), rect) {
             action = Some(ContactAction::OpenDomain(domain));
         }
+        section_top += 16.0;
     }
+    drop(found);
+
+    scroll.content = section_top - (top + NAME_ROW);
+    scroll
+        .bar
+        .show(pane_ui, scroll_id, overlay, scroll.offset, scroll.content);
+    if scroll.offset > 0.0 {
+        // Scrolled, the overlay has a 1px line inside its top (`.isScrolled`'s inset shadow):
+        // black at .04, Carbon's white at .1.
+        pane_ui.painter().rect_filled(
+            Rect::from_min_size(overlay.min, vec2(overlay.width(), 1.0)),
+            0.0,
+            palette.ink(0.04, 0.1),
+        );
+    }
+    pane_ui
+        .ctx()
+        .data_mut(|data| data.insert_temp(scroll_id, scroll));
     action
+}
+
+/// The company section: the company (or, without one, the title) as its header, 24px in where
+/// an icon would be, and the title as its row, each wrapping. Returns the section's height.
+fn company(
+    ui: &Ui,
+    painter: &Painter,
+    left: f32,
+    width: f32,
+    top: f32,
+    person: &crate::people::Person,
+) -> f32 {
+    let palette = exo_ui::palette(ui.ctx());
+    let (header, row) = match (&person.company, &person.title) {
+        (Some(company), title) => (company, title.as_ref()),
+        (None, Some(title)) => (title, None),
+        (None, None) => return 0.0,
+    };
+    let mut y = top;
+    let header_lines = BOLD.wrap(ui.ctx(), header, width - 24.0);
+    let header_rect =
+        Rect::from_min_size(pos2(left, y), vec2(width, 16.0 * header_lines.len() as f32));
+    // A section header takes the pointer, whether or not it goes anywhere.
+    ui.interact(
+        header_rect,
+        exo_ui::id(ui.ctx(), "contact-company"),
+        Sense::hover(),
+    )
+    .on_hover_cursor(egui::CursorIcon::PointingHand);
+    for line in &header_lines {
+        // `top: 1px`.
+        BOLD.paint_line(
+            painter,
+            pos2(left + 24.0, y + 1.0),
+            line,
+            palette.ink(0.8, 0.85),
+            None,
+        );
+        y += 16.0;
+    }
+    // The header's 8px margin, then the row and its 8px margin.
+    y += 8.0;
+    if let Some(row) = row {
+        for line in DATA.wrap(ui.ctx(), row, width) {
+            DATA.paint_line(
+                painter,
+                pos2(left, y + 1.0),
+                &line,
+                palette.ink(0.55, 0.65),
+                None,
+            );
+            y += 16.0;
+        }
+        y += 8.0;
+    }
+    // The section's 20px bottom padding.
+    y + 20.0 - top
 }
 
 /// A section header: a 16px icon and bold text 24px to its right, 1px lower. The icon is a disc

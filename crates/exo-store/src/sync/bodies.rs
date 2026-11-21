@@ -5,7 +5,8 @@
 //! ([`Lane::Sync`]). The thread the list's cursor rests on gets them before it's opened
 //! ([`Store::prefetch`], [`Lane::Show`]). The rest that eviction would keep get them a hundred
 //! at a time ([`Store::prerender`], [`Lane::Sync`]). Any other thread gets them when it's
-//! opened ([`Store::load_bodies`], [`Lane::Act`]).
+//! opened ([`Store::load_bodies`], [`Lane::Act`]), and a thread opened that isn't stored at all
+//! (from a link or a notification) is fetched whole ([`Store::load_thread`]).
 
 use std::collections::HashSet;
 
@@ -14,7 +15,7 @@ use toasty::Executor;
 use toasty::stmt::Value;
 
 use super::backfill::ON_SCREEN_AHEAD;
-use super::{ATTEMPTS, fetch_message, fetch_thread};
+use super::{ATTEMPTS, Rows, fetch_message, fetch_thread};
 use crate::api::{Api, Failure};
 use crate::db::{self, BodyRow, DraftRow, EVICTED_BEFORE, MessageRow, query_i64};
 use crate::error::{Error, Result};
@@ -188,6 +189,51 @@ impl Store {
         self.inner
             .fetch_missing(thread.as_str(), Lane::Act, true)
             .await
+    }
+
+    /// Whether any of `thread`'s messages are stored.
+    ///
+    /// # Errors
+    /// On database failures.
+    pub async fn has_thread(&self, thread: &ThreadId) -> Result<bool> {
+        let mut db = self.inner.db.clone();
+        Ok(MessageRow::filter_by_thread_id(thread.as_str())
+            .first()
+            .exec(&mut db)
+            .await?
+            .is_some())
+    }
+
+    /// Fetches `thread` whole and stores it, for a thread opened that the store doesn't have
+    /// (from a link or a notification). The calls go ahead of everything but other user actions.
+    /// Returns whether Gmail has the thread.
+    ///
+    /// # Errors
+    /// [`Error::Offline`](crate::Error::Offline) and the like when Gmail can't be reached.
+    pub async fn load_thread(&self, thread: &ThreadId) -> Result<bool> {
+        let inner = &self.inner;
+        inner.bootstrapped().await?;
+        let Some(fetched) =
+            fetch_thread(&inner.api, Lane::Act, OPEN_ATTEMPTS, thread.as_str()).await?
+        else {
+            return Ok(false);
+        };
+        let full = fetched
+            .messages
+            .iter()
+            .filter_map(|message| message.id.clone())
+            .collect();
+        let rows = Rows {
+            thread: fetched,
+            full,
+        };
+        let mut db = inner.db.clone();
+        let mut write = inner.begin(&mut db).await?;
+        if let Some(id) = provider::save_rows(write.exec(), &rows).await? {
+            reindex(write.exec(), &id, &inner.router()).await?;
+        }
+        write.publish().await?;
+        Ok(true)
     }
 
     /// [`load_bodies`](Self::load_bodies) for the thread the list's cursor rests on, ahead of

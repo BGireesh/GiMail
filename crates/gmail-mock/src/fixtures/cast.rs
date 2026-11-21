@@ -63,6 +63,8 @@ pub static PEOPLE: &[Person] = &[
     Person { key: "oliver", first: "Oliver", last: "Grant", email: "oliver@brightmoor.co", org: "Brightmoor", title: "Engineer", phone: "+1 929-555-0141", circle: Colleague },
     Person { key: "zara", first: "Zara", last: "Ahmed", email: "zara@brightmoor.co", org: "Brightmoor", title: "Recruiting", phone: "+1 718-555-0107", circle: Colleague },
     Person { key: "ruth", first: "Ruth", last: "Abernathy", email: "ruth@brightmoor.co", org: "Brightmoor", title: "Office Manager", phone: "+1 212-555-0172", circle: Colleague },
+    // A colleague Maya has never written to: only the Workspace directory knows her.
+    Person { key: "noor", first: "Noor", last: "Haddad", email: "noor@brightmoor.co", org: "Brightmoor", title: "Legal Counsel", phone: "+1 212-555-0114", circle: Colleague },
     // Customers, partners, investors, vendors
     Person { key: "rachel", first: "Rachel", last: "Kim", email: "rachel.kim@callowayfreight.com", org: "Calloway Freight", title: "VP Operations", phone: "+1 312-555-0144", circle: Work },
     Person { key: "dev", first: "Dev", last: "Malhotra", email: "dev@callowayfreight.com", org: "Calloway Freight", title: "IT Director", phone: "+1 312-555-0119", circle: Work },

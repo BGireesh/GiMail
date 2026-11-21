@@ -16,6 +16,7 @@ use gmail::{
     BatchModifyMessagesRequest, FilterAction, FilterCriteria, ListQuery, ModifyThreadRequest,
 };
 use jiff::Timestamp;
+use serde::{Deserialize, Serialize};
 
 use crate::db::ListEntry;
 use crate::error::{Error, Result};
@@ -43,7 +44,7 @@ const BATCH_IDS: usize = 1000;
 const CATEGORIES: [&str; 2] = ["CATEGORY_PERSONAL", "CATEGORY_SOCIAL"];
 
 /// The threads a bulk action is for.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BulkTarget {
     /// A select-all: every thread of a list at or before a date, loaded or not.
     pub list: Option<ListCutoff>,
@@ -54,7 +55,7 @@ pub struct BulkTarget {
 }
 
 /// Every thread of a list or search (narrowed by `filter`) dated at or before `before`.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ListCutoff {
     /// The list or search.
     pub scope: Scope,
@@ -68,7 +69,7 @@ pub struct ListCutoff {
 }
 
 /// What a select-all is of.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Scope {
     /// A list.
     List(ListId),
@@ -84,9 +85,31 @@ pub struct Progress {
     total: AtomicUsize,
     done: AtomicUsize,
     stopped: AtomicBool,
+    /// The bulk action's entry in the log ([`Store::bulk_log`]), which keeps what it has changed
+    /// as it goes.
+    log: Option<u64>,
 }
 
 impl Progress {
+    /// The progress of running logged bulk action `log` (not of undoing it), whose entry keeps
+    /// what it changes as it goes, so a quit midway loses no more than the last
+    /// [`SYNC_EVERY`] threads of its undo.
+    pub fn logged(log: u64) -> Self {
+        Self {
+            log: Some(log),
+            ..Self::default()
+        }
+    }
+
+    /// The progress of one that's over, having changed (or put back) `threads`.
+    pub fn ended(threads: usize) -> Self {
+        Self {
+            total: AtomicUsize::new(threads),
+            done: AtomicUsize::new(threads),
+            ..Self::default()
+        }
+    }
+
     /// How many threads it's changing. It's 0 until they're all found.
     pub fn total(&self) -> usize {
         self.total.load(Ordering::Relaxed)
@@ -114,12 +137,12 @@ impl Progress {
 
 /// What a bulk relabel changed, which undoing it reverses: threads with the labels each one
 /// gained (only those it didn't have) and lost (only those it had).
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Relabelled {
     groups: Vec<Relabel>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct Relabel {
     changed: Changed,
     added: Vec<String>,
@@ -127,7 +150,7 @@ struct Relabel {
 }
 
 /// The threads a relabel changed.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct Changed {
     /// Changed whole (`threads.modify`).
     threads: Vec<ThreadId>,
@@ -157,6 +180,31 @@ impl Relabelled {
     /// Nothing changed.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    /// A relabel of `added` and `removed` about to start, with nothing changed yet.
+    fn starting(added: &[String], removed: &[String]) -> Self {
+        let mut relabelled = Self::default();
+        relabelled.start(added, removed);
+        relabelled
+    }
+
+    /// Starts recording a group of threads that gain `added` and lose `removed`.
+    fn start(&mut self, added: &[String], removed: &[String]) {
+        self.groups.push(Relabel {
+            changed: Changed::default(),
+            added: added.to_vec(),
+            removed: removed.to_vec(),
+        });
+    }
+
+    /// The group being recorded.
+    fn current(&mut self) -> &mut Changed {
+        &mut self
+            .groups
+            .last_mut()
+            .expect("a group is started before its threads change")
+            .changed
     }
 }
 
@@ -297,11 +345,15 @@ impl Store {
         add: &[String],
         remove: &[String],
     ) -> Result<Vec<ThreadId>> {
-        let mut changed = Changed::default();
+        let mut changed = Relabelled::starting(add, remove);
         self.modify_threads(threads, add, remove, &Progress::default(), &mut changed)
             .await?;
         self.sync().await?;
-        Ok(changed.into_threads())
+        Ok(changed
+            .groups
+            .into_iter()
+            .flat_map(|group| group.changed.into_threads())
+            .collect())
     }
 
     /// Applies `mutation` to every thread of `target`, to whole threads, recording in `done`
@@ -374,16 +426,9 @@ impl Store {
         }
         progress.start(groups.iter().map(|(threads, _, _)| threads.len()).sum());
         for (threads, added, removed) in groups {
-            let mut changed = Changed::default();
-            let result = self
-                .modify_threads(&threads, &added, &removed, progress, &mut changed)
-                .await;
-            done.groups.push(Relabel {
-                changed,
-                added,
-                removed,
-            });
-            result?;
+            done.start(&added, &removed);
+            self.modify_threads(&threads, &added, &removed, progress, done)
+                .await?;
         }
         self.sync().await?;
         Ok(())
@@ -397,7 +442,7 @@ impl Store {
     pub async fn undo_bulk(&self, done: &Relabelled, progress: &Progress) -> Result<()> {
         progress.start(done.len());
         for group in done.groups.iter().rev() {
-            let mut changed = Changed::default();
+            let mut changed = Relabelled::starting(&group.removed, &group.added);
             let whole = self
                 .batch_modify(
                     &group.changed.messages,
@@ -550,16 +595,16 @@ impl Store {
     }
 
     /// Adds `add` and removes `remove` on every message of `threads` until done or `progress`
-    /// is stopped, counting them in `progress` and recording in `changed` what Gmail changed.
-    /// A relabel that only removes takes the labels off the stored threads' messages that carry
-    /// them in batches. The rest are changed whole.
+    /// is stopped, counting them in `progress` and recording in `changed`'s current group what
+    /// Gmail changed. A relabel that only removes takes the labels off the stored threads'
+    /// messages that carry them in batches. The rest are changed whole.
     async fn modify_threads(
         &self,
         threads: &[ThreadId],
         add: &[String],
         remove: &[String],
         progress: &Progress,
-        changed: &mut Changed,
+        changed: &mut Relabelled,
     ) -> Result<()> {
         let (carrying, mut whole) = if add.is_empty() {
             self.carrying(threads, remove).await?
@@ -608,7 +653,7 @@ impl Store {
         add: &[String],
         remove: &[String],
         progress: &Progress,
-        changed: &mut Changed,
+        changed: &mut Relabelled,
     ) -> Result<Vec<ThreadId>> {
         let mut refused = Vec::new();
         let mut rest = threads;
@@ -650,7 +695,7 @@ impl Store {
                 }
             };
             match sent {
-                Ok(()) => changed.messages.extend_from_slice(batch),
+                Ok(()) => changed.current().messages.extend_from_slice(batch),
                 Err(failure) if failure.is_permanent() => {
                     log::info!(
                         "Gmail refused a batch of {} messages ({}); changing their threads whole",
@@ -662,7 +707,7 @@ impl Store {
                 }
                 Err(failure) => return Err(failure.into()),
             }
-            self.progressed(progress, batch.len()).await?;
+            self.progressed(progress, batch.len(), changed).await?;
         }
         Ok(refused)
     }
@@ -675,7 +720,7 @@ impl Store {
         add: &[String],
         remove: &[String],
         progress: &Progress,
-        changed: &mut Changed,
+        changed: &mut Relabelled,
     ) -> Result<()> {
         let request = ModifyThreadRequest {
             add_label_ids: add.to_vec(),
@@ -695,22 +740,31 @@ impl Store {
             .await
             {
                 match result {
-                    Ok(()) => changed.threads.push(thread),
+                    Ok(()) => changed.current().threads.push(thread),
                     Err(failure) if failure.is_not_found() => {}
                     Err(failure) => return Err(failure.into()),
                 }
             }
-            self.progressed(progress, round.len()).await?;
+            self.progressed(progress, round.len(), changed).await?;
         }
         Ok(())
     }
 
     /// Counts `threads` more done, syncing every [`SYNC_EVERY`] threads, so the stored ones
-    /// leave their lists as the relabel goes.
-    async fn progressed(&self, progress: &Progress, threads: usize) -> Result<()> {
+    /// leave their lists as the relabel goes. A logged relabel's entry then gets what it has
+    /// `changed` so far.
+    async fn progressed(
+        &self,
+        progress: &Progress,
+        threads: usize,
+        changed: &Relabelled,
+    ) -> Result<()> {
         let done = progress.done.fetch_add(threads, Ordering::Relaxed) + threads;
         if done / SYNC_EVERY > (done - threads) / SYNC_EVERY {
             self.sync().await?;
+            if let Some(log) = progress.log {
+                self.checkpoint_bulk(log, changed).await?;
+            }
         }
         Ok(())
     }

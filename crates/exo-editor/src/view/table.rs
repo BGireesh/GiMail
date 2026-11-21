@@ -344,6 +344,33 @@ impl Tables {
         }
     }
 
+    /// The `<img>` at `at` (CSS px from its top left) in table `key`, once its picture has loaded,
+    /// with the `href` of the link around the point.
+    pub(crate) fn image_at(
+        &self,
+        key: u64,
+        at: egui::Pos2,
+        pictures: &Pictures,
+    ) -> Option<(crate::view::MenuImage, Option<String>)> {
+        let table = self.tables.get(&key)?;
+        let hit = table.view.context_hit(at.x, at.y);
+        let shown = hit.image?.src;
+        // The document knows its images by their place in the table, but for a `data:` image,
+        // which loads itself.
+        let source = match shown.strip_prefix(IMAGE_URL) {
+            Some(place) => table.images.get(place.parse::<usize>().ok()?)?.0.clone(),
+            None => table
+                .images
+                .iter()
+                .find(|(source, _)| source.key() == shown)?
+                .0
+                .clone(),
+        };
+        let src = source.key();
+        let file = pictures.file(&src)?;
+        Some((crate::view::MenuImage { src, file }, hit.link))
+    }
+
     /// The painted bands of table `key`, as each one's top (CSS px from the table's) and texture.
     pub(crate) fn bands(&self, key: u64) -> impl Iterator<Item = (f32, &TextureHandle)> {
         self.tables.get(&key).into_iter().flat_map(|table| {

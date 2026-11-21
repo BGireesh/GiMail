@@ -1,14 +1,14 @@
 //! The app's side of attachments: what the fetches report each frame, the file notifications,
 //! the open thread's cards (progress, thumbnails, `Download all`) and the viewer.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use egui::{Context, Rect};
-use exo_store::{Attachment, AttachmentSource, DraftAttachment, MessageDetail};
+use exo_store::{Attachment, DraftAttachment, MessageDetail};
 
 use super::notifications::{Click, STEP};
 use super::viewer::{Action as ViewerAction, Output as ViewerOutput, Viewer};
-use super::{AttachmentFiles, Event, Failure, Target, Update};
+use super::{AttachmentFiles, Event, Failure, Key, Part, Target, Thumbnail, Update};
 use crate::account::Loader;
 use crate::thread::ThreadView;
 
@@ -36,26 +36,73 @@ impl AttachmentFiles {
             files.set_thumbnail(&self.ctx, key, image);
         }
         for attachment in thread.thumbnail_requests() {
-            let (sender, ctx) = (self.thumbnails.0.clone(), self.ctx.clone());
             let key = (attachment.message_id.clone(), attachment.part_id.clone());
-            let pixels_per_point = ctx.pixels_per_point();
-            loader.attachment(&attachment, move |bytes| {
-                // Decoding a photo takes a while, so it gets its own thread and leaves the
-                // account's tasks free.
-                std::thread::spawn(move || {
-                    let image = bytes
-                        .ok()
-                        .and_then(|bytes| super::thumbnails::thumbnail(&bytes, pixels_per_point));
-                    let _ = sender.send((key, image));
-                    ctx.request_repaint();
-                });
-            });
+            self.fetch_thumbnail(
+                loader,
+                Part::Gmail(attachment),
+                key,
+                self.thumbnails.0.clone(),
+            );
         }
     }
 
-    /// Brings a read-only snippet's cards up to date with whether its files are zipping.
-    pub(crate) fn update_files(&self, files: &mut crate::thread::attachments::Files) {
+    /// Brings a read-only snippet's cards up to date with whether its files are zipping and the
+    /// thumbnails that have arrived, and fetches the thumbnails they ask for. The cards are
+    /// `message`'s, made of the snippet's `snippet_files`, which are kept in `folder` (the draft
+    /// files) or still in Gmail.
+    pub(crate) fn update_files(
+        &mut self,
+        loader: &Loader,
+        files: &mut crate::thread::attachments::Files,
+        message: &MessageDetail,
+        snippet_files: &[DraftAttachment],
+        folder: &Path,
+    ) {
         files.set_zipping(&self.zipping);
+        while let Ok((key, image)) = self.snippet_thumbnails.1.try_recv() {
+            files.set_thumbnail(&self.ctx, key, image);
+        }
+        for attachment in files.thumbnail_requests([message]) {
+            let key = (attachment.message_id.clone(), attachment.part_id.clone());
+            match snippet_files
+                .iter()
+                .find(|file| file.uuid == attachment.part_id)
+                .and_then(|file| Part::of_draft(file, folder))
+            {
+                Some(part) => {
+                    self.fetch_thumbnail(loader, part, key, self.snippet_thumbnails.0.clone())
+                }
+                None => files.set_thumbnail(&self.ctx, key, None),
+            }
+        }
+    }
+
+    /// Fetches `part` and sends its thumbnail, keyed by `key`, to `sender`.
+    fn fetch_thumbnail(
+        &self,
+        loader: &Loader,
+        part: Part,
+        key: Key,
+        sender: std::sync::mpsc::Sender<Thumbnail>,
+    ) {
+        let ctx = self.ctx.clone();
+        let pixels_per_point = ctx.pixels_per_point();
+        let decode = move |bytes: Option<Vec<u8>>| {
+            let image =
+                bytes.and_then(|bytes| super::thumbnails::thumbnail(&bytes, pixels_per_point));
+            let _ = sender.send((key, image));
+            ctx.request_repaint();
+        };
+        // Decoding a photo takes a while, so it gets its own thread and leaves the account's
+        // tasks free.
+        match part {
+            Part::Gmail(attachment) => loader.attachment(&attachment, move |bytes| {
+                std::thread::spawn(move || decode(bytes.ok()));
+            }),
+            Part::Kept(_, path) => {
+                std::thread::spawn(move || decode(std::fs::read(path).ok()));
+            }
+        }
     }
 
     /// `Download all` under the cards of `message`, the `position`th message in a conversation
@@ -96,27 +143,7 @@ impl AttachmentFiles {
         let parts = files
             .iter()
             .filter(|file| file.content_id.is_none())
-            .filter_map(|file| {
-                let kept = folder.join(&file.uuid);
-                match &file.source {
-                    _ if kept.is_file() => Some(Part::Kept(file.name.clone(), kept)),
-                    AttachmentSource::Gmail {
-                        message_id,
-                        attachment_id,
-                        part_id,
-                    } => Some(Part::Gmail(Attachment {
-                        message_id: message_id.clone(),
-                        attachment_id: attachment_id.clone(),
-                        part_id: part_id.clone(),
-                        filename: file.name.clone(),
-                        mime_type: file.mime_type.clone(),
-                        size: u32::try_from(file.size).unwrap_or(u32::MAX),
-                        content_id: None,
-                        inline: false,
-                    })),
-                    AttachmentSource::Local => None,
-                }
-            });
+            .filter_map(|file| Part::of_draft(file, folder));
         // The snippet is its thread's only message.
         self.zip(
             loader,
@@ -193,14 +220,6 @@ impl AttachmentFiles {
             },
         );
     }
-}
-
-/// A file going into a zip.
-enum Part {
-    /// A Gmail message's part.
-    Gmail(Attachment),
-    /// A file kept on disk, under the name it goes in as.
-    Kept(String, PathBuf),
 }
 
 impl crate::Mail {
@@ -386,8 +405,12 @@ impl crate::Mail {
                     .and_then(Viewer::current)
                     .cloned()
                 {
-                    self.attachment_files
-                        .drag(&loader, &attachment, at, ctx.zoom_factor());
+                    self.attachment_files.drag(
+                        &loader,
+                        Part::Gmail(attachment),
+                        at,
+                        ctx.zoom_factor(),
+                    );
                 }
             }
             None => {}

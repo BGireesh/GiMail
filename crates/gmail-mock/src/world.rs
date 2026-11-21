@@ -38,6 +38,10 @@ pub struct Config {
     /// `picture` points at it. Without it (the default), the account has Google's generated
     /// avatar.
     pub photo: bool,
+    /// The saved contacts and the directory's colleagues have photos of their own, served at
+    /// `/__mock/photo/…` like the account's. Without it (the default), they have Google's
+    /// generated avatar.
+    pub contact_photos: bool,
 }
 
 impl Default for Config {
@@ -52,6 +56,7 @@ impl Default for Config {
             quota: None,
             origin: None,
             photo: false,
+            contact_photos: false,
         }
     }
 }
@@ -122,6 +127,10 @@ pub struct Fault {
     pub method: Option<String>,
     /// Path prefix to match, e.g. `/gmail/v1/users/me/threads/`.
     pub path: String,
+    /// Query parameters the request must carry, as `name=value` pairs joined by `&`, or none
+    /// when absent. `format=full` fails a thread's full `threads.get` but not its
+    /// `format=minimal` one, as Gmail's `responseTooLarge` does.
+    pub query: Option<String>,
     /// Status to answer with.
     pub status: u16,
     /// Overrides the canned message for the status.

@@ -131,3 +131,47 @@ fn inbox_zero_downloads_its_photo_and_toggles_animated_images() {
     palette(&mut app, "Enable Animated Images");
     assert!(!app.mail().account().settings().reduce_motion);
 }
+
+#[test]
+fn at_inbox_zero_the_toasts_show_the_photo_through_unless_the_folder_drawer_is_open() {
+    let mut app = start("achievements-see-through");
+    let behind = |app: &Fixture| exo_ui::Behind::for_toasts(&app.harness.ctx).is_some();
+    assert!(!behind(&app), "a list's toasts are opaque");
+    clear_inbox(&mut app);
+    assert!(app.mail().toast().is_some(), "Mark Done's toast");
+    assert!(behind(&app));
+    // The open drawer has the keyboard, and the toasts are opaque again until it closes.
+    app.key(Key::ArrowLeft);
+    assert!(app.mail().folders_open());
+    assert!(!behind(&app));
+    app.key(Key::Escape);
+    assert!(!app.mail().folders_open());
+    assert!(behind(&app));
+}
+
+#[test]
+fn the_dialog_scrolls_in_a_short_window() {
+    let mut app = start("achievements-scroll");
+    app.harness.set_size(egui::vec2(1280.0, 400.0));
+    app.harness.run_steps(2);
+    palette(&mut app, "Achievements");
+    // Taller than the page under the tab strip, the dialog fills it. 40px into the first card,
+    // under the 144px banner, is Inbox Zero.
+    let card = Pos2::new(640.0, 41.0 + 144.0 + 40.0);
+    app.click(card);
+    assert_eq!(app.mail().achievements_dialog(), Some(View::InboxZero));
+    // The back button, 20px into the dialog's top left.
+    app.click(Pos2::new(640.0 - 230.0 + 40.0, 41.0 + 40.0));
+    assert_eq!(app.mail().achievements_dialog(), Some(View::Main));
+    // Scrolled to its end, Marked Done has come up to where Inbox Zero was.
+    app.hover(Pos2::new(640.0, 300.0));
+    app.harness.input_mut().events.push(Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: egui::vec2(0.0, -1000.0),
+        phase: egui::TouchPhase::Move,
+        modifiers: Modifiers::NONE,
+    });
+    app.wait(1.0);
+    app.click(card);
+    assert_eq!(app.mail().achievements_dialog(), Some(View::MarkDone));
+}

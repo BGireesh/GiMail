@@ -229,6 +229,7 @@ impl FieldSpelling {
             selection: menu.selected,
             selection_baseline: menu.baseline,
             text_size: menu.text_size,
+            image: None,
         });
     }
 

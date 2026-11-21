@@ -37,6 +37,13 @@ pub struct Render {
     pub actions: Vec<crate::Action>,
     /// What a Google Calendar notification says about its event.
     pub calendar_data: crate::CalendarData,
+    /// The dates the new part mentions outside quotes, as written.
+    pub unquoted_dates: Vec<String>,
+    /// The new part has a phrase that proposes or settles a time (`are you free`, `works for
+    /// me`…), which with a date to come suggests making an event.
+    pub proposes_time: bool,
+    /// Rules for mail from its sender's domain, which follow the restyle.
+    pub sender_css: &'static str,
 }
 
 /// The `<body>` attributes the shown body carries over.

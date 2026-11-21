@@ -3,10 +3,10 @@
 //! 2 s, and a click opens the matching view.
 
 use egui::{
-    Area, Color32, Context, CornerRadius, CursorIcon, Order, Painter, Pos2, Rect, Sense, Vec2,
+    Color32, Context, CornerRadius, CursorIcon, Id, LayerId, Painter, Pos2, Rect, Sense, Vec2,
     pos2, vec2,
 };
-use exo_ui::{BoxShadow, Family, Font, TextStyle, motion, paint_icon};
+use exo_ui::{Behind, BoxShadow, Family, Font, TextStyle, ToastView, motion, paint_icon};
 
 use super::{Kind, Reached, View};
 
@@ -28,6 +28,8 @@ const SHOWN_FOR: f64 = 8.0;
 const FADE: f64 = 2.0;
 /// The gap between cards.
 const GAP: f32 = 12.0;
+/// Over the photo, the card is white at .2 over the photo blurred 12.5px.
+const BLUR: f32 = 12.5;
 
 /// A popup on screen.
 pub struct Popup {
@@ -70,6 +72,14 @@ impl Popups {
         !self.shown.is_empty()
     }
 
+    /// The layers they're painted on, oldest first, for keeping the toasts' stack in order.
+    pub fn layers(&self, ctx: &Context) -> Vec<LayerId> {
+        self.shown
+            .iter()
+            .map(|popup| ToastView::layer(popup_id(ctx, popup.serial)))
+            .collect()
+    }
+
     /// Their titles, oldest first. For tests.
     pub fn titles(&self) -> Vec<String> {
         self.shown
@@ -79,16 +89,11 @@ impl Popups {
     }
 
     /// Paints the popups at the bottom left of the stack in `area` (the page below the tab strip),
-    /// with their bottom `bottom` px up, over whatever the stack has under them. `photo` means
-    /// they're over Inbox Zero's photo. Returns the dialog's view that a click on one opens.
-    pub fn show(
-        &mut self,
-        ctx: &Context,
-        area: Rect,
-        bottom: f32,
-        photo: bool,
-        now: f64,
-    ) -> Option<View> {
+    /// with their bottom `bottom` px up, over whatever the stack has under them, see-through over
+    /// a photo as the toasts are ([`Behind::for_toasts`]). Returns the dialog's view that a click
+    /// on one opens.
+    pub fn show(&mut self, ctx: &Context, area: Rect, bottom: f32, now: f64) -> Option<View> {
+        let behind = Behind::for_toasts(ctx);
         self.shown
             .retain(|popup| popup.fading_since.is_none_or(|since| now - since < FADE));
         let mut y = area.bottom() - bottom;
@@ -98,7 +103,7 @@ impl Popups {
             let height = popup.height(ctx);
             let top = y - height;
             y = top - GAP;
-            match popup.show(ctx, area, top, photo, now) {
+            match popup.show(ctx, area, top, behind.as_ref(), now) {
                 Some(Action::Open) => {
                     clicked = Some(popup.reached.kind.view());
                     closed = Some(popup.serial);
@@ -128,6 +133,11 @@ impl Popups {
 enum Action {
     Open,
     Close,
+}
+
+/// The area of the popup numbered `serial`.
+fn popup_id(ctx: &Context, serial: u64) -> Id {
+    exo_ui::id(ctx, ("achievement-popup", serial))
 }
 
 impl Popup {
@@ -169,7 +179,7 @@ impl Popup {
         ctx: &Context,
         area: Rect,
         top: f32,
-        photo: bool,
+        behind: Option<&Behind>,
         now: f64,
     ) -> Option<Action> {
         let rem = exo_ui::rem(area.width(), false);
@@ -183,9 +193,8 @@ impl Popup {
             pos2(area.left() + inset + 40.0 - 1.75 * rem + 6.0, top),
             vec2(self.width(), self.height(ctx)),
         );
-        let id = exo_ui::id(ctx, ("achievement-popup", self.serial));
-        Area::new(id)
-            .order(Order::Foreground)
+        let id = popup_id(ctx, self.serial);
+        ToastView::area(id)
             .fixed_pos(card.min)
             .show(ctx, |ui| {
                 let response = ui
@@ -215,7 +224,7 @@ impl Popup {
                     0.4,
                     motion::CubicBezier::new(0.25, 0.46, 0.45, 0.94),
                 );
-                let close = self.paint(ui, &painter, card, photo, hover);
+                let close = self.paint(ui, &painter, card, behind, hover);
                 if close {
                     Some(Action::Close)
                 } else {
@@ -226,32 +235,39 @@ impl Popup {
     }
 
     /// Paints the card and returns whether its × was clicked.
-    fn paint(&self, ui: &egui::Ui, painter: &Painter, card: Rect, photo: bool, hover: f32) -> bool {
+    fn paint(
+        &self,
+        ui: &egui::Ui,
+        painter: &Painter,
+        card: Rect,
+        behind: Option<&Behind>,
+        hover: f32,
+    ) -> bool {
         let ctx = ui.ctx();
         let palette = exo_ui::palette(ctx);
         let card = exo_ui::pixel_snap(card);
+        let photo = behind.is_some();
         // `0 6px 30px 2px rgba(0,0,0,.2)` and the `inset 3px 0 0` bar, or
         // `0 8px 30px 2px rgba(0,0,0,.1), 0 10px 30px 2px rgba(0,0,0,.3)` when hovered. These are
         // Classic's for the send, Mark Done and Get Me To Zero cards, and the default for Inbox
-        // Zero's.
+        // Zero's. Under a see-through card they're only outside it, as CSS clips a box-shadow.
         let black = |alpha: f32| Color32::from_black_alpha((alpha * 255.0).round() as u8);
-        BoxShadow::new([0.0, 6.0], 30.0, 2.0, black(0.2 * (1.0 - hover))).paint(
-            painter,
-            card,
-            CornerRadius::ZERO,
-        );
-        BoxShadow::new([0.0, 8.0], 30.0, 2.0, black(0.1 * hover)).paint(
-            painter,
-            card,
-            CornerRadius::ZERO,
-        );
-        BoxShadow::new([0.0, 10.0], 30.0, 2.0, black(0.3 * hover)).paint(
-            painter,
-            card,
-            CornerRadius::ZERO,
-        );
-        // `#fff`, `#464b53` in Carbon. Over the photo it's `hsla(0,0%,100%,.2)` with a 12.5px blur
-        // of the photo, which Exo leaves out.
+        for shadow in [
+            BoxShadow::new([0.0, 6.0], 30.0, 2.0, black(0.2 * (1.0 - hover))),
+            BoxShadow::new([0.0, 8.0], 30.0, 2.0, black(0.1 * hover)),
+            BoxShadow::new([0.0, 10.0], 30.0, 2.0, black(0.3 * hover)),
+        ] {
+            if photo {
+                shadow.paint_outside(painter, card);
+            } else {
+                shadow.paint(painter, card, CornerRadius::ZERO);
+            }
+        }
+        // `#fff`, `#464b53` in Carbon. Over the photo it's `hsla(0,0%,100%,.2)` over a 12.5px blur
+        // of it.
+        if let Some(behind) = behind {
+            behind.paint(painter, card, BLUR);
+        }
         let background = match (photo, palette.theme) {
             (true, _) => Color32::from_white_alpha(51),
             (false, exo_ui::Theme::Snow) => Color32::WHITE,
@@ -263,11 +279,12 @@ impl Popup {
             Kind::MarkDone | Kind::Gmtz => palette.border_success_default,
             Kind::InboxZero | Kind::InboxZeroDays => palette.link_border_primary,
         };
-        painter.rect_filled(
-            Rect::from_min_size(card.min, vec2(3.0, card.height())),
-            0.0,
-            accent,
-        );
+        let bar = Rect::from_min_size(card.min, vec2(3.0, card.height()));
+        painter.rect_filled(bar, 0.0, accent);
+        // The bar's glow: a `::before` as tall as the card (the popup's content stretches), with
+        // `box-shadow: 0 0 25px 0` of the accent at .66.
+        BoxShadow::new([0.0, 0.0], 25.0, 0.0, accent.gamma_multiply(0.66))
+            .paint_outside(painter, bar);
 
         // The title is `rgba(0,0,0,.9)` and the body `.6` (white in Carbon). Over the photo both
         // are `hsla(0,0%,100%,.75)`.
@@ -339,10 +356,11 @@ impl Popup {
             paint_with_italics(painter, pos2(left, y + 1.0), &line, &self.body, body_color);
             y += BODY.line_height;
         }
+        // `text-transform: uppercase`.
         ACTION.paint_line(
             painter,
             pos2(left, y + 12.0 + 1.0),
-            "View Achievements",
+            &"View Achievements".to_uppercase(),
             action_color,
             None,
         );

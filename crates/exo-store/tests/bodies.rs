@@ -546,3 +546,113 @@ async fn bodied(harness: &Harness, threads: &[ThreadSummary]) -> usize {
     }
     bodied
 }
+
+/// How many calls of Gmail `method` (`threads.get`, …) the mock has had.
+async fn calls(harness: &Harness, method: &str) -> u64 {
+    harness
+        .admin(reqwest::Method::GET, "/__mock/quota", Value::Null)
+        .await["methods"][method]["calls"]
+        .as_u64()
+        .unwrap_or_default()
+}
+
+#[tokio::test]
+async fn a_thread_too_large_for_one_answer_comes_message_by_message() {
+    let harness = Harness::synced().await;
+    let mut thread = None;
+    for row in harness.all(&ListId::Done).await {
+        let detail = harness.store.thread(&row.id).await.expect("reads");
+        if detail.is_some_and(|detail| detail.messages.len() > 1)
+            && !harness.store.bodies_stored(&row.id).await.expect("reads")
+        {
+            thread = Some(row.id);
+            break;
+        }
+    }
+    let thread = thread.expect("a conversation of several messages, stored without bodies");
+    // Gmail refuses the thread in full every time, and answers it in `format=minimal`.
+    harness
+        .fault(json!({
+            "method": "GET",
+            "path": format!("/gmail/v1/users/me/threads/{}", thread.as_str()),
+            "query": "format=full",
+            "status": 500,
+            "reason": "responseTooLarge",
+            "message": "Response too large",
+            "times": 100,
+        }))
+        .await;
+    let (threads, messages) = (
+        calls(&harness, "threads.get").await,
+        calls(&harness, "messages.get").await,
+    );
+    harness.store.load_bodies(&thread).await.expect("loads");
+    let detail = harness
+        .store
+        .thread(&thread)
+        .await
+        .expect("reads")
+        .expect("stored");
+    assert!(
+        detail
+            .messages
+            .iter()
+            .all(|message| message.body.html.is_some() || message.body.text.is_some()),
+        "every body"
+    );
+    assert_eq!(
+        calls(&harness, "threads.get").await - threads,
+        2,
+        "the refusal isn't retried, and then the thread's message ids"
+    );
+    assert_eq!(
+        calls(&harness, "messages.get").await - messages,
+        detail.messages.len() as u64,
+        "then each message"
+    );
+
+    // The raw source viewer shows it the same way.
+    let source = harness
+        .store
+        .thread_source(thread.as_str())
+        .await
+        .expect("reads");
+    for message in &detail.messages {
+        assert!(
+            source.contains(&format!("\"id\": \"{}\"", message.id)),
+            "{source}"
+        );
+    }
+    assert!(source.contains("\"payload\""), "the messages in full");
+}
+
+#[tokio::test]
+async fn a_thread_opened_that_isnt_stored_is_fetched_whole() {
+    let harness = Harness::synced().await;
+    let message = harness
+        .deliver(json!({ "from": "Dana Ruiz <dana@harborlight.example>", "subject": "Manifests, filed", "text": "Shipping manifests attached below.", "labelIds": ["CATEGORY_UPDATES"] }))
+        .await;
+    let thread = ThreadId::new(message.thread_id.clone().expect("a thread"));
+    assert!(
+        !harness.store.has_thread(&thread).await.expect("reads"),
+        "not synced yet"
+    );
+    assert!(harness.store.load_thread(&thread).await.expect("loads"));
+    assert!(harness.store.has_thread(&thread).await.expect("reads"));
+    assert!(harness.store.bodies_stored(&thread).await.expect("reads"));
+    let detail = harness
+        .store
+        .thread(&thread)
+        .await
+        .expect("reads")
+        .expect("stored");
+    assert_eq!(detail.messages[0].subject, "Manifests, filed");
+    assert!(
+        !harness
+            .store
+            .load_thread(&ThreadId::new("19af00000000beef".to_owned()))
+            .await
+            .expect("Gmail answers"),
+        "one Gmail doesn't have"
+    );
+}
