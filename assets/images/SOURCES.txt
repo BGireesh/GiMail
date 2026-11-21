@@ -2,7 +2,7 @@ Exo's images (the invite card's headers, the sign-in photo and the first run's p
 generated; don't edit them by hand.
 
 Photos from Unsplash (sha256, file; title, location, author, source page, licence, what was made of it):
-  a3f585e1299daf0cf256516f1fdf321812980c7ed8c9bc5d054b79745dc513d9  invite-default.jpg
+  1bd17c3f22e8b860961af1b8ac0982e3edf48762a0b838beb83b9406ca6e427a  invite-default.jpg
       title     panoramic photography of mountains
       location  Lake Placid, United States
       author    Shur Shu, https://unsplash.com/@shurshu
@@ -34,7 +34,7 @@ Photos from Unsplash (sha256, file; title, location, author, source page, licenc
       source    https://unsplash.com/photos/slice-fruits-on-plate-on-near-glass-cups-IDTEXXXfS44
       licence   Unsplash License, https://unsplash.com/license
       made      the frame (18, 1156, 5678, 1561) at 1280×352, JPEG quality 80
-  237b2d2e06781baebda1ded0b75f46f52d0106a32a64ccac25bfed2d47c98d9f  invite-call.jpg
+  e2ce76fe57102e48c739d672400317c33801daf76e2afc3ac4266de4a3218cdf  invite-call.jpg
       title     woman holding black iphone 5
       author    Giorgio Trovato, https://unsplash.com/@giorgiotrovato
       source    https://unsplash.com/photos/woman-holding-black-iphone-5-wODRXggLv1E
@@ -85,25 +85,25 @@ Photos from Unsplash (sha256, file; title, location, author, source page, licenc
       source    https://unsplash.com/photos/grilled-chicken-on-table-ZpB2T8Pi5II
       licence   Unsplash License, https://unsplash.com/license
       made      the frame (0, 1370, 5138, 1413) at 1280×352, JPEG quality 80
-  aa59ea592844aacac498a96af6251bb04c19bae8c10acc0398faa2c7bfd3f255  invite-meeting.jpg
+  1b64bbdc68719b1f80d8fb7f862a39de37d4e838eaaf7a71bf903a314883ae3c  invite-meeting.jpg
       title     long table with Eiffel chair inside room
       author    Pawel Chu, https://unsplash.com/@pawell
       source    https://unsplash.com/photos/long-table-with-eiffel-chair-inside-room-ULh0i2txBCY
       licence   Unsplash License, https://unsplash.com/license
       made      the frame (0, 1365, 5058, 1391) at 1280×352, JPEG quality 80
-  e7493afe3f8ab461e5211caf8cde0c5f01c080b3c2556a49d2a7e1bf5ef74870  invite-party.jpg
+  e2091f426a68b127cc07799ed61c5ae272e4e30b5734df1e4cd9ddb719fe19c7  invite-party.jpg
       title     person holding fire cracker shallow focus photography
       author    Ian Schneider, https://unsplash.com/@goian
       source    https://unsplash.com/photos/person-holding-fire-cracker-shallow-focus-photography-PAykYb-8Er8
       licence   Unsplash License, https://unsplash.com/license
       made      the frame (17, 1239, 5295, 1456) at 1280×352, JPEG quality 80
-  b80aa4edda4252d68348c5416b20ca8bb002e3bec7ea83a669979278b68ad509  invite-tea.jpg
+  1e58bee1a4222898a0defe6ebcce468e531996aac2bbe706d615d3553f086918  invite-tea.jpg
       title     a black teapot and two cups on a table
       author    Kamilla Isalieva, https://unsplash.com/@kamillaisalieva
       source    https://unsplash.com/photos/a-black-teapot-and-two-cups-on-a-table-F3ITrTDI7iw
       licence   Unsplash License, https://unsplash.com/license
       made      the frame (0, 950, 4752, 1307) at 1280×352, JPEG quality 80
-  2538f22fc0e1544e85759cbae40a4c27f7769666fc0b5408fb2dcaa45556fab3  install-bg.jpg
+  b1b6ecfdb326b1510f0aee2f05c8650faa97c934a1dc9da6009908e0e3b78e6f  install-bg.jpg
       title     tree on body of water near mountains
       location  Wanaka, Otago, New Zealand
       author    Ken Cheung, https://unsplash.com/@kencheungphoto
