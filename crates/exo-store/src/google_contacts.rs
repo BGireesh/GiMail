@@ -81,6 +81,56 @@ impl Store {
     /// On database failures.
     pub async fn save_google_contacts(&self, contacts: &GoogleContacts) -> Result<()> {
         let mut db = self.inner.db.clone();
-        db::kv_set(&mut db, KEY, contacts).await
+        let mut write = self.inner.begin(&mut db).await?;
+        db::kv_set(write.exec(), KEY, contacts).await?;
+        write.commit().await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn a_listing_saved_during_another_write_waits_its_turn() {
+        let dir =
+            std::env::temp_dir().join(format!("exo-store-contacts-turn-{}", std::process::id()));
+        let store = Store::open(
+            &dir,
+            "maya@brightmoor.co",
+            gmail::Endpoints::google(),
+            gmail::StaticToken("unused".into()),
+        )
+        .await
+        .expect("opens");
+        let mut db = store.inner.db.clone();
+        let mut write = store.inner.begin(&mut db).await.expect("a write");
+        // It reads first, as sync's writes do, which pins the database as it read it.
+        db::kv_get::<serde_json::Value>(write.exec(), KEY)
+            .await
+            .expect("reads");
+        let saving = tokio::spawn({
+            let store = store.clone();
+            async move {
+                let listing = GoogleContacts {
+                    listed: Timestamp::now(),
+                    saved: GoogleList::default(),
+                    directory: GoogleList::default(),
+                    other: GoogleList::default(),
+                };
+                store.save_google_contacts(&listing).await
+            }
+        });
+        // Long enough for a save that didn't wait to have landed.
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        db::kv_set(write.exec(), "turn", &1)
+            .await
+            .expect("the write isn't refused as locked");
+        write.commit().await.expect("commits");
+        saving.await.expect("joins").expect("saves after it");
+        drop(store);
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

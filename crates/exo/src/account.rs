@@ -3423,8 +3423,9 @@ impl Pace {
 }
 
 /// Syncs at the [`Pace`], at once when focused or asked, and continuously while the store
-/// backfills. The new mail of each round after the first is posted to the notifier of the
-/// account `notify` names. `synced` turns true once the first round has been tried.
+/// backfills. The new mail each round brings is posted to the notifier of the account `notify`
+/// names, except what Gmail got before the loop started, which the first round to reach Gmail
+/// catches up on quietly. `synced` turns true once the first round has been tried.
 async fn sync_loop(
     store: Store,
     requests: Requests,
@@ -3438,7 +3439,10 @@ async fn sync_loop(
     let Some(mut busy) = now.next().await else {
         return;
     };
-    // When a sync last reached Gmail. None has yet, so the first catches up quietly.
+    // When the loop started (the account opening), and when a sync last reached Gmail. Mail Gmail
+    // got since the start notifies even when the first round to reach Gmail comes late, after
+    // one that failed (offline, say).
+    let opened = jiff::Timestamp::now();
     let mut reached: Option<jiff::Timestamp> = None;
     loop {
         let wait = {
@@ -3453,15 +3457,15 @@ async fn sync_loop(
                 });
                 if let Ok(report) = &result {
                     let synced = jiff::Timestamp::now();
-                    if let Some(last) = reached.replace(synced) {
-                        notify_arrivals(
-                            &store,
-                            &notify,
-                            &report.arrived,
-                            synced.duration_since(last) > NOTIFY_GAP,
-                        )
-                        .await;
-                    }
+                    let last = reached.replace(synced);
+                    let arrived: Vec<exo_store::Arrival> = report
+                        .arrived
+                        .iter()
+                        .filter(|arrival| last.is_some() || arrival.date >= opened)
+                        .cloned()
+                        .collect();
+                    let gap = synced.duration_since(last.unwrap_or(opened)) > NOTIFY_GAP;
+                    notify_arrivals(&store, &notify, &arrived, gap).await;
                 }
                 match result {
                     Ok(report) if report.backfilling => {}
@@ -4222,6 +4226,71 @@ mod tests {
         );
         sync();
         assert_eq!(mail().len(), 1, "once");
+        drop(account);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn mail_that_comes_while_the_first_sync_fails_still_notifies() {
+        let runtime = Runtime::new().expect("runtime");
+        let server = runtime
+            .block_on(gmail_mock::MockServer::start(gmail_mock::Config::default()))
+            .expect("mock starts");
+        let dir =
+            std::env::temp_dir().join(format!("exo-account-late-sync-{}", std::process::id()));
+        let open = || {
+            let credentials = Credentials {
+                email: "maya@brightmoor.co".into(),
+                endpoints: server.endpoints(),
+                tokens: Arc::new(gmail::StaticToken(gmail_mock::DEV_ACCESS_TOKEN.into())),
+            };
+            Account::open(&dir, credentials, egui::Context::default()).expect("opens")
+        };
+        let post = |path: &str, body: serde_json::Value| {
+            runtime.block_on(async {
+                reqwest::Client::new()
+                    .post(server.url().join(path).expect("path"))
+                    .json(&body)
+                    .send()
+                    .await
+                    .expect("posted")
+            });
+        };
+        // Gmail dates each message as it comes: the mock's clock is set to now first.
+        let deliver = |from: &str, subject: &str| {
+            let now = jiff::Timestamp::now().to_string();
+            post("/__mock/clock", serde_json::json!({ "now": now }));
+            post(
+                "/__mock/deliver",
+                serde_json::json!({ "from": from, "subject": subject, "text": "3?" }),
+            );
+        };
+        // A first run fills the store, so the next one starts from Gmail's history.
+        let account = open();
+        settle(&account);
+        drop(account);
+        // What comes while Exo is closed is caught up quietly.
+        deliver("Priya Raman <priya@brightmoor.co>", "While closed");
+        // This run's first sync fails, and mail comes before the next one.
+        post(
+            "/__mock/faults",
+            serde_json::json!({ "path": "/gmail/v1/users/me/history", "status": 400, "message": "Bad Request", "reason": "badRequest" }),
+        );
+        let account = open();
+        let notifier = Notifier::recording(crate::desktop::Launcher::default());
+        account.set_notifier(Some(notifier.clone()));
+        settle(&account);
+        deliver("Tom Becker <tom@brightmoor.co>", "Since opening");
+        account.set_presence(Presence::Visible);
+        account.set_presence(Presence::Focused);
+        settle(&account);
+        let mail: Vec<String> = notifier
+            .posted()
+            .into_iter()
+            .filter(|notice| notice.key.starts_with("EMAIL-"))
+            .map(|notice| notice.body)
+            .collect();
+        assert_eq!(mail, ["Since opening"]);
         drop(account);
         let _ = std::fs::remove_dir_all(dir);
     }

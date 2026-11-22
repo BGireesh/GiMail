@@ -21,16 +21,17 @@ You'll need to create your own Google sign-in client to use Exo. See below on ho
 1. Create a project in the [Google Cloud console](https://console.cloud.google.com/projectcreate).
 2. Enable the [Gmail API](https://console.cloud.google.com/apis/library/gmail.googleapis.com), the [Google Calendar API](https://console.cloud.google.com/apis/library/calendar-json.googleapis.com) and the [People API](https://console.cloud.google.com/apis/library/people.googleapis.com) for that project.
 3. Open [Google Auth Platform](https://console.cloud.google.com/auth/overview) and click **Get started**. Name the app Exo, pick your address as the support email, choose **External** as the audience and finish.
-4. In [Audience](https://console.cloud.google.com/auth/audience), click **Publish app**. (You can keep it in Testing, but Google will sign you out every 7 days, which is annoying).
-5. In [Clients](https://console.cloud.google.com/auth/clients), click **Create client**, choose **Desktop app** as the application type and create it. Download its JSON file.
-6. Move the file into Exo's folder:
+4. In [Branding](https://console.cloud.google.com/auth/branding), give your application a name, support email, homepage URL, and privacy policy URL. You can put whatever you want there, as you'll be the only one using the app.
+5. In [Audience](https://console.cloud.google.com/auth/audience), click **Publish app**. (You can keep it in Testing, but Google will sign you out every 7 days, which is annoying).
+6. In [Clients](https://console.cloud.google.com/auth/clients), click **Create client**, choose **Desktop app** as the application type and create it. Download its JSON file.
+7. Move the file into Exo's folder:
 
 ```sh
 mkdir -p ~/Library/Application\ Support/Exo
 mv ~/Downloads/client_secret_*.json ~/Library/Application\ Support/Exo/google-oauth-client.json
 ```
 
-7. Open Exo and sign in with Google. Google warns that it hasn't verified the app, which is expected for an app you made yourself. Click **Advanced**, then **Go to Exo (unsafe)**, and allow every permission Exo asks for. Exo asks Google for permission to:
+8. Open Exo and sign in with Google. Google warns that it hasn't verified the app, which is expected for an app you made yourself. Click **Advanced**, then **Go to Exo (unsafe)**, and allow every permission Exo asks for. Exo asks Google for permission to:
 
 - read, send and organize your mail
 - change mail settings, such as filters, signatures and the vacation responder
