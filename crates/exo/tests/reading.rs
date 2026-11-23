@@ -468,15 +468,16 @@ fn pipe_shows_the_conversation_as_gmail_sends_it_until_escape() {
     assert!(selected, "its text is selected once it's in");
     let source = text.to_owned();
     // ⌘C copies it all.
+    let release = Event::Key {
+        key: Key::C,
+        physical_key: None,
+        pressed: false,
+        repeat: false,
+        modifiers: CMD,
+    };
     let mut copied = None;
-    for pressed in [true, false] {
-        app.harness.input_mut().events.push(Event::Key {
-            key: Key::C,
-            physical_key: None,
-            pressed,
-            repeat: false,
-            modifiers: CMD,
-        });
+    for event in [Event::Copy, release] {
+        app.harness.input_mut().events.push(event);
         app.harness.run_steps(1);
         copied = copied.or_else(|| {
             app.harness

@@ -2973,6 +2973,8 @@ impl Mail {
                 &commands::ThreadContext {
                     focus_collapsed: thread.focus_is_collapsed(),
                     new_messages_focused: thread.new_messages_focused(),
+                    has_selection: thread.selected_text().is_some()
+                        || self.bodies.selected_text().is_some(),
                     // The messages had the keyboard before the palette took it.
                     show_images: draft_images
                         || region == Region::ThreadMessages

@@ -152,6 +152,7 @@ impl ThreadView {
     /// A click in the thread pane gives the messages the keyboard.
     pub(super) fn clicked_in_pane(&mut self) {
         self.zone = Zone::Messages;
+        self.invite_focus = None;
     }
 
     /// ↑ past the first message, not held, goes to the header, and ↓ past the last goes to the Show

@@ -362,6 +362,19 @@ impl<A: Clone + 'static> Commands<A> {
             .tick(|key| held.contains(&key), now)
             .into_iter()
             .collect();
+        let command = if os == OperatingSystem::Mac {
+            egui::Modifiers {
+                mac_cmd: true,
+                command: true,
+                ..egui::Modifiers::NONE
+            }
+        } else {
+            egui::Modifiers {
+                ctrl: true,
+                command: true,
+                ..egui::Modifiers::NONE
+            }
+        };
         let keyboard = &mut self.keyboard;
         ctx.input_mut(|input| {
             // egui-winit reports a key, then the text it types. A taken key's text goes with it.
@@ -386,6 +399,10 @@ impl<A: Clone + 'static> Commands<A> {
                 if std::mem::take(&mut taken) && matches!(event, Event::Text(_)) {
                     return false;
                 }
+                let is_key = matches!(event, Event::Key { .. });
+                // egui-winit turns ⌘C and ⌘X (Ctrl+C and Ctrl+X off a Mac) into `Copy` and `Cut`
+                // and drops the key press, so commands on `mod+c` and `mod+x` match those too.
+                // Where no command takes them, they stay for the focused field or editor.
                 let event = match *event {
                     Event::Key {
                         key,
@@ -404,6 +421,18 @@ impl<A: Clone + 'static> Commands<A> {
                         pressed: false,
                         ..
                     } => KeyEvent::Up { key },
+                    Event::Copy => KeyEvent::Down {
+                        key: egui::Key::C,
+                        modifiers: command,
+                        repeat: false,
+                        typed: None,
+                    },
+                    Event::Cut => KeyEvent::Down {
+                        key: egui::Key::X,
+                        modifiers: command,
+                        repeat: false,
+                        typed: None,
+                    },
                     _ => return true,
                 };
                 let Some(fire) = keyboard.event(event, &live, region.is_text_input(), now, os)
@@ -411,8 +440,9 @@ impl<A: Clone + 'static> Commands<A> {
                     return true;
                 };
                 fired.push(fire);
-                taken = matches!(fire, Fire::Press(_));
-                !taken
+                let pressed = matches!(fire, Fire::Press(_));
+                taken = is_key && pressed;
+                !pressed
             });
         });
         let mut ran = Vec::new();

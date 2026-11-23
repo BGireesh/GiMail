@@ -277,6 +277,8 @@ pub struct ThreadContext {
     pub focus_collapsed: bool,
     /// Whether the Show New Messages bar has the keyboard, so Enter shows the new messages.
     pub new_messages_focused: bool,
+    /// Whether text is selected in the thread, so ⌘C copies it anywhere in the thread pane.
+    pub has_selection: bool,
     /// Whether the focused message has remote images and they're blocked (`SHOW_IMAGES`).
     pub show_images: bool,
 }
@@ -425,7 +427,11 @@ pub fn register_thread(commands: &mut Commands<Action>, cx: &ThreadContext) {
     commands.add(
         Command::shortcut("COPY", Action::Copy)
             .key("mod+c")
-            .regions(MESSAGES_AND_NEW),
+            .regions(if cx.has_selection {
+                THREAD_PANE
+            } else {
+                MESSAGES_AND_NEW
+            }),
     );
     header_keys(commands);
     // Print and Save as PDF, in the thread view. ⌘P belongs in the File menu, but until Exo's
