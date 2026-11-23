@@ -62,6 +62,7 @@ mod remote;
 mod render;
 mod sanitize;
 mod senders;
+mod tables;
 mod view;
 
 pub use actions::{Action, ActionSource, CalendarData, EventStatus, RsvpLinks};

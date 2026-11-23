@@ -387,3 +387,35 @@ fn collapsed_borders_draw_their_styles() {
     assert_eq!(color_at(&mut double, 50, 3), WHITE);
     assert_eq!(color_at(&mut double, 50, 5), RED);
 }
+
+/// A card whose table says `height: 158px` (G2's unread-notification mail) or `height="450"`
+/// (a Salesforce case template) but holds far more. A table's height is a minimum: the table
+/// grows to fit its rows, instead of what follows it being drawn over them.
+#[test]
+fn a_table_grows_to_fit_rows_taller_than_its_height() {
+    let tall = "<tr style=\"height:20px\"><td style=\"height:20px\">\
+                <div style=\"height:200px\"></div></td></tr>";
+    for table in [
+        "<table cellpadding=\"0\" cellspacing=\"0\" width=\"600\" style=\"height:50px\">",
+        "<table cellpadding=\"0\" cellspacing=\"0\" width=\"600\" height=\"50\">",
+        "<table cellpadding=\"0\" cellspacing=\"0\" width=\"600\" height=\"50\" \
+         style=\"height:50px !important\">",
+    ] {
+        let mut view = view(&format!("{table}{tall}</table>"));
+        assert_eq!(view.layout(640.0, 2.0), 200.0, "{table}");
+    }
+}
+
+/// A table taller than its content keeps the height it asks for.
+#[test]
+fn a_table_shorter_than_its_height_keeps_it() {
+    for table in [
+        "<table cellpadding=\"0\" cellspacing=\"0\" width=\"600\" style=\"height:100px\">",
+        "<table cellpadding=\"0\" cellspacing=\"0\" width=\"600\" height=\"100\">",
+    ] {
+        let mut view = view(&format!(
+            "{table}<tr><td><div style=\"height:20px\"></div></td></tr></table>"
+        ));
+        assert_eq!(view.layout(640.0, 2.0), 100.0, "{table}");
+    }
+}
