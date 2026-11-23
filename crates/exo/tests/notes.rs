@@ -3,7 +3,7 @@
 mod support;
 
 use egui::{Key, Modifiers};
-use exo::notes::Item;
+use exo::notes::{CardAction, Control, Item};
 use exo_store::NotesPlacement;
 use exo_store::{SaveNote, ThreadId};
 use support::{Fixture, start, start_with_settings};
@@ -79,20 +79,25 @@ fn type_key(app: &mut Fixture, key: Key, modifiers: Modifiers, text: &str) {
     app.settle();
 }
 
-/// How far left of a note card's right edge its hover links' middles are.
-const DELETE: f32 = 33.0;
-const EDIT: f32 = 77.0;
-
-/// Points at note `id`'s card and clicks the link `from_right` of its right edge.
-fn click_link(app: &mut Fixture, id: &str, from_right: f32) {
+/// Points at note `id`'s card and clicks its link for `action`.
+fn click_link(app: &mut Fixture, id: &str, action: CardAction) {
     let rects = app.mail().note_rects();
     let (_, rect) = rects
         .iter()
         .find(|(note, _)| note == id)
         .expect("the note is drawn");
-    let at = egui::pos2(rect.right() - from_right, rect.top() + 17.0);
-    app.hover(at);
-    app.click(at);
+    app.hover(rect.center());
+    click_control(app, &Control::Card(id.to_owned(), action));
+}
+
+/// Clicks the notes' control `control`, as last drawn.
+fn click_control(app: &mut Fixture, control: &Control) {
+    let controls = app.mail().note_controls();
+    let (_, rect) = controls
+        .iter()
+        .find(|(drawn, _)| drawn == control)
+        .unwrap_or_else(|| panic!("{control:?} is drawn: {controls:?}"));
+    app.click(rect.center());
 }
 
 /// The labels of the open thread's live notes.
@@ -202,7 +207,7 @@ fn editing_a_note_adds_a_version() {
     app.press(Key::Enter, COMMAND);
     let note = app.mail().notes().notes[0].clone();
     assert_eq!(note.version, 1);
-    click_link(&mut app, &note.id, EDIT);
+    click_link(&mut app, &note.id, CardAction::Edit);
     assert_eq!(app.mail().note_editor_text().as_deref(), Some("First"));
     app.type_text(" and second");
     app.press(Key::Enter, COMMAND);
@@ -212,7 +217,7 @@ fn editing_a_note_adds_a_version() {
     assert_eq!(notes[0].text, "First and second");
     assert_eq!(notes[0].version, 2);
     // Opening it and closing it unchanged writes none.
-    click_link(&mut app, &note.id, EDIT);
+    click_link(&mut app, &note.id, CardAction::Edit);
     assert_eq!(
         app.mail().note_editor_text().as_deref(),
         Some("First and second")
@@ -228,7 +233,7 @@ fn deleting_a_note_removes_it_from_the_thread() {
     app.press(Key::Enter, COMMAND);
     let id = app.mail().notes().notes[0].id.clone();
     assert_eq!(app.mail().note_rects().len(), 1, "its card is drawn");
-    click_link(&mut app, &id, DELETE);
+    click_link(&mut app, &id, CardAction::Delete);
     let notes = app.mail().notes();
     assert!(notes.notes.is_empty());
     assert_eq!(notes.deleted.len(), 1, "it can come back");
@@ -1153,4 +1158,207 @@ fn notes_on_a_deleted_thread_are_shared_too() {
     assert_eq!(said, format!("Notes: {subject}"));
     let body = app.mail().compose_body().expect("a body");
     assert!(body.contains("Ask about the overage fee"), "{body}");
+}
+
+/// Writes `First`, then edits it to `First and second`, and returns the note's id.
+fn note_with_two_versions(name: &str) -> (Fixture, String) {
+    let mut app = start_thread_note(name);
+    app.type_text("First");
+    app.press(Key::Enter, COMMAND);
+    let id = app.mail().notes().notes[0].id.clone();
+    click_link(&mut app, &id, CardAction::Edit);
+    app.type_text(" and second");
+    app.press(Key::Enter, COMMAND);
+    assert_eq!(app.mail().notes().notes[0].version, 2);
+    (app, id)
+}
+
+#[test]
+fn history_lists_every_save_newest_first() {
+    use exo_store::NoteChange;
+    let (mut app, id) = note_with_two_versions("notes-history-lists");
+    assert_eq!(app.mail().note_history(), None, "no history yet");
+    click_link(&mut app, &id, CardAction::History);
+    assert_eq!(
+        app.mail().note_history(),
+        Some(vec![(2, NoteChange::Edited), (1, NoteChange::Created)])
+    );
+    assert!(
+        !app.mail()
+            .note_controls()
+            .iter()
+            .any(|(control, _)| *control == Control::RestoreVersion),
+        "the newest can't be restored"
+    );
+    // ↓ selects the older version, which can be.
+    app.key(Key::ArrowDown);
+    assert!(
+        app.mail()
+            .note_controls()
+            .iter()
+            .any(|(control, _)| *control == Control::RestoreVersion)
+    );
+    // Single-key shortcuts don't reach the thread, and Escape closes the history alone.
+    let thread = app.mail().thread().expect("open").id().to_owned();
+    app.key(Key::E);
+    app.key(Key::Escape);
+    assert_eq!(app.mail().note_history(), None, "Escape closed it");
+    assert_eq!(
+        app.mail().thread().map(|open| open.id()),
+        Some(thread.as_str()),
+        "the thread is still open"
+    );
+    // T closes it too, for the editor.
+    click_link(&mut app, &id, CardAction::History);
+    assert!(app.mail().note_history().is_some());
+    app.click(app.mail().right_pane().center());
+    app.key(Key::T);
+    assert_eq!(app.mail().note_history(), None, "T closed it");
+    assert_eq!(app.mail().note_editor_text().as_deref(), Some(""));
+}
+
+#[test]
+fn restoring_a_version_brings_its_text_back_as_a_new_version() {
+    use exo_store::NoteChange;
+    let (mut app, id) = note_with_two_versions("notes-history-restore");
+    click_link(&mut app, &id, CardAction::History);
+    app.key(Key::ArrowDown);
+    click_control(&mut app, &Control::RestoreVersion);
+    assert_eq!(
+        app.mail().note_history(),
+        None,
+        "restoring closes the history"
+    );
+    assert_eq!(app.mail().toast_text(), Some("Version restored."));
+    let note = &app.mail().notes().notes[0];
+    assert_eq!(note.id, id);
+    assert_eq!(note.text, "First");
+    assert_eq!(note.version, 3);
+    click_link(&mut app, &id, CardAction::History);
+    assert_eq!(
+        app.mail().note_history(),
+        Some(vec![
+            (3, NoteChange::Restored),
+            (2, NoteChange::Edited),
+            (1, NoteChange::Created)
+        ])
+    );
+    click_control(&mut app, &Control::CloseHistory);
+    assert_eq!(app.mail().note_history(), None, "Close closes it");
+}
+
+#[test]
+fn opening_a_history_saves_the_open_editor() {
+    let (mut app, id) = note_with_two_versions("notes-history-saves-editor");
+    app.key(Key::T);
+    app.type_text("Another");
+    click_link(&mut app, &id, CardAction::History);
+    assert_eq!(app.mail().note_editor_text(), None, "the editor closed");
+    assert_eq!(
+        app.mail().note_history().map(|list| list.len()),
+        Some(2),
+        "the history is open"
+    );
+    let mut texts: Vec<String> = app
+        .mail()
+        .notes()
+        .notes
+        .iter()
+        .map(|note| note.text.clone())
+        .collect();
+    texts.sort();
+    assert_eq!(
+        texts,
+        ["Another", "First and second"],
+        "the editor's note saved"
+    );
+}
+
+#[test]
+fn a_history_opens_in_the_pane_with_notes_in_the_pane_only() {
+    let mut app = start_with_settings("notes-history-pane", &|settings| {
+        settings.notes_placement = NotesPlacement::Pane;
+    });
+    app.key(Key::Enter);
+    write_note(&mut app, |app| app.key(Key::T), "In the pane");
+    let id = app.mail().notes().notes[0].id.clone();
+    click_link(&mut app, &id, CardAction::History);
+    assert_eq!(app.mail().note_history().map(|list| list.len()), Some(1));
+    let pane = app.mail().right_pane();
+    let (_, rect) = app.mail().note_rects()[0];
+    assert!(pane.contains_rect(rect), "in its card's place: {rect:?}");
+    app.key(Key::Escape);
+    assert_eq!(app.mail().note_history(), None);
+}
+
+#[test]
+fn a_deleted_note_can_be_restored_from_the_pane() {
+    let mut app = start_thread_note("notes-restore-deleted");
+    app.type_text("Bring me back");
+    app.press(Key::Enter, COMMAND);
+    let id = app.mail().notes().notes[0].id.clone();
+    app.press(Key::N, COMMAND_SHIFT);
+    assert!(
+        !app.mail()
+            .note_controls()
+            .iter()
+            .any(|(control, _)| *control == Control::DeletedNotes),
+        "nothing deleted, nothing listed"
+    );
+    click_link(&mut app, &id, CardAction::Delete);
+    assert!(app.mail().notes().notes.is_empty());
+    // Collapsed at first.
+    assert!(
+        !app.mail()
+            .note_controls()
+            .iter()
+            .any(|(control, _)| *control == Control::RestoreDeleted(id.clone()))
+    );
+    click_control(&mut app, &Control::DeletedNotes);
+    click_control(&mut app, &Control::RestoreDeleted(id.clone()));
+    assert_eq!(app.mail().toast_text(), Some("Note restored."));
+    let notes = app.mail().notes();
+    assert_eq!(notes.notes.len(), 1);
+    assert_eq!(notes.notes[0].id, id);
+    assert_eq!(notes.notes[0].text, "Bring me back");
+    assert!(notes.deleted.is_empty());
+    assert!(
+        !app.mail()
+            .note_controls()
+            .iter()
+            .any(|(control, _)| *control == Control::DeletedNotes),
+        "none left to list"
+    );
+}
+
+#[test]
+fn share_saves_the_open_editor_first() {
+    let mut app = start("notes-share-saves-editor");
+    app.key(Key::Enter);
+    write_note(&mut app, |app| app.key(Key::T), "Ask about the budget");
+    let id = app.mail().notes().notes[0].id.clone();
+    click_link(&mut app, &id, CardAction::Edit);
+    app.type_text(" and the timeline");
+    palette(&mut app, "Share Notes by Email");
+    assert_eq!(app.mail().note_editor_text(), None, "the editor closed");
+    assert_eq!(
+        app.mail().notes().notes[0].text,
+        "Ask about the budget and the timeline",
+        "and its text was saved"
+    );
+    let body = app.mail().compose_body().expect("a draft with a body");
+    assert!(
+        body.contains("Ask about the budget and the timeline"),
+        "what was on screen is shared: {body}"
+    );
+}
+
+#[test]
+fn share_includes_a_new_note_being_written() {
+    let mut app = start_thread_note("notes-share-new-note");
+    app.type_text("Not saved yet");
+    palette(&mut app, "Share Notes by Email");
+    assert_eq!(labels(&app), ["Thread note"]);
+    let body = app.mail().compose_body().expect("a draft with a body");
+    assert!(body.contains("Not saved yet"), "{body}");
 }

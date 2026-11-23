@@ -327,6 +327,9 @@ pub struct Mail {
     /// A note of the open thread to scroll to once its notes are in: a search result's first
     /// matching note.
     notes_reveal: Option<String>,
+    /// A share waiting for the open editor's save, which it closed with: the note's id and the
+    /// version the save makes.
+    notes_share_after: Option<(String, u32)>,
     /// The right pane inside its border, as last laid out.
     right_pane: Rect,
     /// Message bodies, rendered off the UI thread.
@@ -405,6 +408,7 @@ impl Mail {
             notes: notes::Notes::new(now.clone()),
             notes_alone: None,
             notes_reveal: None,
+            notes_share_after: None,
             right_pane: Rect::NOTHING,
             link_preview: link_preview::LinkPreview::default(),
             attachment_files: attachment_files::AttachmentFiles::new(ctx, account.email()),
@@ -674,6 +678,17 @@ impl Mail {
             .map(|alone| alone.subject(&self.notes.all()))
     }
 
+    /// The open note history's versions, newest first: each one's number and what made it (for
+    /// tests).
+    pub fn note_history(&self) -> Option<Vec<(u32, exo_store::NoteChange)>> {
+        self.notes.history()
+    }
+
+    /// The notes' controls drawn last frame, and where (for tests).
+    pub fn note_controls(&self) -> Vec<(notes::Control, Rect)> {
+        self.notes.controls().to_vec()
+    }
+
     /// What note `id`'s card says it's on (for tests).
     pub fn note_where(&self, id: &str) -> Option<String> {
         let all = self.notes.all();
@@ -923,6 +938,7 @@ impl Mail {
         self.notes.open(Some(view.id()));
         self.notes_alone = alone;
         self.notes_reveal = None;
+        self.notes_share_after = None;
         self.thread = Some(view);
     }
 
@@ -961,6 +977,7 @@ impl Mail {
         self.pane_pin = None;
         self.notes_alone = None;
         self.notes_reveal = None;
+        self.notes_share_after = None;
         // A note being written is saved as the thread goes.
         self.notes.close(&self.account);
         self.notes.open(None);
@@ -1502,7 +1519,13 @@ impl Mail {
             | Action::AttachNoteFile
             | Action::ToggleNotesPane
             | Action::SetNotesPlacement(_)
-            | Action::ShareNotes => self.notes_run(action, now),
+            | Action::ShareNotes
+            | Action::ShowNoteHistory(_)
+            | Action::NewerNoteVersion
+            | Action::OlderNoteVersion
+            | Action::CloseNoteHistory
+            | Action::RestoreNoteVersion(..)
+            | Action::RestoreNote(_) => self.notes_run(action, now),
             Action::ShowNewMessages => {
                 if self
                     .thread
@@ -1969,8 +1992,17 @@ impl Mail {
                 Event::Unsent(unsent) => self.sign_out_unsent(unsent),
                 Event::Thread { id, detail } => self.unsubscribe_thread_read(id, detail),
                 Event::Unavailable { id, offline } => self.thread_unavailable(&id, offline),
+                Event::NoteVersions { id, versions } => self.notes.show_history(&id, versions),
                 // Once for an open editor, however often its draft fails.
                 Event::NoteFailed(id) => {
+                    // A share waiting for this save waits no more.
+                    if self
+                        .notes_share_after
+                        .as_ref()
+                        .is_some_and(|(waiting, _)| *waiting == id)
+                    {
+                        self.notes_share_after = None;
+                    }
                     if self.notes.failed(&id) {
                         self.commands
                             .toast(Toast::new("Couldn't save the note.").kind(ToastKind::Error));
@@ -2284,6 +2316,11 @@ impl Mail {
                 }
                 thread::Action::EditNote(id) => self.run(Action::EditNote(id), now),
                 thread::Action::DeleteNote(id) => self.run(Action::DeleteNote(id), now),
+                thread::Action::NoteHistory(id) => self.run(Action::ShowNoteHistory(id), now),
+                thread::Action::RestoreNoteVersion(id, version) => {
+                    self.run(Action::RestoreNoteVersion(id, version), now);
+                }
+                thread::Action::CloseNoteHistory => self.run(Action::CloseNoteHistory, now),
                 thread::Action::SaveNote => self.run(Action::SaveNote, now),
                 thread::Action::ShowNotes => self.notes_show_tab(true),
                 thread::Action::Back => {
@@ -3291,6 +3328,7 @@ impl Mail {
                         .editing()
                         .filter(|_| region == Region::NoteEditor)
                         .map(notes::Editing::editor),
+                    history: self.notes.history_focused() && region == Region::NoteEditor,
                     notes_tab: self.account.device_settings().notes_tab,
                     placement: self.account.settings().notes_placement,
                 },

@@ -275,6 +275,18 @@ pub enum Action {
     /// The notes pane's `Share notes by email`, `Share Notes by Email`: a new message holding
     /// the open thread's notes.
     ShareNotes,
+    /// A note card's `History`: open that note's versions in place of its card.
+    ShowNoteHistory(String),
+    /// ↑ in a note's history: select the newer version.
+    NewerNoteVersion,
+    /// ↓ in a note's history: select the older version.
+    OlderNoteVersion,
+    /// Escape in a note's history, or its `Close`.
+    CloseNoteHistory,
+    /// A note history's `Restore this version`: make version `.1` note `.0`'s newest.
+    RestoreNoteVersion(String, u32),
+    /// A deleted note's `Restore`, in the notes pane: bring note `id` back.
+    RestoreNote(String),
 }
 
 /// The header's and the back gutter's keys (`ThreadMessagesHeader`, `ActionPane`).
@@ -496,6 +508,8 @@ pub fn register_thread(commands: &mut Commands<Action>, cx: &ThreadContext) {
 pub struct NotesContext<'a> {
     /// The open note editor, while it has the keyboard.
     pub editor: Option<&'a exo_editor::Editor>,
+    /// Whether a note's history has the keyboard.
+    pub history: bool,
     /// Whether the right pane shows its Notes tab.
     pub notes_tab: bool,
     /// Where the notes show, which the placement rows change.
@@ -503,8 +517,9 @@ pub struct NotesContext<'a> {
 }
 
 /// Registers the open thread's note commands for this frame: T and ⇧T in the thread pane, ⌘⇧N,
-/// the notes' palette rows, and with an editor that has the keyboard ⌘↩, Escape when the editor
-/// has nothing of its own to close, and the formatting keys that apply.
+/// the notes' palette rows, with an editor that has the keyboard ⌘↩, Escape when the editor
+/// has nothing of its own to close, and the formatting keys that apply, and with a history that
+/// has it ↑, ↓ and Escape.
 pub fn register_notes(commands: &mut Commands<Action>, cx: &NotesContext<'_>) {
     use exo_store::NotesPlacement;
     commands.add(
@@ -560,6 +575,23 @@ pub fn register_notes(commands: &mut Commands<Action>, cx: &NotesContext<'_>) {
     commands.add(
         Command::new("SHARE_NOTES", "Share Notes by Email", Action::ShareNotes).regions(NOTES_PANE),
     );
+    if cx.history {
+        commands.add(
+            Command::shortcut("NEWER_NOTE_VERSION", Action::NewerNoteVersion)
+                .key("up")
+                .regions(NOTE_EDITOR),
+        );
+        commands.add(
+            Command::shortcut("OLDER_NOTE_VERSION", Action::OlderNoteVersion)
+                .key("down")
+                .regions(NOTE_EDITOR),
+        );
+        commands.add(
+            Command::shortcut("CLOSE_NOTE_HISTORY", Action::CloseNoteHistory)
+                .key("esc")
+                .regions(NOTE_EDITOR),
+        );
+    }
     let Some(editor) = cx.editor else {
         return;
     };

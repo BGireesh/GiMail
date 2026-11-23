@@ -6,11 +6,13 @@
 //!
 //! One editor is open at a time. What's typed in it is kept as a draft a second after it last
 //! changed, so a crash loses nothing, and closing the editor saves the note
-//! ([`Notes::close`]).
+//! ([`Notes::close`]). A note's history ([`history`]) opens in place of its card, and only while
+//! no editor is open.
 
 mod card;
 mod editor;
 mod files;
+mod history;
 pub mod pane;
 pub mod share;
 
@@ -22,7 +24,10 @@ use std::{
 use egui::Rect;
 use exo_commands::Region;
 use exo_editor::{BodyText, Editor, FormatCommand, Pos, Selection};
-use exo_store::{Note, NoteDraft, NoteFile, NotesPlacement, SaveNote, ThreadId, ThreadNotes};
+use exo_store::{
+    Note, NoteChange, NoteDraft, NoteFile, NoteVersion, NotesPlacement, SaveNote, ThreadId,
+    ThreadNotes,
+};
 use exo_ui::{Family, Font, TextStyle};
 use jiff::{Timestamp, Zoned};
 
@@ -54,6 +59,22 @@ const META: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 13.0, 16.0)
 const RADIUS: u8 = 4;
 /// The padding at a card's and the editor's sides.
 const PADDING_X: f32 = 14.0;
+
+/// A control the notes draw, where tests find it: a card's links, the open history's buttons,
+/// and the notes pane's deleted notes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Control {
+    /// A link on note `.0`'s card, shown while the pointer is on it.
+    Card(String, CardAction),
+    /// The history's `Restore this version`.
+    RestoreVersion,
+    /// The history's `Close`.
+    CloseHistory,
+    /// `Deleted notes ({n})`, which shows or hides them.
+    DeletedNotes,
+    /// A deleted note's `Restore`, by the note's id.
+    RestoreDeleted(String),
+}
 
 /// What a new editor is for.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -208,6 +229,16 @@ pub struct Notes {
     adder: files::Adder,
     /// A file a card was clicked to open, and whether to preview it.
     opening: Option<(NoteFile, bool)>,
+    /// The open history, in place of its note's card.
+    history: Option<history::History>,
+    /// The note whose versions were asked for, whose history opens when they come.
+    history_wanted: Option<String>,
+    /// Whether the notes pane lists the deleted notes.
+    deleted_open: bool,
+    /// How far the pane's deleted notes are scrolled.
+    deleted_scroll: f32,
+    /// The controls drawn this frame, and where.
+    controls: Vec<(Control, Rect)>,
 }
 
 impl Notes {
@@ -239,6 +270,11 @@ impl Notes {
             pictures: files::Pictures::default(),
             adder: files::Adder::default(),
             opening: None,
+            history: None,
+            history_wanted: None,
+            deleted_open: false,
+            deleted_scroll: 0.0,
+            controls: Vec::new(),
         }
     }
 
@@ -264,6 +300,10 @@ impl Notes {
         self.flash = None;
         self.pictures.clear();
         self.opening = None;
+        self.close_history();
+        self.deleted_open = false;
+        self.deleted_scroll = 0.0;
+        self.controls.clear();
     }
 
     /// Takes the open thread's notes from a snapshot of it, and where they show. The first
@@ -279,6 +319,14 @@ impl Notes {
                 .retain(|id, _| notes.notes.iter().any(|note| note.id == *id));
             self.rects
                 .retain(|(id, _)| notes.notes.iter().any(|note| note.id == *id));
+            // A history whose note was deleted goes with its card.
+            if self
+                .history
+                .as_ref()
+                .is_some_and(|open| !notes.notes.iter().any(|note| note.id == open.id))
+            {
+                self.history = None;
+            }
             self.notes = notes;
         }
         // Only what the thread opened with: a draft that turns up later is another window's.
@@ -466,6 +514,7 @@ impl Notes {
             }
         };
         self.close(account);
+        self.close_history();
         let mut editor = note_editor(note.as_ref().map_or("", |note| note.html.as_str()));
         // Typing goes on from the note's end.
         editor.set_selection(Selection::caret(editor.document().end()));
@@ -514,19 +563,27 @@ impl Notes {
     }
 
     /// Closes the open editor. A note that changed is saved, an empty new note is dropped, and
-    /// what was kept of the editor's text goes either way.
-    pub fn close(&mut self, account: &Account) {
-        let Some(open) = self.editing.take() else {
-            return;
-        };
+    /// what was kept of the editor's text goes either way. Returns the note saved, if one was:
+    /// its id and the version the save makes.
+    pub fn close(&mut self, account: &Account) -> Option<(String, u32)> {
+        let open = self.editing.take()?;
         self.closed.insert(open.id.clone());
         let empty = open.note_id.is_none() && open.editor.is_empty() && open.files.is_empty();
         if empty || !open.differs() {
             if open.drafted {
                 account.discard_note_draft(open.id);
             }
-            return;
+            return None;
         }
+        let version = open
+            .note_id
+            .as_ref()
+            .and_then(|id| self.notes.notes.iter().find(|note| note.id == *id))
+            .map_or(1, |note| note.version + 1);
+        let saved = (
+            open.note_id.clone().unwrap_or_else(|| open.id.clone()),
+            version,
+        );
         let html = open.editor.html();
         account.save_note(SaveNote {
             files: open.kept_files(&html),
@@ -537,6 +594,56 @@ impl Notes {
             thread_id: open.thread_id,
             message_id: open.message_id,
         });
+        Some(saved)
+    }
+
+    /// Asks for note `id`'s history, which opens when its versions come
+    /// ([`Self::show_history`]). Close the editor first.
+    pub fn want_history(&mut self, id: String) {
+        self.history_wanted = Some(id);
+    }
+
+    /// Opens note `id`'s history over `versions` (newest first), with the keyboard, if it's the
+    /// one asked for and still a live note of the thread's.
+    pub fn show_history(&mut self, id: &str, versions: Vec<NoteVersion>) {
+        if self.history_wanted.as_deref() != Some(id)
+            || versions.is_empty()
+            || self.editing.is_some()
+            || !self.notes.notes.iter().any(|note| note.id == id)
+        {
+            return;
+        }
+        self.history_wanted = None;
+        self.history = Some(history::History::new(id.to_owned(), versions));
+    }
+
+    /// Closes the open history, and forgets one asked for.
+    pub fn close_history(&mut self) {
+        self.history = None;
+        self.history_wanted = None;
+    }
+
+    /// Selects the version `delta` rows down the open history (`-1` a newer one).
+    pub fn step_history(&mut self, delta: isize) {
+        if let Some(open) = &mut self.history {
+            open.step(delta);
+        }
+    }
+
+    /// The open history's versions, newest first: each one's number and what made it.
+    pub fn history(&self) -> Option<Vec<(u32, NoteChange)>> {
+        self.history.as_ref().map(history::History::list)
+    }
+
+    /// The open history's note and its selected version's number.
+    pub fn history_selected(&self) -> Option<(String, u32)> {
+        let open = self.history.as_ref()?;
+        Some((open.id.clone(), open.selected()?.version))
+    }
+
+    /// The controls drawn this frame, and where.
+    pub fn controls(&self) -> &[(Control, Rect)] {
+        &self.controls
     }
 
     /// Keeps what's typed as a draft, [`AUTOSAVE_AFTER`] its last change at `time` (the frame's),
@@ -545,6 +652,7 @@ impl Notes {
         self.time = time;
         // The frame starts with the editor not drawn yet.
         self.shown = std::mem::replace(&mut self.painted, false);
+        self.controls.clear();
         let Some(open) = &mut self.editing else {
             return;
         };
@@ -577,12 +685,19 @@ impl Notes {
         }
     }
 
-    /// The region the editor holds the keyboard in, while it does: it has the focus and was
-    /// painted this frame. An editor that's open but hidden keeps its text and its focus, and has
-    /// the keyboard again once it shows.
+    /// The region the editor, or the open history, holds the keyboard in, while it does: it has
+    /// the focus and was painted this frame. An editor that's open but hidden keeps its text and
+    /// its focus, and has the keyboard again once it shows. The history takes the editor's
+    /// region, where single-key thread shortcuts don't fire.
     pub fn region(&self) -> Option<Region> {
-        (self.painted && self.editing.as_ref().is_some_and(|open| open.focused))
-            .then_some(Region::NoteEditor)
+        let focused = self.editing.as_ref().is_some_and(|open| open.focused)
+            || self.history.as_ref().is_some_and(|open| open.focused);
+        (self.painted && focused).then_some(Region::NoteEditor)
+    }
+
+    /// Whether a history has the keyboard: it's open, focused and was painted this frame.
+    pub fn history_focused(&self) -> bool {
+        self.painted && self.history.as_ref().is_some_and(|open| open.focused)
     }
 
     /// Whether an editor is open and was on screen last frame.
@@ -645,6 +760,7 @@ impl crate::Mail {
                 self.notes.set_senders(std::iter::empty());
             }
             self.notes_reveal_pending();
+            self.notes_share_pending(time);
         }
         // A draft that took the keyboard has it.
         if self.compose.focused().is_some() {
@@ -677,6 +793,24 @@ impl crate::Mail {
         }
     }
 
+    /// Shares the notes once the save that sharing waited for is in the thread's notes, at
+    /// `now` (the frame's time).
+    fn notes_share_pending(&mut self, now: f64) {
+        let Some((id, version)) = self.notes_share_after.clone() else {
+            return;
+        };
+        if self
+            .notes
+            .all()
+            .notes
+            .iter()
+            .any(|note| note.id == id && note.version >= version)
+        {
+            self.notes_share_after = None;
+            self.notes_share(now);
+        }
+    }
+
     /// Keeps what's typed in the open note editor, as the window closes or the account leaves
     /// the screen. The editor opens on it again with its thread.
     pub(crate) fn notes_keep(&mut self) {
@@ -699,7 +833,9 @@ impl crate::Mail {
                 }
             }
             Action::EditNote(id) => self.notes_start(Target::Existing(id)),
-            Action::SaveNote | Action::CloseNote => self.notes.close(&self.account),
+            Action::SaveNote | Action::CloseNote => {
+                self.notes.close(&self.account);
+            }
             Action::DeleteNote(id) => {
                 self.account.delete_note(id);
                 self.commands
@@ -720,7 +856,33 @@ impl crate::Mail {
             Action::SetNotesPlacement(placement) => self
                 .account
                 .update_settings(|settings| settings.notes_placement = placement),
-            Action::ShareNotes => self.notes_share(now),
+            Action::ShareNotes => {
+                // What's on screen is what's shared: an open editor is saved first, and the
+                // notes are shared once its save is in.
+                match self.notes.close(&self.account) {
+                    Some(saved) => self.notes_share_after = Some(saved),
+                    None => self.notes_share(now),
+                }
+            }
+            Action::ShowNoteHistory(id) => {
+                self.notes.close(&self.account);
+                self.notes.want_history(id.clone());
+                self.account.note_versions(id);
+            }
+            Action::NewerNoteVersion => self.notes.step_history(-1),
+            Action::OlderNoteVersion => self.notes.step_history(1),
+            Action::CloseNoteHistory => self.notes.close_history(),
+            Action::RestoreNoteVersion(id, version) => {
+                self.account.restore_note(id, Some(version));
+                self.notes.close_history();
+                self.commands
+                    .toast(exo_commands::Toast::new("Version restored."));
+            }
+            Action::RestoreNote(id) => {
+                self.account.restore_note(id, None);
+                self.commands
+                    .toast(exo_commands::Toast::new("Note restored."));
+            }
             _ => {}
         }
     }
@@ -800,7 +962,8 @@ impl crate::Mail {
     }
 
     /// Opens a new message holding the open thread's notes, popped out, or says there are none.
-    /// The notes are as they were saved: an editor open on one stays open.
+    /// The notes are as they were saved: [`Action::ShareNotes`](crate::commands::Action) saves an
+    /// open editor first.
     fn notes_share(&mut self, now: f64) {
         let Some(open) = self.thread.as_ref().map(|thread| thread.id().to_owned()) else {
             return;
@@ -922,10 +1085,16 @@ impl crate::Mail {
             PaneAction::Start(target) => self.notes_start(target),
             PaneAction::Card(id, CardAction::Edit) => self.run(Action::EditNote(id), now),
             PaneAction::Card(id, CardAction::Delete) => self.run(Action::DeleteNote(id), now),
-            PaneAction::Card(_, CardAction::History) => {}
+            PaneAction::Card(id, CardAction::History) => self.run(Action::ShowNoteHistory(id), now),
+            PaneAction::Card(id, CardAction::Restore(version)) => {
+                self.run(Action::RestoreNoteVersion(id, version), now);
+            }
+            PaneAction::Card(_, CardAction::CloseHistory) => {
+                self.run(Action::CloseNoteHistory, now)
+            }
             PaneAction::Save => self.run(Action::SaveNote, now),
             PaneAction::Share => self.run(Action::ShareNotes, now),
-            PaneAction::RestoreDeleted(id) => self.account.restore_note(id, None),
+            PaneAction::RestoreDeleted(id) => self.run(Action::RestoreNote(id), now),
         }
     }
 }

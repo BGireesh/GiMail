@@ -292,7 +292,7 @@ pub enum Event {
     NoteVersions {
         /// The note.
         id: String,
-        /// Its versions, oldest first.
+        /// Its versions, newest first.
         versions: Vec<NoteVersion>,
     },
     /// A note, or its editor's draft, by id, couldn't be saved, deleted, restored or read.

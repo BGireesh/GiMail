@@ -1,5 +1,6 @@
 //! A note as the thread shows it: an amber card with a bar on its left, the note's label and
-//! what it's on, and its text, read-only. Pointing at it shows its `Edit` and `Delete`.
+//! what it's on, and its text, read-only. Pointing at it shows its `Edit`, `History` and `Delete`.
+//! While its history is open, the history shows in its place.
 
 use egui::{CornerRadius, Rect, Sense, Shape, Stroke, Ui, UiBuilder, pos2, vec2};
 use exo_editor::EditorStyle;
@@ -13,13 +14,13 @@ use super::{
 };
 
 /// The bar on a card's left.
-const BAR: f32 = 3.0;
+pub(super) const BAR: f32 = 3.0;
 /// The padding above the label and under the text.
-const PADDING_Y: f32 = 9.0;
+pub(super) const PADDING_Y: f32 = 9.0;
 /// The gap between the label's line and the text.
-const LABEL_GAP: f32 = 4.0;
+pub(super) const LABEL_GAP: f32 = 4.0;
 /// The gap between the links on the label's line, and between them and what's before.
-const LINK_GAP: f32 = 12.0;
+pub(super) const LINK_GAP: f32 = 12.0;
 /// The `+ Add thread note` row's height.
 pub const ADD_HEIGHT: f32 = 32.0;
 const ADD: &str = "+ Add thread note";
@@ -33,6 +34,10 @@ pub enum CardAction {
     Delete,
     /// Show the note's versions.
     History,
+    /// The open history's `Restore this version`: make this version the note's newest.
+    Restore(u32),
+    /// The open history's `Close`.
+    CloseHistory,
 }
 
 impl Notes {
@@ -54,6 +59,9 @@ impl Notes {
 
     /// How tall `note`'s card is at `width`: its text, and the cards of its listed files.
     pub fn card_height(&mut self, ui: &Ui, note: &Note, width: f32) -> f32 {
+        if self.history_of(&note.id).is_some() {
+            return self.history_height(ui, width);
+        }
         let inner = width - BAR - 2.0 * PADDING_X;
         let body = self.body(note);
         let text = body.editor.height(ui, inner, body.left);
@@ -67,6 +75,9 @@ impl Notes {
 
     /// Draws `note`'s card in `rect`, of which `clip` shows, and returns what was clicked on it.
     pub fn card(&mut self, ui: &mut Ui, note: &Note, rect: Rect, clip: Rect) -> Option<CardAction> {
+        if self.history_of(&note.id).is_some() {
+            return self.history_card(ui, note, rect, clip);
+        }
         let ctx = ui.ctx().clone();
         let palette = exo_ui::palette(&ctx);
         match self.rects.iter_mut().find(|(id, _)| *id == note.id) {
@@ -102,11 +113,16 @@ impl Notes {
         let line = rect.top() + PADDING_Y;
         let muted = palette.ink(0.4, 0.4);
 
-        // `Edit` and `Delete` at the right of the label's line, while the pointer is on the card.
+        // `Edit`, `History` and `Delete` at the right of the label's line, while the pointer is on
+        // the card.
         let mut clicked = None;
         let mut meta_right = right;
         if ui.rect_contains_pointer(rect.intersect(clip)) {
-            for (text, action) in [("Delete", CardAction::Delete), ("Edit", CardAction::Edit)] {
+            for (text, action) in [
+                ("Delete", CardAction::Delete),
+                ("History", CardAction::History),
+                ("Edit", CardAction::Edit),
+            ] {
                 let width = META.width(&ctx, text);
                 let link = Rect::from_min_size(
                     pos2(meta_right - width, line),
@@ -128,6 +144,8 @@ impl Notes {
                 if response.clicked() {
                     clicked = Some(action);
                 }
+                self.controls
+                    .push((super::Control::Card(note.id.clone(), action), link));
                 meta_right = link.left() - LINK_GAP;
             }
         }

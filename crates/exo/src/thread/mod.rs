@@ -136,6 +136,12 @@ pub(crate) enum Action {
     EditNote(String),
     /// A note card's `Delete`.
     DeleteNote(String),
+    /// A note card's `History`.
+    NoteHistory(String),
+    /// A note history's `Restore this version`: the note and the version.
+    RestoreNoteVersion(String, u32),
+    /// A note history's `Close`.
+    CloseNoteHistory,
     /// The note editor's `Save`.
     SaveNote,
     /// A note count chip, with notes in the pane only: show the pane's Notes tab.
@@ -2111,7 +2117,15 @@ impl ThreadView {
                                 Some(CardAction::Delete) => {
                                     actions.push(Action::DeleteNote(note.id.clone()))
                                 }
-                                Some(CardAction::History) | None => {}
+                                Some(CardAction::History) => {
+                                    actions.push(Action::NoteHistory(note.id.clone()))
+                                }
+                                Some(CardAction::Restore(version)) => actions
+                                    .push(Action::RestoreNoteVersion(note.id.clone(), version)),
+                                Some(CardAction::CloseHistory) => {
+                                    actions.push(Action::CloseNoteHistory)
+                                }
+                                None => {}
                             }
                         }
                         Entry::NoteEditor => {

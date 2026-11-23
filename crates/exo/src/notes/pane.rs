@@ -3,7 +3,8 @@
 //! With notes in the thread, the tab is a timeline: one compact entry per note between small
 //! markers for the emails, in time order, and clicking a note's entry scrolls the thread to it.
 //! With notes in the pane only, it shows the notes as full cards in time order, and the editor
-//! opens there. `Share notes by email` sits at the foot of both.
+//! opens there. `Share notes by email` sits at the foot of both, under `Deleted notes ({n})` when
+//! the thread has any, which shows them, each with its `Restore`.
 
 use egui::{CornerRadius, Rect, Sense, Ui, UiBuilder, pos2, vec2};
 use exo_store::{Note, NotesPlacement, ThreadDetail};
@@ -11,8 +12,8 @@ use exo_ui::{Family, Font, TextStyle};
 use jiff::Timestamp;
 
 use super::{
-    ADD_HEIGHT, CardAction, EditorAction, LABEL, META, Notes, Target, add_thread_note, date,
-    first_name,
+    ADD_HEIGHT, CardAction, Control, EditorAction, LABEL, META, Notes, Target, add_thread_note,
+    date, first_name,
 };
 
 /// The tab row's height, at the pane's top.
@@ -48,6 +49,11 @@ const ENVELOPE_GAP: f32 = 5.0;
 const EXCERPT: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 13.0, 16.0);
 const EXCERPT_LINES: usize = 2;
 const ELLIPSIS: &str = "…";
+/// `Deleted notes ({n})`'s line, and each deleted note's two lines and the gap after them.
+const DELETED_HEADER: f32 = 24.0;
+const DELETED_ROW: f32 = 2.0 * META.line_height;
+const DELETED_GAP: f32 = 8.0;
+const RESTORE: &str = "Restore";
 
 /// One entry in the timeline.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -193,10 +199,14 @@ pub fn show(
         action = Some(PaneAction::Share);
     }
 
-    // What's above the button scrolls, clipped to its box.
+    // The deleted notes over the button, then what's above them scrolls, clipped to its box.
+    let room = share.top() - LIST_GAP - (pane.top() + LIST_TOP);
+    let (deleted_top, restored) =
+        notes.paint_deleted(ui, left, right, share.top() - LIST_GAP, room / 2.0);
+    action = action.or(restored);
     let list = Rect::from_min_max(
         pos2(left, pane.top() + LIST_TOP),
-        pos2(right, share.top() - LIST_GAP),
+        pos2(right, deleted_top - LIST_GAP),
     );
     if list.height() <= 0.0 {
         return action;
@@ -296,6 +306,121 @@ pub fn alone(
 }
 
 impl Notes {
+    /// Paints `Deleted notes ({n})` with its bottom at `bottom` between `left` and `right`, and
+    /// under it while it's open the deleted notes, at most `room` tall in all. Nothing shows when
+    /// the thread has none. Returns its top (`bottom` with none), and what was clicked.
+    fn paint_deleted(
+        &mut self,
+        ui: &Ui,
+        left: f32,
+        right: f32,
+        bottom: f32,
+        room: f32,
+    ) -> (f32, Option<PaneAction>) {
+        let all = self.all();
+        if all.deleted.is_empty() {
+            return (bottom, None);
+        }
+        let ctx = ui.ctx().clone();
+        let palette = exo_ui::palette(&ctx);
+        let muted = palette.ink(0.4, 0.4);
+        let rows = if self.deleted_open {
+            all.deleted.len() as f32 * (DELETED_ROW + DELETED_GAP)
+        } else {
+            0.0
+        };
+        let shown = rows.min((room - DELETED_HEADER).max(0.0));
+        let top = bottom - DELETED_HEADER - shown;
+        let mut clicked = None;
+
+        let header = Rect::from_min_max(pos2(left, top), pos2(right, top + DELETED_HEADER));
+        let response = ui
+            .interact(header, exo_ui::id(&ctx, "notes-deleted"), Sense::click())
+            .on_hover_cursor(egui::CursorIcon::PointingHand);
+        let ink = if response.hovered() {
+            palette.ink(0.8, 0.8)
+        } else {
+            muted
+        };
+        let text = format!("Deleted notes ({})", all.deleted.len());
+        META.paint_line(
+            ui.painter(),
+            pos2(left, header.center().y - META.line_height / 2.0),
+            &text,
+            ink,
+            Some(header.width()),
+        );
+        if response.clicked() {
+            self.deleted_open = !self.deleted_open;
+            self.deleted_scroll = 0.0;
+        }
+        self.controls.push((Control::DeletedNotes, header));
+        if shown <= 0.0 {
+            return (top, None);
+        }
+
+        // The deleted notes, newest first, scrolled within their box.
+        let area = Rect::from_min_max(pos2(left, header.bottom()), pos2(right, bottom));
+        let painter = ui.painter_at(area);
+        let mut y = area.top() - self.deleted_scroll;
+        for note in all.deleted.iter().rev() {
+            let restore_width = META.width(&ctx, RESTORE);
+            let restore = Rect::from_min_size(
+                pos2(right - restore_width, y),
+                vec2(restore_width, META.line_height),
+            );
+            let response = ui
+                .interact(
+                    restore.expand(4.0).intersect(area),
+                    exo_ui::id(&ctx, ("notes-restore-deleted", &note.id)),
+                    Sense::click(),
+                )
+                .on_hover_cursor(egui::CursorIcon::PointingHand);
+            let ink = if response.hovered() {
+                palette.text_base_default
+            } else {
+                palette.note_label_default
+            };
+            META.paint_line(&painter, restore.min, RESTORE, ink, None);
+            if response.clicked() {
+                clicked = Some(PaneAction::RestoreDeleted(note.id.clone()));
+            }
+            if restore.intersects(area) {
+                self.controls
+                    .push((Control::RestoreDeleted(note.id.clone()), restore));
+            }
+            let when = note.deleted_at.unwrap_or(note.updated_at);
+            META.paint_line(
+                &painter,
+                pos2(left, y),
+                &format!("{} · {}", note.label(), date(when, &self.now)),
+                muted,
+                Some((restore.left() - 8.0 - left).max(0.0)),
+            );
+            let first = note
+                .text
+                .lines()
+                .map(str::trim)
+                .find(|line| !line.is_empty())
+                .unwrap_or("");
+            META.paint_line(
+                &painter,
+                pos2(left, y + META.line_height),
+                first,
+                muted,
+                Some(right - left),
+            );
+            y += DELETED_ROW + DELETED_GAP;
+        }
+        let max = (rows - shown).max(0.0);
+        if ui.rect_contains_pointer(area) {
+            let delta = ui.input(|input| input.smooth_scroll_delta.y);
+            self.deleted_scroll -= delta;
+        }
+        self.deleted_scroll = self.deleted_scroll.clamp(0.0, max);
+        (top, clicked)
+    }
+
     /// Paints the timeline's `items` from `top` down in `list`, and returns how tall it is and
     /// what was clicked.
     fn paint_timeline(

@@ -500,6 +500,13 @@ impl Notes {
                 wanted.push((open.id.clone(), source, file));
             }
         }
+        if let Some(history) = &mut self.history {
+            let files = history.files().to_vec();
+            for (source, _) in history.editor.image_requests() {
+                let file = cid_file(&source, &files);
+                wanted.push((history.id.clone(), source, file));
+            }
+        }
         for note in self.notes.notes.iter() {
             if let Some(body) = self.bodies.get_mut(&note.id) {
                 for (source, _) in body.editor.image_requests() {
@@ -556,10 +563,14 @@ impl Notes {
         }
     }
 
-    /// Gives note `note`'s editors (the open one, its card's) what loading `key` came to.
+    /// Gives note `note`'s editors (the open one, its card's, its history's) what loading `key`
+    /// came to.
     fn set_image(&mut self, note: &str, key: &str, load: &ImageLoad) {
         if let Some(open) = self.editing.as_mut().filter(|open| open.id == note) {
             open.editor.set_image(key, copy(load));
+        }
+        if let Some(history) = self.history.as_mut().filter(|open| open.id == note) {
+            history.editor.set_image(key, copy(load));
         }
         if let Some(body) = self.bodies.get_mut(note) {
             body.editor.set_image(key, copy(load));
