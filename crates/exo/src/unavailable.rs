@@ -13,7 +13,10 @@ impl crate::Mail {
     pub(crate) fn thread_unavailable(&mut self, id: &str, offline: bool) {
         // A thread whose mail is gone is shown for its notes, which Gmail can't take away.
         if self.thread.as_ref().is_none_or(|open| open.id() != id)
-            || self.notes_alone.as_deref() == Some(id)
+            || self
+                .notes_alone
+                .as_ref()
+                .is_some_and(|alone| alone.id == id)
         {
             return;
         }

@@ -862,9 +862,10 @@ fn search_for(app: &mut Fixture, query: &str) {
     app.key(Key::Enter);
 }
 
-#[test]
-fn a_note_on_a_deleted_thread_opens_alone() {
-    let mut app = start_thread_note("notes-deleted-thread");
+/// Writes a thread note on the first conversation, deletes the conversation in Gmail and syncs,
+/// then searches `notes:overage`, which lists it alone, its mail gone. Returns its id and subject.
+fn deleted_result(name: &str) -> (Fixture, String, String) {
+    let mut app = start_thread_note(name);
     let (thread, subject) = {
         let open = app.mail().thread().expect("open");
         let subject = open.detail().expect("loaded").subject.clone();
@@ -882,11 +883,17 @@ fn a_note_on_a_deleted_thread_opens_alone() {
         "gone from the inbox: {:?}",
         app.subjects()
     );
-
     search_for(&mut app, "notes:overage");
     let rows = app.mail().inbox().threads();
     assert_eq!(rows.len(), 1, "{:?}", app.subjects());
     assert_eq!(rows[0].id, thread);
+    (app, thread, subject)
+}
+
+#[test]
+fn a_note_on_a_deleted_thread_opens_alone() {
+    let (mut app, thread, subject) = deleted_result("notes-deleted-thread");
+    let rows = app.mail().inbox().threads();
     assert_eq!(rows[0].subject, subject);
     assert_eq!(rows[0].snippet, "Email deleted");
     let hits = app.mail().search_note_hits(0);
@@ -901,7 +908,7 @@ fn a_note_on_a_deleted_thread_opens_alone() {
         Some(thread.as_str()),
         "it stays open"
     );
-    assert_eq!(app.mail().notes_alone(), Some(subject.as_str()));
+    assert_eq!(app.mail().notes_alone(), Some(subject));
     let note = app.mail().notes().notes[0].id.clone();
     assert!(
         app.mail().note_rects().iter().any(|(id, _)| *id == note),
@@ -910,6 +917,56 @@ fn a_note_on_a_deleted_thread_opens_alone() {
     // Notes are still written there.
     write_note(&mut app, |app| app.key(Key::T), "Call Dana");
     assert_eq!(labels(&app), ["Thread note", "Thread note"]);
+}
+
+#[test]
+fn done_and_trash_leave_a_notes_only_thread_alone() {
+    let (mut app, thread, subject) = deleted_result("notes-deleted-triage");
+    app.key(Key::Enter);
+    assert_eq!(app.mail().notes_alone(), Some(subject.clone()));
+    app.wait(0.5);
+    let units = app.units();
+    app.key(Key::E);
+    assert_eq!(app.mail().toast_text(), None, "nothing was tried");
+    type_key(&mut app, Key::Num3, Modifiers::SHIFT, "#");
+    assert_eq!(app.mail().toast_text(), None, "nothing was tried");
+    app.wait(0.5);
+    assert_eq!(app.units(), units, "Gmail was asked nothing");
+    assert_eq!(
+        app.mail().thread().map(|open| open.id()),
+        Some(thread.as_str()),
+        "still open"
+    );
+    assert_eq!(app.mail().notes_alone(), Some(subject));
+    app.key(Key::Escape);
+    let row = app
+        .mail()
+        .inbox()
+        .threads()
+        .iter()
+        .find(|row| row.id == thread)
+        .cloned()
+        .expect("still listed");
+    assert!(!row.done && !row.trashed, "{row:?}");
+}
+
+#[test]
+fn done_on_a_deleted_result_does_nothing() {
+    let (mut app, thread, _) = deleted_result("notes-deleted-row-done");
+    assert_eq!(
+        app.mail().inbox().cursor().map(|row| row.id.clone()),
+        Some(thread.clone()),
+        "the results have the keyboard"
+    );
+    app.wait(0.5);
+    let units = app.units();
+    app.key(Key::E);
+    assert_eq!(app.mail().toast_text(), None, "nothing was tried");
+    app.wait(0.5);
+    assert_eq!(app.units(), units, "Gmail was asked nothing");
+    let rows = app.mail().inbox().threads();
+    assert_eq!(rows.len(), 1, "the row stays");
+    assert!(!rows[0].done);
 }
 
 #[test]

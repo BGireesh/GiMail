@@ -204,6 +204,12 @@ impl ThreadSummary {
         row
     }
 
+    /// Whether it's a search result whose mail is gone, with only its notes left. Nothing is
+    /// done to it in Gmail, which no longer has it.
+    pub fn mail_gone(&self) -> bool {
+        self.search.as_ref().is_some_and(|marks| marks.deleted)
+    }
+
     /// Whether it has the Gmail label `id`.
     pub fn has_label(&self, id: &str) -> bool {
         self.label_ids.iter().any(|label| label == id)

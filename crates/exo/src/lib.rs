@@ -163,15 +163,17 @@ pub fn native_options() -> eframe::NativeOptions {
 /// The threads an action applies to: in a thread, that thread alone, as long as it's still listed
 /// (the list's selection only counts in the list); in the list, the selection, or else the cursor's
 /// thread.
+/// A search result whose mail is gone is never among them: Gmail no longer has it.
 fn actionable<'a>(thread: Option<&ThreadView>, inbox: &'a Inbox) -> Vec<&'a ThreadSummary> {
-    match thread {
+    let rows = match thread {
         Some(open) => inbox
             .threads()
             .iter()
             .filter(|row| row.id == open.id())
             .collect(),
         None => inbox.actionable(),
-    }
+    };
+    rows.into_iter().filter(|row| !row.mail_gone()).collect()
 }
 
 /// Which of the palette's copy rows apply: in a thread, its conversation, focused message and
@@ -321,7 +323,7 @@ pub struct Mail {
     /// The open thread's notes, and the editor one is written in.
     notes: notes::Notes,
     /// The open thread, when its mail is gone and only its notes are left: they show alone.
-    notes_alone: Option<String>,
+    notes_alone: Option<notes::Alone>,
     /// A note of the open thread to scroll to once its notes are in: a search result's first
     /// matching note.
     notes_reveal: Option<String>,
@@ -664,11 +666,12 @@ impl Mail {
 
     /// The subject over the open thread's notes when its mail is gone and they show alone (for
     /// tests).
-    pub fn notes_alone(&self) -> Option<&str> {
-        self.notes_alone.as_ref()?;
-        let context = self.snapshot.notes.context.as_ref()?;
-        (Some(context.thread_id.as_str()) == self.notes_alone.as_deref())
-            .then_some(context.subject.as_str())
+    pub fn notes_alone(&self) -> Option<String> {
+        let open = self.thread.as_ref()?.id();
+        self.notes_alone
+            .as_ref()
+            .filter(|alone| alone.id == open)
+            .map(|alone| alone.subject(&self.notes.all()))
     }
 
     /// What note `id`'s card says it's on (for tests).
@@ -896,9 +899,15 @@ impl Mail {
             .iter()
             .any(|thread| thread.id == id && thread.unread);
         // A search result whose mail is gone has only its notes to show.
-        let deleted = self.inbox.threads().iter().any(|thread| {
-            thread.id == id && thread.search.as_ref().is_some_and(|marks| marks.deleted)
-        });
+        let alone = self
+            .inbox
+            .threads()
+            .iter()
+            .find(|thread| thread.id == id && thread.mail_gone())
+            .map(|thread| notes::Alone {
+                id: thread.id.clone(),
+                subject: thread.subject.clone(),
+            });
         self.search_opened_thread();
         self.close_snippet_view();
         self.account.open_thread(Some(&id));
@@ -912,7 +921,7 @@ impl Mail {
             view.set_read_on_open();
         }
         self.notes.open(Some(view.id()));
-        self.notes_alone = deleted.then(|| view.id().to_owned());
+        self.notes_alone = alone;
         self.notes_reveal = None;
         self.thread = Some(view);
     }
@@ -926,6 +935,17 @@ impl Mail {
             let first = row.search.as_ref()?.notes.first()?.note_id.clone();
             Some((first, query.note_words()))
         });
+        // Behind an unsaved snippet, the thread opens once it's dealt with, still on its note.
+        if self.snippet_unsaved() {
+            self.ask_leaving_snippet(Box::new(move |mail| mail.open_revealing(id, hits)));
+            return;
+        }
+        self.open_revealing(id, hits);
+    }
+
+    /// Opens thread `id`, then with `hits` (its first matching note and the search's words) scrolls
+    /// to that note and marks the words.
+    fn open_revealing(&mut self, id: String, hits: Option<(String, Vec<String>)>) {
         self.open_thread(id.clone());
         if self.thread.as_ref().is_none_or(|thread| thread.id() != id) {
             return;
@@ -1737,6 +1757,23 @@ impl Mail {
         direction: isize,
         now: f64,
     ) -> Option<UndoToken> {
+        // Threads whose mail is gone (search results kept for their notes) are left out, from
+        // every path: Gmail no longer has them.
+        let ids: Vec<String> = ids
+            .iter()
+            .filter(|id| {
+                !self
+                    .inbox
+                    .threads()
+                    .iter()
+                    .any(|thread| thread.id == **id && thread.mail_gone())
+            })
+            .cloned()
+            .collect();
+        if ids.is_empty() {
+            return None;
+        }
+        let ids = ids.as_slice();
         if self.bulk_instead(ids, &mutation) {
             return None;
         }

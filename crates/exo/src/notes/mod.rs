@@ -569,6 +569,21 @@ impl crate::Mail {
     pub(crate) fn notes_frame(&mut self, time: f64) {
         // A snapshot of another thread, on its way out, has nothing of this one's. Until this
         // one's is in, the notes are as opening the thread left them: none.
+        // A thread shown for its notes alone whose mail turns out to be in Gmail after all (its
+        // copy arrived) shows as a thread again.
+        if let Some(open) = self.thread.as_ref().map(|thread| thread.id().to_owned())
+            && self
+                .notes_alone
+                .as_ref()
+                .is_some_and(|alone| alone.id == open)
+            && self
+                .snapshot
+                .thread
+                .as_ref()
+                .is_some_and(|detail| detail.id.as_str() == open)
+        {
+            self.notes_alone = None;
+        }
         let current = self.thread.as_ref().is_some_and(|thread| {
             let open = thread.id();
             self.snapshot
@@ -576,13 +591,8 @@ impl crate::Mail {
                 .as_ref()
                 .is_some_and(|detail| detail.id.as_str() == open)
                 // A thread whose mail is gone has its notes alone, told apart by their thread.
-                || (self.notes_alone.as_deref() == Some(open)
-                    && self
-                        .snapshot
-                        .notes
-                        .context
-                        .as_ref()
-                        .is_some_and(|context| context.thread_id.as_str() == open))
+                || (self.notes_alone.as_ref().is_some_and(|alone| alone.id == open)
+                    && notes_of(&self.snapshot.notes, open))
         });
         if current {
             let was = self.notes.placement();
@@ -825,16 +835,14 @@ impl crate::Mail {
         rem: f32,
         now: f64,
     ) {
-        let open = self.thread.as_ref().map(|thread| thread.id());
-        if open.is_none() || self.notes_alone.as_deref() != open {
+        let Some(open) = self.thread.as_ref().map(|thread| thread.id()) else {
             return;
-        }
-        let all = self.notes.all();
-        let subject = all
-            .context
-            .as_ref()
-            .map_or("-", |context| context.subject.as_str());
-        if let Some(action) = pane::alone(ui, content, rem, &mut self.notes, subject) {
+        };
+        let Some(alone) = self.notes_alone.as_ref().filter(|alone| alone.id == open) else {
+            return;
+        };
+        let subject = alone.subject(&self.notes.all());
+        if let Some(action) = pane::alone(ui, content, rem, &mut self.notes, &subject) {
             self.notes_pane_action(action, now);
         }
     }
@@ -864,6 +872,40 @@ impl crate::Mail {
             PaneAction::RestoreDeleted(id) => self.account.restore_note(id, None),
         }
     }
+}
+
+/// A thread shown for its notes alone, its mail gone: its id, and the subject its search result
+/// had.
+pub(crate) struct Alone {
+    pub id: String,
+    pub subject: String,
+}
+
+impl Alone {
+    /// The subject over its notes: the one its notes saved, or else its search result's.
+    pub fn subject(&self, notes: &ThreadNotes) -> String {
+        notes
+            .context
+            .as_ref()
+            .map(|context| context.subject.trim())
+            .filter(|subject| !subject.is_empty())
+            .unwrap_or(&self.subject)
+            .to_owned()
+    }
+}
+
+/// Whether `notes` are thread `id`'s: their saved context, or any note or draft, says so. A
+/// thread with nothing of either has nothing to show.
+fn notes_of(notes: &ThreadNotes, id: &str) -> bool {
+    notes
+        .context
+        .as_ref()
+        .is_some_and(|context| context.thread_id.as_str() == id)
+        || notes.notes.iter().any(|note| note.thread_id.as_str() == id)
+        || notes
+            .drafts
+            .iter()
+            .any(|draft| draft.thread_id.as_str() == id)
 }
 
 /// The first word of a sender's name, or the mailbox of a bare address.
@@ -1080,6 +1122,38 @@ mod tests {
         assert_eq!(found(&["keep*", "the"]), ["keep", "the"]);
         assert_eq!(found(&["zebra"]), Vec::<String>::new());
         assert_eq!(found(&[]), Vec::<String>::new());
+    }
+
+    #[test]
+    fn notes_without_a_saved_context_are_still_the_threads() {
+        let mut notes = ThreadNotes {
+            notes: vec![note(None)],
+            ..ThreadNotes::default()
+        };
+        assert!(notes_of(&notes, "thread"), "by the note's own thread");
+        assert!(!notes_of(&notes, "other"));
+        assert!(
+            !notes_of(&ThreadNotes::default(), "thread"),
+            "nothing to show"
+        );
+        let alone = Alone {
+            id: "thread".to_owned(),
+            subject: "Contract renewal".to_owned(),
+        };
+        assert_eq!(
+            alone.subject(&notes),
+            "Contract renewal",
+            "the result's subject"
+        );
+        notes.context = Some(exo_store::NoteThread {
+            thread_id: ThreadId::new("thread".to_owned()),
+            subject: "Saved subject".to_owned(),
+            participants: Vec::new(),
+            first_date: None,
+            last_date: None,
+            messages: 0,
+        });
+        assert_eq!(alone.subject(&notes), "Saved subject");
     }
 
     #[test]
