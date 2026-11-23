@@ -106,10 +106,10 @@ pub use search::{GmailPage, Highlighted, Search, SearchPage, SearchResult};
 pub use settings::{
     AdditionalTimezone, AutoAdvance, CalendarAccount, CalendarEventNotifications,
     CalendarNotifications, CalendarSetting, CalendarSettings, DeviceSettings, Document,
-    EmojiSkinTone, MeetingLinks, Notifications, Nudge, PreviousDropdown, PreviousReminder,
-    PreviousSchedule, PreviousSuggestion, QuickTips, ReminderSettings, RemoteContentBlocking,
-    SearchHistoryItem, SearchHistoryKind, Settings, Snippet, SnippetAnalytics, SnippetSend,
-    SplitsEngagement, Theme, TriggerCondition, TypingAssistance,
+    EmojiSkinTone, MeetingLinks, NotesPlacement, Notifications, Nudge, PreviousDropdown,
+    PreviousReminder, PreviousSchedule, PreviousSuggestion, QuickTips, ReminderSettings,
+    RemoteContentBlocking, SearchHistoryItem, SearchHistoryKind, Settings, Snippet,
+    SnippetAnalytics, SnippetSend, SplitsEngagement, Theme, TriggerCondition, TypingAssistance,
 };
 pub use split::{
     AutoLabels, CALENDAR_QUERY, Definitions, Invalidity, LabelIndex, LabelRef, LibrarySection,

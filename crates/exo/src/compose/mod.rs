@@ -3206,7 +3206,9 @@ impl crate::Mail {
             | Event::LabelNotCreated { .. }
             | Event::Unsent(_)
             | Event::Thread { .. }
-            | Event::Unavailable { .. } => {}
+            | Event::Unavailable { .. }
+            | Event::NoteVersions { .. }
+            | Event::NoteFailed(_) => {}
         }
     }
 

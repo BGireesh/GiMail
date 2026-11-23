@@ -26,9 +26,9 @@ use std::{
 
 use exo_store::{
     Alias, Attachment, AttachmentSource, Connection, DeviceSettings, Draft, DraftAttachment,
-    DraftFailure, Filter, GmailPage, GoogleContacts, Label, ListCount, ListId, Mutation,
-    RECENT_THREADS, ScoredContact, Search, SendFailure, SentDraft, Settings, Store, StoredDraft,
-    ThreadDetail, ThreadId, Undo,
+    DraftFailure, Filter, GmailPage, GoogleContacts, Label, ListCount, ListId, Mutation, NoteDraft,
+    NoteVersion, RECENT_THREADS, SaveNote, ScoredContact, Search, SendFailure, SentDraft, Settings,
+    Store, StoredDraft, ThreadDetail, ThreadId, ThreadNotes, Undo,
 };
 use futures::FutureExt as _;
 use gmail::TokenProvider;
@@ -192,6 +192,8 @@ pub struct Snapshot {
     /// Those of the open thread's messages stored without their body, which show placeholders until
     /// the bodies are in.
     pub bodiless: Vec<String>,
+    /// The open thread's notes, deleted ones and unsaved ones (none with no thread open).
+    pub notes: Arc<ThreadNotes>,
     /// Every draft compose has saved.
     pub drafts: Vec<StoredDraft>,
     /// The account's send-as aliases, with their signatures.
@@ -286,6 +288,15 @@ pub enum Event {
         /// The thread, with every message.
         detail: Option<Arc<ThreadDetail>>,
     },
+    /// The versions [`Account::note_versions`] read.
+    NoteVersions {
+        /// The note.
+        id: String,
+        /// Its versions, oldest first.
+        versions: Vec<NoteVersion>,
+    },
+    /// A note, or its editor's draft, by id, couldn't be saved, deleted, restored or read.
+    NoteFailed(String),
 }
 
 /// Names one of the account's views ([`Account::view`]).
@@ -409,6 +420,28 @@ enum Request {
     /// From the account's own tasks, a page of Gmail's matches for the search with this number
     /// (`None` when Gmail couldn't be reached).
     SearchPage(u64, Option<GmailPage>),
+    /// Save a note from its editor, at `now`.
+    SaveNote {
+        save: Box<SaveNote>,
+        now: jiff::Timestamp,
+    },
+    /// Delete note `id` at `now`.
+    DeleteNote {
+        id: String,
+        now: jiff::Timestamp,
+    },
+    /// Bring note `id` back at `now`, or one of its versions.
+    RestoreNote {
+        id: String,
+        version: Option<u32>,
+        now: jiff::Timestamp,
+    },
+    /// Keep what a note's editor has typed.
+    SaveNoteDraft(Box<NoteDraft>),
+    /// Drop a note editor's draft, by the editor's id.
+    DiscardNoteDraft(String),
+    /// Read note `id`'s versions, for [`Event::NoteVersions`].
+    NoteVersions(String),
 }
 
 /// One account as one page sees it. It's a handle on the account (its store and the tasks that keep
@@ -456,6 +489,8 @@ struct Shared {
     email: String,
     /// The folder that holds the bytes of draft attachments.
     files: PathBuf,
+    /// The folder that holds the bytes of notes' files.
+    note_files: PathBuf,
     /// Wakes the task that writes to Gmail.
     flush: Wake,
     /// Wakes the task that syncs.
@@ -742,6 +777,7 @@ impl Account {
             contact: None,
             thread: None,
             bodiless: Vec::new(),
+            notes: Arc::default(),
             drafts: Vec::new(),
             aliases: Vec::new(),
             address_book: None,
@@ -789,6 +825,7 @@ impl Account {
             }
         });
         let files = store.draft_files().to_owned();
+        let note_files = store.note_files().to_owned();
         let progress = store.sync_progress();
         let uploads = store.uploads();
         let pruning = store.clone();
@@ -980,6 +1017,7 @@ impl Account {
         let shared = Shared {
             email,
             files,
+            note_files,
             flush,
             sync_now,
             network,
@@ -1056,6 +1094,7 @@ impl Account {
             contact: None,
             thread: None,
             bodiless: Vec::new(),
+            notes: Arc::default(),
             search: None,
             ..Snapshot::clone(&self.snapshot())
         };
@@ -1575,6 +1614,63 @@ impl Account {
         self.shared
             .requests
             .post(Request::DiscardDraft(id.to_owned()));
+    }
+
+    /// What time it is by the app's clock, which dates notes' changes.
+    fn now(&self) -> jiff::Timestamp {
+        self.shared
+            .clock
+            .read()
+            .expect("the clock lock is never poisoned")
+            .now()
+            .timestamp()
+    }
+
+    /// Saves a note from its editor, and drops the editor's draft. Snapshots carry it once it's
+    /// saved, and [`Event::NoteFailed`] says when it couldn't be.
+    pub fn save_note(&self, save: SaveNote) {
+        let now = self.now();
+        self.shared.requests.post(Request::SaveNote {
+            save: Box::new(save),
+            now,
+        });
+    }
+
+    /// Deletes note `id` (bring it back with [`Account::restore_note`]).
+    pub fn delete_note(&self, id: String) {
+        let now = self.now();
+        self.shared.requests.post(Request::DeleteNote { id, now });
+    }
+
+    /// Brings note `id` back: undeletes it, or with `version`, makes that version its newest.
+    pub fn restore_note(&self, id: String, version: Option<u32>) {
+        let now = self.now();
+        self.shared
+            .requests
+            .post(Request::RestoreNote { id, version, now });
+    }
+
+    /// Keeps what a note's editor has typed, so a crash loses nothing.
+    pub fn save_note_draft(&self, draft: NoteDraft) {
+        self.shared
+            .requests
+            .post(Request::SaveNoteDraft(Box::new(draft)));
+    }
+
+    /// Drops the draft of note editor `id`, which closed without saving.
+    pub fn discard_note_draft(&self, id: String) {
+        self.shared.requests.post(Request::DiscardNoteDraft(id));
+    }
+
+    /// Reads note `id`'s versions, which come as [`Event::NoteVersions`].
+    pub fn note_versions(&self, id: String) {
+        self.shared.requests.post(Request::NoteVersions(id));
+    }
+
+    /// The folder that holds the bytes of notes' files, each named by its uuid. The app writes
+    /// them there before saving the note.
+    pub fn note_files(&self) -> PathBuf {
+        self.shared.note_files.clone()
     }
 
     /// Holds draft `id` for sending at `at`, or moves its hold there.
@@ -2322,6 +2418,40 @@ impl Worker {
                     Err(error) => log::error!("discarding draft {id}: {error}"),
                 }
             }
+            Request::SaveNote { save, now } => {
+                let id = save.draft_id.clone();
+                if let Err(error) = self.store.save_note(*save, now).await {
+                    self.note_failed(id, "saving", &error);
+                }
+            }
+            Request::DeleteNote { id, now } => {
+                if let Err(error) = self.store.delete_note(&id, now).await {
+                    self.note_failed(id, "deleting", &error);
+                }
+            }
+            Request::RestoreNote { id, version, now } => {
+                if let Err(error) = self.store.restore_note(&id, version, now).await {
+                    self.note_failed(id, "restoring", &error);
+                }
+            }
+            Request::SaveNoteDraft(draft) => {
+                let id = draft.id.clone();
+                if let Err(error) = self.store.save_note_draft(*draft).await {
+                    self.note_failed(id, "keeping the draft of", &error);
+                }
+            }
+            Request::DiscardNoteDraft(id) => {
+                if let Err(error) = self.store.discard_note_draft(&id).await {
+                    self.note_failed(id, "discarding the draft of", &error);
+                }
+            }
+            Request::NoteVersions(id) => match self.store.note_versions(&id).await {
+                Ok(versions) => {
+                    let _ = self.events.send(Event::NoteVersions { id, versions });
+                    self.repaint.request();
+                }
+                Err(error) => self.note_failed(id, "reading the versions of", &error),
+            },
             Request::SendDraft { id, .. } if self.incomplete.contains_key(&id) => {
                 // Sending would leave files off, so the user gets the draft back instead.
                 let reason = SendFailure::Other;
@@ -2750,6 +2880,13 @@ impl Worker {
         self.repaint.request();
     }
 
+    /// Logs that `doing` note `id` failed, and tells the UI ([`Event::NoteFailed`]).
+    fn note_failed(&self, id: String, doing: &str, error: &exo_store::Error) {
+        log::error!("{doing} note {id}: {error}");
+        let _ = self.events.send(Event::NoteFailed(id));
+        self.repaint.request();
+    }
+
     /// Saves `draft` as `email` with the bytes of its attachments added, and returns how many
     /// couldn't be had. A draft missing some is kept on the device, not written to Gmail. It's
     /// saved again once a sync round that reaches Gmail has fetched the missing files
@@ -3010,9 +3147,13 @@ impl Worker {
                     )
                     .await?;
                 let count = store.count(&view.list).await?;
-                let (thread, bodiless) = match &view.open {
-                    Some(id) => (store.thread(id).await?, store.bodiless(id).await?),
-                    None => (None, Vec::new()),
+                let (thread, bodiless, notes) = match &view.open {
+                    Some(id) => (
+                        store.thread(id).await?,
+                        store.bodiless(id).await?,
+                        store.thread_notes(id).await?,
+                    ),
+                    None => (None, Vec::new(), ThreadNotes::default()),
                 };
                 let contact = match &view.contact {
                     Some(email) => Some((
@@ -3038,9 +3179,9 @@ impl Worker {
                     )),
                     None => None,
                 };
-                Ok::<_, exo_store::Error>((page, count, (thread, bodiless), contact, search))
+                Ok::<_, exo_store::Error>((page, count, (thread, bodiless, notes), contact, search))
             };
-            let (page, count, (thread, bodiless), contact, search) = match read.await {
+            let (page, count, (thread, bodiless, notes), contact, search) = match read.await {
                 Ok(read) => read,
                 Err(error) => {
                     self.health.failed(&error);
@@ -3097,6 +3238,7 @@ impl Worker {
                 }),
                 thread: thread.map(Arc::new),
                 bodiless,
+                notes: Arc::new(notes),
                 drafts: drafts.clone(),
                 aliases: aliases.clone(),
                 address_book: self.address_book.clone(),

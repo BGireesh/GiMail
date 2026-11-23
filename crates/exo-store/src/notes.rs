@@ -179,8 +179,9 @@ pub struct NoteThread {
     pub messages: u32,
 }
 
-/// A thread's notes, as its view and notes pane show them.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// A thread's notes, as its view and notes pane show them. The default has none, for a view with
+/// no thread open.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ThreadNotes {
     /// The thread as it was when a note last changed, or `None` if it never had one.
     pub context: Option<NoteThread>,

@@ -615,6 +615,11 @@ impl Mail {
         self.thread.as_ref()
     }
 
+    /// The open thread's notes, as the latest snapshot has them (for tests).
+    pub fn notes(&self) -> &exo_store::ThreadNotes {
+        &self.snapshot.notes
+    }
+
     /// The status bar at the bottom of the window, if one shows: the offline bar, else Out of
     /// Office Reply's.
     pub fn status_bar(&self) -> Option<status_bar::StatusBar> {
@@ -1807,6 +1812,9 @@ impl Mail {
                 Event::Unsent(unsent) => self.sign_out_unsent(unsent),
                 Event::Thread { id, detail } => self.unsubscribe_thread_read(id, detail),
                 Event::Unavailable { id, offline } => self.thread_unavailable(&id, offline),
+                Event::NoteFailed(_) => self
+                    .commands
+                    .toast(Toast::new("Couldn't save the note.").kind(ToastKind::Error)),
                 event => self.compose_event(event),
             }
         }

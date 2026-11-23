@@ -203,6 +203,20 @@ pub struct Settings {
     /// Images`).
     #[serde(skip_serializing_if = "is_false")]
     pub reduce_motion: bool,
+    /// `notesPlacement`: where a thread's notes show, in the thread or in the right pane.
+    #[serde(skip_serializing_if = "is_default")]
+    pub notes_placement: NotesPlacement,
+}
+
+/// `notesPlacement`: where a thread's notes show.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum NotesPlacement {
+    /// `thread`: in the thread, among its messages.
+    #[default]
+    Thread,
+    /// `pane`: in the right pane, beside the thread.
+    Pane,
 }
 
 /// `quickTips`: the Quick Tips bar.
@@ -1310,6 +1324,28 @@ mod tests {
         assert_eq!(written["includeSignatureOnReplies"], false);
         assert_eq!(written["convertHyphenToBulletList"], true);
         assert_eq!(written["enableBacktickAsEscape"], true);
+    }
+
+    #[test]
+    fn notes_placement_uses_its_key_name_and_is_left_out_when_default() {
+        let settings: Settings =
+            serde_json::from_str(r#"{"notesPlacement":"pane"}"#).expect("parses");
+        assert_eq!(settings.notes_placement, NotesPlacement::Pane);
+        let written = serde_json::to_value(&settings).expect("serializes");
+        assert_eq!(written["notesPlacement"], "pane");
+        let back: Settings = serde_json::from_value(written).expect("parses");
+        assert_eq!(back, settings);
+        let fresh: Settings = serde_json::from_str("{}").expect("parses");
+        assert_eq!(
+            fresh.notes_placement,
+            NotesPlacement::Thread,
+            "in the thread"
+        );
+        let written = serde_json::to_value(&fresh).expect("serializes");
+        assert!(
+            written.get("notesPlacement").is_none(),
+            "the default is left out"
+        );
     }
 
     fn defaults() -> Vec<SplitInbox> {

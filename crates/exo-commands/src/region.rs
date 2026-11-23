@@ -49,6 +49,8 @@ pub enum Region {
     ShareAvailabilitySidebar,
     ShareAvailabilitySidebarAttendees,
     ShareAvailabilitySidebarTimezoneInput,
+    /// A note's editor, in the thread or the notes pane.
+    NoteEditor,
 }
 
 impl Region {
@@ -77,6 +79,7 @@ impl Region {
                 | Self::CalendarCreate
                 | Self::ShareAvailabilitySidebarAttendees
                 | Self::ShareAvailabilitySidebarTimezoneInput
+                | Self::NoteEditor
         )
     }
 }
@@ -143,6 +146,7 @@ pub(crate) const PALETTE_TOGGLE: &[Region] = &[
     Region::SeeYourWeekSidebar,
     Region::SeeYourWeekSidebarMeetWithInput,
     Region::CalendarCreate,
+    Region::NoteEditor,
 ];
 
 /// Where `?` toggles the shortcuts sheet.

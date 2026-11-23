@@ -230,6 +230,16 @@ roles! {
     button_primary_fill_active = "#aeb1dd", "#aeb1dd";
     /// Primary buttons' text: `hsla(0, 0%, 100%, .98)`.
     button_primary_content_default = "rgba(255, 255, 255, .98)", "rgba(255, 255, 255, .98)";
+    /// A note's bar, down its left edge.
+    note_bar_default = "#b7791f", "#e0b24d";
+    /// Behind a note.
+    note_background_default = "#fbf3df", "#2f2c22";
+    /// A note's label: `Thread note`, `Note 3`.
+    note_label_default = "#8a5a00", "#e0b24d";
+    /// Behind a note the notes pane just scrolled to, for a moment.
+    note_flash_default = "#f3dfa8", "#5a4d22";
+    /// Behind the words a search matched in a note.
+    note_mark_default = "#f6d98a", "#6b5a1e";
 }
 
 impl Palette {
