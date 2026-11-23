@@ -236,6 +236,11 @@ pub(crate) fn suggest(
             .cmp(&a.original.len())
             .then_with(|| a.is_contact().cmp(&b.is_contact()))
     });
+    // An operator the word starts (`notes:` for `n`) stays ahead of the labels the word merely
+    // names, whose typed text counts their `in:`.
+    if merged.iter().any(|found| found.kind == Kind::Operator) {
+        merged.sort_by_key(|found| found.kind == Kind::Label);
+    }
     merged
 }
 
@@ -269,10 +274,17 @@ fn syntax_suggestions(
                         .then(|| keywords.filter(|other| other.starts_with("has:")))
                         .into_iter()
                         .flatten();
-                    std::iter::once(keyword)
+                    let mut found: Vec<Suggestion> = std::iter::once(keyword)
                         .chain(others)
                         .map(|keyword| Suggestion::new(Kind::Operator, replacement(keyword), value))
-                        .collect()
+                        .collect();
+                    // `notes:` is the one operator starting with `n`, where a bare word has
+                    // always offered the labels it names: it joins them, and doesn't replace
+                    // them.
+                    if *keyword == "notes" && !has_people {
+                        found.extend(label_suggestions("in", value, labels));
+                    }
+                    found
                 }
                 _ if !value.is_empty() && !has_people => label_suggestions("in", value, labels),
                 _ => Vec::new(),
@@ -544,6 +556,36 @@ mod tests {
         assert_eq!(
             replacements(&suggest("att", &labels(), &[vec![]])),
             ["has:attachment"]
+        );
+    }
+
+    #[test]
+    fn a_bare_n_offers_notes_and_still_the_labels_it_names() {
+        // Before notes, `n` offered the labels it names. It still does, after `notes:`.
+        assert_eq!(
+            replacements(&suggest("n", &labels(), &[vec![]])),
+            [
+                "notes:",
+                "in:newsletters",
+                "in:inbox",
+                "in:unread",
+                "in:sent"
+            ]
+        );
+        assert_eq!(
+            replacements(&suggest("ne", &labels(), &[vec![]])),
+            ["in:newsletters"],
+            "a word no operator starts is as it was"
+        );
+        // `no` names no label here, and with one that it names, `notes:` is still first.
+        let mut with_notices = labels();
+        with_notices.push(LabelChoice {
+            slug: "notices".into(),
+            name: "notices".into(),
+        });
+        assert_eq!(
+            replacements(&suggest("no", &with_notices, &[vec![]])),
+            ["notes:", "in:notices"]
         );
     }
 
