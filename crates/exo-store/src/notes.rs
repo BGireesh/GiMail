@@ -1081,7 +1081,10 @@ pub(crate) async fn recover(db: &mut Db, backup: &Path) -> Result<Recovered> {
     let marker = retry_marker(backup);
     let empty = query_i64(db, "SELECT count(*) FROM notes").await? == 0;
     if empty || marker.exists() {
-        match restore(db, backup, !empty).await {
+        // With no drafts either, a backup that holds only drafts (a note being written when the
+        // account signed out, and none saved yet) has something to bring back.
+        let bare = empty && query_i64(db, "SELECT count(*) FROM note_drafts").await? == 0;
+        match restore(db, backup, !empty, bare).await {
             Ok(()) => {
                 let _ = std::fs::remove_file(&marker);
             }
@@ -1200,8 +1203,15 @@ fn file_name(path: &Path) -> Option<String> {
 /// them as they were. Into empty tables, a backup's row replaces any row left with its key (a
 /// draft kept before the notes came back). With `merge` (the tables have notes written since a
 /// restore failed), only the rows the tables lack are added. A backup without notes copies
-/// nothing. A column the backup lacks (it's from an older Exo) takes its default.
-async fn restore(db: &mut Db, path: &Path, merge: bool) -> std::result::Result<(), Unrestored> {
+/// nothing, unless the tables are `bare` (no notes and no drafts) and it has drafts, which are
+/// then what there is to bring back. A column the backup lacks (it's from an older Exo) takes
+/// its default.
+async fn restore(
+    db: &mut Db,
+    path: &Path,
+    merge: bool,
+    bare: bool,
+) -> std::result::Result<(), Unrestored> {
     let text = match std::fs::read_to_string(path) {
         Ok(text) => text,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -1225,9 +1235,14 @@ async fn restore(db: &mut Db, path: &Path, merge: bool) -> std::result::Result<(
                 "its {table} table has a row that isn't one"
             )));
         }
-        if table == "notes" && rows.is_empty() {
-            return Ok(());
-        }
+    }
+    let has = |table: &str| {
+        backup[table]
+            .as_array()
+            .is_some_and(|rows| !rows.is_empty())
+    };
+    if !has("notes") && !(bare && has("note_drafts")) {
+        return Ok(());
     }
     let later = |error: toasty::Error| Unrestored::Later(error.to_string());
     let mut tx = db.transaction().await.map_err(later)?;
@@ -1242,7 +1257,7 @@ async fn restore(db: &mut Db, path: &Path, merge: bool) -> std::result::Result<(
             .join(", ");
         let values = columns
             .iter()
-            .map(Column::from_backup)
+            .map(Column::backed_up)
             .collect::<Vec<_>>()
             .join(", ");
         let statement = if merge {
@@ -1317,7 +1332,7 @@ struct Column {
 impl Column {
     /// Its value in a backup's row (`value`, of `json_each`): what the row has, or the column's
     /// default where the row has nothing.
-    fn from_backup(&self) -> String {
+    fn backed_up(&self) -> String {
         let read = format!(r#"json_extract(value, '$."{}"')"#, self.name);
         match &self.default {
             Some(default) => format!("coalesce({read}, {default})"),

@@ -1205,3 +1205,64 @@ async fn a_noted_thread_that_isnt_stored_is_fetched_again_not_called_deleted() {
         serde_json::json!(1)
     );
 }
+
+#[tokio::test]
+async fn a_note_being_written_at_sign_out_comes_back_though_none_was_saved() {
+    let harness = Harness::synced().await;
+    let thread = conversation(&harness).await;
+    harness
+        .store
+        .save_note_draft(unsaved(&thread.id, "d", "Typed, never saved"))
+        .await
+        .expect("keeps the draft");
+    harness.store.backup_notes().await.expect("backs up");
+    let Harness {
+        server, dir, store, ..
+    } = harness;
+    drop(store);
+    Store::delete(dir.path(), ACCOUNT).expect("signs out");
+    let store = support::open(&server, dir.path()).await;
+    let notes = store.thread_notes(&thread.id).await.expect("reads");
+    assert_eq!(
+        notes
+            .drafts
+            .iter()
+            .map(|draft| draft.text.as_str())
+            .collect::<Vec<_>>(),
+        ["Typed, never saved"]
+    );
+    assert_eq!(set_aside(dir.path()), Vec::<String>::new());
+
+    // A store that still has its drafts takes none from a backup without notes: a draft
+    // dropped since the backup was written stays dropped.
+    store.discard_note_draft("d").await.expect("discards");
+    store
+        .save_note_draft(unsaved(&thread.id, "e", "The newer one"))
+        .await
+        .expect("keeps the draft");
+    drop(store);
+    let stale = serde_json::json!({
+        "note_threads": [], "notes": [], "note_versions": [], "note_files": [],
+        "note_drafts": [{
+            "id": "d",
+            "thread_id": thread.id.as_str(),
+            "message_id": null,
+            "note_id": null,
+            "html": "<p>Typed, never saved</p>",
+            "text": "Typed, never saved",
+            "files": "[]",
+            "updated_at": at(0).to_string(),
+        }],
+    });
+    std::fs::write(backup(dir.path()), stale.to_string()).expect("writes the backup");
+    let store = support::open(&server, dir.path()).await;
+    let notes = store.thread_notes(&thread.id).await.expect("reads");
+    assert_eq!(
+        notes
+            .drafts
+            .iter()
+            .map(|draft| draft.id.as_str())
+            .collect::<Vec<_>>(),
+        ["e"]
+    );
+}
