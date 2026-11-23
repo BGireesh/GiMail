@@ -27,9 +27,10 @@ use crate::ids::ListId;
 use crate::ids::ThreadId;
 use crate::ids::labels::{INBOX, SH_ALL, SH_IMPORTANT, SH_OTHER, TRASH};
 use crate::model::{Contact, ThreadSummary};
+use crate::notes::TermMatch;
 use crate::parse::unescape_html;
 use crate::provider;
-use crate::query::{FTS_ANCHOR, Fts, LabelIndex, Recheck, SearchQuery, tokenize_email};
+use crate::query::{Cond, FTS_ANCHOR, LabelIndex, Recheck, SearchQuery, tokenize_email};
 use crate::quota::Lane;
 use crate::split::{Me, important_definition};
 use crate::store::{Store, load_views, reindex};
@@ -495,9 +496,9 @@ impl Search {
     pub fn new(raw: &str) -> Self {
         let query = SearchQuery::parse(raw);
         Self {
-            // Gmail can't search notes, and the local match of a query with a `notes:` term is
-            // complete, so Gmail has nothing to add.
-            gmail_done: query.has_notes_terms(),
+            // Gmail can't search notes, and the local match of a query that requires a note is
+            // complete, as threads with notes are stored whole. Gmail has nothing to add.
+            gmail_done: query.requires_a_note(),
             query,
             started: jiff::Timestamp::now().as_millisecond(),
             gmail: Vec::new(),
@@ -575,14 +576,11 @@ impl Store {
         let labels = label_index(&mut db).await?;
         let me = &router.me.addresses;
         let query = &search.query;
-        let fts = query.fts(&labels, me);
-        let notes_terms = query.has_notes_terms();
-        // Words may be found in notes instead of mail. When no note has any of them, the mail's
-        // own lookup is all there is.
-        let loose = match &fts.loose {
-            Some(loose) if any_note_matches(&mut db, &fts.words).await? => Some(loose.clone()),
-            _ => None,
-        };
+        // A query with a `notes:` term is read with its real AND, OR and NOT. Any other keeps the
+        // flattened lookup, with notes as one more place a word can be found.
+        let structured = query.has_notes_terms();
+        let structure = query.structure(&labels, me);
+        let matches = crate::notes::term_matches(&mut db, &structure.notes).await?;
         let mut sql = String::from(
             "SELECT thread_id, sort, snippet(search_fts, ?1, char(58704), char(58705), char(58707), ?2), snippet(search_fts, ?3, char(58704), char(58705), char(58707), ?4) FROM search_fts WHERE search_fts MATCH ?5",
         );
@@ -592,41 +590,66 @@ impl Store {
             CONTENT_COLUMN.into(),
             snippet_tokens.into(),
         ];
-        for (at, (negated, expression)) in fts.matches.iter().enumerate() {
-            let expression = match &loose {
-                Some(loose) if at == 0 => loose,
-                _ => expression,
-            };
-            params.push(expression.clone().into());
-            if at > 0 {
-                let not = if *negated { "NOT " } else { "" };
+        if structured {
+            // Every row, with what a match is found with highlighted.
+            let highlight: Vec<String> = std::iter::once(format!("meta:{FTS_ANCHOR}"))
+                .chain(
+                    structure
+                        .highlight
+                        .iter()
+                        .map(|expression| format!("({expression})")),
+                )
+                .collect();
+            params.push(highlight.join(" OR ").into());
+            sql.push_str(" AND ");
+            cond_sql(&structure.cond, &mut sql, &mut params, &matches);
+        } else {
+            let fts = query.fts(&labels, me);
+            // Words may be found in notes instead of mail. When no note has any of them, the
+            // mail's own lookup is all there is.
+            let loose = fts
+                .loose
+                .as_ref()
+                .filter(|_| matches.iter().any(|found| !found.notes.is_empty()));
+            for (at, (negated, expression)) in fts.matches.iter().enumerate() {
+                let expression = match loose {
+                    Some(loose) if at == 0 => loose,
+                    _ => expression,
+                };
+                params.push(expression.clone().into());
+                if at > 0 {
+                    let not = if *negated { "NOT " } else { "" };
+                    sql.push_str(&format!(
+                        " AND rowid {not}IN (SELECT rowid FROM search_fts WHERE search_fts MATCH ?{})",
+                        params.len()
+                    ));
+                }
+            }
+            if loose.is_some() {
+                for word in &fts.words {
+                    params.push(word.clone().into());
+                    let at = params.len();
+                    sql.push_str(&format!(
+                        " AND (rowid IN (SELECT rowid FROM search_fts WHERE search_fts MATCH ?{at}) OR thread_id IN (SELECT thread_id FROM notes_fts WHERE notes_fts MATCH ?{at}))"
+                    ));
+                }
+            }
+            push_note_terms(&mut sql, &mut params, &fts.notes);
+            for (before, date) in &fts.dates {
+                params.push((*date).into());
                 sql.push_str(&format!(
-                    " AND rowid {not}IN (SELECT rowid FROM search_fts WHERE search_fts MATCH ?{})",
+                    " AND sort {} ?{}",
+                    if *before { "<" } else { ">=" },
                     params.len()
                 ));
             }
         }
-        if loose.is_some() {
-            for word in &fts.words {
-                params.push(word.clone().into());
-                let at = params.len();
-                sql.push_str(&format!(
-                    " AND (rowid IN (SELECT rowid FROM search_fts WHERE search_fts MATCH ?{at}) OR thread_id IN (SELECT thread_id FROM notes_fts WHERE notes_fts MATCH ?{at}))"
-                ));
-            }
-        }
-        push_note_terms(&mut sql, &mut params, "thread_id", &fts.notes);
-        for (before, date) in &fts.dates {
-            params.push((*date).into());
-            sql.push_str(&format!(
-                " AND sort {} ?{}",
-                if *before { "<" } else { ">=" },
-                params.len()
-            ));
-        }
-        // Online, local results stop where All Mail's backfill does, unless the query asks for
-        // drafts or snippets, or has a `notes:` term: threads with notes are stored whole.
-        if online && !notes_terms && !query.shows_label("draft") && !query.shows_label("snippets") {
+        // Online, local results stop where All Mail's backfill does, since Gmail finds the older
+        // ones, unless the query asks for drafts or snippets. Threads with notes are stored whole
+        // and Gmail can't search their notes, so they're found at any age, and a query that
+        // requires a note isn't bounded at all.
+        let local_only = query.requires_a_note();
+        if online && !local_only && !query.shows_label("draft") && !query.shows_label("snippets") {
             let all = ListCursor::filter_by_id(SH_ALL)
                 .first()
                 .exec(&mut db)
@@ -638,7 +661,10 @@ impl Store {
             };
             if let Some(bound) = bound {
                 params.push(bound.into());
-                sql.push_str(&format!(" AND sort >= ?{}", params.len()));
+                sql.push_str(&format!(
+                    " AND (sort >= ?{} OR thread_id IN (SELECT thread_id FROM notes WHERE deleted_at IS NULL))",
+                    params.len()
+                ));
             }
         }
         params.push(i64::try_from(limit + 1).unwrap_or(i64::MAX).into());
@@ -651,10 +677,10 @@ impl Store {
             statement = statement.bind(param);
         }
         let rows = statement.exec(&mut db).await?;
-        let mut found: Vec<(String, Option<Highlighted>, Option<Highlighted>)> = Vec::new();
+        let mut found: Vec<Local> = Vec::new();
         let highlightable = !query.highlightable_tokens().is_empty();
         for row in &rows {
-            let [Value::String(thread), _, subject, snippet] = fields(row) else {
+            let [Value::String(thread), sort, subject, snippet] = fields(row) else {
                 continue;
             };
             let subject = match subject {
@@ -667,14 +693,41 @@ impl Store {
                 Value::String(snippet) if highlightable => pick_snippet(snippet),
                 _ => None,
             };
-            found.push((thread.clone(), subject, snippet));
+            found.push(Local::Mail {
+                id: thread.clone(),
+                sort: match sort {
+                    Value::I64(sort) => *sort,
+                    _ => 0,
+                },
+                subject,
+                snippet,
+            });
         }
+        // Threads whose mail is gone are found by their notes alone, where the query holds with
+        // no mail at all.
+        let candidates: BTreeSet<String> = structure
+            .positive
+            .iter()
+            .filter_map(|at| matches.get(*at))
+            .flat_map(|found| found.threads.iter().cloned())
+            .collect();
+        for result in deleted(&mut db, &candidates, me).await? {
+            let id = result.thread.id.as_str().to_owned();
+            if structure.cond.eval(Some(false), &in_notes(&matches, &id)) == Some(true) {
+                found.push(Local::Gone(Box::new(result)));
+            }
+        }
+        // Newest first, the limit counting both.
+        found.sort_by_key(|local| std::cmp::Reverse(local.date()));
         let more_local = found.len() > limit;
         found.truncate(limit);
 
         let ids: Vec<String> = found
             .iter()
-            .map(|(id, ..)| id.clone())
+            .filter_map(|local| match local {
+                Local::Mail { id, .. } => Some(id.clone()),
+                Local::Gone(_) => None,
+            })
             .chain(search.gmail.iter().map(|hit| hit.thread.clone()))
             .collect();
         let mut views = load_views(&mut db, &ids).await?;
@@ -691,7 +744,13 @@ impl Store {
         .await?;
         let included = query.included_labels(&labels);
         let keeps_trash = query.shows_label("trash");
-        let (rechecks, rehighlight) = query.rechecks();
+        // A structured query's phrases are checked as typed where the whole query requires them;
+        // a note's are checked in its lookup already.
+        let (rechecks, rehighlight) = if structured {
+            (query.required_rechecks(), false)
+        } else {
+            query.rechecks()
+        };
         let list = if query.shows_label("sent") && included.len() == 1 {
             ListId::Sent
         } else {
@@ -699,7 +758,21 @@ impl Store {
         };
         let mut results = Vec::new();
         let mut seen = BTreeSet::new();
-        for (id, subject, snippet) in found {
+        for local in found {
+            let (id, subject, snippet) = match local {
+                Local::Gone(result) => {
+                    if seen.insert(result.thread.id.as_str().to_owned()) {
+                        results.push(*result);
+                    }
+                    continue;
+                }
+                Local::Mail {
+                    id,
+                    subject,
+                    snippet,
+                    ..
+                } => (id, subject, snippet),
+            };
             // A thread that Gmail found too, and that is new to the index since the search
             // started, was stored by that Gmail search. It shows as Gmail found it, not as an
             // index hit.
@@ -728,7 +801,19 @@ impl Store {
                     excerpt: &snippet.text,
                     searched,
                 };
-                if !recheck(&mut db, &checked, &rechecks).await? {
+                let passes = if structured {
+                    let mut all = true;
+                    for one in &rechecks {
+                        if !recheck(&mut db, &checked, std::slice::from_ref(one)).await? {
+                            all = false;
+                            break;
+                        }
+                    }
+                    all
+                } else {
+                    recheck(&mut db, &checked, &rechecks).await?
+                };
+                if !passes {
                     continue;
                 }
                 if rehighlight {
@@ -760,27 +845,6 @@ impl Store {
                 deleted: false,
             });
         }
-        if query.notes_can_answer() && (fts.words.is_empty() || loose.is_some()) {
-            for result in deleted(&mut db, &fts, limit, me).await? {
-                if seen.contains(result.thread.id.as_str()) {
-                    continue;
-                }
-                if !rechecks.is_empty() {
-                    let checked = Checked {
-                        thread: result.thread.id.as_str(),
-                        view: None,
-                        subject: &result.thread.subject,
-                        excerpt: "",
-                        searched: "",
-                    };
-                    if !recheck(&mut db, &checked, &rechecks).await? {
-                        continue;
-                    }
-                }
-                seen.insert(result.thread.id.as_str().to_owned());
-                results.push(result);
-            }
-        }
         let terms = query.highlightable_tokens();
         for hit in &search.gmail {
             if seen.contains(&hit.thread) {
@@ -790,6 +854,11 @@ impl Store {
                 continue;
             };
             if view.messages.is_empty() || query.excludes(view, &attachments, &labels, me) {
+                continue;
+            }
+            // Gmail was asked without the notes terms, so its matches are held to them here. The
+            // mail's part is Gmail's to judge.
+            if structure.cond.eval(None, &in_notes(&matches, &hit.thread)) == Some(false) {
                 continue;
             }
             seen.insert(hit.thread.clone());
@@ -824,26 +893,39 @@ impl Store {
                 deleted: false,
             });
         }
-        // The notes each result lists are those the words and `notes:` terms find.
-        let found_in_notes: Vec<String> = fts
-            .words
+        // A result lists its notes that a match is found with, among those its lookups found.
+        let found_with: Vec<usize> = structure
+            .positive
             .iter()
-            .chain(
-                fts.notes
-                    .iter()
-                    .filter(|(negated, expression)| !negated && !expression.is_empty())
-                    .map(|(_, expression)| expression),
-            )
-            .map(|expression| format!("({expression})"))
+            .copied()
+            .filter(|at| {
+                !structure.notes[*at].expression.is_empty()
+                    && matches
+                        .get(*at)
+                        .is_some_and(|found| !found.notes.is_empty())
+            })
             .collect();
-        if !found_in_notes.is_empty() && !results.is_empty() {
-            let ids: Vec<String> = results
+        let shown: BTreeSet<&str> = results
+            .iter()
+            .map(|result| result.thread.id.as_str())
+            .collect();
+        let notes: Vec<String> = found_with
+            .iter()
+            .flat_map(|at| matches[*at].notes.iter())
+            .filter(|(_, thread)| shown.contains(thread.as_str()))
+            .map(|(note, _)| note.clone())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        if !notes.is_empty() {
+            let expression = found_with
                 .iter()
-                .map(|result| result.thread.id.as_str().to_owned())
-                .collect();
-            let mut hits =
-                crate::notes::hits(&mut db, &ids, &found_in_notes.join(" OR "), snippet_tokens)
-                    .await?;
+                .map(|at| format!("({})", structure.notes[*at].expression))
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect::<Vec<_>>()
+                .join(" OR ");
+            let mut hits = crate::notes::hits(&mut db, &notes, &expression, snippet_tokens).await?;
             for result in &mut results {
                 result.notes = hits.remove(result.thread.id.as_str()).unwrap_or_default();
             }
@@ -871,8 +953,8 @@ impl Store {
     /// # Errors
     /// [`Error::Offline`](crate::Error::Offline) and the like when Gmail can't be reached.
     pub async fn search_gmail(&self, search: &Search) -> Result<GmailPage> {
-        // Notes never reach Gmail, and the local match of such a query is complete.
-        if search.query.has_notes_terms() {
+        // The local match of a query that requires a note is complete (see `Search::new`).
+        if search.query.requires_a_note() {
             return Ok(GmailPage::default());
         }
         let inner = &self.inner;
@@ -1008,84 +1090,144 @@ async fn recheck(
     Ok(false)
 }
 
-/// Whether a live note matches any of `words` (FTS5 expressions).
-async fn any_note_matches(exec: &mut dyn Executor, words: &[String]) -> Result<bool> {
-    let expression = words
-        .iter()
-        .map(|word| format!("({word})"))
-        .collect::<Vec<_>>()
-        .join(" OR ");
-    let rows =
-        toasty::sql::query("SELECT EXISTS (SELECT 1 FROM notes_fts WHERE notes_fts MATCH ?1)")
-            .bind(expression)
-            .exec(exec)
-            .await?;
-    Ok(rows
-        .first()
-        .is_some_and(|row| matches!(fields(row), [Value::I64(1)])))
+/// Whether `thread` has a note in the lookup at an index, as [`Cond::eval`] asks.
+fn in_notes<'a>(matches: &'a [TermMatch], thread: &'a str) -> impl Fn(usize) -> bool + 'a {
+    move |at| {
+        matches
+            .get(at)
+            .is_some_and(|found| found.threads.contains(thread))
+    }
 }
 
-/// Adds a condition on `column`, a thread id, for each of `terms` (`Fts::notes`): it has a live
-/// note matching the expression, any live note for an empty one, or, negated, none.
-fn push_note_terms(
-    sql: &mut String,
-    params: &mut Vec<Value>,
-    column: &str,
-    terms: &[(bool, String)],
-) {
+/// A local match, before it's read: a row of the mail's index, or a thread whose mail is gone.
+enum Local {
+    Mail {
+        id: String,
+        sort: i64,
+        subject: Option<Highlighted>,
+        snippet: Option<Highlighted>,
+    },
+    Gone(Box<SearchResult>),
+}
+
+impl Local {
+    /// Its date in epoch milliseconds, by which local matches are ordered.
+    fn date(&self) -> i64 {
+        match self {
+            Self::Mail { sort, .. } => *sort,
+            Self::Gone(result) => result.thread.date.as_millisecond(),
+        }
+    }
+}
+
+/// Writes `cond` as SQL over a row of the mail's index, each value a bound parameter. A note
+/// condition is the set of threads its lookup found (`matches`).
+fn cond_sql(cond: &Cond, sql: &mut String, params: &mut Vec<Value>, matches: &[TermMatch]) {
+    match cond {
+        Cond::True => sql.push('1'),
+        Cond::Mail(expression) => {
+            params.push(expression.clone().into());
+            sql.push_str(&format!(
+                "rowid IN (SELECT rowid FROM search_fts WHERE search_fts MATCH ?{})",
+                params.len()
+            ));
+        }
+        Cond::Date(before, date) => {
+            params.push((*date).into());
+            sql.push_str(&format!(
+                "sort {} ?{}",
+                if *before { "<" } else { ">=" },
+                params.len()
+            ));
+        }
+        Cond::Note(at) => {
+            let threads: Vec<&String> = matches
+                .get(*at)
+                .map(|found| found.threads.iter().collect())
+                .unwrap_or_default();
+            params.push(
+                serde_json::to_string(&threads)
+                    .expect("ids serialize")
+                    .into(),
+            );
+            sql.push_str(&format!(
+                "thread_id IN (SELECT value FROM json_each(?{}))",
+                params.len()
+            ));
+        }
+        Cond::Not(inner) => {
+            sql.push_str("NOT (");
+            cond_sql(inner, sql, params, matches);
+            sql.push(')');
+        }
+        Cond::All(children) | Cond::Any(children) => {
+            let (join, empty) = if matches!(cond, Cond::All(_)) {
+                (" AND ", '1')
+            } else {
+                (" OR ", '0')
+            };
+            if children.is_empty() {
+                sql.push(empty);
+                return;
+            }
+            sql.push('(');
+            for (at, child) in children.iter().enumerate() {
+                if at > 0 {
+                    sql.push_str(join);
+                }
+                cond_sql(child, sql, params, matches);
+            }
+            sql.push(')');
+        }
+    }
+}
+
+/// Adds a condition on the row's thread for each of `terms` (`Fts::notes`): it has a live note
+/// matching the expression, any live note for an empty one, or, negated, none.
+fn push_note_terms(sql: &mut String, params: &mut Vec<Value>, terms: &[(bool, String)]) {
     for (negated, expression) in terms {
         let not = if *negated { "NOT " } else { "" };
         if expression.is_empty() {
             sql.push_str(&format!(
-                " AND {column} {not}IN (SELECT thread_id FROM notes WHERE deleted_at IS NULL)"
+                " AND thread_id {not}IN (SELECT thread_id FROM notes WHERE deleted_at IS NULL)"
             ));
         } else {
             params.push(expression.clone().into());
             sql.push_str(&format!(
-                " AND {column} {not}IN (SELECT thread_id FROM notes_fts WHERE notes_fts MATCH ?{})",
+                " AND thread_id {not}IN (SELECT thread_id FROM notes_fts WHERE notes_fts MATCH ?{})",
                 params.len()
             ));
         }
     }
 }
 
-/// The threads whose mail is gone but whose live notes match the words and `notes:` terms of
-/// `fts`, up to `limit`, as results built from the thread as it was when a note last changed.
-/// A thread is gone when none of its messages is stored. (Its index row may outlive it, as
-/// deleting a thread leaves that row to be skipped.)
+/// Those of `threads` whose mail is gone (none of their messages is stored), newest first, as
+/// results built from each as it was when a note last changed. (A thread's index row may outlive
+/// it, as deleting a thread leaves that row to be skipped.)
 async fn deleted(
     exec: &mut dyn Executor,
-    fts: &Fts,
-    limit: usize,
+    threads: &BTreeSet<String>,
     me: &[String],
 ) -> Result<Vec<SearchResult>> {
-    let mut sql = String::from(
-        "SELECT thread_id FROM note_threads WHERE thread_id IN (SELECT thread_id FROM notes WHERE deleted_at IS NULL) AND thread_id NOT IN (SELECT thread_id FROM messages)",
-    );
-    let mut params: Vec<Value> = Vec::new();
-    for word in &fts.words {
-        params.push(word.clone().into());
-        sql.push_str(&format!(
-            " AND thread_id IN (SELECT thread_id FROM notes_fts WHERE notes_fts MATCH ?{})",
-            params.len()
-        ));
-    }
-    push_note_terms(&mut sql, &mut params, "thread_id", &fts.notes);
-    params.push(i64::try_from(limit).unwrap_or(i64::MAX).into());
-    sql.push_str(&format!(" LIMIT ?{}", params.len()));
-    let mut statement = toasty::sql::query(sql);
-    for param in params {
-        statement = statement.bind(param);
-    }
-    let ids: Vec<String> = crate::db::strings(statement.exec(exec).await?).collect();
-    if ids.is_empty() {
+    if threads.is_empty() {
         return Ok(Vec::new());
     }
-    let mut counts = crate::notes::live_counts(exec, &ids).await?;
-    let rows = NoteThreadRow::filter(NoteThreadRow::fields().thread_id().in_list(ids.as_slice()))
+    let ids = serde_json::to_string(threads).expect("ids serialize");
+    let gone: Vec<String> = crate::db::strings(
+        toasty::sql::query("SELECT thread_id FROM note_threads WHERE thread_id IN (SELECT value FROM json_each(?1)) AND thread_id NOT IN (SELECT thread_id FROM messages)")
+            .bind(ids)
+            .exec(exec)
+            .await?,
+    )
+    .collect();
+    if gone.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut counts = crate::notes::live_counts(exec, &gone).await?;
+    let rows = NoteThreadRow::filter(NoteThreadRow::fields().thread_id().in_list(gone.as_slice()))
         .exec(exec)
         .await?;
-    Ok(rows
+    let mut results: Vec<SearchResult> = rows
         .into_iter()
         .map(|row| {
             let participants: Vec<Contact> = row
@@ -1131,7 +1273,14 @@ async fn deleted(
                 deleted: true,
             }
         })
-        .collect())
+        .collect();
+    results.sort_by(|a, b| {
+        b.thread
+            .date
+            .cmp(&a.thread.date)
+            .then_with(|| a.thread.id.cmp(&b.thread.id))
+    });
+    Ok(results)
 }
 
 /// Of the excerpt's pieces (split at ellipses and between messages), the one with the most

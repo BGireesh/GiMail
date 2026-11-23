@@ -367,6 +367,39 @@ pub(crate) struct Recheck {
     pub negated: bool,
 }
 
+/// The check of `token` as typed, when it needs one: it's a phrase typed in quotes, or a word
+/// the index's stemming matches too loosely ([`STEMMED`]).
+fn recheck_of(token: &Token) -> Option<Recheck> {
+    static PUNCTUATION: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"[~!@#$%^*()+={}\\:;'<>,.?]").expect("valid regex"));
+    let wanted = (token.quoted && token.text.matches(['"', '\'']).count() >= 2)
+        || STEMMED.contains(&token.value().to_lowercase().as_str());
+    if !wanted || token.value().is_empty() {
+        return None;
+    }
+    let term = PUNCTUATION
+        .replace_all(&token.value().to_lowercase(), "")
+        .into_owned();
+    let edge = |c: Option<char>| {
+        if c.is_some_and(|c| c.is_ascii_alphanumeric() || c == '_') {
+            r"(?-u:\b)"
+        } else {
+            ""
+        }
+    };
+    let pattern = format!(
+        "(?i){}{}{}",
+        edge(term.chars().next()),
+        regex::escape(&term),
+        edge(term.chars().last())
+    );
+    Some(Recheck {
+        regex: Regex::new(&pattern).ok()?,
+        subject_only: token.kind == Kind::Header,
+        negated: token.negated,
+    })
+}
+
 /// A parsed search, as the search bar runs it.
 #[derive(Debug, Clone)]
 pub struct SearchQuery {
@@ -474,40 +507,9 @@ impl SearchQuery {
                 Node::Leaf(_) => {}
             }
         }
-        static PUNCTUATION: LazyLock<Regex> =
-            LazyLock::new(|| Regex::new(r"[~!@#$%^*()+={}\\:;'<>,.?]").expect("valid regex"));
         let mut words = Vec::new();
         walk(&self.tree, &mut words);
-        let rechecks: Vec<Recheck> = words
-            .iter()
-            .filter(|token| {
-                (token.quoted && token.text.matches(['"', '\'']).count() >= 2)
-                    || STEMMED.contains(&token.value().to_lowercase().as_str())
-            })
-            .filter_map(|token| {
-                let term = PUNCTUATION
-                    .replace_all(&token.value().to_lowercase(), "")
-                    .into_owned();
-                let edge = |c: Option<char>| {
-                    if c.is_some_and(|c| c.is_ascii_alphanumeric() || c == '_') {
-                        r"(?-u:\b)"
-                    } else {
-                        ""
-                    }
-                };
-                let pattern = format!(
-                    "(?i){}{}{}",
-                    edge(term.chars().next()),
-                    regex::escape(&term),
-                    edge(term.chars().last())
-                );
-                Some(Recheck {
-                    regex: Regex::new(&pattern).ok()?,
-                    subject_only: token.kind == Kind::Header,
-                    negated: token.negated,
-                })
-            })
-            .collect();
+        let rechecks: Vec<Recheck> = words.iter().filter_map(|token| recheck_of(token)).collect();
         let all = !rechecks.is_empty() && rechecks.len() == words.len();
         (rechecks, all)
     }
@@ -622,43 +624,6 @@ impl SearchQuery {
         walk(&self.tree)
     }
 
-    /// Whether the query has a `notes:` term. Such a query is answered locally alone: threads
-    /// with notes are stored whole, and Gmail can't search notes.
-    pub fn has_notes_terms(&self) -> bool {
-        fn walk(node: &Node) -> bool {
-            match node {
-                Node::And(children, _) | Node::Or(children, _) => children.iter().any(walk),
-                Node::Leaf(token) => token.kind == Kind::Notes,
-            }
-        }
-        walk(&self.tree)
-    }
-
-    /// Whether a thread whose mail isn't stored can match, from its notes alone: every term is a
-    /// word or a `notes:` term (or `in:all`), and some term must be found in a note.
-    pub(crate) fn notes_can_answer(&self) -> bool {
-        fn walk(node: &Node, positive: &mut bool) -> bool {
-            match node {
-                Node::And(children, _) | Node::Or(children, _) => {
-                    children.iter().all(|child| walk(child, positive))
-                }
-                Node::Leaf(token) if token.is_empty_text() => true,
-                Node::Leaf(token) => match token.kind {
-                    Kind::Text | Kind::Notes => {
-                        *positive |= !token.negated;
-                        true
-                    }
-                    Kind::Label => {
-                        matches!(token.value().to_lowercase().as_str(), "all" | "anywhere")
-                    }
-                    _ => false,
-                },
-            }
-        }
-        let mut positive = false;
-        walk(&self.tree, &mut positive) && positive
-    }
-
     /// A quick test that rules `thread` out (a Gmail hit that no longer matches).
     pub(crate) fn excludes(
         &self,
@@ -691,50 +656,12 @@ impl SearchQuery {
     /// add the rest. It leaves out Trash and Spam unless the query names them or `in:all`, and
     /// Snippets unless the query names them.
     pub(crate) fn fts(&self, labels: &LabelIndex, me: &[String]) -> Fts {
-        let mut tokens: Vec<&Token> = Vec::new();
-        let (mut anywhere, mut trash, mut spam, mut snippets) = (false, false, false, false);
-        fn leaves<'a>(node: &'a Node, out: &mut Vec<&'a Token>) {
-            match node {
-                Node::And(children, _) | Node::Or(children, _) => {
-                    children.iter().for_each(|child| leaves(child, out))
-                }
-                Node::Leaf(token) if token.value.as_deref() == Some("") => {}
-                Node::Leaf(token) => out.push(token),
-            }
-        }
-        let mut all = Vec::new();
-        leaves(&self.tree, &mut all);
-        for token in all {
-            if token.kind == Kind::Label {
-                match token.value().to_lowercase().as_str() {
-                    "all" | "anywhere" => {
-                        anywhere = true;
-                        continue;
-                    }
-                    "trash" => trash = true,
-                    "spam" => spam = true,
-                    "snippets" => snippets = true,
-                    _ => {}
-                }
-            }
-            tokens.push(token);
-        }
-        let defaults: Vec<Token> = [
-            ("trash", !anywhere && !trash),
-            ("spam", !anywhere && !spam),
-            ("snippets", !snippets),
-        ]
-        .into_iter()
-        .filter(|(_, add)| *add)
-        .map(|(label, _)| Token {
-            kind: Kind::Label,
-            field: "label".into(),
-            value: Some(label.into()),
-            quoted: false,
-            negated: true,
-            text: format!("label:{label}"),
-        })
-        .collect();
+        let tokens: Vec<&Token> = self
+            .leaves()
+            .into_iter()
+            .filter(|token| !is_anywhere(token))
+            .collect();
+        let defaults = self.default_exclusions();
         let mut fts = Fts::default();
         let mut terms: Vec<Term> = Vec::new();
         for token in tokens.into_iter().chain(&defaults) {
@@ -760,6 +687,308 @@ impl SearchQuery {
         }
         fts.matches.insert(0, (false, full_table_match(terms)));
         fts
+    }
+
+    /// The leaves of the query, empty text aside.
+    fn leaves(&self) -> Vec<&Token> {
+        fn walk<'a>(node: &'a Node, out: &mut Vec<&'a Token>) {
+            match node {
+                Node::And(children, _) | Node::Or(children, _) => {
+                    children.iter().for_each(|child| walk(child, out))
+                }
+                Node::Leaf(token) if token.value.as_deref() == Some("") => {}
+                Node::Leaf(token) => out.push(token),
+            }
+        }
+        let mut out = Vec::new();
+        walk(&self.tree, &mut out);
+        out
+    }
+
+    /// What a search leaves out unless asked: Trash and Spam unless the query names them or
+    /// `in:all`, and Snippets unless the query names them. Each is a negated label token.
+    fn default_exclusions(&self) -> Vec<Token> {
+        let (mut anywhere, mut trash, mut spam, mut snippets) = (false, false, false, false);
+        for token in self.leaves() {
+            if token.kind == Kind::Label {
+                match token.value().to_lowercase().as_str() {
+                    "all" | "anywhere" => anywhere = true,
+                    "trash" => trash = true,
+                    "spam" => spam = true,
+                    "snippets" => snippets = true,
+                    _ => {}
+                }
+            }
+        }
+        [
+            ("trash", !anywhere && !trash),
+            ("spam", !anywhere && !spam),
+            ("snippets", !snippets),
+        ]
+        .into_iter()
+        .filter(|(_, add)| *add)
+        .map(|(label, _)| Token {
+            kind: Kind::Label,
+            field: "label".into(),
+            value: Some(label.into()),
+            quoted: false,
+            negated: true,
+            text: format!("label:{label}"),
+        })
+        .collect()
+    }
+
+    /// Whether the query has a `notes:` term, which [`structure`](Self::structure) then answers.
+    pub fn has_notes_terms(&self) -> bool {
+        self.leaves().iter().any(|token| token.kind == Kind::Notes)
+    }
+
+    /// Whether every match must have a live note: a positive `notes:` term that the whole query
+    /// requires. Threads with notes are stored whole, so such a query is answered locally alone,
+    /// and Gmail, which can't search notes, isn't asked.
+    pub fn requires_a_note(&self) -> bool {
+        fn walk(node: &Node) -> bool {
+            match node {
+                Node::Leaf(token) => token.kind == Kind::Notes && !token.negated,
+                Node::And(children, false) => children.iter().any(walk),
+                Node::Or(children, false) => !children.is_empty() && children.iter().all(walk),
+                Node::And(_, true) | Node::Or(_, true) => false,
+            }
+        }
+        walk(&self.tree)
+    }
+
+    /// The phrases and stemmed words that every local result must have (or, negated, not have)
+    /// as typed: those of words and `subject:` terms the whole query requires.
+    pub(crate) fn required_rechecks(&self) -> Vec<Recheck> {
+        let required: Vec<&Token> = match &self.tree {
+            Node::And(children, false) => children
+                .iter()
+                .filter_map(|child| match child {
+                    Node::Leaf(token) => Some(token),
+                    _ => None,
+                })
+                .collect(),
+            Node::Leaf(token) => vec![token],
+            _ => Vec::new(),
+        };
+        required
+            .into_iter()
+            .filter(|token| {
+                token.kind == Kind::Text || (token.kind == Kind::Header && token.field == "subject")
+            })
+            .filter_map(recheck_of)
+            .collect()
+    }
+
+    /// The query as a condition on a thread, with its real AND, OR and NOT, for a query with a
+    /// `notes:` term: the flattened lookup ([`fts`](Self::fts)) leaves Gmail to find the rest,
+    /// and Gmail can't search notes. The default exclusions are ANDed on.
+    pub(crate) fn structure(&self, labels: &LabelIndex, me: &[String]) -> Structure {
+        let mut structure = Structure {
+            cond: Cond::True,
+            notes: Vec::new(),
+            positive: Vec::new(),
+            highlight: Vec::new(),
+        };
+        let tree = structure.node(&self.tree, false, labels, me);
+        let mut all = vec![tree];
+        for token in self.default_exclusions() {
+            all.push(structure.leaf(&token, false, labels, me));
+        }
+        structure.cond = Cond::All(all);
+        structure
+    }
+}
+
+/// `in:all` (or `in:anywhere`), which lifts the default exclusions and matches every thread.
+fn is_anywhere(token: &Token) -> bool {
+    token.kind == Kind::Label && matches!(token.value().to_lowercase().as_str(), "all" | "anywhere")
+}
+
+/// A condition on a thread, as [`SearchQuery::structure`] builds it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Cond {
+    True,
+    All(Vec<Cond>),
+    Any(Vec<Cond>),
+    Not(Box<Cond>),
+    /// The thread's row in the mail's index matches the FTS5 expression.
+    Mail(String),
+    /// `(before, epoch ms)`: the thread's date is before it, or else at or after it.
+    Date(bool, i64),
+    /// The thread has a live note in [`Structure::notes`] at this index.
+    Note(usize),
+}
+
+impl Cond {
+    /// The condition's value, where `mail` is the value of every mail and date condition
+    /// (`None` when they can't be told) and `note` says whether the thread has a note in a term.
+    /// `None` when it can't be told.
+    pub(crate) fn eval(&self, mail: Option<bool>, note: &dyn Fn(usize) -> bool) -> Option<bool> {
+        match self {
+            Self::True => Some(true),
+            Self::Mail(_) | Self::Date(..) => mail,
+            Self::Note(at) => Some(note(*at)),
+            Self::Not(inner) => inner.eval(mail, note).map(|value| !value),
+            Self::All(children) => {
+                let values: Vec<Option<bool>> = children
+                    .iter()
+                    .map(|child| child.eval(mail, note))
+                    .collect();
+                if values.contains(&Some(false)) {
+                    Some(false)
+                } else if values.iter().all(Option::is_some) {
+                    Some(true)
+                } else {
+                    None
+                }
+            }
+            Self::Any(children) => {
+                let values: Vec<Option<bool>> = children
+                    .iter()
+                    .map(|child| child.eval(mail, note))
+                    .collect();
+                if values.contains(&Some(true)) {
+                    Some(true)
+                } else if values.iter().all(Option::is_some) {
+                    Some(false)
+                } else {
+                    None
+                }
+            }
+        }
+    }
+}
+
+/// A lookup in the notes' index: the live notes matching `expression` (any live note when it's
+/// empty), and of those, the ones whose text has `exact` as typed, when it's set.
+#[derive(Debug, Clone)]
+pub(crate) struct NoteTerm {
+    pub expression: String,
+    pub exact: Option<Regex>,
+}
+
+/// A query as a condition on a thread ([`SearchQuery::structure`]).
+#[derive(Debug, Clone)]
+pub(crate) struct Structure {
+    pub cond: Cond,
+    /// The lookups in the notes' index that [`Cond::Note`] names.
+    pub notes: Vec<NoteTerm>,
+    /// The note lookups a match can be found with (not under a negation), whose notes a result
+    /// lists.
+    pub positive: Vec<usize>,
+    /// The mail index's expressions not under a negation, which highlight a result's subject and
+    /// excerpt.
+    pub highlight: Vec<String>,
+}
+
+impl Structure {
+    fn node(&mut self, node: &Node, flipped: bool, labels: &LabelIndex, me: &[String]) -> Cond {
+        let (children, negated, all) = match node {
+            Node::Leaf(token) => return self.leaf(token, flipped, labels, me),
+            Node::And(children, negated) => (children, *negated, true),
+            Node::Or(children, negated) => (children, *negated, false),
+        };
+        let conds = children
+            .iter()
+            .map(|child| self.node(child, flipped != negated, labels, me))
+            .collect();
+        let cond = if all {
+            Cond::All(conds)
+        } else {
+            Cond::Any(conds)
+        };
+        if negated {
+            Cond::Not(Box::new(cond))
+        } else {
+            cond
+        }
+    }
+
+    /// `flipped` says the token sits under a negated group.
+    fn leaf(&mut self, token: &Token, flipped: bool, labels: &LabelIndex, me: &[String]) -> Cond {
+        if token.is_empty_text() || is_anywhere(token) {
+            return Cond::True;
+        }
+        let positive = flipped == token.negated;
+        let cond = match token.kind {
+            // `before:` reads as a negated `after:`, so its negation is its direction.
+            Kind::After => {
+                let mut fts = Fts::default();
+                fts_token(token, labels, me, &mut Vec::new(), &mut fts);
+                return fts
+                    .dates
+                    .first()
+                    .map_or(Cond::True, |(before, date)| Cond::Date(*before, *date));
+            }
+            Kind::Notes => {
+                let expression = token
+                    .value
+                    .as_deref()
+                    .map(fts5_prefix_or_phrase)
+                    .unwrap_or_default();
+                let at = self.note_term(expression, token);
+                if positive {
+                    self.positive.push(at);
+                }
+                Cond::Note(at)
+            }
+            Kind::Text => {
+                let expression = if token.quoted {
+                    fts5_prefix_or_phrase(token.value())
+                } else {
+                    fts5_value(token.value())
+                };
+                let at = self.note_term(expression.clone(), token);
+                if positive {
+                    self.positive.push(at);
+                    self.highlight.push(expression.clone());
+                }
+                Cond::Any(vec![Cond::Mail(expression), Cond::Note(at)])
+            }
+            _ => {
+                let unnegated = Token {
+                    negated: false,
+                    ..token.clone()
+                };
+                let mut terms = Vec::new();
+                let mut fts = Fts::default();
+                fts_token(&unnegated, labels, me, &mut terms, &mut fts);
+                let mut parts: Vec<String> = Vec::new();
+                if !terms.is_empty() {
+                    parts.push(full_table_match(terms));
+                }
+                parts.extend(fts.matches.into_iter().map(|(_, expression)| expression));
+                // A token with nothing to look up (an Auto Label) limits nothing.
+                if parts.is_empty() {
+                    return Cond::True;
+                }
+                if positive {
+                    self.highlight.extend(parts.iter().cloned());
+                }
+                Cond::All(parts.into_iter().map(Cond::Mail).collect())
+            }
+        };
+        if token.negated {
+            Cond::Not(Box::new(cond))
+        } else {
+            cond
+        }
+    }
+
+    /// The index of the notes' lookup for `expression`, checked as `token` is typed.
+    fn note_term(&mut self, expression: String, token: &Token) -> usize {
+        let exact = recheck_of(token).map(|recheck| recheck.regex);
+        let same = |term: &NoteTerm| {
+            term.expression == expression
+                && term.exact.as_ref().map(Regex::as_str) == exact.as_ref().map(Regex::as_str)
+        };
+        if let Some(at) = self.notes.iter().position(same) {
+            return at;
+        }
+        self.notes.push(NoteTerm { expression, exact });
+        self.notes.len() - 1
     }
 }
 
@@ -2438,6 +2667,40 @@ mod tests {
             )
         );
         assert_eq!(fts("from:a").loose, None);
+    }
+
+    #[test]
+    fn a_query_with_notes_keeps_its_structure() {
+        let requires = |query: &str| SearchQuery::parse(query).requires_a_note();
+        assert!(requires("notes:x"));
+        assert!(requires("has:notes budget"));
+        assert!(requires("notes:x OR notes:y"));
+        assert!(requires("from:a (notes:x OR notes:y)"));
+        assert!(!requires("notes:x OR budget"));
+        assert!(!requires("-notes:x budget"));
+        assert!(!requires("-(notes:x budget)"));
+        assert!(!requires("budget"));
+
+        let structure =
+            SearchQuery::parse("-(notes:x budget)").structure(&labels(), &[ME.to_owned()]);
+        let Cond::All(parts) = &structure.cond else {
+            panic!("{:?}", structure.cond)
+        };
+        assert_eq!(
+            parts[0],
+            Cond::Not(Box::new(Cond::All(vec![
+                Cond::Note(0),
+                Cond::Any(vec![Cond::Mail("budget".into()), Cond::Note(1)]),
+            ])))
+        );
+        assert!(
+            structure.positive.is_empty(),
+            "nothing is found under a negation"
+        );
+        // With no mail, it holds for a thread without those notes.
+        assert_eq!(structure.cond.eval(Some(false), &|_| false), Some(true));
+        assert_eq!(structure.cond.eval(None, &|at| at == 0), None);
+        assert_eq!(structure.cond.eval(None, &|_| true), Some(false));
     }
 
     #[test]

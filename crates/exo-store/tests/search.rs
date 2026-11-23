@@ -757,6 +757,11 @@ async fn fts_syntax_in_a_notes_term_is_harmless() {
         "notes:' OR 1=1 --",
         "overage*",
         "\"a-b\" notes:",
+        "notes:x OR (",
+        "-(notes:\" OR",
+        "{notes:* from:\"}",
+        "notes:a OR -{NEAR( notes:)}",
+        "after:'; notes:x OR before:2000/01/01",
     ] {
         let mut session = Search::new(query);
         harness
@@ -852,4 +857,234 @@ async fn notes_on_a_deleted_thread_are_still_found() {
             .contains(&noted.id.as_str()),
         "a mail term can't match a thread whose mail is gone"
     );
+}
+
+/// The ids of a page, as a set.
+fn id_set(page: &SearchPage) -> std::collections::BTreeSet<String> {
+    page.results
+        .iter()
+        .map(|result| result.thread.id.as_str().to_owned())
+        .collect()
+}
+
+#[tokio::test]
+async fn a_notes_phrase_matches_as_typed() {
+    let harness = Harness::synced().await;
+    let loose = thanksgiving(&harness).await;
+    let exact = another(&harness, &loose.id).await;
+    note(&harness, &loose.id, None, "a", "Keeping the costs flat", 0).await;
+    let typed = note(&harness, &exact.id, None, "b", "We keep the cost flat", 1).await;
+    note(&harness, &exact.id, None, "c", "Keeping the costs flat", 2).await;
+
+    let page = search(&harness, "notes:\"keep the cost flat\"").await;
+    assert_eq!(ids(&page), [exact.id.as_str()], "stemming doesn't stand in");
+    let hits = &page.results[0].notes;
+    assert_eq!(
+        hits.iter()
+            .map(|hit| hit.note_id.as_str())
+            .collect::<Vec<_>>(),
+        [typed.id.as_str()],
+        "only the note that has it as typed"
+    );
+    assert_eq!(
+        ids(&search(&harness, "\"keep the cost flat\"").await),
+        [exact.id.as_str()],
+        "the same as a plain phrase"
+    );
+}
+
+/// The Thanksgiving thread with an `overage` note, and another inbox thread, not from Emeka, with
+/// a `slack` note.
+async fn two_noted(harness: &Harness) -> (ThreadSummary, ThreadSummary) {
+    let first = thanksgiving(harness).await;
+    let emeka = id_set(&search(harness, "from:emekao@gmail.com").await);
+    let second = harness
+        .all(&ListId::Inbox)
+        .await
+        .into_iter()
+        .find(|thread| thread.id != first.id && !emeka.contains(thread.id.as_str()))
+        .expect("a thread not from Emeka");
+    note(
+        harness,
+        &first.id,
+        None,
+        "a",
+        "Ask about the overage fee",
+        0,
+    )
+    .await;
+    note(harness, &second.id, None, "b", "Ping them on Slack", 1).await;
+    (first, second)
+}
+
+fn set(ids: &[&ThreadId]) -> std::collections::BTreeSet<String> {
+    ids.iter().map(|id| id.as_str().to_owned()).collect()
+}
+
+#[tokio::test]
+async fn notes_or_notes_finds_either() {
+    let harness = Harness::synced().await;
+    let (first, second) = two_noted(&harness).await;
+    let session = Search::new("notes:overage OR notes:slack");
+    assert!(session.gmail_done(), "every match has a note");
+    assert_eq!(
+        id_set(&search(&harness, "notes:overage OR notes:slack").await),
+        set(&[&first.id, &second.id])
+    );
+}
+
+#[tokio::test]
+async fn notes_or_a_word_finds_either() {
+    let harness = Harness::synced().await;
+    let (first, second) = two_noted(&harness).await;
+    let mut expected = id_set(&search(&harness, "renewal").await);
+    expected.insert(second.id.as_str().to_owned());
+    assert!(!Search::new("notes:slack OR renewal").gmail_done());
+    assert_eq!(
+        id_set(&search(&harness, "notes:slack OR renewal").await),
+        expected,
+        "the word in mail"
+    );
+    assert_eq!(
+        id_set(&search(&harness, "notes:zzqx OR overage").await),
+        set(&[&first.id]),
+        "the word in a note"
+    );
+}
+
+#[tokio::test]
+async fn notes_in_a_braced_or_with_from() {
+    let harness = Harness::synced().await;
+    let (_, second) = two_noted(&harness).await;
+    let mut expected = id_set(&search(&harness, "from:emekao@gmail.com").await);
+    expected.insert(second.id.as_str().to_owned());
+    assert_eq!(
+        id_set(&search(&harness, "{notes:slack from:emekao@gmail.com}").await),
+        expected
+    );
+}
+
+#[tokio::test]
+async fn a_negated_group_with_notes() {
+    let harness = Harness::synced().await;
+    let (first, second) = two_noted(&harness).await;
+    let found = id_set(&search(&harness, "-(notes:overage potato)").await);
+    assert!(!found.contains(first.id.as_str()), "it has both");
+    assert!(found.contains(second.id.as_str()), "it has neither");
+    let potato = id_set(&search(&harness, "potato").await);
+    assert!(
+        potato
+            .iter()
+            .filter(|id| *id != first.id.as_str())
+            .all(|id| found.contains(id)),
+        "potato without the note"
+    );
+}
+
+#[tokio::test]
+async fn from_and_a_group_of_notes() {
+    let harness = Harness::synced().await;
+    let (first, _) = two_noted(&harness).await;
+    assert_eq!(
+        ids(&search(
+            &harness,
+            "from:emekao@gmail.com (notes:overage OR notes:slack)"
+        )
+        .await),
+        [first.id.as_str()]
+    );
+}
+
+/// Stores the freight newsletter's threads older than the window, as Gmail's search does, and
+/// returns one of them.
+async fn an_old_thread(harness: &Harness) -> ThreadId {
+    let mut session = Search::new("from:newsletter@freightsignals.com");
+    while !session.gmail_done() {
+        let page = harness.store.search_gmail(&session).await.expect("gmail");
+        session.add_gmail(page);
+    }
+    let cutoff = jiff::Timestamp::now().as_millisecond() - WINDOW_MS;
+    harness
+        .store
+        .search(&mut session, 200, true, 15)
+        .await
+        .expect("search")
+        .results
+        .into_iter()
+        .find(|result| result.thread.date.as_millisecond() < cutoff)
+        .expect("older than the window")
+        .thread
+        .id
+}
+
+#[tokio::test]
+async fn an_old_noted_thread_is_found_online_by_its_note() {
+    let harness = Harness::synced().await;
+    let old = an_old_thread(&harness).await;
+    assert!(
+        !ids(&search(&harness, "from:newsletter@freightsignals.com").await).contains(&old.as_str()),
+        "online, the local results stop at the window"
+    );
+    note(&harness, &old, None, "a", "Ask about the overage fee", 0).await;
+    assert_eq!(ids(&search(&harness, "overage").await), [old.as_str()]);
+}
+
+#[tokio::test]
+async fn without_notes_gmail_still_adds_the_rest() {
+    let harness = Harness::synced().await;
+    let old = an_old_thread(&harness).await;
+    note(&harness, &old, None, "a", "Ask about the overage fee", 0).await;
+    let query = "from:newsletter@freightsignals.com -has:notes";
+    let mut session = Search::new(query);
+    assert!(
+        !session.gmail_done(),
+        "matches without notes may be only in Gmail"
+    );
+    let local = harness
+        .store
+        .search(&mut session, 200, true, 15)
+        .await
+        .expect("search");
+    while !session.gmail_done() {
+        let page = harness.store.search_gmail(&session).await.expect("gmail");
+        session.add_gmail(page);
+    }
+    let merged = harness
+        .store
+        .search(&mut session, 200, true, 15)
+        .await
+        .expect("search");
+    let found = id_set(&merged);
+    assert!(!found.contains(old.as_str()), "Gmail's match has a note");
+    assert!(found.len() > local.results.len(), "Gmail added older ones");
+    let cutoff = jiff::Timestamp::now().as_millisecond() - WINDOW_MS;
+    assert!(
+        merged
+            .results
+            .iter()
+            .any(|result| result.thread.date.as_millisecond() < cutoff)
+    );
+}
+
+#[tokio::test]
+async fn deleted_rows_share_the_limit_by_date() {
+    let harness = Harness::synced().await;
+    let (gone, kept) = two_noted(&harness).await;
+    harness
+        .gmail
+        .gmail()
+        .delete_thread(gone.id.as_str())
+        .await
+        .expect("deletes");
+    harness.store.sync().await.expect("syncs");
+    let all = search(&harness, "has:notes").await;
+    assert_eq!(id_set(&all), set(&[&gone.id, &kept.id]));
+    let mut session = Search::new("has:notes");
+    let one = harness
+        .store
+        .search(&mut session, 1, true, 15)
+        .await
+        .expect("search");
+    assert_eq!(ids(&one), [all.results[0].thread.id.as_str()], "the newer");
+    assert!(one.more_local);
 }

@@ -5,7 +5,7 @@
 //! to a standing backup beside the store (`{account}.notes-backup.json`), which signing out leaves
 //! alone. A store opened with no notes and a backup that has some takes them from it.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
 use jiff::Timestamp;
@@ -19,6 +19,7 @@ use crate::db::{
 };
 use crate::error::{Error, Result};
 use crate::ids::ThreadId;
+use crate::query::NoteTerm;
 use crate::search::{Highlighted, NoteHit, index_note, unindex_note};
 use crate::store::{Store, load_view};
 
@@ -620,16 +621,68 @@ pub(crate) async fn live_counts(
         .collect())
 }
 
-/// The live notes of `threads` that the notes' index matches with `expression`, each thread's in
-/// note order, with an excerpt of `snippet_tokens` words that has the matches in bold.
+/// What a lookup in the notes' index ([`NoteTerm`]) found: its live notes, as note id to thread
+/// id, and their threads.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct TermMatch {
+    pub notes: BTreeMap<String, String>,
+    pub threads: BTreeSet<String>,
+}
+
+/// The live notes each of `terms` finds. A term with an exact form keeps only the notes whose
+/// text has it as typed, so a phrase matches within one note, word for word.
+pub(crate) async fn term_matches(
+    exec: &mut dyn Executor,
+    terms: &[NoteTerm],
+) -> Result<Vec<TermMatch>> {
+    let mut out = Vec::with_capacity(terms.len());
+    for term in terms {
+        let rows = if term.expression.is_empty() {
+            toasty::sql::query("SELECT id, thread_id, text FROM notes WHERE deleted_at IS NULL")
+                .exec(exec)
+                .await?
+        } else {
+            toasty::sql::query("SELECT id, thread_id, text FROM notes WHERE deleted_at IS NULL AND id IN (SELECT note_id FROM notes_fts WHERE notes_fts MATCH ?1)")
+                .bind(term.expression.clone())
+                .exec(exec)
+                .await?
+        };
+        let mut found = TermMatch::default();
+        for row in rows {
+            let Value::Record(row) = row else { continue };
+            let [
+                Value::String(note),
+                Value::String(thread),
+                Value::String(text),
+            ] = &row.fields[..]
+            else {
+                continue;
+            };
+            if term
+                .exact
+                .as_ref()
+                .is_some_and(|exact| !exact.is_match(text))
+            {
+                continue;
+            }
+            found.threads.insert(thread.clone());
+            found.notes.insert(note.clone(), thread.clone());
+        }
+        out.push(found);
+    }
+    Ok(out)
+}
+
+/// The notes `notes` as search results list them, by thread, each thread's in note order, with
+/// an excerpt of `snippet_tokens` words that has what `expression` matches in bold.
 pub(crate) async fn hits(
     exec: &mut dyn Executor,
-    threads: &[String],
+    notes: &[String],
     expression: &str,
     snippet_tokens: i64,
 ) -> Result<HashMap<String, Vec<NoteHit>>> {
-    let ids = serde_json::to_string(threads).expect("ids serialize");
-    let rows = toasty::sql::query("SELECT note_id, snippet(notes_fts, 2, char(58704), char(58705), char(8230), ?1) FROM notes_fts WHERE notes_fts MATCH ?2 AND thread_id IN (SELECT value FROM json_each(?3))")
+    let ids = serde_json::to_string(notes).expect("ids serialize");
+    let rows = toasty::sql::query("SELECT note_id, snippet(notes_fts, 2, char(58704), char(58705), char(8230), ?1) FROM notes_fts WHERE notes_fts MATCH ?2 AND note_id IN (SELECT value FROM json_each(?3))")
         .bind(snippet_tokens)
         .bind(expression)
         .bind(ids)
@@ -647,7 +700,7 @@ pub(crate) async fn hits(
             _ => None,
         })
         .collect();
-    let ids: Vec<&str> = snippets.keys().map(String::as_str).collect();
+    let ids: Vec<&str> = notes.iter().map(String::as_str).collect();
     let mut rows = NoteRow::filter(NoteRow::fields().id().in_list(ids.as_slice()))
         .exec(exec)
         .await?;
@@ -655,13 +708,15 @@ pub(crate) async fn hits(
     rows.sort_by(|a, b| (a.created_at, a.number, &a.id).cmp(&(b.created_at, b.number, &b.id)));
     let mut hits: HashMap<String, Vec<NoteHit>> = HashMap::new();
     for row in rows {
-        let Some(snippet) = snippets.get(&row.id) else {
-            continue;
-        };
+        let snippet = snippets
+            .get(&row.id)
+            .map_or_else(Highlighted::default, |snippet| {
+                Highlighted::from_marked(snippet)
+            });
         hits.entry(row.thread_id).or_default().push(NoteHit {
             label: label(row.number),
             date: row.created_at,
-            snippet: Highlighted::from_marked(snippet),
+            snippet,
             note_id: row.id,
         });
     }
