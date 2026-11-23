@@ -32,8 +32,11 @@ pub(crate) fn is_marketing(root: &NodeRef, sender: &str) -> bool {
         return false;
     }
     let any = |matches: fn(&NodeRef) -> bool| dom::select_first(root, matches).is_some();
+    // Centered words, not a signature's centered row of icons.
     let centered = any(|n| {
-        dom::attr(n, "align").is_some_and(|a| a.eq_ignore_ascii_case("center")) && counts(n)
+        dom::attr(n, "align").is_some_and(|a| a.eq_ignore_ascii_case("center"))
+            && counts(n)
+            && !dom::text_content(n).trim().is_empty()
     });
     let bordered = any(|n| {
         if !dom::attr(n, "style").is_some_and(|s| s.contains("border:")) {
@@ -48,6 +51,7 @@ pub(crate) fn is_marketing(root: &NodeRef, sender: &str) -> bool {
             && !border.is_empty()
             && border != "none"
             && !border_is_zero(border)
+            && border_has_line_style(border)
     });
     let marked = any(|n| dom::has_class(n, "Superhuman-marketing"));
     let centered_text = any(|n| {
@@ -73,6 +77,17 @@ pub(crate) fn is_marketing(root: &NodeRef, sender: &str) -> bool {
             .any(|v| has_positive_length(v))
     });
     centered || bordered || marked || (centered_text && button)
+}
+
+/// Whether a `border` shorthand names a line style. Without one the style is `none` and nothing
+/// is drawn, as with Outlook's `border:1pt windowtext`.
+fn border_has_line_style(border: &str) -> bool {
+    border.split_whitespace().any(|token| {
+        matches!(
+            token.to_ascii_lowercase().as_str(),
+            "solid" | "dashed" | "dotted" | "double" | "groove" | "ridge" | "inset" | "outset"
+        )
+    })
 }
 
 /// Whether a `border` shorthand's width is zero.
@@ -288,6 +303,31 @@ mod tests {
         assert!(!is_marketing(
             &dom::parse("<p align=center>x</p>"),
             "MAILER-DAEMON@x.com"
+        ));
+    }
+
+    #[test]
+    fn a_signature_does_not_make_a_reply_marketing() {
+        // Outlook's `border:1pt windowtext` has no line style, so it draws no border.
+        assert!(!marketing(
+            "<p><span style=\"border:1pt windowtext;padding:0in\">Nicole</span></p>"
+        ));
+        // A signature's centered row of linked social icons has no text of its own.
+        assert!(!marketing(
+            "<p align=\"center\" style=\"margin:0in;text-align:center\">\
+             <a href=\"https://x.example/ig\"><span><img src=\"cid:ig\"></span></a> \
+             <a href=\"https://x.example/tw\"><span><img src=\"cid:tw\"></span></a></p>"
+        ));
+        // Still marketing: a border with a line style, and centered words.
+        assert!(marketing(
+            "<div style=\"border:1px solid #ddd\">Hi</div>"
+        ));
+        assert!(marketing(
+            "<span style=\"border:1pt windowtext solid\">Box</span>"
+        ));
+        assert!(marketing("<p align=\"center\">Spring sale, 40% off</p>"));
+        assert!(marketing(
+            "<table><tr><td align=\"center\"><img src=\"cid:logo\"><h1>Big news</h1></td></tr></table>"
         ));
     }
 
