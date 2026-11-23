@@ -89,7 +89,10 @@ pub use model::{
     MessageDetail, RecentThread, ReminderStatus, ThreadDetail, ThreadPage, ThreadSummary,
 };
 pub use mutation::Mutation;
-pub use notes::{NoteFile, NoteParticipant};
+pub use notes::{
+    Note, NoteChange, NoteDraft, NoteFile, NoteParticipant, NoteThread, NoteVersion, SaveNote,
+    ThreadNotes,
+};
 pub use onboarding::{PreviewEmail, PreviewList, SplitPreview};
 pub use out_of_office::{
     DetectedEvent, EventTime, GoogleResponder, OUT_OF_OFFICE_LOOKAHEAD, OutOfOfficeDays,

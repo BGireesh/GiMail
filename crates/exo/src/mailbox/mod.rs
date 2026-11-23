@@ -81,6 +81,8 @@ pub struct ThreadSummary {
     pub reminder: Option<ReminderStatus>,
     /// Its attached files, which a search result shows as cards under its row.
     pub files: Vec<exo_store::Attachment>,
+    /// How many live notes it has, which the row's note icon shows.
+    pub notes: usize,
 }
 
 impl ThreadSummary {
@@ -155,6 +157,7 @@ impl ThreadSummary {
             scheduled: thread.scheduled,
             reminder: thread.reminder,
             files: thread.files,
+            notes: thread.notes,
         }
     }
 

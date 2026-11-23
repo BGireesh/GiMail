@@ -110,6 +110,8 @@ pub struct ThreadSummary {
     pub removed_by: Vec<Mutation>,
     /// Its reminder, while the row shows it.
     pub reminder: Option<ReminderStatus>,
+    /// How many live notes it has, which the row's note icon shows.
+    pub notes: usize,
 }
 
 /// Where a thread's reminder stands, as its row and header show it.

@@ -1931,6 +1931,7 @@ mod tests {
             scheduled: None,
             reminder: None,
             files: Vec::new(),
+            notes: 0,
         }
     }
 

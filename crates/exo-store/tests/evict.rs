@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use exo_store::{
-    Address, Draft, DraftAction, DraftRecord, Eviction, ListId, Mutation, Search, SendLater,
-    Settings, Theme, ThreadId,
+    Address, Draft, DraftAction, DraftRecord, Eviction, ListId, Mutation, SaveNote, Search,
+    SendLater, Settings, Theme, ThreadId,
 };
 use gmail::{Format, ListQuery};
 use jiff::{SignedDuration, Timestamp};
@@ -649,6 +649,60 @@ async fn eviction_never_touches_drafts_sends_the_outbox_or_local_state() {
     store.reading(None).await;
     store.evict(&EVERYTHING).await.expect("evicts");
     assert!(store.thread(&open).await.expect("reads").is_none());
+}
+
+#[tokio::test]
+async fn a_thread_with_a_note_is_never_evicted() {
+    let harness = Harness::synced().await;
+    let store = &harness.store;
+    let dir = harness.dir.path();
+    let [noted, deleted]: [ThreadId; 2] = open_done(&harness, 2)
+        .await
+        .into_iter()
+        .map(|(id, _)| id)
+        .collect::<Vec<_>>()
+        .try_into()
+        .expect("two");
+    for (thread, draft) in [(&noted, "a"), (&deleted, "b")] {
+        store
+            .save_note(
+                SaveNote {
+                    draft_id: draft.into(),
+                    note_id: None,
+                    thread_id: thread.clone(),
+                    message_id: None,
+                    html: "<p>Renewal at 40k</p>".into(),
+                    text: "Renewal at 40k".into(),
+                    files: Vec::new(),
+                },
+                Timestamp::now(),
+            )
+            .await
+            .expect("saves")
+            .expect("a note");
+    }
+    store
+        .delete_note("b", Timestamp::now())
+        .await
+        .expect("deletes");
+    let tables = kept_tables(dir);
+
+    store.evict(&EVERYTHING).await.expect("evicts");
+    let left = stored(dir);
+    assert!(left.contains(noted.as_str()), "its rows stay");
+    assert!(
+        store.bodies_stored(&noted).await.expect("reads"),
+        "and its bodies"
+    );
+    assert!(
+        !left.contains(deleted.as_str()),
+        "a deleted note keeps nothing"
+    );
+    assert_eq!(
+        kept_tables(dir),
+        tables,
+        "the notes, their versions and their index stay as they were"
+    );
 }
 
 #[tokio::test]

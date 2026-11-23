@@ -72,6 +72,28 @@ pub(crate) async fn unindex(exec: &mut dyn Executor, thread: &str) -> Result<()>
     Ok(())
 }
 
+/// Drops note `note` from the notes' index (`notes_fts`).
+pub(crate) async fn unindex_note(exec: &mut dyn Executor, note: &str) -> Result<()> {
+    toasty::sql::statement("DELETE FROM notes_fts WHERE note_id = ?1")
+        .bind(note)
+        .exec(exec)
+        .await?;
+    Ok(())
+}
+
+/// Writes note `note`'s row in the notes' index: its text and its files' names. A deleted note
+/// has none.
+pub(crate) async fn index_note(exec: &mut dyn Executor, note: &str) -> Result<()> {
+    unindex_note(exec, note).await?;
+    toasty::sql::statement(
+        "INSERT INTO notes_fts (note_id, thread_id, text, files) SELECT n.id, n.thread_id, n.text, coalesce((SELECT group_concat(f.name, ' ') FROM note_files f WHERE f.uuid IN (SELECT value FROM json_each(n.files))), '') FROM notes n WHERE n.id = ?1 AND n.deleted_at IS NULL",
+    )
+    .bind(note)
+    .exec(exec)
+    .await?;
+    Ok(())
+}
+
 /// Writes `view`'s row: its subject, every message's text, its people, its attachments' names,
 /// its labels and lists (`list_ids`), mailing lists and Message-IDs. A thread that is only a
 /// draft written elsewhere isn't searchable, because such drafts only show in Drafts.

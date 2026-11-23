@@ -105,6 +105,8 @@ pub(crate) struct ThreadView {
     pub scheduled: Option<(Timestamp, bool)>,
     /// Its reminder, if one was ever set and not removed.
     pub reminder: Option<ReminderRow>,
+    /// How many live notes it has.
+    pub notes: usize,
 }
 
 /// How long a failed draft keeps its thread in the inbox, counted from the draft's date (three
@@ -201,6 +203,7 @@ impl ThreadView {
             sending_snippet: None,
             scheduled: None,
             reminder: None,
+            notes: 0,
         };
         for step in ops.iter().flat_map(|op| op.steps.iter()) {
             view.apply(step);
@@ -668,6 +671,7 @@ impl ThreadView {
             drafts: shown.iter().filter(|m| m.is_editable_draft()).count(),
             removed_by,
             reminder,
+            notes: self.notes,
         }
     }
 

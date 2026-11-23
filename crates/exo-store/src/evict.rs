@@ -14,12 +14,12 @@
 //! The file gives the space back to the disk (`auto_vacuum = INCREMENTAL`).
 //!
 //! Never evicted: the open conversation, the first threads of the lists that sync keeps bodies
-//! for (it would fetch them again), and a conversation with a draft or a send of its own. The
-//! rows, though not the bodies, of the inbox lists' first [`LIST_CAP`] threads (the reach of
-//! their background passes) are kept too, and so are those of a conversation with a reminder or
-//! a change Gmail hasn't had. Nothing Gmail doesn't have is evicted either: drafts and their
-//! files, the outbox, held and scheduled sends, reminders, settings, unsubscribes, and the
-//! calendar's queued changes.
+//! for (it would fetch them again), and a conversation with a draft, a send of its own or a live
+//! note. The rows, though not the bodies, of the inbox lists' first [`LIST_CAP`] threads (the
+//! reach of their background passes) are kept too, and so are those of a conversation with a
+//! reminder or a change Gmail hasn't had. Nothing Gmail doesn't have is evicted either: drafts and
+//! their files, the outbox, held and scheduled sends, reminders, settings, unsubscribes, the
+//! calendar's queued changes, and the notes with their search index.
 
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
@@ -59,6 +59,8 @@ const QUIET: &str = "SELECT thread_id, max(internal_date) AS newest FROM message
 /// The conversations with a draft or a held or scheduled send. They're the ones in Drafts or
 /// Scheduled, and the ones that one of Exo's drafts names, by thread or by message.
 const DRAFTED: &str = "SELECT thread_id FROM list_ids WHERE list_id IN (?1, ?2) UNION SELECT thread_id FROM drafts WHERE thread_id IS NOT NULL UNION SELECT m.thread_id FROM drafts d JOIN messages m ON m.id = d.message_id";
+/// The conversations with a live note, which stay whole so their notes make sense.
+const NOTED: &str = "SELECT DISTINCT thread_id FROM notes WHERE deleted_at IS NULL";
 /// The conversations with a reminder or a change Gmail hasn't had.
 const PENDING: &str = "SELECT thread_id FROM reminders UNION SELECT queue FROM outbox";
 /// The first `?2` threads of list `?1`.
@@ -325,7 +327,8 @@ async fn quiet(exec: &mut dyn Executor, cutoff: i64) -> Result<Vec<Quiet>> {
 }
 
 /// The conversations that eviction leaves alone: the open one, the first threads of each list
-/// that sync fetches bodies for ([`Inner::prefetched_lists`]), and those with a draft or a send.
+/// that sync fetches bodies for ([`Inner::prefetched_lists`]), and those with a draft, a send or
+/// a live note.
 /// For their rows it also leaves the inbox lists' first [`LIST_CAP`], which their passes list (if
 /// evicted, the next pass would fetch them again), and those with a reminder or a change Gmail
 /// hasn't had.
@@ -362,6 +365,7 @@ async fn kept(
             .exec(exec)
             .await?,
     ));
+    kept.extend(strings(toasty::sql::query(NOTED).exec(exec).await?));
     if keep == Keep::Rows {
         kept.extend(strings(toasty::sql::query(PENDING).exec(exec).await?));
     }

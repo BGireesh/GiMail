@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use exo_store::{
     Address, CalendarChange, Draft, DraftAction, DraftRecord, Error, GoogleContact, GoogleContacts,
-    GoogleList, ListId, Mutation, Settings, Store, Theme, Unusable,
+    GoogleList, ListId, Mutation, NoteChange, NoteFile, SaveNote, Settings, Store, Theme, Unusable,
 };
 use jiff::Timestamp;
 use support::{ACCOUNT, Harness};
@@ -114,6 +114,44 @@ async fn clearing_a_newer_exos_cache_keeps_what_gmail_doesnt_have() {
         .apply(std::slice::from_ref(&thread), Mutation::Star)
         .await
         .expect("queues");
+    let noted = thread.clone();
+    let quote = NoteFile {
+        uuid: "f1".into(),
+        name: "quote.pdf".into(),
+        mime_type: "application/pdf".into(),
+        size: 2048,
+        content_id: None,
+    };
+    let note = SaveNote {
+        draft_id: "n1".into(),
+        note_id: None,
+        thread_id: noted.clone(),
+        message_id: None,
+        html: "<p>The quokka renewal</p>".into(),
+        text: "The quokka renewal".into(),
+        files: vec![quote.clone()],
+    };
+    let saved_at = Timestamp::now();
+    harness
+        .store
+        .save_note(note.clone(), saved_at)
+        .await
+        .expect("saves")
+        .expect("a note");
+    let note = harness
+        .store
+        .save_note(
+            SaveNote {
+                note_id: Some("n1".into()),
+                html: "<p>The quokka renewal, signed</p>".into(),
+                text: "The quokka renewal, signed".into(),
+                ..note
+            },
+            saved_at,
+        )
+        .await
+        .expect("saves")
+        .expect("a note");
     let remind_at: Timestamp = "2030-02-01T13:00:00Z".parse().expect("a time");
     harness
         .store
@@ -209,6 +247,36 @@ async fn clearing_a_newer_exos_cache_keeps_what_gmail_doesnt_have() {
         store.calendar_pending().await.expect("counts"),
         1,
         "the calendar's change Calendar hasn't got"
+    );
+    assert_eq!(
+        store.thread_notes(&noted).await.expect("reads").notes,
+        vec![note],
+        "the note, with its file"
+    );
+    assert_eq!(
+        store
+            .note_versions("n1")
+            .await
+            .expect("reads")
+            .iter()
+            .map(|version| (version.change, version.files.clone()))
+            .collect::<Vec<_>>(),
+        [
+            (NoteChange::Edited, vec![quote.clone()]),
+            (NoteChange::Created, vec![quote])
+        ],
+        "and its versions"
+    );
+    assert_eq!(
+        rusqlite::Connection::open(database(dir.path()))
+            .and_then(|db| db.query_row(
+                "SELECT count(*) FROM notes_fts WHERE notes_fts MATCH 'quokka'",
+                [],
+                |row| row.get::<_, i64>(0)
+            ))
+            .expect("searches"),
+        1,
+        "and search finds it"
     );
     assert!(
         store

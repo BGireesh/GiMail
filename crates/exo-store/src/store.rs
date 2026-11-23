@@ -108,6 +108,13 @@ pub(crate) struct Inner {
     pub progress: watch::Sender<crate::SyncProgress>,
     /// The folder draft attachments' bytes are kept in.
     pub files: PathBuf,
+    /// The folder notes' files' bytes are kept in ([`Store::note_files`]).
+    pub notes: PathBuf,
+    /// The notes' standing backup ([`Store::backup_notes`]).
+    pub notes_backup: PathBuf,
+    /// One backup of the notes written at a time, so a later one is never overwritten by an
+    /// earlier one.
+    pub backing_up: Mutex<()>,
     /// When each draft was last written to Gmail this session, which paces its next write.
     pub written: std::sync::Mutex<HashMap<String, jiff::Timestamp>>,
     /// What Gmail holds of each draft Exo wrote this session: the message the write made and its
@@ -197,6 +204,8 @@ impl Store {
     ) -> Result<Self> {
         check_account(account)?;
         let mut db = db::open(&dir.as_ref().join(format!("{account}.sqlite3"))).await?;
+        let notes_backup = dir.as_ref().join(format!("{account}.notes-backup.json"));
+        crate::notes::recover(&mut db, &notes_backup).await?;
         let identity = db::kv_get(&mut db, IDENTITY).await?.unwrap_or_default();
         let splits = load_splits(&mut db).await?;
         Ok(Self {
@@ -230,6 +239,9 @@ impl Store {
                 changes: watch::channel(0).0,
                 progress: watch::Sender::new(crate::SyncProgress::default()),
                 files: dir.as_ref().join(format!("{account}.files")),
+                notes: dir.as_ref().join(format!("{account}.notes")),
+                notes_backup,
+                backing_up: Mutex::new(()),
                 written: std::sync::Mutex::default(),
                 acked: std::sync::Mutex::default(),
                 uploads: watch::Sender::new(crate::drafts::Uploads::new()),
@@ -249,8 +261,9 @@ impl Store {
     }
 
     /// Deletes `account`'s store in `dir` (its database, its drafts' attachments and any parts
-    /// kept beside them), as signing out does. Close every [`Store`] on it first. A store that
-    /// isn't there deletes fine.
+    /// kept beside them), as signing out does. Its notes' files and backup stay, so signing in
+    /// again brings the notes back. Close every [`Store`] on it first. A store that isn't there
+    /// deletes fine.
     ///
     /// # Errors
     /// [`Error::InvalidAccount`], or [`Error::Delete`] for a file the OS wouldn't delete.
@@ -955,6 +968,7 @@ pub(crate) async fn load_views(
             .into_iter()
             .map(|row| (row.thread_id.clone(), row))
             .collect();
+    let mut notes = crate::notes::live_counts(exec, threads).await?;
     let exo_drafts = exo_drafts(exec).await?;
     let marks = crate::drafts::marks(exec).await?;
     Ok(rows
@@ -975,6 +989,7 @@ pub(crate) async fn load_views(
             view.sending_snippet = marks.sending_snippets.get(&id).cloned();
             view.scheduled = marks.scheduled_threads.get(&id).copied();
             view.reminder = reminders.remove(&id);
+            view.notes = notes.remove(&id).unwrap_or_default();
             Some((id, view))
         })
         .collect())

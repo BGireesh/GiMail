@@ -88,6 +88,9 @@ pub enum Error {
     /// The thread isn't in the local store.
     #[error("thread {0} isn't in the local store")]
     UnknownThread(ThreadId),
+    /// The note, or the version of it asked for, isn't in the local store.
+    #[error("note {0} isn't in the local store")]
+    UnknownNote(String),
     /// Something the call needs only exists after the first [`sync`](crate::Store::sync), such
     /// as the hidden mute label.
     #[error("{0} isn't available until the first sync")]
