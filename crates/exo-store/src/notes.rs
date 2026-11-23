@@ -32,6 +32,9 @@ const TABLES: [&str; 5] = [
     "note_drafts",
 ];
 
+/// How many message ids [`Store::missing_messages`] looks up in one statement.
+const MESSAGE_CHUNK: usize = 500;
+
 /// A name and address of one of a noted thread's participants, as the thread had them when a
 /// note last changed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -659,14 +662,18 @@ impl Store {
             return Ok(BTreeSet::new());
         }
         let mut db = self.inner.db.clone();
-        let list: Vec<&str> = ids.iter().map(String::as_str).collect();
-        let stored: BTreeSet<String> =
-            MessageRow::filter(MessageRow::fields().id().in_list(list.as_slice()))
-                .exec(&mut db)
-                .await?
-                .into_iter()
-                .map(|row| row.id)
-                .collect();
+        let mut stored = BTreeSet::new();
+        // In chunks, as SQLite takes only so many values in one statement.
+        for chunk in ids.chunks(MESSAGE_CHUNK) {
+            let list: Vec<&str> = chunk.iter().map(String::as_str).collect();
+            stored.extend(
+                MessageRow::filter(MessageRow::fields().id().in_list(list.as_slice()))
+                    .exec(&mut db)
+                    .await?
+                    .into_iter()
+                    .map(|row| row.id),
+            );
+        }
         Ok(ids
             .iter()
             .filter(|id| !stored.contains(*id))

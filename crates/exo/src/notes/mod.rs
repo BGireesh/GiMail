@@ -12,6 +12,7 @@
 mod card;
 mod editor;
 mod files;
+pub(crate) mod folder;
 mod history;
 pub mod markdown;
 pub mod pane;

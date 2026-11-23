@@ -445,10 +445,8 @@ impl Settings {
                     .device_settings()
                     .notes_folder
                     .as_deref()
-                    .map_or_else(
-                        || crate::notes::markdown::default_folder(account.email()),
-                        crate::notes::markdown::expand,
-                    );
+                    .and_then(|folder| crate::notes::markdown::expand(folder).ok())
+                    .unwrap_or_else(|| crate::notes::markdown::default_folder(account.email()));
                 if let Some(folder) = crate::downloads::pick(Some(&current)) {
                     let folder = folder.display().to_string();
                     account.update_device_settings(|device| device.notes_folder = Some(folder));

@@ -259,7 +259,6 @@ impl Tree {
         self.nodes[new].parent = Some(parent);
     }
 
-    /// A new element with no parent yet.
     /// Sets element `id`'s attribute `name` to `value`, adding it when it has none.
     pub(crate) fn set_attribute(&mut self, id: usize, name: &str, value: &str) {
         if let Kind::Element { attributes, .. } = &mut self.nodes[id].kind {
@@ -270,6 +269,7 @@ impl Tree {
         }
     }
 
+    /// A new element with no parent yet.
     pub(crate) fn create(&mut self, name: &str) -> usize {
         self.nodes.push(Node {
             kind: Kind::Element {

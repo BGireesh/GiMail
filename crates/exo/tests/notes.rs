@@ -1579,3 +1579,41 @@ fn a_new_note_whose_only_image_was_taken_out_shares_at_once() {
     );
     assert!(app.mail().notes().notes.is_empty());
 }
+
+#[test]
+fn a_save_is_not_held_up_by_the_notes_folder() {
+    let mut app = start("notes-folder-paused");
+    let folder = app.folder("Email Notes");
+    keep_markdown_in(&mut app, &folder);
+    app.key(Key::Enter);
+    let thread = app.mail().thread().expect("open").id().to_owned();
+    // The folder's writes stall, as on a disk that doesn't answer.
+    app.mail().account().pause_notes_folder(true);
+    app.mail_mut().account_mut().save_note(SaveNote {
+        draft_id: "6b0d3c55-6f43-4a8e-9a39-0c1f6f3f8a11".to_owned(),
+        note_id: None,
+        thread_id: ThreadId::new(thread.clone()),
+        message_id: None,
+        html: "<div>Ask about the budget</div>".to_owned(),
+        text: "Ask about the budget".to_owned(),
+        files: Vec::new(),
+    });
+    // Not settled: the waiting copy keeps the account busy.
+    let started = std::time::Instant::now();
+    while app.mail().notes().notes.is_empty()
+        && started.elapsed() < std::time::Duration::from_secs(10)
+    {
+        app.harness.run_steps(1);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert_eq!(labels(&app), ["Thread note"], "the save is in");
+    assert_eq!(
+        file_ending(&folder, &format!("-{thread}.md")),
+        None,
+        "its copy waits"
+    );
+    app.mail().account().pause_notes_folder(false);
+    app.settle();
+    let markdown = file_ending(&folder, &format!("-{thread}.md")).expect("written once let go");
+    assert!(markdown.contains("Ask about the budget"), "{markdown}");
+}

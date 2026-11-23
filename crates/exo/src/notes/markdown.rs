@@ -12,13 +12,13 @@
 //! thread's id, a file's uuid and its sanitized name, so nothing lands outside the folder.
 
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     io,
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use exo_store::{Note, NoteFile, NoteThread, NoteVersion};
+use exo_store::{Note, NoteFile, NoteThread, NoteVersion, NotedThread};
 
 use crate::copy::turndown::{self, Tree};
 
@@ -39,11 +39,23 @@ pub fn default_folder(account: &str) -> PathBuf {
 }
 
 /// `folder` as typed or chosen, with a leading `~` meaning the home folder.
-pub fn expand(folder: &str) -> PathBuf {
-    match folder.strip_prefix('~') {
+///
+/// # Errors
+/// When it isn't a full path (`Notes`, `~bob/Notes`, or `~` with the home folder unknown), so
+/// nothing is written wherever the app happens to run.
+pub fn expand(folder: &str) -> io::Result<PathBuf> {
+    let path = match folder.strip_prefix('~') {
         Some("") => home(),
         Some(rest) if rest.starts_with('/') => home().join(rest.trim_start_matches('/')),
         _ => PathBuf::from(folder),
+    };
+    if path.is_absolute() {
+        Ok(path)
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("the notes folder {folder} isn't a full path"),
+        ))
     }
 }
 
@@ -108,9 +120,9 @@ pub fn render(context: &NoteThread, notes: &[Note], gone: &BTreeSet<String>) -> 
     out += "---\n";
     let id = safe_id(context.thread_id.as_str());
     for note in notes.iter().filter(|note| note.deleted_at.is_none()) {
-        out += &format!("\n## {}\n\n", note.label());
-        out += &format!("- id: {}\n", note.id);
-        out += &format!("- kind: {}\n", note.kind);
+        out += &format!("\n## {}\n\n", one_line(&note.label()));
+        out += &format!("- id: {}\n", one_line(&note.id));
+        out += &format!("- kind: {}\n", one_line(&note.kind));
         out += &format!("- created: {}\n", note.created_at);
         out += &format!("- edited: {}\n", note.updated_at);
         out += &format!("- on: {}\n", on(note, gone));
@@ -139,10 +151,11 @@ fn on(note: &Note, gone: &BTreeSet<String>) -> String {
     let Some(message) = &note.message_id else {
         return "thread".to_owned();
     };
+    // A sender's name comes from the email, so it can't start a line of its own.
     let parts: Vec<String> = note
         .message_from
         .iter()
-        .cloned()
+        .map(|from| one_line(from))
         .chain(note.message_date.map(|date| date.to_string()))
         .collect();
     let mut on = if parts.is_empty() {
@@ -193,11 +206,7 @@ pub fn history_line(note_id: &str, version: &NoteVersion) -> String {
     .to_string()
 }
 
-/// Writes a thread's notes to `folder`: `{stem}.md` (removed when no note is live) and
-/// `{stem}.history.jsonl`, each whole, through a temporary file renamed over it. The live notes'
-/// files are copied from `files` (the store's, by uuid) to `files/{thread_id}/` when missing
-/// there. Files left from the thread's old subject go. `gone` names the messages no longer
-/// stored.
+/// Writes a thread's notes to `folder`, as [`export_all`] does.
 ///
 /// # Errors
 /// When the folder can't be made, read or written.
@@ -210,25 +219,120 @@ pub fn export(
     gone: &BTreeSet<String>,
 ) -> io::Result<()> {
     std::fs::create_dir_all(folder)?;
-    let id = safe_id(context.thread_id.as_str());
+    let mut manifest = Manifest::read(folder);
+    let exported = export_thread(folder, files, &mut manifest, context, notes, versions, gone);
+    exported.and(manifest.write(folder))
+}
+
+/// Writes each of `threads`' notes to `folder`: `{stem}.md` (removed when no note is live) and
+/// `{stem}.history.jsonl`, each whole, through a temporary file renamed over it. The live notes'
+/// files are copied from `files` (the store's, by uuid) to `files/{thread_id}/` when missing
+/// there. `gone` names the messages no longer stored.
+///
+/// Only files the app wrote are ever removed: the folder's manifest ([`MANIFEST`]) records the
+/// stem each thread was last written under, and a thread whose subject changed loses the files
+/// of the stem recorded. Without a manifest nothing is removed.
+///
+/// # Errors
+/// When the folder can't be made, read or written. The threads before the one that failed are
+/// written, and recorded.
+pub fn export_all(
+    folder: &Path,
+    files: &Path,
+    threads: &[NotedThread],
+    gone: &BTreeSet<String>,
+) -> io::Result<()> {
+    std::fs::create_dir_all(folder)?;
+    let mut manifest = Manifest::read(folder);
+    let mut exported = Ok(());
+    for (context, notes, versions) in threads {
+        exported = export_thread(folder, files, &mut manifest, context, notes, versions, gone);
+        if exported.is_err() {
+            break;
+        }
+    }
+    exported.and(manifest.write(folder))
+}
+
+/// The folder's record of the files the app wrote: by thread id, the stem its files were last
+/// written under.
+const MANIFEST: &str = ".email-notes.json";
+
+#[derive(Default)]
+struct Manifest {
+    threads: BTreeMap<String, String>,
+    changed: bool,
+}
+
+impl Manifest {
+    /// The manifest in `folder`, or an empty one when it's missing or can't be read.
+    fn read(folder: &Path) -> Self {
+        let threads = std::fs::read_to_string(folder.join(MANIFEST))
+            .ok()
+            .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+            .and_then(|value| {
+                serde_json::from_value::<BTreeMap<String, String>>(value["threads"].clone()).ok()
+            })
+            .unwrap_or_default();
+        Self {
+            threads,
+            changed: false,
+        }
+    }
+
+    /// Writes it to `folder`, if it changed.
+    fn write(&self, folder: &Path) -> io::Result<()> {
+        if !self.changed {
+            return Ok(());
+        }
+        let text = serde_json::json!({ "threads": self.threads }).to_string();
+        write_whole(&folder.join(MANIFEST), text.as_bytes())
+    }
+
+    /// The stem the app last wrote thread `id`'s files under, if it's one it could have: a plain
+    /// name ending in the thread's id. A manifest edited by hand can't name anything else.
+    fn stem(&self, id: &str) -> Option<&str> {
+        let stem = self.threads.get(id)?;
+        let ours = plain_component(stem) && stem.ends_with(&format!("-{}", safe_id(id)));
+        ours.then_some(stem.as_str())
+    }
+}
+
+/// Writes one thread's notes to `folder`, as [`export_all`] says, and records its stem in
+/// `manifest`.
+fn export_thread(
+    folder: &Path,
+    files: &Path,
+    manifest: &mut Manifest,
+    context: &NoteThread,
+    notes: &[Note],
+    versions: &[(String, NoteVersion)],
+    gone: &BTreeSet<String>,
+) -> io::Result<()> {
+    let thread = context.thread_id.as_str();
+    let id = safe_id(thread);
     let stem = file_stem(context);
     let markdown = format!("{stem}.md");
     let history = format!("{stem}.history.jsonl");
-    let (old_markdown, old_history) = (format!("-{id}.md"), format!("-{id}.history.jsonl"));
-    for entry in std::fs::read_dir(folder)? {
-        let name = entry?.file_name();
-        let Some(name) = name.to_str() else { continue };
-        let old = (name.ends_with(&old_markdown) && name != markdown)
-            || (name.ends_with(&old_history) && name != history);
-        if old {
-            remove(&folder.join(name))?;
-        }
+    let recorded = manifest.stem(thread).map(str::to_owned);
+    // The subject changed since: its old files go.
+    if let Some(old) = recorded.as_deref().filter(|old| *old != stem) {
+        remove_written(&folder.join(format!("{old}.md")))?;
+        remove_written(&folder.join(format!("{old}.history.jsonl")))?;
     }
     if notes.iter().any(|note| note.deleted_at.is_none()) {
         // The files first, so the Markdown's links work once it's there.
         let copies = folder.join(FILES).join(&id);
         let live = notes.iter().filter(|note| note.deleted_at.is_none());
         for file in live.flat_map(|note| &note.files) {
+            // Read from the store's folder only.
+            if !plain_component(&file.uuid) {
+                log::warn!(
+                    "note file {:?} has no plain name, so isn't copied",
+                    file.uuid
+                );
+                continue;
+            }
             let copy = copies.join(file_name(file));
             if copy.exists() {
                 continue;
@@ -249,8 +353,8 @@ pub fn export(
             &folder.join(&markdown),
             render(context, notes, gone).as_bytes(),
         )?;
-    } else {
-        remove(&folder.join(&markdown))?;
+    } else if recorded.as_deref() == Some(stem.as_str()) {
+        remove_written(&folder.join(&markdown))?;
     }
     if !versions.is_empty() {
         let mut lines: String = versions
@@ -261,15 +365,40 @@ pub fn export(
         lines.push('\n');
         write_whole(&folder.join(&history), lines.as_bytes())?;
     }
+    if recorded.as_deref() != Some(stem.as_str()) {
+        manifest.threads.insert(thread.to_owned(), stem);
+        manifest.changed = true;
+    }
     Ok(())
 }
 
-/// Removes the file at `path`, which may not be there.
-fn remove(path: &Path) -> io::Result<()> {
-    match std::fs::remove_file(path) {
-        Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
-        _ => Ok(()),
+/// Removes the file the app wrote at `path`, if it's there and still a file. Anything else there
+/// (a folder the user made) stays.
+fn remove_written(path: &Path) -> io::Result<()> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_file() => std::fs::remove_file(path),
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
     }
+}
+
+/// Whether `name` is one plain part of a path: not empty, `.` or `..`, with no separators or
+/// control characters.
+fn plain_component(name: &str) -> bool {
+    !name.is_empty()
+        && name != "."
+        && name != ".."
+        && !name.contains(['/', '\\'])
+        && !name.chars().any(char::is_control)
+}
+
+/// `text` on one line: control characters (line breaks among them) become spaces, so text from
+/// an email can't start a line of the Markdown.
+fn one_line(text: &str) -> String {
+    text.chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect()
 }
 
 /// Writes `bytes` to `path` whole: to a temporary file beside it, renamed over it, so a reader
@@ -313,9 +442,10 @@ fn link(id: &str, file: &NoteFile) -> String {
     out
 }
 
-/// A file's name as a link's text, its brackets escaped.
+/// A file's name as a link's text, on one line, its brackets escaped.
 fn label_text(name: &str) -> String {
-    name.replace('\\', "\\\\")
+    one_line(name)
+        .replace('\\', "\\\\")
         .replace('[', "\\[")
         .replace(']', "\\]")
 }
@@ -574,9 +704,12 @@ mod tests {
     #[test]
     fn a_folder_with_a_tilde_is_in_the_home_folder() {
         let home = home();
-        assert_eq!(expand("~"), home);
-        assert_eq!(expand("~/Notes"), home.join("Notes"));
-        assert_eq!(expand("/tmp/Notes"), PathBuf::from("/tmp/Notes"));
+        assert_eq!(expand("~").expect("full"), home);
+        assert_eq!(expand("~/Notes").expect("full"), home.join("Notes"));
+        assert_eq!(
+            expand("/tmp/Notes").expect("full"),
+            PathBuf::from("/tmp/Notes")
+        );
         assert_eq!(
             default_folder("maya@brightmoor.co"),
             home.join("Documents/Email Notes/maya@brightmoor.co")
@@ -584,18 +717,48 @@ mod tests {
     }
 
     #[test]
-    fn an_export_writes_renames_and_removes() {
-        let root = std::env::temp_dir().join(format!(
-            "exo-notes-markdown-{}-{:?}",
-            std::process::id(),
-            std::thread::current().id()
-        ));
+    fn a_folder_that_is_not_a_full_path_is_refused() {
+        for folder in ["Notes", "~bob/Notes", "./Notes", ""] {
+            assert!(expand(folder).is_err(), "{folder}");
+        }
+    }
+
+    #[test]
+    fn text_from_an_email_stays_on_its_line() {
+        let mut on_message = note("n1", Some(1), "<div>Mine</div>");
+        on_message.message_from = Some("Dana\n## Note 9\r\n- id: fake".to_owned());
+        on_message.files = vec![file("u1", "a\n## b.txt", None)];
+        let markdown = render(&context("Q4"), &[on_message], &BTreeSet::new());
+        assert_eq!(
+            markdown
+                .lines()
+                .filter(|line| line.starts_with("## "))
+                .count(),
+            1,
+            "{markdown}"
+        );
+        assert!(
+            markdown.contains("- on: Dana ## Note 9  - id: fake \u{b7} "),
+            "{markdown}"
+        );
+        assert!(markdown.contains("- [a ## b.txt]("), "{markdown}");
+        assert!(!markdown.contains("\n- id: fake"), "{markdown}");
+    }
+
+    /// A fresh folder for a test, `name`'s, with the store's files folder `files` in it.
+    fn scratch(name: &str) -> (PathBuf, PathBuf, PathBuf) {
+        let root =
+            std::env::temp_dir().join(format!("exo-notes-markdown-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let (folder, files) = (root.join("folder"), root.join("files"));
         std::fs::create_dir_all(&files).expect("a folder");
-        std::fs::write(files.join("u2"), b"1. Budget").expect("written");
+        (root, folder, files)
+    }
+
+    /// A live note with one listed file, `uuid`, and its one version.
+    fn agenda(uuid: &str) -> (Note, [(String, NoteVersion); 1]) {
         let mut live = note("n1", None, "<div>Agenda</div>");
-        live.files = vec![file("u2", "agenda.txt", None)];
+        live.files = vec![file(uuid, "agenda.txt", None)];
         let version = NoteVersion {
             version: 1,
             html: live.html.clone(),
@@ -604,7 +767,59 @@ mod tests {
             saved_at: live.created_at,
             change: NoteChange::Created,
         };
-        let versions = [("n1".to_owned(), version)];
+        (live, [("n1".to_owned(), version)])
+    }
+
+    #[test]
+    fn files_the_app_did_not_write_stay() {
+        let (root, folder, files) = scratch("not-ours");
+        std::fs::create_dir_all(&folder).expect("a folder");
+        // The user's own, and an old copy from before the manifest: neither is the app's to
+        // remove.
+        std::fs::write(folder.join("mine-18c2f0a9d3e4b5a6.md"), b"mine").expect("written");
+        std::fs::write(folder.join("old-18c2f0a9d3e4b5a6.md"), b"old").expect("written");
+        std::fs::write(root.join("victim.md"), b"keep").expect("written");
+        // A manifest edited to point outside the folder.
+        std::fs::write(
+            folder.join(MANIFEST),
+            r#"{"threads":{"18c2f0a9d3e4b5a6":"../victim"}}"#,
+        )
+        .expect("written");
+        let (live, versions) = agenda("u2");
+        let none = BTreeSet::new();
+        export(&folder, &files, &context("New"), &[live], &versions, &none).expect("exported");
+        assert!(folder.join("new-18c2f0a9d3e4b5a6.md").is_file());
+        for kept in [
+            folder.join("mine-18c2f0a9d3e4b5a6.md"),
+            folder.join("old-18c2f0a9d3e4b5a6.md"),
+            root.join("victim.md"),
+        ] {
+            assert!(kept.is_file(), "{}", kept.display());
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_file_whose_uuid_is_not_a_plain_name_is_not_copied() {
+        let (root, folder, files) = scratch("odd-uuid");
+        std::fs::write(root.join("secret"), b"not a note's").expect("written");
+        let (live, versions) = agenda("../secret");
+        let none = BTreeSet::new();
+        export(&folder, &files, &context("New"), &[live], &versions, &none).expect("exported");
+        let copies = folder.join("files/18c2f0a9d3e4b5a6");
+        assert!(
+            !copies.exists() || std::fs::read_dir(&copies).expect("listed").next().is_none(),
+            "nothing copied"
+        );
+        assert!(folder.join("new-18c2f0a9d3e4b5a6.md").is_file());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn an_export_writes_renames_and_removes() {
+        let (root, folder, files) = scratch("renames");
+        std::fs::write(files.join("u2"), b"1. Budget").expect("written");
+        let (mut live, versions) = agenda("u2");
         let none = BTreeSet::new();
         export(
             &folder,
@@ -639,6 +854,7 @@ mod tests {
         assert_eq!(
             names,
             [
+                ".email-notes.json",
                 "files",
                 "new-18c2f0a9d3e4b5a6.history.jsonl",
                 "new-18c2f0a9d3e4b5a6.md"

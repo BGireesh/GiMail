@@ -38,6 +38,7 @@ use tokio::{
 };
 
 use crate::mailbox::{Chips, RecentThread, ThreadSummary};
+use crate::notes::folder::{Exports, Job, Outcome};
 use crate::notifications::{Notifier, mail as mail_notifications};
 use crate::power::{Power, PowerSource};
 use crate::recovery::{self, Restarts};
@@ -496,6 +497,8 @@ struct CalendarAccounts {
 
 /// The account itself, which every handle on it shares.
 struct Shared {
+    /// The notes folder's loop.
+    exports: Arc<Exports>,
     email: String,
     /// The folder that holds the bytes of draft attachments.
     files: PathBuf,
@@ -979,7 +982,18 @@ impl Account {
             Vec::new()
         });
         let bulk = crate::bulk::Jobs::start(store.clone(), repaint.clone(), &restarts, logged);
+        let exports = {
+            let (events, repaint) = (event_sender.clone(), repaint.clone());
+            Exports::start(store.clone(), &restarts, move |outcome| {
+                let _ = events.send(match outcome {
+                    Outcome::Failed { asked } => Event::NotesFolderFailed { asked },
+                    Outcome::Rebuilt => Event::NotesFolderRebuilt,
+                });
+                repaint.request();
+            })
+        };
         let worker = Worker {
+            exports: exports.clone(),
             address_book: None,
             mail_contacts: None,
             google_contacts: None,
@@ -1025,6 +1039,7 @@ impl Account {
         drop(guard);
 
         let shared = Shared {
+            exports,
             email,
             files,
             note_files,
@@ -1683,6 +1698,13 @@ impl Account {
         self.shared.note_files.clone()
     }
 
+    /// Holds the notes folder's writes (`true`) until called with `false`. Note changes are saved
+    /// meanwhile, and their copies wait. For tests.
+    #[doc(hidden)]
+    pub fn pause_notes_folder(&self, paused: bool) {
+        self.shared.exports.pause(paused);
+    }
+
     /// Writes every thread's notes to the notes folder again, off the UI thread.
     /// [`Event::NotesFolderRebuilt`] or [`Event::NotesFolderFailed`] says how it went.
     pub fn rebuild_notes_folder(&self) {
@@ -1836,6 +1858,8 @@ struct SenderJobState {
 
 /// The task that owns what's on screen. It handles requests in order and publishes snapshots.
 struct Worker {
+    /// The notes folder's loop, which note changes are queued for.
+    exports: Arc<Exports>,
     store: Store,
     /// What compose suggests from (mail's contacts with Google's merged in).
     address_book: Option<Arc<Vec<ScoredContact>>>,
@@ -2422,7 +2446,7 @@ impl Worker {
                 if settings.notes_folder.is_some()
                     && before.is_none_or(|before| before.notes_folder != settings.notes_folder)
                 {
-                    self.rebuild_notes_folder(false).await;
+                    self.export_notes(Job::Rebuild { asked: false });
                 }
             }
             Request::SaveDraft { draft, email } => {
@@ -2446,25 +2470,25 @@ impl Worker {
             Request::SaveNote { save, now } => {
                 let id = save.draft_id.clone();
                 match self.store.save_note(*save, now).await {
-                    Ok(Some(note)) => self.export_notes(&note.thread_id).await,
+                    Ok(Some(note)) => self.export_notes(Job::Thread(note.thread_id)),
                     Ok(None) => {}
                     Err(error) => self.note_failed(id, "saving", &error),
                 }
             }
             Request::DeleteNote { id, now } => match self.store.delete_note(&id, now).await {
                 Ok(()) => match self.store.note(&id).await {
-                    Ok(note) => self.export_notes(&note.thread_id).await,
+                    Ok(note) => self.export_notes(Job::Thread(note.thread_id)),
                     Err(error) => log::error!("reading note {id} to copy it: {error}"),
                 },
                 Err(error) => self.note_failed(id, "deleting", &error),
             },
             Request::RestoreNote { id, version, now } => {
                 match self.store.restore_note(&id, version, now).await {
-                    Ok(note) => self.export_notes(&note.thread_id).await,
+                    Ok(note) => self.export_notes(Job::Thread(note.thread_id)),
                     Err(error) => self.note_failed(id, "restoring", &error),
                 }
             }
-            Request::RebuildNotesFolder => self.rebuild_notes_folder(true).await,
+            Request::RebuildNotesFolder => self.export_notes(Job::Rebuild { asked: true }),
             Request::SaveNoteDraft(draft) => {
                 let id = draft.id.clone();
                 if let Err(error) = self.store.save_note_draft(*draft).await {
@@ -2911,102 +2935,9 @@ impl Worker {
         self.repaint.request();
     }
 
-    /// The notes folder this device keeps a Markdown copy of the notes in, or `None` while it
-    /// keeps none.
-    async fn notes_folder(&self) -> Option<PathBuf> {
-        match self.store.settings::<DeviceSettings>().await {
-            Ok(device) => device
-                .notes_folder
-                .as_deref()
-                .map(crate::notes::markdown::expand),
-            Err(error) => {
-                log::error!("reading the notes folder's setting: {error}");
-                None
-            }
-        }
-    }
-
-    /// Writes `thread`'s notes to the notes folder, when there is one, after they changed.
-    async fn export_notes(&self, thread: &ThreadId) {
-        let Some(folder) = self.notes_folder().await else {
-            return;
-        };
-        let noted = match self.store.noted_thread(thread).await {
-            Ok(Some(noted)) => noted,
-            Ok(None) => return,
-            Err(error) => {
-                log::error!(
-                    "reading thread {}'s notes to copy them: {error}",
-                    thread.as_str()
-                );
-                return;
-            }
-        };
-        self.write_notes_folder(folder, vec![noted], false).await;
-    }
-
-    /// Writes every thread's notes to the notes folder, when there is one. The user `asked`, or
-    /// the folder was just turned on or moved.
-    async fn rebuild_notes_folder(&self, asked: bool) {
-        let Some(folder) = self.notes_folder().await else {
-            return;
-        };
-        match self.store.all_notes().await {
-            Ok(all) => self.write_notes_folder(folder, all, asked).await,
-            Err(error) => {
-                log::error!("reading the notes to copy them: {error}");
-                if asked {
-                    let _ = self.events.send(Event::NotesFolderFailed { asked });
-                    self.repaint.request();
-                }
-            }
-        }
-    }
-
-    /// Writes `threads`' notes to `folder`, off the worker's thread, and says whether that failed
-    /// (or, when the user `asked` for it, that it's done).
-    async fn write_notes_folder(
-        &self,
-        folder: PathBuf,
-        threads: Vec<exo_store::NotedThread>,
-        asked: bool,
-    ) {
-        let messages: Vec<String> = threads
-            .iter()
-            .flat_map(|(_, notes, _)| notes.iter().filter_map(|note| note.message_id.clone()))
-            .collect();
-        let gone = match self.store.missing_messages(&messages).await {
-            Ok(gone) => gone,
-            Err(error) => {
-                log::error!("reading which noted messages are gone: {error}");
-                Default::default()
-            }
-        };
-        let files = self.store.note_files().to_owned();
-        let written = tokio::task::spawn_blocking(move || {
-            // Made even with no notes to write, so a folder that can't be is found out at once.
-            std::fs::create_dir_all(&folder).map_err(|error| (folder.clone(), error))?;
-            for (context, notes, versions) in &threads {
-                crate::notes::markdown::export(&folder, &files, context, notes, versions, &gone)
-                    .map_err(|error| (folder.clone(), error))?;
-            }
-            Ok(())
-        })
-        .await;
-        let event = match written {
-            Ok(Ok(())) if asked => Event::NotesFolderRebuilt,
-            Ok(Ok(())) => return,
-            Ok(Err((folder, error))) => {
-                log::error!("writing the notes folder {}: {error}", folder.display());
-                Event::NotesFolderFailed { asked }
-            }
-            Err(error) => {
-                log::error!("writing the notes folder: {error}");
-                Event::NotesFolderFailed { asked }
-            }
-        };
-        let _ = self.events.send(event);
-        self.repaint.request();
+    /// Queues `job` for the notes folder's loop, which writes it without the worker waiting.
+    fn export_notes(&self, job: crate::notes::folder::Job) {
+        self.exports.queue(job, self.requests.busy());
     }
 
     /// Logs that `doing` note `id` failed, and tells the UI ([`Event::NoteFailed`]).

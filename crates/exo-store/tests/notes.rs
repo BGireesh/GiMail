@@ -762,4 +762,10 @@ async fn every_noted_thread_comes_with_its_notes_and_versions() {
         .await
         .expect("reads");
     assert_eq!(missing.into_iter().collect::<Vec<_>>(), ["not-a-message"]);
+    // More ids than one statement takes.
+    let mut many: Vec<String> = (0..1200).map(|i| format!("gone-{i:04}")).collect();
+    many.push(message.clone());
+    let missing = store.missing_messages(&many).await.expect("reads");
+    assert_eq!(missing.len(), 1200);
+    assert!(!missing.contains(message));
 }
