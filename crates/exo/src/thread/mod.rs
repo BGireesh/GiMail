@@ -1210,7 +1210,8 @@ impl ThreadView {
         });
     }
 
-    /// Scrolls note `id`'s card into view on the next frame, from the notes pane's timeline.
+    /// Scrolls note `id`'s card into view once the thread is laid out: from the notes pane's
+    /// timeline, or a search result opened for it.
     pub fn reveal_note(&mut self, id: &str) {
         self.reveal_note = Some(id.to_owned());
     }
@@ -1409,10 +1410,12 @@ impl ThreadView {
                         .then_some(footer::Hint::CalendarEvent)
                 })
             });
-        notes.set_senders(detail.messages.iter().filter_map(|message| {
-            let from = message.from.as_ref()?;
-            let name = from.name.as_deref().filter(|name| !name.is_empty());
-            Some((message.id.as_str(), name.unwrap_or(&from.email), from.is_me))
+        notes.set_senders(detail.messages.iter().map(|message| {
+            let (from, mine) = message.from.as_ref().map_or(("", false), |from| {
+                let name = from.name.as_deref().filter(|name| !name.is_empty());
+                (name.unwrap_or(&from.email), from.is_me)
+            });
+            (message.id.as_str(), from, mine)
         }));
         let order = self.with_notes(self.order(&detail), notes);
         let all_notes = notes.all();
@@ -1605,7 +1608,10 @@ impl ThreadView {
         if notes.placement() == NotesPlacement::Thread && notes.take_reveal() {
             self.scroll_to_note_editor();
         }
-        if let Some(id) = self.reveal_note.take() {
+        // Once the thread has its first position, which would otherwise undo the scroll.
+        if self.positioned
+            && let Some(id) = self.reveal_note.take()
+        {
             self.scroll_to_note(&id, &all_notes);
         }
         if typing && self.animation.is_none() {

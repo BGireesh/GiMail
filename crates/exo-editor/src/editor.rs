@@ -256,6 +256,10 @@ pub struct Editor {
     pub(crate) view: crate::view::ViewState,
     pub(crate) spelling: crate::spelling::State,
     pub(crate) autocorrect: crate::autocorrect::State,
+    /// Ranges painted behind the text, as `<mark>` paints them, and their color
+    /// ([`Self::set_marks`]).
+    pub(crate) marks: Vec<(Pos, Pos)>,
+    pub(crate) mark_color: egui::Color32,
 }
 
 impl Default for Editor {
@@ -294,6 +298,8 @@ impl Editor {
             view: crate::view::ViewState::default(),
             spelling: crate::spelling::State::default(),
             autocorrect: crate::autocorrect::State::default(),
+            marks: Vec::new(),
+            mark_color: egui::Color32::TRANSPARENT,
         };
         editor.undo.reset(&editor.doc, editor.selection);
         editor
@@ -327,6 +333,13 @@ impl Editor {
         self.selection = Selection::default();
         self.undo.reset(&self.doc, self.selection);
         self.touch();
+    }
+
+    /// Paints the ranges `marks` (start, end) behind the text in `color`, as `<mark>` does: a
+    /// search's matches in text shown read-only. Empty `marks` paint nothing.
+    pub fn set_marks(&mut self, marks: Vec<(Pos, Pos)>, color: egui::Color32) {
+        self.marks = marks;
+        self.mark_color = color;
     }
 
     /// The body as HTML, which is the draft body that's saved.

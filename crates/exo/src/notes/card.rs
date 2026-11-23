@@ -9,7 +9,7 @@ use exo_ui::{Family, Font, TextStyle};
 use super::{
     Body, LABEL, META, Notes, PADDING_X, RADIUS, date,
     files::{chips, chips_height},
-    note_editor, where_line,
+    marks, note_editor,
 };
 
 /// The bar on a card's left.
@@ -42,10 +42,12 @@ impl Notes {
             version: note.version,
             editor: note_editor(&note.html),
             left: 0.0,
+            marked: (Vec::new(), egui::Color32::TRANSPARENT),
         });
         if body.version != note.version {
             body.version = note.version;
             body.editor = note_editor(&note.html);
+            body.marked = (Vec::new(), egui::Color32::TRANSPARENT);
         }
         body
     }
@@ -130,11 +132,6 @@ impl Notes {
             }
         }
 
-        let mine = note
-            .message_id
-            .as_ref()
-            .and_then(|message| self.senders.get(message))
-            .is_some_and(|(_, mine)| *mine);
         let label = LABEL.paint_line(
             &painter,
             pos2(left, line),
@@ -144,7 +141,7 @@ impl Notes {
         );
         let meta = format!(
             " · {} · {}",
-            where_line(note, mine, &self.now),
+            self.where_text(note),
             date(note.updated_at, &self.now)
         );
         META.paint_line(
@@ -172,8 +169,16 @@ impl Notes {
             pos2(left, line + LABEL.line_height + LABEL_GAP),
             pos2(right, files.top()),
         );
+        // A search's words, marked where the text has them.
+        let terms = self.highlight.clone();
         let body = self.body(note);
         body.left = text.left();
+        let color = palette.note_mark_default;
+        if body.marked.0 != terms || body.marked.1 != color {
+            let found = marks(body.editor.document(), &terms);
+            body.editor.set_marks(found, color);
+            body.marked = (terms, color);
+        }
         let mut child = ui.new_child(
             UiBuilder::new()
                 .max_rect(text)

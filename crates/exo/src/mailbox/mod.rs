@@ -110,6 +110,11 @@ pub struct SearchMarks {
     /// Words of the query that highlight a participant's name where they match it, or the
     /// whole name where they're its address.
     pub names: Vec<String>,
+    /// The thread's notes the query matched, which show under the row.
+    pub notes: Vec<exo_store::NoteHit>,
+    /// The thread's mail is gone and only its notes are left: the row says `Email deleted`, and
+    /// opening it shows the notes alone.
+    pub deleted: bool,
 }
 
 impl ThreadSummary {
@@ -189,6 +194,12 @@ impl ThreadSummary {
             marks.snippet = snippet.bold;
             row.snippet = snippet.text;
         }
+        if result.deleted {
+            marks.snippet.clear();
+            row.snippet = crate::notes::pane::EMAIL_DELETED.to_owned();
+        }
+        marks.notes = result.notes;
+        marks.deleted = result.deleted;
         row.search = Some(marks);
         row
     }

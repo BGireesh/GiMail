@@ -29,6 +29,19 @@ impl crate::Mail {
         Some(self.search.as_ref()?.text())
     }
 
+    /// What the search bar's suggestions read (for tests).
+    pub fn search_suggestions(&self) -> Vec<String> {
+        self.search
+            .as_ref()
+            .map_or_else(Vec::new, Search::suggestion_values)
+    }
+
+    /// The note lines under search result `row`, as they read: `{label} · {date} — {excerpt}`,
+    /// then `+{n} more` (for tests).
+    pub fn search_note_hits(&self, row: usize) -> Vec<String> {
+        self.inbox.note_hit_lines(row)
+    }
+
     /// Whether the search bar has the keyboard.
     pub fn search_bar_focused(&self) -> bool {
         self.search.as_ref().is_some_and(Search::bar_focused)

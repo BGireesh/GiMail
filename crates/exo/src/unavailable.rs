@@ -11,7 +11,10 @@ impl crate::Mail {
     /// reached (`offline`), or doesn't have it. If it's still open, it closes, back to its list,
     /// under the alert when offline.
     pub(crate) fn thread_unavailable(&mut self, id: &str, offline: bool) {
-        if self.thread.as_ref().is_none_or(|open| open.id() != id) {
+        // A thread whose mail is gone is shown for its notes, which Gmail can't take away.
+        if self.thread.as_ref().is_none_or(|open| open.id() != id)
+            || self.notes_alone.as_deref() == Some(id)
+        {
             return;
         }
         self.close_thread();

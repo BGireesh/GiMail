@@ -150,6 +150,8 @@ struct Body {
     editor: Editor,
     /// Its left edge on screen when last drawn.
     left: f32,
+    /// The words its marks show, in the color they show in.
+    marked: (Vec<String>, egui::Color32),
 }
 
 /// The open thread's notes and the editor one is written in.
@@ -168,6 +170,13 @@ pub struct Notes {
     closed: HashSet<String>,
     /// The thread's messages: who each is from (a first name), and whether that's the user.
     senders: HashMap<String, (String, bool)>,
+    /// Whether the thread's messages are known, so a note's message missing from them was
+    /// deleted.
+    senders_known: bool,
+    /// The words of the search the thread was opened from, which the notes' text marks.
+    highlight: Vec<String>,
+    /// A note the pane's cards scroll to the next time they're drawn.
+    pane_reveal: Option<String>,
     /// The clock's time, whose zone dates are told in.
     now: Zoned,
     /// Whether the editor may hold the keyboard: nothing over the thread has taken it.
@@ -212,6 +221,9 @@ impl Notes {
             rects: Vec::new(),
             closed: HashSet::new(),
             senders: HashMap::new(),
+            senders_known: false,
+            highlight: Vec::new(),
+            pane_reveal: None,
             now,
             active: false,
             reveal: false,
@@ -235,13 +247,16 @@ impl Notes {
     }
 
     /// Thread `thread` opened, or with `None` the open one closed. Close the editor first
-    /// ([`Self::close`]).
+    /// ([`Self::close`]). Nothing is highlighted until [`Self::highlight`] says what.
     pub fn open(&mut self, thread: Option<&str>) {
         self.thread = thread.map(ThreadId::new);
         self.notes = Arc::default();
         self.bodies.clear();
         self.rects.clear();
         self.senders.clear();
+        self.senders_known = false;
+        self.highlight.clear();
+        self.pane_reveal = None;
         self.recovered = false;
         self.timeline.clear();
         self.pane_scroll = 0.0;
@@ -349,19 +364,44 @@ impl Notes {
         (flashing == id && progress < 1.0).then_some(progress.max(0.0) as f32)
     }
 
-    /// Says who the open thread's messages are from: each one's id, its sender's name or
-    /// address, and whether the sender is the user.
+    /// Says which messages the open thread has: each one's id, its sender's name or address,
+    /// and whether the sender is the user. A note on a message not among them is on a deleted
+    /// one.
     pub fn set_senders<'a>(&mut self, messages: impl Iterator<Item = (&'a str, &'a str, bool)>) {
-        for (id, from, mine) in messages {
-            let known = self
-                .senders
-                .get(id)
-                .is_some_and(|(name, was_mine)| *was_mine == mine && name == first_name(from));
-            if !known {
-                self.senders
-                    .insert(id.to_owned(), (first_name(from).to_owned(), mine));
-            }
+        let senders: HashMap<String, (String, bool)> = messages
+            .map(|(id, from, mine)| (id.to_owned(), (first_name(from).to_owned(), mine)))
+            .collect();
+        if senders != self.senders {
+            self.senders = senders;
         }
+        self.senders_known = true;
+    }
+
+    /// Marks `terms` (a search's words) wherever the notes' text has them, until another thread
+    /// opens.
+    pub fn highlight(&mut self, terms: Vec<String>) {
+        self.highlight = terms;
+    }
+
+    /// The words the notes' text marks.
+    pub fn highlighted(&self) -> &[String] {
+        &self.highlight
+    }
+
+    /// Scrolls the pane's cards to note `id` the next time they're drawn, and flashes it.
+    pub fn show_in_pane(&mut self, id: String) {
+        self.pane_reveal = Some(id.clone());
+        self.flash(id);
+    }
+
+    /// What `note` is on, as its card says.
+    pub fn where_text(&self, note: &Note) -> String {
+        let on = match note.message_id.as_ref().map(|id| self.senders.get(id)) {
+            Some(Some((_, true))) => OnMessage::Mine,
+            Some(None) if self.senders_known => OnMessage::Deleted,
+            _ => OnMessage::Theirs,
+        };
+        where_line(note, on, &self.now)
     }
 
     /// Says whether the editor may hold the keyboard this frame: the note editor's region is the
@@ -530,10 +570,19 @@ impl crate::Mail {
         // A snapshot of another thread, on its way out, has nothing of this one's. Until this
         // one's is in, the notes are as opening the thread left them: none.
         let current = self.thread.as_ref().is_some_and(|thread| {
+            let open = thread.id();
             self.snapshot
                 .thread
                 .as_ref()
-                .is_some_and(|detail| detail.id.as_str() == thread.id())
+                .is_some_and(|detail| detail.id.as_str() == open)
+                // A thread whose mail is gone has its notes alone, told apart by their thread.
+                || (self.notes_alone.as_deref() == Some(open)
+                    && self
+                        .snapshot
+                        .notes
+                        .context
+                        .as_ref()
+                        .is_some_and(|context| context.thread_id.as_str() == open))
         });
         if current {
             let was = self.notes.placement();
@@ -546,6 +595,11 @@ impl crate::Mail {
             {
                 self.notes_show_tab(true);
             }
+            if self.notes_alone.is_some() {
+                // No message is left, so every message note's is deleted.
+                self.notes.set_senders(std::iter::empty());
+            }
+            self.notes_reveal_pending();
         }
         // A draft that took the keyboard has it.
         if self.compose.focused().is_some() {
@@ -554,6 +608,28 @@ impl crate::Mail {
         self.notes
             .set_active(self.commands.region() == Region::NoteEditor);
         self.notes.tick(&self.account, time, self.now.timestamp());
+    }
+
+    /// Scrolls to the note a search result was opened for, once the thread's notes have it: in
+    /// the thread, or with notes in the pane only (or the mail gone), in the pane's cards.
+    fn notes_reveal_pending(&mut self) {
+        let Some(id) = self
+            .notes_reveal
+            .take_if(|id| self.notes.all().notes.iter().any(|note| note.id == *id))
+        else {
+            return;
+        };
+        if self.notes_alone.is_some() {
+            self.notes.show_in_pane(id);
+        } else if self.notes.placement() == NotesPlacement::Pane {
+            self.notes_show_tab(true);
+            self.notes.show_in_pane(id);
+        } else {
+            if let Some(thread) = &mut self.thread {
+                thread.reveal_note(&id);
+            }
+            self.notes.flash(id);
+        }
     }
 
     /// Keeps what's typed in the open note editor, as the window closes or the account leaves
@@ -712,7 +788,7 @@ impl crate::Mail {
     /// While a thread is open (and no new message's pane is), draws the right pane's tab row at
     /// `pane`'s top and returns the rest of the pane, which shows the chosen tab.
     pub(crate) fn notes_pane_tabs(&mut self, ui: &egui::Ui, pane: Rect, rem: f32) -> Option<Rect> {
-        if self.thread.is_none() || self.compose.pane().is_some() {
+        if self.thread.is_none() || self.compose.pane().is_some() || self.notes_alone.is_some() {
             return None;
         }
         let row = Rect::from_min_max(
@@ -735,9 +811,36 @@ impl crate::Mail {
             .thread
             .as_ref()
             .and_then(|thread| thread.shared_detail());
-        let Some(action) = pane::show(ui, pane, rem, &mut self.notes, detail.as_deref()) else {
+        if let Some(action) = pane::show(ui, pane, rem, &mut self.notes, detail.as_deref()) {
+            self.notes_pane_action(action, now);
+        }
+    }
+
+    /// Draws the open thread's notes alone in `content`, while its mail is gone, and carries out
+    /// what's clicked in them.
+    pub(crate) fn show_notes_alone(
+        &mut self,
+        ui: &mut egui::Ui,
+        content: Rect,
+        rem: f32,
+        now: f64,
+    ) {
+        let open = self.thread.as_ref().map(|thread| thread.id());
+        if open.is_none() || self.notes_alone.as_deref() != open {
             return;
-        };
+        }
+        let all = self.notes.all();
+        let subject = all
+            .context
+            .as_ref()
+            .map_or("-", |context| context.subject.as_str());
+        if let Some(action) = pane::alone(ui, content, rem, &mut self.notes, subject) {
+            self.notes_pane_action(action, now);
+        }
+    }
+
+    /// Carries out what was clicked in the notes pane, or in notes shown alone.
+    fn notes_pane_action(&mut self, action: PaneAction, now: f64) {
         use crate::commands::Action;
         match action {
             PaneAction::Reveal(id) => {
@@ -783,22 +886,95 @@ pub fn date(at: Timestamp, now: &Zoned) -> String {
     }
 }
 
+/// Whose a note's message is, or that it's gone.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OnMessage {
+    /// Someone else's email.
+    Theirs,
+    /// The user's own (the message's is-me flag).
+    Mine,
+    /// An email the thread no longer has: deleted in Gmail.
+    Deleted,
+}
+
 /// What a note is on, for its card and wherever else notes are listed: `whole thread`,
-/// `on Dana's email of 3 Nov`, or `on my reply of 3 Nov` when `mine` says its message is the
-/// user's (the message's own is-me flag). Dates are told in `now`'s zone.
-pub fn where_line(note: &Note, mine: bool, now: &Zoned) -> String {
+/// `on Dana's email of 3 Nov`, `on my reply of 3 Nov` when its message is the user's, or
+/// `on a deleted email from Dana of 3 Nov` when the message is gone, told from what the note
+/// kept of it. Dates are told in `now`'s zone.
+pub fn where_line(note: &Note, on: OnMessage, now: &Zoned) -> String {
     if note.message_id.is_none() {
         return "whole thread".to_owned();
     }
-    let what = match note.message_from.as_deref().map(first_name) {
-        _ if mine => "my reply".to_owned(),
-        Some(name) => format!("{name}'s email"),
-        None => "an email".to_owned(),
+    let what = match (on, note.message_from.as_deref().map(first_name)) {
+        (OnMessage::Deleted, Some(name)) => format!("a deleted email from {name}"),
+        (OnMessage::Deleted, None) => "a deleted email".to_owned(),
+        (OnMessage::Mine, _) => "my reply".to_owned(),
+        (OnMessage::Theirs, Some(name)) => format!("{name}'s email"),
+        (OnMessage::Theirs, None) => "an email".to_owned(),
     };
     match note.message_date {
         Some(at) => format!("on {what} of {}", date(at, now)),
         None => format!("on {what}"),
     }
+}
+
+/// Where `document` has `terms` (a search's words), case aside: each starts a word, and a
+/// single word's mark runs to the end of the word it starts, as stemming matches `renew` in
+/// `renewal`. A phrase is marked as typed. A trailing `*` (a prefix) is left out.
+fn marks(document: &exo_editor::Document, terms: &[String]) -> Vec<(Pos, Pos)> {
+    let lower = |c: char| c.to_lowercase().next().unwrap_or(c);
+    let terms: Vec<Vec<char>> = terms
+        .iter()
+        .map(|term| {
+            term.trim()
+                .trim_end_matches('*')
+                .chars()
+                .map(lower)
+                .collect()
+        })
+        .filter(|term: &Vec<char>| !term.is_empty())
+        .collect();
+    let mut out = Vec::new();
+    if terms.is_empty() {
+        return out;
+    }
+    for (index, block) in document.blocks.iter().enumerate() {
+        let text: Vec<char> = block.text().chars().map(lower).collect();
+        let mut found: Vec<(usize, usize)> = Vec::new();
+        for term in &terms {
+            let phrase = term.iter().any(|c| c.is_whitespace());
+            let mut at = 0;
+            while at + term.len() <= text.len() {
+                let starts_word = at == 0 || !text[at - 1].is_alphanumeric();
+                if starts_word && text[at..at + term.len()] == term[..] {
+                    let mut end = at + term.len();
+                    if !phrase {
+                        while end < text.len() && text[end].is_alphanumeric() {
+                            end += 1;
+                        }
+                    }
+                    found.push((at, end));
+                    at = end;
+                } else {
+                    at += 1;
+                }
+            }
+        }
+        found.sort_unstable();
+        let mut merged: Vec<(usize, usize)> = Vec::new();
+        for (start, end) in found {
+            match merged.last_mut() {
+                Some(last) if start <= last.1 => last.1 = last.1.max(end),
+                _ => merged.push((start, end)),
+            }
+        }
+        out.extend(
+            merged
+                .into_iter()
+                .map(|(start, end)| (Pos::new(index, start), Pos::new(index, end))),
+        );
+    }
+    out
 }
 
 /// An editor on `html`, set in the notes' text: the one a note is written in, and the one its
@@ -841,11 +1017,14 @@ mod tests {
 
     #[test]
     fn where_lines_say_what_a_note_is_on() {
-        assert_eq!(where_line(&note(None), false, &now()), "whole thread");
+        assert_eq!(
+            where_line(&note(None), OnMessage::Theirs, &now()),
+            "whole thread"
+        );
         assert_eq!(
             where_line(
                 &note(Some(("Dana Reyes", "2026-11-03T15:00:00Z"))),
-                false,
+                OnMessage::Theirs,
                 &now()
             ),
             "on Dana's email of 3 Nov"
@@ -853,7 +1032,7 @@ mod tests {
         assert_eq!(
             where_line(
                 &note(Some(("dana@example.com", "2025-11-03T15:00:00Z"))),
-                false,
+                OnMessage::Theirs,
                 &now()
             ),
             "on dana's email of 3 Nov 2025"
@@ -862,11 +1041,45 @@ mod tests {
         assert_eq!(
             where_line(
                 &note(Some(("Maya Okafor", "2026-11-12T15:00:00Z"))),
-                true,
+                OnMessage::Mine,
                 &now()
             ),
             "on my reply of 12 Nov"
         );
+    }
+
+    #[test]
+    fn a_note_whose_message_is_gone_says_so() {
+        let gone = note(Some(("Dana Reyes", "2026-11-03T15:00:00Z")));
+        assert_eq!(
+            where_line(&gone, OnMessage::Deleted, &now()),
+            "on a deleted email from Dana of 3 Nov"
+        );
+        let mut unknown = gone.clone();
+        unknown.message_from = None;
+        unknown.message_date = None;
+        assert_eq!(
+            where_line(&unknown, OnMessage::Deleted, &now()),
+            "on a deleted email"
+        );
+    }
+
+    #[test]
+    fn a_searchs_words_are_marked_where_words_start() {
+        let editor =
+            note_editor("<div>Renewal: keep the cost flat.</div><div>Unrenewed renewals</div>");
+        let found = |terms: &[&str]| {
+            let terms: Vec<String> = terms.iter().map(|term| (*term).to_owned()).collect();
+            marks(editor.document(), &terms)
+                .into_iter()
+                .map(|(start, end)| editor.document().text(start, end))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(found(&["renew"]), ["Renewal", "renewals"]);
+        assert_eq!(found(&["Cost flat"]), ["cost flat"]);
+        assert_eq!(found(&["keep*", "the"]), ["keep", "the"]);
+        assert_eq!(found(&["zebra"]), Vec::<String>::new());
+        assert_eq!(found(&[]), Vec::<String>::new());
     }
 
     #[test]
@@ -881,6 +1094,9 @@ mod tests {
         let mut orphan = note(Some(("Dana", "2026-11-03T15:00:00Z")));
         orphan.message_from = None;
         orphan.message_date = None;
-        assert_eq!(where_line(&orphan, false, &now()), "on an email");
+        assert_eq!(
+            where_line(&orphan, OnMessage::Theirs, &now()),
+            "on an email"
+        );
     }
 }

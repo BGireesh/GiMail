@@ -29,7 +29,7 @@ use crate::{
 pub use header::{Focus as HeaderFocus, HeaderAction};
 pub use nudge::{HIDE_EMPTY_SPLIT, NudgeAction};
 
-/// A row's height. A search result with files is taller, to show them under its row.
+/// A row's height. A search result with notes or files is taller, to show them under its row.
 pub(super) const ROW_HEIGHT: f32 = 36.0;
 const ROW_WITH_FILES: f32 = 68.0;
 /// A date separator's height.
@@ -803,13 +803,33 @@ impl Inbox {
             })
     }
 
-    /// A row's height: taller for a search result with files.
+    /// A row's height: taller for a search result with notes (a line each) or files.
     fn row_height(&self, thread: &ThreadSummary) -> f32 {
-        if self.view.search.is_some() && !thread.files.is_empty() {
-            ROW_WITH_FILES
-        } else {
-            ROW_HEIGHT
+        if self.view.search.is_none() {
+            return ROW_HEIGHT;
         }
+        let notes = row::note_line_count(thread) as f32 * row::NOTE_LINE;
+        let files = if self.has_strip(thread) {
+            ROW_WITH_FILES - ROW_HEIGHT
+        } else {
+            0.0
+        };
+        ROW_HEIGHT + notes + files
+    }
+
+    /// Whether `thread`'s row shows its files under it: a search result with files.
+    fn has_strip(&self, thread: &ThreadSummary) -> bool {
+        self.view.search.is_some() && !thread.files.is_empty()
+    }
+
+    /// The note lines under search result `row`, as they read (for tests).
+    pub fn note_hit_lines(&self, row: usize) -> Vec<String> {
+        self.threads.get(row).map_or_else(Vec::new, |thread| {
+            row::note_lines(thread, &self.now)
+                .iter()
+                .map(row::NoteLine::text)
+                .collect()
+        })
     }
 
     fn item_height(&self, item: &Item) -> f32 {
@@ -1704,7 +1724,7 @@ impl Inbox {
                         archivable: self.view.archivable,
                         pending: self.pending.get(&thread.id).map(String::as_str),
                         offline: !self.online,
-                        strip: (self.row_height(thread) == ROW_WITH_FILES).then(|| {
+                        strip: self.has_strip(thread).then(|| {
                             self.file_pages
                                 .get(&thread.id)
                                 .map_or(0.0, |(_, scrolled)| *scrolled)

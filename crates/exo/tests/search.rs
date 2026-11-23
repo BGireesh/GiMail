@@ -218,3 +218,159 @@ fn a_copied_subject_pastes_into_search_as_its_search() {
         Some(format!("subject:\"{subject}").as_str())
     );
 }
+
+const COMMAND: Modifiers = Modifiers::MAC_CMD.plus(Modifiers::COMMAND);
+
+/// Writes a thread note holding `lines` in the open conversation, and saves it.
+fn write_thread_note(app: &mut support::Fixture, lines: &[&str]) {
+    app.key(Key::T);
+    for (at, line) in lines.iter().enumerate() {
+        if at > 0 {
+            app.key(Key::Enter);
+        }
+        app.type_text(line);
+    }
+    app.press(Key::Enter, COMMAND);
+}
+
+/// Searches `query` from the list, and lets the results take the keyboard.
+fn search_for(app: &mut support::Fixture, query: &str) {
+    app.key(Key::Slash);
+    app.type_text(query);
+    app.key(Key::Enter);
+}
+
+#[test]
+fn a_notes_search_shows_the_matching_note_under_the_row() {
+    let mut app = start("search-notes-under-row");
+    app.key(Key::Enter);
+    let thread = app.mail().thread().expect("open").id().to_owned();
+    let matching = [
+        "Ask about the overage fee",
+        "Overage was 12% last year",
+        "No overage next time",
+    ];
+    for text in matching {
+        write_thread_note(&mut app, &[text]);
+    }
+    write_thread_note(&mut app, &["Nothing to see here"]);
+    app.key(Key::Escape);
+    search_for(&mut app, "notes:overage");
+    let rows = app.mail().inbox().threads();
+    assert_eq!(
+        rows.iter().map(|row| row.id.as_str()).collect::<Vec<_>>(),
+        [thread.as_str()],
+        "only the noted conversation"
+    );
+    let hits = app.mail().search_note_hits(0);
+    assert_eq!(hits.len(), 3, "two notes and the rest counted: {hits:?}");
+    let mut shown = Vec::new();
+    for hit in &hits[..2] {
+        assert!(hit.starts_with("Thread note · "), "{hit}");
+        let (_, snippet) = hit.split_once(" — ").expect("a snippet after the label");
+        assert!(matching.contains(&snippet), "{hit}");
+        shown.push(snippet);
+    }
+    assert_ne!(shown[0], shown[1], "two different notes");
+    assert_eq!(hits[2], "+1 more");
+}
+
+#[test]
+fn opening_a_result_reveals_the_note() {
+    let mut app = start("search-notes-reveal");
+    app.key(Key::Enter);
+    let thread = app.mail().thread().expect("open").id().to_owned();
+    // Tall notes first, then the one to find, written later, so it comes last.
+    for _ in 0..6 {
+        write_thread_note(&mut app, &["One", "Two", "Three", "Four", "Five", "Six"]);
+    }
+    let written = app.mail().notes().notes[0].created_at;
+    app.set_now((written + jiff::SignedDuration::from_mins(1)).to_zoned(jiff::tz::TimeZone::UTC));
+    write_thread_note(&mut app, &["Ask the zebra about it"]);
+    let id = app
+        .mail()
+        .notes()
+        .notes
+        .iter()
+        .find(|note| note.text.contains("zebra"))
+        .map(|note| note.id.clone())
+        .expect("saved");
+    app.key(Key::Escape);
+    search_for(&mut app, "notes:zebra");
+    app.key(Key::Enter);
+    assert_eq!(
+        app.mail().thread().map(|open| open.id()),
+        Some(thread.as_str())
+    );
+    assert_eq!(
+        app.mail().flashing_note(),
+        Some(id.as_str()),
+        "the note flashes"
+    );
+    assert_eq!(app.mail().note_highlights(), ["zebra"]);
+    app.wait(1.2);
+    let content = app.mail().thread().expect("open").messages_rect();
+    let (_, card) = app
+        .mail()
+        .note_rects()
+        .into_iter()
+        .find(|(note, _)| *note == id)
+        .expect("the card is drawn");
+    assert!(
+        content.contains_rect(card),
+        "in view: {card:?} in {content:?}"
+    );
+
+    // Opened any other way, nothing is highlighted.
+    app.key(Key::Escape);
+    app.key(Key::Escape);
+    app.key(Key::Escape);
+    assert!(!app.mail().is_searching());
+    app.key(Key::Enter);
+    assert!(app.mail().thread().is_some());
+    assert!(app.mail().note_highlights().is_empty());
+}
+
+#[test]
+fn opening_a_result_reveals_the_note_in_the_pane() {
+    let mut app = support::start_with_settings("search-notes-reveal-pane", &|settings| {
+        settings.notes_placement = exo_store::NotesPlacement::Pane;
+    });
+    app.key(Key::Enter);
+    write_thread_note(&mut app, &["Ask the zebra about it"]);
+    let id = app.mail().notes().notes[0].id.clone();
+    // The pane shows the contact again before the search.
+    app.press(Key::N, COMMAND.plus(Modifiers::SHIFT));
+    assert!(!app.mail().notes_tab());
+    app.key(Key::Escape);
+    search_for(&mut app, "zebra");
+    app.key(Key::Enter);
+    assert!(app.mail().notes_tab(), "the pane shows the notes");
+    assert_eq!(app.mail().flashing_note(), Some(id.as_str()));
+    let pane = app.mail().right_pane();
+    assert!(
+        app.mail()
+            .note_rects()
+            .iter()
+            .any(|(note, rect)| *note == id && pane.contains_rect(*rect)),
+        "in the pane"
+    );
+    assert_eq!(app.mail().note_highlights(), ["zebra"]);
+}
+
+#[test]
+fn autocomplete_offers_notes() {
+    let mut app = start("search-autocomplete-notes");
+    app.key(Key::Slash);
+    app.type_text("no");
+    app.key(Key::Tab);
+    assert_eq!(app.mail().search_text(), Some("notes:"));
+    app.press(Key::A, COMMAND);
+    app.type_text("has:");
+    let suggested = app.mail().search_suggestions();
+    assert!(
+        suggested.iter().any(|value| value == "has:notes")
+            && suggested.iter().any(|value| value == "has:attachment"),
+        "{suggested:?}"
+    );
+}

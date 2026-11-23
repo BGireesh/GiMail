@@ -1,4 +1,5 @@
-//! The search bar's suggestions: the operator the last word starts, labels for
+//! The search bar's suggestions: the operator the last word starts (with `has:` all of its
+//! values), labels for
 //! `in:`/`is:`/`label:`, Gmail categories, and people from local mail, at most five, mixed and
 //! ordered by how much of the text each completes.
 
@@ -11,11 +12,12 @@ use regex::Regex;
 /// Most suggestions shown, and people looked up per word.
 pub(crate) const LIMIT: usize = 5;
 /// The operators a word completes to.
-const KEYWORDS: [&str; 16] = [
+const KEYWORDS: [&str; 18] = [
     "in",
     "is",
     "label",
     "has:attachment",
+    "has:notes",
     "attachment",
     "from",
     "to",
@@ -28,12 +30,13 @@ const KEYWORDS: [&str; 16] = [
     "category",
     "list",
     "rfc822msgid",
+    "notes",
 ];
 /// Gmail's categories as `in:category_…` names them.
 const CATEGORIES: [&str; 5] = ["personal", "social", "promotions", "forums", "updates"];
 
 /// The operators the bar recognises, which get lozenges.
-pub(crate) const OPERATORS: &str = "(is|in|label|l|has|category|from|to|cc|bcc|subject|filename|list|before|after|older|newer|older_than|newer_than|deliveredto|rfc822msgid|size|larger|smaller):";
+pub(crate) const OPERATORS: &str = "(is|in|label|l|has|notes|note|category|from|to|cc|bcc|subject|filename|list|before|after|older|newer|older_than|newer_than|deliveredto|rfc822msgid|size|larger|smaller):";
 
 /// What a suggestion is.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -250,13 +253,26 @@ fn syntax_suggestions(
         TokenKind::Category => category_suggestions(field, value),
         TokenKind::Text => {
             let lower = value.to_lowercase();
-            match KEYWORDS.iter().find(|keyword| keyword.starts_with(&lower)) {
+            let mut keywords = KEYWORDS
+                .iter()
+                .filter(|keyword| keyword.starts_with(&lower));
+            match keywords.next() {
                 Some(keyword) if !value.is_empty() => {
-                    let replacement = match *keyword {
+                    let replacement = |keyword: &str| match keyword {
                         "has:attachment" | "attachment" => "has:attachment".to_owned(),
+                        "has:notes" => keyword.to_owned(),
                         keyword => format!("{keyword}:"),
                     };
-                    vec![Suggestion::new(Kind::Operator, replacement, value)]
+                    // `has:` has values of its own, offered side by side.
+                    let others = keyword
+                        .starts_with("has:")
+                        .then(|| keywords.filter(|other| other.starts_with("has:")))
+                        .into_iter()
+                        .flatten();
+                    std::iter::once(keyword)
+                        .chain(others)
+                        .map(|keyword| Suggestion::new(Kind::Operator, replacement(keyword), value))
+                        .collect()
                 }
                 _ if !value.is_empty() && !has_people => label_suggestions("in", value, labels),
                 _ => Vec::new(),
@@ -528,6 +544,26 @@ mod tests {
         assert_eq!(
             replacements(&suggest("att", &labels(), &[vec![]])),
             ["has:attachment"]
+        );
+    }
+
+    #[test]
+    fn notes_are_offered_as_an_operator_and_a_has_value() {
+        assert_eq!(
+            replacements(&suggest("no", &labels(), &[vec![]])),
+            ["notes:"]
+        );
+        assert_eq!(
+            replacements(&suggest("has:", &labels(), &[vec![]])),
+            ["has:attachment", "has:notes"]
+        );
+        assert_eq!(
+            replacements(&suggest("has:n", &labels(), &[vec![]])),
+            ["has:notes"]
+        );
+        assert!(
+            suggest("notes:", &labels(), &[]).is_empty(),
+            "a value follows"
         );
     }
 

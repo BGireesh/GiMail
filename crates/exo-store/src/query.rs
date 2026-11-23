@@ -743,6 +743,34 @@ impl SearchQuery {
         self.leaves().iter().any(|token| token.kind == Kind::Notes)
     }
 
+    /// The words and `notes:` values a note can match, as typed: the ones the query looks for,
+    /// not those it rules out (under an odd number of negations). A note opened from the results
+    /// shows them highlighted.
+    pub fn note_words(&self) -> Vec<String> {
+        fn walk(node: &Node, negated: bool, out: &mut Vec<String>) {
+            let negated = negated != node.negated();
+            match node {
+                Node::And(children, _) | Node::Or(children, _) => {
+                    children.iter().for_each(|child| walk(child, negated, out))
+                }
+                Node::Leaf(token)
+                    if !negated
+                        && matches!(token.kind, Kind::Text | Kind::Notes)
+                        && !token.value().trim().is_empty() =>
+                {
+                    let word = token.value().trim().to_owned();
+                    if !out.contains(&word) {
+                        out.push(word);
+                    }
+                }
+                Node::Leaf(_) => {}
+            }
+        }
+        let mut out = Vec::new();
+        walk(&self.tree, false, &mut out);
+        out
+    }
+
     /// Whether every match must have a live note: with each `notes:` term decided for a thread
     /// without notes (a positive one false, a negated one true), the query can't hold. Threads
     /// with notes are stored whole, so such a query is answered locally alone, and Gmail, which
@@ -2769,6 +2797,19 @@ mod tests {
             )
         );
         assert_eq!(fts("from:a").loose, None);
+    }
+
+    #[test]
+    fn note_words_are_what_a_note_can_match() {
+        let words = |query: &str| SearchQuery::parse(query).note_words();
+        assert_eq!(words("notes:slack renewal from:dana"), ["slack", "renewal"]);
+        assert_eq!(
+            words("notes:\"keep the cost flat\""),
+            ["keep the cost flat"]
+        );
+        assert_eq!(words("has:notes"), Vec::<String>::new());
+        assert_eq!(words("budget -notes:x -(overage OR fee)"), ["budget"]);
+        assert_eq!(words("-(-renewal)"), ["renewal"]);
     }
 
     #[test]

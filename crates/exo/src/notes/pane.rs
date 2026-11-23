@@ -231,6 +231,70 @@ pub fn show(
     action
 }
 
+/// The subject over a thread whose mail is gone: 20px bold.
+const SUBJECT: TextStyle = TextStyle::new(Font::new(Family::Sans, 700), 20.0, 26.0);
+/// The notes-only view's column: at most this wide, centred, under the subject and its line.
+const ALONE_WIDTH: f32 = 720.0;
+const ALONE_TOP: f32 = 32.0;
+const ALONE_GAP: f32 = 18.0;
+/// What the notes-only view says under the subject.
+pub const EMAIL_DELETED: &str = "Email deleted";
+
+/// Draws a thread whose mail is gone in `content`: its `subject`, `Email deleted`, then its notes
+/// as cards, which still open, edit and delete, with `+ Add thread note` after them. Returns
+/// what was clicked.
+pub fn alone(
+    ui: &mut Ui,
+    content: Rect,
+    rem: f32,
+    notes: &mut Notes,
+    subject: &str,
+) -> Option<PaneAction> {
+    let ctx = ui.ctx().clone();
+    let palette = exo_ui::palette(&ctx);
+    ui.painter()
+        .rect_filled(content, 0.0, palette.background_base_default);
+    let width = (content.width() - 4.0 * rem).clamp(0.0, ALONE_WIDTH);
+    let left = content.center().x - width / 2.0;
+    let right = left + width;
+    let mut y = content.top() + ALONE_TOP;
+    let painter = ui.painter_at(content);
+    SUBJECT.paint_line(
+        &painter,
+        pos2(left, y),
+        subject,
+        palette.text_base_default,
+        Some(width),
+    );
+    y += SUBJECT.line_height + 4.0;
+    META.paint_line(
+        &painter,
+        pos2(left, y),
+        EMAIL_DELETED,
+        palette.ink(0.4, 0.4),
+        Some(width),
+    );
+    y += META.line_height + ALONE_GAP;
+    let list = Rect::from_min_max(pos2(left, y), pos2(right, content.bottom()));
+    if list.height() <= 0.0 || width <= 0.0 {
+        return None;
+    }
+    let mut child = ui.new_child(UiBuilder::new().max_rect(list).id_salt("notes-alone-list"));
+    child.set_clip_rect(list.intersect(ui.clip_rect()));
+    let all = notes.all();
+    let mut ordered: Vec<&Note> = all.notes.iter().collect();
+    ordered.sort_by_key(|note| (note.created_at, note.number));
+    let top = list.top() - notes.pane_scroll;
+    let (height, clicked) = notes.paint_cards(&mut child, list, top, &ordered);
+    let max = (height - list.height()).max(0.0);
+    if ui.rect_contains_pointer(content) {
+        let delta = ui.input(|input| input.smooth_scroll_delta.y);
+        notes.pane_scroll -= delta;
+    }
+    notes.pane_scroll = notes.pane_scroll.clamp(0.0, max);
+    clicked
+}
+
 impl Notes {
     /// Paints the timeline's `items` from `top` down in `list`, and returns how tall it is and
     /// what was clicked.
@@ -389,6 +453,10 @@ impl Notes {
                 continue;
             }
             let height = self.card_height(ui, note, width);
+            if self.pane_reveal.as_deref() == Some(note.id.as_str()) {
+                self.pane_reveal = None;
+                self.scroll_pane_to(y - top, height, list.height());
+            }
             let rect = Rect::from_min_size(pos2(list.left(), y), vec2(width, height));
             if rect.intersects(list)
                 && let Some(card) = self.card(ui, note, rect, list)
@@ -417,7 +485,7 @@ impl Notes {
         if let Some((at, height)) = editor_at {
             let rect = Rect::from_min_size(pos2(list.left(), at), vec2(width, height));
             if self.take_reveal() {
-                self.reveal_in_pane(at - top, height, list.height());
+                self.scroll_pane_to(at - top, height, list.height());
             }
             if self.editor(ui, rect) == Some(EditorAction::Save) {
                 clicked = Some(PaneAction::Save);
@@ -428,7 +496,7 @@ impl Notes {
 
     /// Scrolls the pane's list so what's `at` px down it and `height` tall shows in a list
     /// `view` tall.
-    fn reveal_in_pane(&mut self, at: f32, height: f32, view: f32) {
+    fn scroll_pane_to(&mut self, at: f32, height: f32, view: f32) {
         if at < self.pane_scroll {
             self.pane_scroll = at;
         } else if at + height > self.pane_scroll + view {

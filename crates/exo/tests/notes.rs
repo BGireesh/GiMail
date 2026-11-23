@@ -854,3 +854,119 @@ fn a_file_dropped_while_the_note_editor_lacks_the_keyboard_goes_to_the_note() {
         ["agenda.txt"]
     );
 }
+
+/// Searches `query` from the list, and lets the results take the keyboard.
+fn search_for(app: &mut Fixture, query: &str) {
+    app.key(Key::Slash);
+    app.type_text(query);
+    app.key(Key::Enter);
+}
+
+#[test]
+fn a_note_on_a_deleted_thread_opens_alone() {
+    let mut app = start_thread_note("notes-deleted-thread");
+    let (thread, subject) = {
+        let open = app.mail().thread().expect("open");
+        let subject = open.detail().expect("loaded").subject.clone();
+        (open.id().to_owned(), subject)
+    };
+    app.type_text("Ask about the overage fee");
+    app.press(Key::Enter, COMMAND);
+    app.key(Key::Escape);
+    let gmail = app.gmail();
+    app.block_on(async { gmail.gmail().delete_thread(&thread).await })
+        .expect("deleted in Gmail");
+    app.sync();
+    assert!(
+        !app.subjects().contains(&subject),
+        "gone from the inbox: {:?}",
+        app.subjects()
+    );
+
+    search_for(&mut app, "notes:overage");
+    let rows = app.mail().inbox().threads();
+    assert_eq!(rows.len(), 1, "{:?}", app.subjects());
+    assert_eq!(rows[0].id, thread);
+    assert_eq!(rows[0].subject, subject);
+    assert_eq!(rows[0].snippet, "Email deleted");
+    let hits = app.mail().search_note_hits(0);
+    assert!(
+        hits.first()
+            .is_some_and(|hit| hit.ends_with("— Ask about the overage fee")),
+        "{hits:?}"
+    );
+    app.key(Key::Enter);
+    assert_eq!(
+        app.mail().thread().map(|open| open.id()),
+        Some(thread.as_str()),
+        "it stays open"
+    );
+    assert_eq!(app.mail().notes_alone(), Some(subject.as_str()));
+    let note = app.mail().notes().notes[0].id.clone();
+    assert!(
+        app.mail().note_rects().iter().any(|(id, _)| *id == note),
+        "its card is drawn"
+    );
+    // Notes are still written there.
+    write_note(&mut app, |app| app.key(Key::T), "Call Dana");
+    assert_eq!(labels(&app), ["Thread note", "Thread note"]);
+}
+
+#[test]
+fn a_note_whose_message_is_gone_stays_in_place() {
+    let mut app = start("notes-message-gone");
+    open_debrief(&mut app);
+    app.key(Key::P);
+    let (ids, from) = {
+        let thread = app.mail().thread().expect("open");
+        let ids: Vec<String> = thread
+            .messages()
+            .iter()
+            .map(|message| message.id.clone())
+            .collect();
+        let from = thread.messages()[1]
+            .from
+            .as_ref()
+            .and_then(|from| from.name.clone())
+            .expect("a sender's name");
+        (ids, from)
+    };
+    write_note(
+        &mut app,
+        |app| app.press(Key::T, Modifiers::SHIFT),
+        "Between the two",
+    );
+    let note = app.mail().notes().notes[0].id.clone();
+    let gmail = app.gmail();
+    app.block_on(async { gmail.gmail().delete_message(&ids[1]).await })
+        .expect("deleted in Gmail");
+    app.sync();
+    assert_eq!(
+        app.mail().thread().expect("still open").messages().len(),
+        2,
+        "the message is gone"
+    );
+    assert_eq!(labels(&app), ["Note 1"], "the note keeps its number");
+    let first = from.split_whitespace().next().expect("a first name");
+    let said = app.mail().note_where(&note).expect("the note is drawn");
+    assert!(
+        said.starts_with(&format!("on a deleted email from {first} of ")),
+        "{said}"
+    );
+    let rects = app.mail().note_rects();
+    let (_, rect) = rects
+        .iter()
+        .find(|(id, _)| *id == note)
+        .expect("the note is drawn");
+    let cards = app.mail().thread().expect("open").card_rects();
+    let card = |id: &str| {
+        cards
+            .iter()
+            .find(|(card, _)| card == id)
+            .map(|(_, rect)| *rect)
+            .expect("the message is drawn")
+    };
+    let (above, below) = (card(&ids[0]), card(&ids[2]));
+    assert!(rect.top() >= above.bottom(), "{rect:?} {above:?}");
+    assert!(rect.bottom() <= below.top(), "{rect:?} {below:?}");
+}

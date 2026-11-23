@@ -731,6 +731,19 @@ impl Editor {
                 colors.bar,
             );
         }
+        // Marks go under the text and the selection, on the text's boxes.
+        for &(start, end) in &self.marks {
+            let (start, end) = (self.doc.clamp(start), self.doc.clamp(end));
+            if start < end {
+                for mark in self.text_boxes(rect.min, start, end) {
+                    painter.rect_filled(
+                        exo_ui::pixel_snap(mark),
+                        CornerRadius::same(2),
+                        self.mark_color,
+                    );
+                }
+            }
+        }
         // The selection goes under the text, and a focused image shows the resizer instead.
         let focused_image = self.focused_image();
         if !self.selection.is_collapsed() && focused_image.is_none() {

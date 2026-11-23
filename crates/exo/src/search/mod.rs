@@ -181,6 +181,15 @@ impl Search {
         self.focused
     }
 
+    /// What the open suggestions read, in order.
+    pub fn suggestion_values(&self) -> Vec<String> {
+        self.suggestions
+            .iter()
+            .flatten()
+            .map(|suggestion| suggestion.replacement.clone())
+            .collect()
+    }
+
     /// Whether the suggestion list is open.
     fn list_open(&self) -> bool {
         self.suggestions

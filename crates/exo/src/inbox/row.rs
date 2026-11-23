@@ -289,12 +289,32 @@ pub(super) fn paint(
         )
     };
 
-    if let Some(scrolled) = state.strip {
-        hit = strip(ui, painter, rect, geometry, thread, state, scrolled).or(hit);
-    }
-
     // Labels, subject and snippet, cut to the estimated width of the middle column.
     let middle_left = left + geometry.from_width;
+
+    // A search result's notes, under its first line, and its files under them.
+    let lines = note_lines(thread, now);
+    for (at, line) in lines.iter().enumerate() {
+        paint_note_line(
+            ui,
+            painter,
+            pos2(
+                middle_left,
+                first_row + NOTE_LINES_TOP + at as f32 * NOTE_LINE,
+            ),
+            (right - middle_left).max(0.0),
+            line,
+            state.selected,
+        );
+    }
+    if let Some(scrolled) = state.strip {
+        let below = Rect::from_min_max(
+            pos2(rect.left(), rect.top() + lines.len() as f32 * NOTE_LINE),
+            rect.max,
+        );
+        hit = strip(ui, painter, below, geometry, thread, state, scrolled).or(hit);
+    }
+
     let mut x = middle_left;
     for label in &thread.labels {
         let chip = LabelChip::new(painter, label, state.selected);
@@ -386,6 +406,146 @@ fn status(
     } else {
         exo_ui::Status::resting(unread, thread.starred)
     }
+}
+
+/// A search result's note lines: each 18px, the first 18px under the row's first line's top.
+pub(super) const NOTE_LINE: f32 = 18.0;
+const NOTE_LINES_TOP: f32 = 18.0;
+/// At most this many notes show under a row, and a line counts the rest.
+const NOTE_HITS: usize = 2;
+/// A note line's icon, and the gap after it.
+const NOTE_HIT_ICON: f32 = 10.0;
+const NOTE_HIT_ICON_GAP: f32 = 5.0;
+
+/// One line under a search result: a note it matched, or how many more there are.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum NoteLine {
+    /// `{label} · {date}`, then the note's excerpt with the matches (byte ranges) marked.
+    Hit {
+        head: String,
+        snippet: String,
+        marks: Vec<Range<usize>>,
+    },
+    /// `+{n} more`.
+    More(usize),
+}
+
+impl NoteLine {
+    /// The line's text, as it reads.
+    pub(super) fn text(&self) -> String {
+        match self {
+            Self::Hit { head, snippet, .. } => format!("{head} — {snippet}"),
+            Self::More(count) => format!("+{count} more"),
+        }
+    }
+}
+
+/// How many note lines a search result shows under its row.
+pub(super) fn note_line_count(thread: &ThreadSummary) -> usize {
+    let hits = thread.search.as_ref().map_or(0, |marks| marks.notes.len());
+    hits.min(NOTE_HITS) + usize::from(hits > NOTE_HITS)
+}
+
+/// The note lines a search result shows under its row, dated in `now`'s zone.
+pub(super) fn note_lines(thread: &ThreadSummary, now: &Zoned) -> Vec<NoteLine> {
+    let Some(marks) = &thread.search else {
+        return Vec::new();
+    };
+    let mut lines: Vec<NoteLine> = marks
+        .notes
+        .iter()
+        .take(NOTE_HITS)
+        .map(|hit| NoteLine::Hit {
+            head: format!("{} · {}", hit.label, crate::notes::date(hit.date, now)),
+            // One line: breaks read as spaces, which keeps every byte where it was.
+            snippet: hit.snippet.text.replace(['\n', '\r', '\t'], " "),
+            marks: hit.snippet.bold.clone(),
+        })
+        .collect();
+    if marks.notes.len() > NOTE_HITS {
+        lines.push(NoteLine::More(marks.notes.len() - NOTE_HITS));
+    }
+    lines
+}
+
+/// Paints a note line with its line box at `at`, cut with `…` to `width`: the note icon and
+/// `{label} · {date}` in amber, then ` — ` and the excerpt in the row's muted ink, with the
+/// matches on the note mark's amber. `+{n} more` is muted, with no icon.
+fn paint_note_line(
+    ui: &Ui,
+    painter: &Painter,
+    at: Pos2,
+    width: f32,
+    line: &NoteLine,
+    selected: bool,
+) {
+    let ctx = ui.ctx();
+    let palette = exo_ui::palette(ctx);
+    let (amber, muted) = if selected {
+        (palette.select_content_default, ON_SELECTED)
+    } else {
+        (palette.note_label_default, palette.text_base_subdued)
+    };
+    let (head, snippet, marks) = match line {
+        NoteLine::More(_) => {
+            REGULAR.paint_line(painter, at, &line.text(), muted, Some(width));
+            return;
+        }
+        NoteLine::Hit {
+            head,
+            snippet,
+            marks,
+        } => (head, snippet, marks),
+    };
+    paint_icon(
+        ui,
+        "legacy/DEPRECATED_notes",
+        exo_ui::pixel_snap(Rect::from_min_size(
+            pos2(at.x, at.y + 3.0),
+            vec2(NOTE_HIT_ICON, NOTE_HIT_ICON),
+        )),
+        amber,
+    );
+    let left = at.x + NOTE_HIT_ICON + NOTE_HIT_ICON_GAP;
+    let limit = (width - NOTE_HIT_ICON - NOTE_HIT_ICON_GAP).max(0.0);
+    let lead = format!("{head} — ");
+    let mut job = LayoutJob::default();
+    job.append(head, 0.0, REGULAR.format(amber));
+    job.append(" — ", 0.0, REGULAR.format(muted));
+    let lead_width = REGULAR.width(ctx, &lead);
+    let mut done = 0;
+    for range in marks {
+        let (start, end) = (range.start.min(snippet.len()), range.end.min(snippet.len()));
+        if start < done
+            || start >= end
+            || !snippet.is_char_boundary(start)
+            || !snippet.is_char_boundary(end)
+        {
+            continue;
+        }
+        let from = lead_width + REGULAR.width(ctx, &snippet[..start]);
+        let to = (lead_width + REGULAR.width(ctx, &snippet[..end])).min(limit);
+        if from < to {
+            painter.rect_filled(
+                exo_ui::pixel_snap(Rect::from_min_max(
+                    pos2(left + from, at.y),
+                    pos2(left + to, at.y + 15.0),
+                )),
+                2.0,
+                palette.note_mark_default,
+            );
+        }
+        job.append(&snippet[done..start], 0.0, REGULAR.format(muted));
+        job.append(
+            &snippet[start..end],
+            0.0,
+            REGULAR.format(palette.ink(0.85, 0.8)),
+        );
+        done = end;
+    }
+    job.append(&snippet[done..], 0.0, REGULAR.format(muted));
+    job.wrap = egui::text::TextWrapping::truncate_at_width(limit);
+    paint_job(painter, pos2(left, at.y), job, &REGULAR);
 }
 
 /// A file card's width and the gap after it.

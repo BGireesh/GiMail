@@ -320,6 +320,11 @@ pub struct Mail {
     thread: Option<ThreadView>,
     /// The open thread's notes, and the editor one is written in.
     notes: notes::Notes,
+    /// The open thread, when its mail is gone and only its notes are left: they show alone.
+    notes_alone: Option<String>,
+    /// A note of the open thread to scroll to once its notes are in: a search result's first
+    /// matching note.
+    notes_reveal: Option<String>,
     /// The right pane inside its border, as last laid out.
     right_pane: Rect,
     /// Message bodies, rendered off the UI thread.
@@ -396,6 +401,8 @@ impl Mail {
             bodies: Bodies::new(ctx),
             thread: None,
             notes: notes::Notes::new(now.clone()),
+            notes_alone: None,
+            notes_reveal: None,
             right_pane: Rect::NOTHING,
             link_preview: link_preview::LinkPreview::default(),
             attachment_files: attachment_files::AttachmentFiles::new(ctx, account.email()),
@@ -650,6 +657,27 @@ impl Mail {
         self.notes.timeline().to_vec()
     }
 
+    /// The words the open thread's notes mark: the search's it was opened from (for tests).
+    pub fn note_highlights(&self) -> Vec<String> {
+        self.notes.highlighted().to_vec()
+    }
+
+    /// The subject over the open thread's notes when its mail is gone and they show alone (for
+    /// tests).
+    pub fn notes_alone(&self) -> Option<&str> {
+        self.notes_alone.as_ref()?;
+        let context = self.snapshot.notes.context.as_ref()?;
+        (Some(context.thread_id.as_str()) == self.notes_alone.as_deref())
+            .then_some(context.subject.as_str())
+    }
+
+    /// What note `id`'s card says it's on (for tests).
+    pub fn note_where(&self, id: &str) -> Option<String> {
+        let all = self.notes.all();
+        let note = all.notes.iter().find(|note| note.id == id)?;
+        Some(self.notes.where_text(note))
+    }
+
     /// The note the thread scrolled to, while it flashes (for tests).
     pub fn flashing_note(&self) -> Option<&str> {
         self.notes.flashing()
@@ -867,6 +895,10 @@ impl Mail {
             .threads()
             .iter()
             .any(|thread| thread.id == id && thread.unread);
+        // A search result whose mail is gone has only its notes to show.
+        let deleted = self.inbox.threads().iter().any(|thread| {
+            thread.id == id && thread.search.as_ref().is_some_and(|marks| marks.deleted)
+        });
         self.search_opened_thread();
         self.close_snippet_view();
         self.account.open_thread(Some(&id));
@@ -880,12 +912,35 @@ impl Mail {
             view.set_read_on_open();
         }
         self.notes.open(Some(view.id()));
+        self.notes_alone = deleted.then(|| view.id().to_owned());
+        self.notes_reveal = None;
         self.thread = Some(view);
+    }
+
+    /// Opens thread `id` from the list (Enter or a click). A search result with matching notes
+    /// opens on the first of them, with the search's words marked in its notes.
+    fn open_result(&mut self, id: String) {
+        let hits = self.search.as_ref().and_then(|search| {
+            let query = exo_store::SearchQuery::parse(search.query()?);
+            let row = self.inbox.threads().iter().find(|thread| thread.id == id)?;
+            let first = row.search.as_ref()?.notes.first()?.note_id.clone();
+            Some((first, query.note_words()))
+        });
+        self.open_thread(id.clone());
+        if self.thread.as_ref().is_none_or(|thread| thread.id() != id) {
+            return;
+        }
+        if let Some((first, words)) = hits {
+            self.notes.highlight(words);
+            self.notes_reveal = Some(first);
+        }
     }
 
     /// Back to the list, its cursor where it was. The thread's bodies and their textures go.
     fn close_thread(&mut self) {
         self.pane_pin = None;
+        self.notes_alone = None;
+        self.notes_reveal = None;
         // A note being written is saved as the thread goes.
         self.notes.close(&self.account);
         self.notes.open(None);
@@ -1348,7 +1403,7 @@ impl Mail {
             Action::Page(direction) => self.inbox.page(direction),
             Action::Open => {
                 if let Some(id) = self.inbox.cursor().map(|thread| thread.id.clone()) {
-                    self.open_thread(id);
+                    self.open_result(id);
                 }
             }
             Action::ToggleSelected => self.inbox.toggle_selected(),
@@ -1911,7 +1966,7 @@ impl Mail {
         self.inbox.set_covered(self.popout_card());
         for action in self.inbox.show(ui, content, rem, window_width) {
             match action {
-                inbox::Action::Open(id) => self.open_thread(id),
+                inbox::Action::Open(id) => self.open_result(id),
                 inbox::Action::ToggleDone => self.toggle_done(now),
                 inbox::Action::Remind => self.remind(remind::Action::Open { button: true }, now),
                 inbox::Action::CommandPalette => self.open_palette_button(),
@@ -2183,6 +2238,7 @@ impl Mail {
             typing,
             &mut self.notes,
         );
+        self.show_notes_alone(ui, content, rem, now);
         for action in actions {
             match action {
                 thread::Action::AddNote(None) => self.run(Action::NewThreadNote, now),
