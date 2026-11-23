@@ -353,11 +353,16 @@ impl ThreadView {
                 ids.push(id);
             }
         };
-        if ids.contains(&SPAM) && self.messages.iter().all(|m| m.has(SPAM)) {
+        // A thread wholly in Spam or Trash is only there, as in Gmail: out of All Mail, Done and
+        // its labels.
+        let only_in = [SPAM, TRASH]
+            .into_iter()
+            .find(|id| ids.contains(id) && self.messages.iter().all(|m| m.has(id)));
+        if let Some(id) = only_in {
             ids = if self.has(UNREAD) {
-                vec![UNREAD, SPAM]
+                vec![UNREAD, id]
             } else {
-                vec![SPAM]
+                vec![id]
             };
         } else if self.is_muted(me) {
             ids.retain(|id| *id != INBOX);
@@ -1226,6 +1231,27 @@ pub(crate) mod tests {
             lists(&reply_draft),
             ["CATEGORY_PERSONAL", "DRAFT", "SH_ALL", "SH_ARCHIVED"]
         );
+    }
+
+    #[test]
+    fn trashed_threads_leave_all_mail_done_and_labels_as_spam_does() {
+        // As in Gmail, Trash is the only list a trashed thread is in: not All Mail, not Done.
+        let trashed = thread(vec![message(
+            "a",
+            1,
+            "ann@x.com",
+            &[ME],
+            &["TRASH", "UNREAD", "STARRED", "CATEGORY_UPDATES"],
+        )]);
+        assert_eq!(lists(&trashed), ["TRASH", "UNREAD"]);
+        let read = thread(vec![message("a", 1, "ann@x.com", &[ME], &["TRASH"])]);
+        assert_eq!(lists(&read), ["TRASH"]);
+        // A thread with a message outside Trash is still listed where that message is.
+        let partly = thread(vec![
+            message("a", 1, "ann@x.com", &[ME], &["CATEGORY_PERSONAL"]),
+            message("b", 2, "ann@x.com", &[ME], &["TRASH"]),
+        ]);
+        assert!(lists(&partly).contains(&SH_ALL.into()));
     }
 
     #[test]

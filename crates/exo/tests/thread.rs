@@ -95,6 +95,51 @@ fn done_moves_on_to_the_next_conversation_and_undo_comes_back() {
 }
 
 #[test]
+fn trash_moves_on_to_the_next_conversation_and_undo_comes_back() {
+    let mut app = start("thread-trash");
+    app.key(Key::Enter);
+    app.press(Key::Num3, Modifiers::SHIFT);
+    assert!(
+        !app.subjects()
+            .contains(&"Design crit moved to 3pm".to_owned()),
+        "out of the inbox"
+    );
+    assert!(
+        open_subject(&app)
+            .is_some_and(|subject| subject.starts_with("Invitation: Coffee with Grace")),
+        "auto-advance, as Done does: {:?}",
+        open_subject(&app)
+    );
+    app.key(Key::Z);
+    assert_eq!(
+        open_subject(&app).as_deref(),
+        Some("Design crit moved to 3pm"),
+        "undo reopens it"
+    );
+    assert_eq!(app.subjects().len(), 24);
+}
+
+#[test]
+fn trash_in_all_mail_moves_on_to_the_next_conversation() {
+    let mut app = start("thread-trash-all-mail");
+    app.key(Key::G);
+    app.key(Key::A);
+    let first = app.cursor();
+    app.key(Key::Enter);
+    let opened = open_subject(&app).expect("a thread is open");
+    app.press(Key::Num3, Modifiers::SHIFT);
+    assert!(
+        !app.subjects().contains(&first),
+        "a trashed thread leaves All Mail, as in Gmail"
+    );
+    let next = open_subject(&app);
+    assert!(
+        next.as_ref().is_some_and(|subject| *subject != opened),
+        "auto-advance to the next conversation, not {next:?}"
+    );
+}
+
+#[test]
 fn mark_unread_goes_back_to_the_list() {
     let mut app = start("thread-unread");
     app.key(Key::Enter);
