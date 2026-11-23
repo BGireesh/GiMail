@@ -1088,3 +1088,97 @@ async fn deleted_rows_share_the_limit_by_date() {
     assert_eq!(ids(&one), [all.results[0].thread.id.as_str()], "the newer");
     assert!(one.more_local);
 }
+
+#[tokio::test]
+async fn a_negated_group_with_notes_asks_gmail_for_everything_it_could_add() {
+    let harness = Harness::synced().await;
+    let old = an_old_thread(&harness).await;
+    note(&harness, &old, None, "a", "Ask about the overage fee", 0).await;
+    // A thread without an overage note matches, whoever it's from.
+    let query = "-(notes:overage from:newsletter@freightsignals.com)";
+    let mut session = Search::new(query);
+    assert!(!session.gmail_done());
+    while !session.gmail_done() {
+        let page = harness.store.search_gmail(&session).await.expect("gmail");
+        session.add_gmail(page);
+    }
+    let found = id_set(
+        &harness
+            .store
+            .search(&mut session, 500, true, 15)
+            .await
+            .expect("search"),
+    );
+    assert!(!found.contains(old.as_str()), "it has both");
+    let cutoff = jiff::Timestamp::now().as_millisecond() - WINDOW_MS;
+    let mut newsletters = Search::new("from:newsletter@freightsignals.com");
+    let older: Vec<String> = harness
+        .store
+        .search(&mut newsletters, 500, false, 15)
+        .await
+        .expect("search")
+        .results
+        .into_iter()
+        .filter(|result| result.thread.date.as_millisecond() < cutoff && result.thread.id != old)
+        .map(|result| result.thread.id.as_str().to_owned())
+        .collect();
+    assert!(!older.is_empty());
+    assert!(
+        older.iter().all(|id| found.contains(id)),
+        "older newsletters without the note, which only Gmail could add"
+    );
+}
+
+/// Runs `test` on a thread with a stack deep enough to parse a deeply nested query.
+fn with_a_deep_stack(test: impl std::future::Future<Output = ()> + Send + 'static) {
+    std::thread::Builder::new()
+        .stack_size(512 * 1024 * 1024)
+        .spawn(move || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("a runtime")
+                .block_on(test);
+        })
+        .expect("a thread")
+        .join()
+        .expect("the test passes");
+}
+
+#[test]
+fn a_deeply_nested_query_with_notes_is_harmless() {
+    with_a_deep_stack(async {
+        let harness = Harness::synced().await;
+        let noted = thanksgiving(&harness).await;
+        note(
+            &harness,
+            &noted.id,
+            None,
+            "a",
+            "Ask about the overage fee",
+            0,
+        )
+        .await;
+        let mut nested = "budget".to_owned();
+        for _ in 0..1_500 {
+            nested = format!("-(potato {nested})");
+        }
+        for query in [format!("notes:overage {nested}"), nested.clone()] {
+            let mut session = Search::new(&query);
+            harness
+                .store
+                .search(&mut session, 100, true, 15)
+                .await
+                .expect("a result, not an error");
+        }
+        let mut shallow = "overage".to_owned();
+        for _ in 0..10 {
+            shallow = format!("-(zzqx -{shallow})");
+        }
+        assert_eq!(
+            ids(&search(&harness, &format!("notes:overage {shallow}")).await),
+            [noted.id.as_str()],
+            "a query nested less deeply is read"
+        );
+    });
+}

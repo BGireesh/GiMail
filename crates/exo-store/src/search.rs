@@ -845,6 +845,38 @@ impl Store {
                 deleted: false,
             });
         }
+        // Gmail is asked without the notes terms. A match of it that has notes is stored whole, so
+        // the query is decided for it here, in full.
+        let noted_hits: Vec<String> = if structured {
+            search
+                .gmail
+                .iter()
+                .filter(|hit| views.get(&hit.thread).is_some_and(|view| view.notes > 0))
+                .map(|hit| hit.thread.clone())
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let noted_matches: BTreeSet<String> = if noted_hits.is_empty() {
+            BTreeSet::new()
+        } else {
+            let mut params: Vec<Value> = vec![
+                serde_json::to_string(&noted_hits)
+                    .expect("ids serialize")
+                    .into(),
+            ];
+            let mut sql = String::from(
+                "SELECT thread_id FROM search_fts WHERE thread_id IN (SELECT value FROM json_each(?1)) AND ",
+            );
+            cond_sql(&structure.cond, &mut sql, &mut params, &matches);
+            let mut statement = toasty::sql::query(sql);
+            for param in params {
+                statement = statement.bind(param);
+            }
+            crate::db::strings(statement.exec(&mut db).await?).collect()
+        };
         let terms = query.highlightable_tokens();
         for hit in &search.gmail {
             if seen.contains(&hit.thread) {
@@ -857,8 +889,12 @@ impl Store {
                 continue;
             }
             // Gmail was asked without the notes terms, so its matches are held to them here. The
-            // mail's part is Gmail's to judge.
-            if structure.cond.eval(None, &in_notes(&matches, &hit.thread)) == Some(false) {
+            // mail's part is Gmail's to judge, unless the thread has notes (above).
+            if structure.cond.eval(None, &in_notes(&matches, &hit.thread)) == Some(false)
+                || (view.notes > 0
+                    && !noted_hits.is_empty()
+                    && !noted_matches.contains(&hit.thread))
+            {
                 continue;
             }
             seen.insert(hit.thread.clone());

@@ -743,19 +743,13 @@ impl SearchQuery {
         self.leaves().iter().any(|token| token.kind == Kind::Notes)
     }
 
-    /// Whether every match must have a live note: a positive `notes:` term that the whole query
-    /// requires. Threads with notes are stored whole, so such a query is answered locally alone,
-    /// and Gmail, which can't search notes, isn't asked.
+    /// Whether every match must have a live note: with each `notes:` term decided for a thread
+    /// without notes (a positive one false, a negated one true), the query can't hold. Threads
+    /// with notes are stored whole, so such a query is answered locally alone, and Gmail, which
+    /// can't search notes, isn't asked.
     pub fn requires_a_note(&self) -> bool {
-        fn walk(node: &Node) -> bool {
-            match node {
-                Node::Leaf(token) => token.kind == Kind::Notes && !token.negated,
-                Node::And(children, false) => children.iter().any(walk),
-                Node::Or(children, false) => !children.is_empty() && children.iter().all(walk),
-                Node::And(_, true) | Node::Or(_, true) => false,
-            }
-        }
-        walk(&self.tree)
+        // The Gmail search comes out false exactly when no thread without notes can match.
+        gmail_part(&self.tree, false, &LabelIndex::default(), &[], Some("")) == GmailPart::False
     }
 
     /// The phrases and stemmed words that every local result must have (or, negated, not have)
@@ -791,6 +785,12 @@ impl SearchQuery {
             positive: Vec::new(),
             highlight: Vec::new(),
         };
+        // A query nested deeper than this matches nothing, rather than making SQL deeper than
+        // SQLite parses.
+        if depth(&self.tree) > MAX_DEPTH {
+            structure.cond = Cond::Any(Vec::new());
+            return structure;
+        }
         let tree = structure.node(&self.tree, false, labels, me);
         let mut all = vec![tree];
         for token in self.default_exclusions() {
@@ -798,6 +798,19 @@ impl SearchQuery {
         }
         structure.cond = Cond::All(all);
         structure
+    }
+}
+
+/// How deeply groups may nest in a query that [`SearchQuery::structure`] reads.
+const MAX_DEPTH: usize = 50;
+
+/// How deeply `node`'s groups nest.
+fn depth(node: &Node) -> usize {
+    match node {
+        Node::Leaf(_) => 0,
+        Node::And(children, _) | Node::Or(children, _) => {
+            1 + children.iter().map(depth).max().unwrap_or_default()
+        }
     }
 }
 
@@ -1832,31 +1845,106 @@ fn gmail_query(
     me: &[String],
     important: Option<&str>,
 ) -> String {
+    match gmail_part(node, top, labels, me, important) {
+        GmailPart::Text(text) => text,
+        GmailPart::Empty | GmailPart::True | GmailPart::False => String::new(),
+    }
+}
+
+/// A part of the Gmail search. Gmail can only add threads that have no notes (threads with notes
+/// are stored whole), so a `notes:` term is decided for it: a positive one is false and a negated
+/// one true, and the groups around them simplify.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum GmailPart {
+    Text(String),
+    /// Nothing to say (an Auto Label, empty text), left out of its group as before notes.
+    Empty,
+    /// Holds for every thread without notes: no restriction.
+    True,
+    /// Holds for none: no thread Gmail can add matches.
+    False,
+}
+
+/// The Gmail search part for `node` ([`gmail_query`]).
+fn gmail_part(
+    node: &Node,
+    top: bool,
+    labels: &LabelIndex,
+    me: &[String],
+    important: Option<&str>,
+) -> GmailPart {
     let minus = if node.negated() { "-" } else { "" };
-    // A part Gmail never sees (`notes:`) leaves nothing, and a group of nothing else goes too.
-    let join = |children: &[Node]| {
-        children
-            .iter()
-            .map(|child| gmail_query(child, false, labels, me, important))
-            .filter(|part| !part.is_empty())
-            .collect::<Vec<_>>()
-            .join(" ")
-    };
     let token = match node {
-        Node::And(children, negated) if top && !negated => return join(children),
-        Node::And(children, _) | Node::Or(children, _) => {
-            let joined = join(children);
-            return match (joined.is_empty(), node) {
-                (true, _) => String::new(),
-                (false, Node::And(..)) => format!("{minus}({joined})"),
-                (false, _) => format!("{minus}{{{joined}}}"),
+        Node::And(children, negated) | Node::Or(children, negated) => {
+            let all = matches!(node, Node::And(..));
+            let parts: Vec<GmailPart> = children
+                .iter()
+                .map(|child| gmail_part(child, false, labels, me, important))
+                .collect();
+            let (absorbing, identity) = if all {
+                (GmailPart::False, GmailPart::True)
+            } else {
+                (GmailPart::True, GmailPart::False)
+            };
+            let texts: Vec<&str> = parts
+                .iter()
+                .filter_map(|part| match part {
+                    GmailPart::Text(text) => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect();
+            let combined = if parts.contains(&absorbing) {
+                absorbing
+            } else if texts.is_empty() {
+                if parts.contains(&identity) {
+                    identity
+                } else {
+                    GmailPart::Empty
+                }
+            } else {
+                let joined = texts.join(" ");
+                return GmailPart::Text(if all && top && !negated {
+                    joined
+                } else if all {
+                    format!("{minus}({joined})")
+                } else {
+                    format!("{minus}{{{joined}}}")
+                });
+            };
+            return match (combined, negated) {
+                (GmailPart::True, true) => GmailPart::False,
+                (GmailPart::False, true) => GmailPart::True,
+                (combined, _) => combined,
             };
         }
         Node::Leaf(token) => token,
     };
-    if token.value.as_deref() == Some("") {
-        return String::new();
+    if token.kind == Kind::Notes {
+        return if token.negated {
+            GmailPart::True
+        } else {
+            GmailPart::False
+        };
     }
+    if token.value.as_deref() == Some("") {
+        return GmailPart::Empty;
+    }
+    let text = gmail_leaf(token, labels, me, important);
+    if text.is_empty() {
+        GmailPart::Empty
+    } else {
+        GmailPart::Text(text)
+    }
+}
+
+/// A leaf's Gmail search, empty for one Gmail can't be asked about.
+fn gmail_leaf(
+    token: &Token,
+    labels: &LabelIndex,
+    me: &[String],
+    important: Option<&str>,
+) -> String {
+    let minus = if token.negated { "-" } else { "" };
     let value = if token.quoted {
         format!("\"{}\"", token.value())
     } else {
@@ -2618,11 +2706,25 @@ mod tests {
     fn notes_tokens_never_reach_gmail() {
         let to_gmail =
             |query: &str| SearchQuery::parse(query).to_gmail(&labels(), &[ME.to_owned()], "");
-        assert_eq!(to_gmail("notes:x from:a"), "-in:DRAFT -in:CHAT (from:a)");
+        assert_eq!(to_gmail("-notes:x from:a"), "-in:DRAFT -in:CHAT (from:a)");
+        assert_eq!(
+            to_gmail("-(notes:x budget)"),
+            "-in:DRAFT -in:CHAT",
+            "a thread without notes always matches"
+        );
+        assert_eq!(to_gmail("-notes:x OR budget"), "-in:DRAFT -in:CHAT");
+        assert_eq!(
+            to_gmail("from:a (notes:x OR budget)"),
+            "-in:DRAFT -in:CHAT (from:a {budget})"
+        );
+        assert_eq!(
+            to_gmail("-(notes:x OR budget) from:a"),
+            "-in:DRAFT -in:CHAT (-{budget} from:a)"
+        );
         assert_eq!(to_gmail("has:notes"), "-in:DRAFT -in:CHAT");
         assert_eq!(to_gmail("-notes:\"a b\" -note:"), "-in:DRAFT -in:CHAT");
         assert_eq!(
-            gmail("notes:x from:a"),
+            gmail("-notes:x from:a"),
             "-in:DRAFT -in:CHAT in:inbox from:a"
         );
     }
@@ -2680,6 +2782,8 @@ mod tests {
         assert!(!requires("-notes:x budget"));
         assert!(!requires("-(notes:x budget)"));
         assert!(!requires("budget"));
+        assert!(requires("-(-notes:x OR budget) from:a"));
+        assert!(!requires("-notes:x"));
 
         let structure =
             SearchQuery::parse("-(notes:x budget)").structure(&labels(), &[ME.to_owned()]);
