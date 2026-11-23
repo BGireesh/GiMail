@@ -3212,6 +3212,9 @@ impl crate::Mail {
             | Event::Unavailable { .. }
             | Event::NoteVersions { .. }
             | Event::NoteFailed(_)
+            | Event::NoteSaved { .. }
+            | Event::NoteSaveFailed(_)
+            | Event::NotesBackupSetAside(_)
             | Event::NotesFolderFailed { .. }
             | Event::NotesFolderRebuilt => {}
         }

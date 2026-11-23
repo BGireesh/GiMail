@@ -81,6 +81,8 @@ pub enum PaneAction {
     Share,
     /// A deleted note's `Restore`, from the pane's deleted notes.
     RestoreDeleted(String),
+    /// `← Back`, over a thread's notes shown alone: what Escape does.
+    Back,
 }
 
 /// The thread's notes and emails in time order: each email by its date, each note by when it was
@@ -155,47 +157,13 @@ pub fn show(
     notes: &mut Notes,
     detail: Option<&ThreadDetail>,
 ) -> Option<PaneAction> {
-    let ctx = ui.ctx().clone();
-    let palette = exo_ui::palette(&ctx);
     let (left, right) = (pane.left() + 2.0 * rem, pane.right() - 2.0 * rem);
     let bottom = pane.bottom() - FOOTER_HEIGHT;
     let mut action = None;
 
     // `Share notes by email`, at the foot.
     let share = Rect::from_min_max(pos2(left, bottom - SHARE_HEIGHT), pos2(right, bottom));
-    let response = ui
-        .interact(share, exo_ui::id(&ctx, "notes-share"), Sense::click())
-        .on_hover_cursor(egui::CursorIcon::PointingHand);
-    let fill = if response.hovered() {
-        palette.ink(0.08, 0.12)
-    } else {
-        palette.ink(0.05, 0.08)
-    };
-    let painter = ui.painter_at(pane);
-    painter.rect_filled(exo_ui::pixel_snap(share), CornerRadius::same(5), fill);
-    let ink = palette.text_base_default;
-    let label = META.width(&ctx, SHARE);
-    let start = share.center().x - (SHARE_ICON + SHARE_ICON_GAP + label) / 2.0;
-    exo_ui::paint_icon(
-        ui,
-        "legacy/DEPRECATED_share",
-        exo_ui::pixel_snap(Rect::from_min_size(
-            pos2(start, share.center().y - SHARE_ICON / 2.0),
-            vec2(SHARE_ICON, SHARE_ICON),
-        )),
-        ink,
-    );
-    META.paint_line(
-        &painter,
-        pos2(
-            start + SHARE_ICON + SHARE_ICON_GAP,
-            share.center().y - META.line_height / 2.0,
-        ),
-        SHARE,
-        ink,
-        None,
-    );
-    if response.clicked() {
+    if notes.share_button(ui, share, pane) {
         action = Some(PaneAction::Share);
     }
 
@@ -249,10 +217,16 @@ const ALONE_TOP: f32 = 32.0;
 const ALONE_GAP: f32 = 18.0;
 /// What the notes-only view says under the subject.
 pub const EMAIL_DELETED: &str = "Email deleted";
+/// The notes-only view's way back to the list, over the subject: what Escape does.
+const BACK: &str = "\u{2190} Back";
+const BACK_GAP: f32 = 12.0;
+/// The space under the notes-only view's share button.
+const ALONE_BOTTOM: f32 = 24.0;
 
-/// Draws a thread whose mail is gone in `content`: its `subject`, `Email deleted`, then its notes
-/// as cards, which still open, edit and delete, with `+ Add thread note` after them. Returns
-/// what was clicked.
+/// Draws a thread whose mail is gone in `content`: `← Back`, its `subject`, `Email deleted`, then
+/// its notes as cards, which still open, edit and delete, with `+ Add thread note` after them.
+/// At its foot, as in the notes pane, `Deleted notes ({n})` with each one's `Restore`, over
+/// `Share notes by email`. Returns what was clicked.
 pub fn alone(
     ui: &mut Ui,
     content: Rect,
@@ -269,6 +243,32 @@ pub fn alone(
     let right = left + width;
     let mut y = content.top() + ALONE_TOP;
     let painter = ui.painter_at(content);
+    let mut action = None;
+    if width <= 0.0 {
+        return None;
+    }
+    let back = Rect::from_min_size(
+        pos2(left, y),
+        vec2(META.width(&ctx, BACK), META.line_height),
+    );
+    let response = ui
+        .interact(
+            back.expand(4.0).intersect(content),
+            exo_ui::id(&ctx, "notes-alone-back"),
+            Sense::click(),
+        )
+        .on_hover_cursor(egui::CursorIcon::PointingHand);
+    let ink = if response.hovered() {
+        palette.text_base_default
+    } else {
+        palette.ink(0.6, 0.6)
+    };
+    META.paint_line(&painter, back.min, BACK, ink, None);
+    notes.controls.push((Control::Back, back));
+    if response.clicked() {
+        action = Some(PaneAction::Back);
+    }
+    y += META.line_height + BACK_GAP;
     SUBJECT.paint_line(
         &painter,
         pos2(left, y),
@@ -285,9 +285,25 @@ pub fn alone(
         Some(width),
     );
     y += META.line_height + ALONE_GAP;
-    let list = Rect::from_min_max(pos2(left, y), pos2(right, content.bottom()));
-    if list.height() <= 0.0 || width <= 0.0 {
-        return None;
+
+    // `Share notes by email` at the foot, the deleted notes over it, and the cards scroll in
+    // what's left.
+    let bottom = content.bottom() - ALONE_BOTTOM;
+    let share = Rect::from_min_max(pos2(left, bottom - SHARE_HEIGHT), pos2(right, bottom));
+    if share.top() <= y {
+        return action;
+    }
+    if notes.share_button(ui, share, content) {
+        action = Some(PaneAction::Share);
+    }
+    notes.controls.push((Control::Share, share));
+    let room = share.top() - LIST_GAP - y;
+    let (deleted_top, restored) =
+        notes.paint_deleted(ui, left, right, share.top() - LIST_GAP, room / 2.0);
+    action = action.or(restored);
+    let list = Rect::from_min_max(pos2(left, y), pos2(right, deleted_top - LIST_GAP));
+    if list.height() <= 0.0 {
+        return action;
     }
     let mut child = ui.new_child(UiBuilder::new().max_rect(list).id_salt("notes-alone-list"));
     child.set_clip_rect(list.intersect(ui.clip_rect()));
@@ -297,15 +313,57 @@ pub fn alone(
     let top = list.top() - notes.pane_scroll;
     let (height, clicked) = notes.paint_cards(&mut child, list, top, &ordered);
     let max = (height - list.height()).max(0.0);
-    if ui.rect_contains_pointer(content) {
+    // The wheel scrolls the cards from anywhere over them or the subject. Over the deleted
+    // notes it scrolls those.
+    if ui.rect_contains_pointer(content.with_max_y(list.bottom())) {
         let delta = ui.input(|input| input.smooth_scroll_delta.y);
         notes.pane_scroll -= delta;
     }
     notes.pane_scroll = notes.pane_scroll.clamp(0.0, max);
-    clicked
+    action.or(clicked)
 }
 
 impl Notes {
+    /// Draws `Share notes by email` in `share`, clipped to `clip`, and returns whether it was
+    /// clicked.
+    fn share_button(&self, ui: &Ui, share: Rect, clip: Rect) -> bool {
+        let ctx = ui.ctx().clone();
+        let palette = exo_ui::palette(&ctx);
+        let response = ui
+            .interact(share, exo_ui::id(&ctx, "notes-share"), Sense::click())
+            .on_hover_cursor(egui::CursorIcon::PointingHand);
+        let fill = if response.hovered() {
+            palette.ink(0.08, 0.12)
+        } else {
+            palette.ink(0.05, 0.08)
+        };
+        let painter = ui.painter_at(clip);
+        painter.rect_filled(exo_ui::pixel_snap(share), CornerRadius::same(5), fill);
+        let ink = palette.text_base_default;
+        let label = META.width(&ctx, SHARE);
+        let start = share.center().x - (SHARE_ICON + SHARE_ICON_GAP + label) / 2.0;
+        exo_ui::paint_icon(
+            ui,
+            "legacy/DEPRECATED_share",
+            exo_ui::pixel_snap(Rect::from_min_size(
+                pos2(start, share.center().y - SHARE_ICON / 2.0),
+                vec2(SHARE_ICON, SHARE_ICON),
+            )),
+            ink,
+        );
+        META.paint_line(
+            &painter,
+            pos2(
+                start + SHARE_ICON + SHARE_ICON_GAP,
+                share.center().y - META.line_height / 2.0,
+            ),
+            SHARE,
+            ink,
+            None,
+        );
+        response.clicked()
+    }
+
     /// Paints `Deleted notes ({n})` with its bottom at `bottom` between `left` and `right`, and
     /// under it while it's open the deleted notes, at most `room` tall in all. Nothing shows when
     /// the thread has none. Returns its top (`bottom` with none), and what was clicked.
@@ -611,6 +669,14 @@ impl Notes {
             let rect = Rect::from_min_size(pos2(list.left(), at), vec2(width, height));
             if self.take_reveal() {
                 self.scroll_pane_to(at - top, height, list.height());
+            }
+            // A caret typed or moved past the list's edge comes back into view.
+            if let Some(caret) = self.take_caret() {
+                if caret.bottom() > list.bottom() {
+                    self.pane_scroll += caret.bottom() - list.bottom();
+                } else if caret.top() < list.top() {
+                    self.pane_scroll += caret.top() - list.top();
+                }
             }
             if self.editor(ui, rect) == Some(EditorAction::Save) {
                 clicked = Some(PaneAction::Save);

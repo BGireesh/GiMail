@@ -1614,6 +1614,23 @@ impl ThreadView {
         if notes.placement() == NotesPlacement::Thread && notes.take_reveal() {
             self.scroll_to_note_editor();
         }
+        // A caret typed or moved past the fold in the note editor comes back into view, as a
+        // reply's does. (With notes in the pane only, the pane keeps its own.)
+        if self
+            .entries
+            .iter()
+            .any(|placed| placed.entry == Entry::NoteEditor)
+            && let Some(caret) = notes.take_caret()
+            && self.animation.is_none()
+        {
+            let top = self.messages.top() + MESSAGES_PADDING_TOP;
+            let bottom = self.messages.bottom() - DRAFT_MARGIN_BOTTOM;
+            if caret.bottom() > bottom {
+                self.scroll = self.clamp_scroll(self.scroll + caret.bottom() - bottom);
+            } else if caret.top() < top {
+                self.scroll = self.clamp_scroll(self.scroll + caret.top() - top);
+            }
+        }
         // Once the thread has its first position, which would otherwise undo the scroll.
         if self.positioned
             && let Some(id) = self.reveal_note.take()

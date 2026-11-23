@@ -281,6 +281,8 @@ pub enum Event {
         id: String,
         /// Whether Gmail couldn't be reached.
         offline: bool,
+        /// Whether it has notes, which are still there to show.
+        noted: bool,
     },
     /// The thread [`Account::read_thread`] read (its detail is `None` when it isn't stored).
     Thread {
@@ -296,8 +298,21 @@ pub enum Event {
         /// Its versions, newest first.
         versions: Vec<NoteVersion>,
     },
-    /// A note, or its editor's draft, by id, couldn't be saved, deleted, restored or read.
+    /// The store answered the save a note editor closed with: the note it saved, by id, at the
+    /// version the save left it, or `None` for a blank new note, which isn't kept.
+    NoteSaved {
+        /// The editor's id.
+        editor: String,
+        /// The note saved, and its version.
+        note: Option<(String, u32)>,
+    },
+    /// The save a note editor closed with failed, by the editor's id. What it held isn't saved.
+    NoteSaveFailed(String),
+    /// A note, or its editor's draft, by id, couldn't be deleted, restored, read or kept.
     NoteFailed(String),
+    /// The notes' backup couldn't be restored when the account opened, and was kept under this
+    /// file name beside the store.
+    NotesBackupSetAside(String),
     /// The notes folder couldn't be written, on a rebuild the user `asked` for or as notes
     /// changed.
     NotesFolderFailed {
@@ -453,6 +468,9 @@ enum Request {
     NoteVersions(String),
     /// Write every thread's notes to the notes folder, as `Rebuild Notes Folder` asks.
     RebuildNotesFolder,
+    /// Write the notes' backup now, after the note requests before this one, and say when it's
+    /// written: the account is closing.
+    BackUpNotes(tokio::sync::oneshot::Sender<()>),
 }
 
 /// One account as one page sees it. It's a handle on the account (its store and the tasks that keep
@@ -1034,6 +1052,10 @@ impl Account {
             restarts: restarts.clone(),
             health: health.clone(),
         };
+        // A notes' backup that couldn't be restored is said once, when the account opens.
+        if let Some(name) = worker.store.take_notes_backup_set_aside() {
+            let _ = worker.events.send(Event::NotesBackupSetAside(name));
+        }
         recovery::spawn_once(&restarts, worker.run(receiver));
         requests.post(Request::Refresh);
         drop(guard);
@@ -1651,8 +1673,8 @@ impl Account {
             .timestamp()
     }
 
-    /// Saves a note from its editor, and drops the editor's draft. Snapshots carry it once it's
-    /// saved, and [`Event::NoteFailed`] says when it couldn't be.
+    /// Saves a note from its editor, and drops the editor's draft. [`Event::NoteSaved`] says when
+    /// it's saved, which snapshots then carry, and [`Event::NoteSaveFailed`] when it couldn't be.
     pub fn save_note(&self, save: SaveNote) {
         let now = self.now();
         self.shared.requests.post(Request::SaveNote {
@@ -1785,6 +1807,9 @@ impl Account {
     /// queued changes and the calendar's held changes stay unsent. The account's tasks are stopped
     /// when this returns, and its store closes once every handle on the account is dropped.
     pub fn discard(&mut self) {
+        // The notes outlive the store in their backup, so it's written first, with what the
+        // note editor held.
+        self.shared.back_up_notes(STOP_GRACE);
         let runtime = self.shared.runtime.take();
         if let Some(runtime) = runtime {
             runtime.block_on(self.shared.restarts.stop(STOP_GRACE));
@@ -1819,6 +1844,23 @@ impl Drop for Account {
     }
 }
 
+impl Shared {
+    /// Has the worker write the notes' backup, once it has handled the note requests posted
+    /// before, and waits for it, `grace` at most. Nothing happens once the account has stopped.
+    fn back_up_notes(&self, grace: Duration) {
+        let runtime = self.runtime.borrow();
+        let Some(runtime) = runtime.as_ref() else {
+            return;
+        };
+        let requests = self.requests.clone();
+        let _ = runtime.block_on(async move {
+            let (done, wait) = tokio::sync::oneshot::channel();
+            requests.post(Request::BackUpNotes(done));
+            tokio::time::timeout(grace, wait).await
+        });
+    }
+}
+
 impl Drop for Shared {
     fn drop(&mut self) {
         // Its people show no more, and what loads their photos lets go of the store.
@@ -1841,6 +1883,14 @@ impl Drop for Shared {
             requests.post(Request::SendHeldNow(done));
             flush.wake();
             tokio::time::timeout(QUIT_GRACE, wait).await
+        });
+        // The last note changes, and what an open note editor held, are in the backup before
+        // the account goes.
+        let requests = self.requests.clone();
+        let _ = runtime.block_on(async move {
+            let (done, wait) = tokio::sync::oneshot::channel();
+            requests.post(Request::BackUpNotes(done));
+            tokio::time::timeout(STOP_GRACE, wait).await
         });
         runtime.block_on(self.restarts.stop(STOP_GRACE));
         runtime.shutdown_background();
@@ -2184,9 +2234,17 @@ impl Worker {
             } => {
                 self.opening.remove(&thread);
                 if let Some(offline) = unavailable {
+                    let noted = match self.store.thread_notes(&thread).await {
+                        Ok(notes) => !notes.notes.is_empty() || !notes.drafts.is_empty(),
+                        Err(error) => {
+                            log::error!("reading the notes of {}: {error}", thread.as_str());
+                            false
+                        }
+                    };
                     let _ = self.events.send(Event::Unavailable {
                         id: thread.as_str().to_owned(),
                         offline,
+                        noted,
                     });
                     self.repaint.request();
                 }
@@ -2468,12 +2526,30 @@ impl Worker {
                 }
             }
             Request::SaveNote { save, now } => {
-                let id = save.draft_id.clone();
-                match self.store.save_note(*save, now).await {
-                    Ok(Some(note)) => self.export_notes(Job::Thread(note.thread_id)),
-                    Ok(None) => {}
-                    Err(error) => self.note_failed(id, "saving", &error),
+                let editor = save.draft_id.clone();
+                let event = match self.store.save_note(*save, now).await {
+                    Ok(saved) => {
+                        let note = saved.as_ref().map(|note| (note.id.clone(), note.version));
+                        if let Some(note) = saved {
+                            self.export_notes(Job::Thread(note.thread_id));
+                        }
+                        Event::NoteSaved { editor, note }
+                    }
+                    Err(error) => {
+                        log::error!("saving note {editor}: {error}");
+                        Event::NoteSaveFailed(editor)
+                    }
+                };
+                let _ = self.events.send(event);
+                self.repaint.request();
+            }
+            Request::BackUpNotes(done) => {
+                if self.store.notes_backup_due()
+                    && let Err(error) = self.store.backup_notes().await
+                {
+                    log::error!("writing the notes' backup as the account closes: {error}");
                 }
+                let _ = done.send(());
             }
             Request::DeleteNote { id, now } => match self.store.delete_note(&id, now).await {
                 Ok(()) => match self.store.note(&id).await {

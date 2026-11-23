@@ -1380,6 +1380,56 @@ fn signing_out_right_after_typing_writes_the_draft_rather_than_ask() {
 }
 
 #[test]
+fn signing_out_keeps_what_a_note_editor_held() {
+    let device = Device::new("sign-out-note");
+    device.sign_in();
+    let mut app = device.launch(abandoned());
+    run_until(&mut app, "the inbox", inbox_shows);
+    press(&mut app, Key::Enter);
+    settle(&mut app);
+    press(&mut app, Key::T);
+    settle(&mut app);
+    type_text(&mut app, "Ask about the overage fee");
+    assert_eq!(
+        app.state()
+            .mail()
+            .and_then(|mail| mail.note_editor_text())
+            .as_deref(),
+        Some("Ask about the overage fee")
+    );
+    // Signed out at once, before the editor's second of quiet has kept a draft.
+    sign_out(&mut app);
+    run_until(&mut app, "the sign-in screen", |app| log_in(app).is_some());
+    assert_eq!(
+        device.store_files(EMAIL),
+        [format!("{EMAIL}.notes-backup.json")],
+        "the mail is gone, and the notes' backup stays"
+    );
+    let backup =
+        std::fs::read_to_string(device.stores().join(format!("{EMAIL}.notes-backup.json")))
+            .expect("a backup");
+    let backup: serde_json::Value = serde_json::from_str(&backup).expect("a whole document");
+    let drafts = backup["note_drafts"].as_array().expect("the drafts");
+    assert_eq!(drafts.len(), 1, "{backup}");
+    assert_eq!(drafts[0]["text"], "Ask about the overage fee");
+    drop(app);
+
+    // Signed in again (behind Exo's back, so nothing greets it), the thread opens with its
+    // editor on what was typed.
+    device.sign_in();
+    let mut app = device.launch(abandoned());
+    run_until(&mut app, "the inbox", inbox_shows);
+    settle(&mut app);
+    press(&mut app, Key::Enter);
+    run_until(&mut app, "the note's editor", |app| {
+        app.mail()
+            .and_then(|mail| mail.note_editor_text())
+            .as_deref()
+            == Some("Ask about the overage fee")
+    });
+}
+
+#[test]
 fn signing_out_an_account_off_screen_asks_about_its_send() {
     let device = Device::new("sign-out-parked");
     device.sign_in_as(Some(BEA));

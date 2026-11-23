@@ -4,9 +4,11 @@
 use egui::{CornerRadius, Rect, Sense, Stroke, StrokeKind, Ui, UiBuilder, pos2, vec2};
 use exo_editor::EditorStyle;
 
+use exo_store::NoteFile;
+
 use super::{
     Editing, LABEL, META, Notes, PADDING_X, RADIUS,
-    files::{chips, chips_height},
+    files::{chips, chips_height, pending_file},
 };
 
 /// The padding above the label, and under the text and the foot.
@@ -49,8 +51,27 @@ impl Notes {
         }
     }
 
+    /// The open editor's files as its cards list them: the note's, then those still being added,
+    /// which show dimmed until they're in.
+    fn editor_files(&self) -> Vec<NoteFile> {
+        let Some(open) = &self.editing else {
+            return Vec::new();
+        };
+        open.files
+            .iter()
+            .cloned()
+            .chain(
+                self.adder
+                    .pending_for(&open.id)
+                    .enumerate()
+                    .map(|(at, name)| pending_file(at, name)),
+            )
+            .collect()
+    }
+
     /// How tall the open editor's card is at `width` (0 with none open).
     pub fn editor_height(&mut self, ui: &Ui, width: f32) -> f32 {
+        let listed = self.editor_files();
         let Some(open) = &mut self.editing else {
             return 0.0;
         };
@@ -60,7 +81,7 @@ impl Notes {
             + LABEL.line_height
             + PADDING_Y
             + text
-            + chips_height(&open.files, inner)
+            + chips_height(&listed, inner)
             + PADDING_Y
             + META.line_height
             + PADDING_Y
@@ -73,8 +94,11 @@ impl Notes {
         let palette = exo_ui::palette(&ctx);
         let title = self.title(self.editing.as_ref()?);
         let active = self.active;
+        let listed = self.editor_files();
         self.editor_rect = Some(rect);
         self.painted = true;
+        // Drawn wherever it is, to keep the keyboard, but only in view where its column shows it.
+        self.in_view = rect.intersect(ui.clip_rect()).is_positive();
         let open = self.editing.as_mut()?;
         let painter = ui.painter().clone();
         let snapped = exo_ui::pixel_snap(rect);
@@ -125,13 +149,10 @@ impl Notes {
 
         // The listed files' cards over the foot, each with its remove cross.
         let files = Rect::from_min_max(
-            pos2(
-                left,
-                foot - PADDING_Y - chips_height(&open.files, right - left),
-            ),
+            pos2(left, foot - PADDING_Y - chips_height(&listed, right - left)),
             pos2(right, foot - PADDING_Y),
         );
-        let chip = chips(ui, &open.files, files, ui.clip_rect(), true, &open.id);
+        let chip = chips(ui, &listed, files, ui.clip_rect(), true, &open.id);
 
         let text = Rect::from_min_max(
             pos2(left, rect.top() + PADDING_Y + LABEL.line_height + PADDING_Y),
@@ -177,11 +198,21 @@ impl Notes {
         }
         let wanted = active && open.focused;
         let has = ui.memory(|memory| memory.has_focus(edited.response.id));
+        // A caret that moved, or an edit, is kept in view by what shows the editor: typing past
+        // the fold scrolls with it. The wheel alone leaves the caret where it is, out of view.
+        let caret = (wanted && has).then_some(edited.caret);
+        // Told within the text, so scrolling the editor isn't a move.
+        let within = caret.map(|caret| caret.translate(-text.min.to_vec2()));
+        let moved = within.is_some() && (edited.changed || self.last_caret != within);
         if wanted && !has {
             ui.memory_mut(|memory| memory.request_focus(edited.response.id));
         } else if !wanted && has {
             ui.memory_mut(|memory| memory.surrender_focus(edited.response.id));
         }
+        if moved {
+            self.caret = caret;
+        }
+        self.last_caret = within;
         if let Some(chip) = chip {
             self.chip(chip);
         }

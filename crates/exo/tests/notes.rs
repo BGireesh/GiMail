@@ -1121,8 +1121,8 @@ fn shared_files_ride_along_and_oversized_ones_are_listed() {
     palette(&mut app, "Share Notes by Email");
     assert_eq!(
         app.mail().compose_attachments(),
-        ["agenda.txt"],
-        "the file that fits is attached"
+        ["agenda.txt", "after.txt"],
+        "every file that fits is attached, the one after the big one too"
     );
     let body = app.mail().compose_body().expect("a body");
     assert!(
@@ -1130,8 +1130,8 @@ fn shared_files_ride_along_and_oversized_ones_are_listed() {
         "{body}"
     );
     assert!(
-        body.contains("after.txt"),
-        "and every file after the one that didn't fit: {body}"
+        !body.contains("after.txt"),
+        "only the file that didn't fit is listed: {body}"
     );
     assert!(body.contains("board"), "the image is shown inline: {body}");
     assert_eq!(app.mail().compose_alert(), None);
@@ -1616,4 +1616,487 @@ fn a_save_is_not_held_up_by_the_notes_folder() {
     app.settle();
     let markdown = file_ending(&folder, &format!("-{thread}.md")).expect("written once let go");
     assert!(markdown.contains("Ask about the budget"), "{markdown}");
+}
+
+/// Whether the notes' control `control` was drawn last frame.
+fn drawn(app: &Fixture, control: &Control) -> bool {
+    app.mail()
+        .note_controls()
+        .iter()
+        .any(|(drawn, _)| drawn == control)
+}
+
+#[test]
+fn the_last_note_deleted_in_the_notes_only_view_can_be_restored_there() {
+    let (mut app, thread, subject) = deleted_result("notes-alone-restore");
+    app.key(Key::Enter);
+    assert_eq!(app.mail().notes_alone(), Some(subject.clone()));
+    let id = app.mail().notes().notes[0].id.clone();
+    assert!(
+        !drawn(&app, &Control::DeletedNotes),
+        "nothing deleted, nothing listed"
+    );
+    click_link(&mut app, &id, CardAction::Delete);
+    assert!(app.mail().notes().notes.is_empty(), "its only note is gone");
+    assert_eq!(
+        app.mail().thread().map(|open| open.id()),
+        Some(thread.as_str()),
+        "the view stays"
+    );
+    // The way back is on screen: its deleted notes, as in the notes pane.
+    click_control(&mut app, &Control::DeletedNotes);
+    click_control(&mut app, &Control::RestoreDeleted(id.clone()));
+    assert_eq!(app.mail().toast_text(), Some("Note restored."));
+    assert_eq!(app.mail().notes().notes.len(), 1);
+    assert_eq!(app.mail().notes().notes[0].id, id);
+    assert_eq!(app.mail().notes_alone(), Some(subject));
+}
+
+#[test]
+fn the_notes_only_view_shares_its_notes() {
+    let (mut app, _, _) = deleted_result("notes-alone-share");
+    app.key(Key::Enter);
+    click_control(&mut app, &Control::Share);
+    let body = app.mail().compose_body().expect("a new message");
+    assert!(body.contains("Ask about the overage fee"), "{body}");
+}
+
+#[test]
+fn the_notes_only_view_has_a_way_back() {
+    let (mut app, thread, _) = deleted_result("notes-alone-back");
+    app.key(Key::Enter);
+    assert_eq!(
+        app.mail().thread().map(|open| open.id()),
+        Some(thread.as_str())
+    );
+    click_control(&mut app, &Control::Back);
+    assert!(app.mail().thread().is_none(), "back in the results");
+    assert_eq!(app.mail().inbox().threads().len(), 1, "which still list it");
+}
+
+#[test]
+fn undo_on_the_toast_brings_a_deleted_note_back() {
+    let mut app = start_thread_note("notes-delete-undo");
+    app.type_text("Bring me back");
+    app.press(Key::Enter, COMMAND);
+    let id = app.mail().notes().notes[0].id.clone();
+    click_link(&mut app, &id, CardAction::Delete);
+    assert_eq!(app.mail().toast_text(), Some("Note deleted."));
+    assert!(app.mail().notes().notes.is_empty());
+    app.key(Key::Z);
+    let notes = app.mail().notes();
+    assert_eq!(notes.notes.len(), 1, "Undo restored it");
+    assert_eq!(notes.notes[0].id, id);
+    assert_eq!(notes.notes[0].text, "Bring me back");
+}
+
+/// The open account's database file.
+fn database(app: &Fixture) -> std::path::PathBuf {
+    let files = app.mail().account().note_files();
+    let name = files
+        .file_name()
+        .expect("the notes' folder has a name")
+        .to_string_lossy()
+        .into_owned();
+    let account = name.strip_suffix(".notes").expect("{account}.notes");
+    files.with_file_name(format!("{account}.sqlite3"))
+}
+
+/// Makes every save of a note fail (`true`), by taking the table their versions go in out of
+/// the database's way, or puts it back.
+fn fail_saves(app: &Fixture, fail: bool) {
+    let (from, to) = if fail {
+        ("note_versions", "note_versions_away")
+    } else {
+        ("note_versions_away", "note_versions")
+    };
+    let db = rusqlite::Connection::open(database(app)).expect("opens");
+    db.busy_timeout(std::time::Duration::from_secs(5))
+        .expect("waits its turn");
+    db.execute_batch(&format!("ALTER TABLE {from} RENAME TO {to}"))
+        .expect("renamed");
+}
+
+#[test]
+fn a_save_that_fails_opens_the_editor_again_on_what_was_typed() {
+    let mut app = start_thread_note("notes-save-fails");
+    fail_saves(&app, true);
+    app.type_text("Ask about the budget");
+    app.press(Key::Enter, COMMAND);
+    assert_eq!(app.mail().toast_text(), Some("Couldn't save the note."));
+    assert!(app.mail().notes().notes.is_empty(), "nothing was saved");
+    assert_eq!(
+        app.mail().note_editor_text().as_deref(),
+        Some("Ask about the budget"),
+        "what was typed is back in its editor"
+    );
+    // It has the keyboard, and saves once the store can.
+    app.type_text(" again");
+    fail_saves(&app, false);
+    app.press(Key::Enter, COMMAND);
+    assert_eq!(labels(&app), ["Thread note"]);
+    assert_eq!(
+        app.mail().notes().notes[0].text,
+        "Ask about the budget again"
+    );
+    assert_eq!(app.mail().note_editor_text(), None);
+    assert!(app.mail().notes().drafts.is_empty(), "its draft went");
+}
+
+#[test]
+fn a_share_whose_save_fails_does_not_share_or_wait() {
+    let mut app = start_thread_note("notes-share-save-fails");
+    fail_saves(&app, true);
+    app.type_text("Not saved yet");
+    palette(&mut app, "Share Notes by Email");
+    assert_eq!(app.mail().toast_text(), Some("Couldn't save the note."));
+    assert_eq!(app.mail().compose_body(), None, "nothing is shared");
+    assert_eq!(
+        app.mail().note_editor_text().as_deref(),
+        Some("Not saved yet")
+    );
+    // The share isn't left waiting: once the note saves, sharing again shares it.
+    fail_saves(&app, false);
+    palette(&mut app, "Share Notes by Email");
+    let body = app.mail().compose_body().expect("a new message");
+    assert!(body.contains("Not saved yet"), "{body}");
+}
+
+#[test]
+fn a_backup_that_cant_be_restored_is_said_and_stays_said() {
+    let mut app = start("notes-backup-set-aside");
+    let backup = database(&app).with_extension("notes-backup.json");
+    std::fs::write(&backup, "not a backup {").expect("written");
+    app.relaunch();
+    let toast = app.mail().toast_text().expect("a toast").to_owned();
+    let name = toast
+        .strip_prefix("Your notes backup couldn't be restored. It was kept as ")
+        .and_then(|rest| rest.strip_suffix('.'))
+        .unwrap_or_else(|| panic!("{toast}"));
+    assert!(name.contains(".notes-backup.unrestored-"), "{name}");
+    assert_eq!(
+        std::fs::read_to_string(backup.with_file_name(name)).expect("kept"),
+        "not a backup {"
+    );
+    app.wait(12.0);
+    assert_eq!(
+        app.mail().toast_text(),
+        Some(toast.as_str()),
+        "it doesn't go on its own"
+    );
+}
+
+/// Turns the wheel by `delta` points over `at`.
+fn wheel(app: &mut Fixture, at: egui::Pos2, delta: f32) {
+    app.hover(at);
+    app.harness
+        .input_mut()
+        .events
+        .push(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, delta),
+            phase: egui::TouchPhase::Move,
+            modifiers: Modifiers::NONE,
+        });
+    app.harness.run_steps(2);
+    app.settle();
+}
+
+#[test]
+fn a_file_dropped_with_the_note_editor_scrolled_away_is_not_the_notes() {
+    let mut app = start("notes-drop-out-of-view");
+    open_debrief(&mut app);
+    let thread = app.mail().thread().expect("open").id().to_owned();
+    // A long thread note, so a note on the last message is far down the thread.
+    let lines: String = (0..80)
+        .map(|line| format!("<div>Line {line}</div>"))
+        .collect();
+    app.mail_mut().account_mut().save_note(SaveNote {
+        draft_id: "6b0d3c55-6f43-4a8e-9a39-0c1f6f3f8a11".to_owned(),
+        note_id: None,
+        thread_id: ThreadId::new(thread),
+        message_id: None,
+        html: lines,
+        text: "Lines".to_owned(),
+        files: Vec::new(),
+    });
+    app.settle();
+    app.press(Key::T, Modifiers::SHIFT);
+    app.type_text("Agenda");
+    let editor = app.mail().note_editor_rect().expect("the editor is open");
+    assert!(editor.top() < 800.0, "it opened in view: {editor:?}");
+    // Scrolled back to the thread's top, the editor is far below the window, and no longer has
+    // the keyboard.
+    let column = egui::pos2(editor.center().x, 300.0);
+    wheel(&mut app, column, 20_000.0);
+    app.click(column);
+    let editor = app.mail().note_editor_rect().expect("still open");
+    assert!(editor.top() > 800.0, "out of view: {editor:?}");
+    app.type_text("x");
+    assert_eq!(app.mail().note_editor_text().as_deref(), Some("Agenda"));
+
+    drop_file(&mut app, "agenda.txt", b"1. Budget");
+    assert_eq!(
+        app.mail().note_editor_files(),
+        Some(Vec::new()),
+        "the note the user can't see takes nothing"
+    );
+    assert_eq!(app.mail().note_files_adding(), Vec::<String>::new());
+    // Back in view, with no draft in the thread, a drop is the note's again.
+    wheel(&mut app, column, -20_000.0);
+    let editor = app.mail().note_editor_rect().expect("still open");
+    assert!(editor.top() < 800.0, "in view again: {editor:?}");
+    drop_file(&mut app, "agenda.txt", b"1. Budget");
+    assert_eq!(
+        app.mail().note_editor_files(),
+        Some(vec!["agenda.txt".to_owned()])
+    );
+}
+
+#[test]
+fn a_file_dropped_beside_an_open_reply_is_not_the_notes() {
+    let mut app = start_thread_note("notes-drop-beside-reply");
+    app.type_text("Agenda");
+    // A reply opens with the keyboard, then lets go of it. Both are on screen.
+    app.key(Key::Escape);
+    let saved = app.mail().notes().notes[0].id.clone();
+    app.key(Key::R);
+    app.type_text("On it");
+    click_link(&mut app, &saved, CardAction::Edit);
+    assert_eq!(app.mail().note_editor_text().as_deref(), Some("Agenda"));
+    let editor = app.mail().note_editor_rect().expect("the editor is open");
+    assert!(editor.bottom() > 0.0 && editor.top() < 800.0, "{editor:?}");
+    // The keyboard leaves the note for the thread: neither the note nor the reply has it.
+    app.click(egui::pos2(editor.center().x, 780.0));
+    app.type_text("x");
+    assert_eq!(app.mail().note_editor_text().as_deref(), Some("Agenda"));
+
+    drop_file(&mut app, "agenda.txt", b"1. Budget");
+    assert_eq!(
+        app.mail().note_editor_files(),
+        Some(Vec::new()),
+        "with a reply open in the thread, an unfocused note doesn't take the drop"
+    );
+    assert_eq!(app.mail().note_files_adding(), Vec::<String>::new());
+}
+
+/// Drops the file `name` holding `bytes` on the window, without waiting for it to be kept.
+fn drop_held(app: &mut Fixture, name: &str, bytes: &[u8]) {
+    let folder = app.folder("drops");
+    std::fs::create_dir_all(&folder).expect("a folder");
+    let path = folder.join(name);
+    std::fs::write(&path, bytes).expect("written");
+    app.harness
+        .input_mut()
+        .dropped_files
+        .push(std::sync::Arc::new(Dropped(path)));
+    app.harness.run_steps(2);
+}
+
+#[test]
+fn closing_the_editor_waits_for_a_file_still_being_added() {
+    let mut app = start_thread_note("notes-close-waits-for-file");
+    app.type_text("Agenda");
+    app.mail().hold_note_files(true);
+    drop_held(&mut app, "agenda.txt", b"1. Budget");
+    assert_eq!(
+        app.mail().note_files_adding(),
+        ["agenda.txt"],
+        "listed while it's on its way"
+    );
+    app.press(Key::Enter, COMMAND);
+    assert_eq!(
+        app.mail().note_editor_text().as_deref(),
+        Some("Agenda"),
+        "the editor waits for the file"
+    );
+    assert!(app.mail().notes().notes.is_empty(), "nothing is saved yet");
+    app.mail().hold_note_files(false);
+    app.wait(0.5);
+    assert_eq!(app.mail().note_editor_text(), None, "then it closes");
+    let note = &app.mail().notes().notes[0];
+    assert_eq!(note.text, "Agenda");
+    assert_eq!(
+        note.files
+            .iter()
+            .map(|file| file.name.as_str())
+            .collect::<Vec<_>>(),
+        ["agenda.txt"],
+        "and the save has the file"
+    );
+    assert_eq!(app.mail().toast_text(), None);
+}
+
+#[test]
+fn a_file_still_being_added_when_the_thread_is_left_is_said_to_be_left_off() {
+    let mut app = start_thread_note("notes-leave-before-file");
+    app.type_text("Agenda");
+    app.mail().hold_note_files(true);
+    drop_held(&mut app, "agenda.txt", b"1. Budget");
+    // Escape closes the editor (which waits), then leaves the thread (which doesn't).
+    app.key(Key::Escape);
+    assert_eq!(app.mail().note_editor_text().as_deref(), Some("Agenda"));
+    app.key(Key::Escape);
+    assert!(app.mail().thread().is_none(), "the thread was left");
+    app.mail().hold_note_files(false);
+    app.wait(0.5);
+    assert_eq!(
+        app.mail().toast_text(),
+        Some("agenda.txt wasn't added to the note.")
+    );
+    let kept = std::fs::read_dir(app.mail().account().note_files())
+        .map(|entries| entries.count())
+        .unwrap_or_default();
+    assert_eq!(kept, 0, "its bytes aren't left behind");
+    app.key(Key::Enter);
+    let note = &app.mail().notes().notes[0];
+    assert_eq!(note.text, "Agenda", "the note was saved without it");
+    assert!(note.files.is_empty());
+}
+
+#[test]
+fn a_draft_of_edits_to_a_note_deleted_since_is_dropped() {
+    let mut app = start_thread_note("notes-stale-draft");
+    app.type_text("Keep");
+    app.press(Key::Enter, COMMAND);
+    let (id, thread) = {
+        let note = &app.mail().notes().notes[0];
+        (note.id.clone(), note.thread_id.clone())
+    };
+    // Edits kept as Exo quit, then the note deleted (from another window, say).
+    app.mail_mut()
+        .account_mut()
+        .save_note_draft(exo_store::NoteDraft {
+            id: id.clone(),
+            thread_id: thread,
+            message_id: None,
+            note_id: Some(id.clone()),
+            html: "<div>Keep and more</div>".to_owned(),
+            text: "Keep and more".to_owned(),
+            files: Vec::new(),
+            updated_at: "2026-11-23T10:00:00Z".parse().expect("a time"),
+        });
+    app.mail_mut().account_mut().delete_note(id);
+    app.settle();
+    assert_eq!(app.mail().notes().drafts.len(), 1, "the draft outlived it");
+    app.relaunch();
+    app.key(Key::Enter);
+    assert_eq!(app.mail().note_editor_text(), None, "nothing to open on");
+    assert!(
+        app.mail().notes().drafts.is_empty(),
+        "and it isn't kept forever"
+    );
+}
+
+#[test]
+fn escape_closes_a_history_that_lost_the_keyboard_before_the_thread() {
+    let (mut app, id) = note_with_two_versions("notes-history-escape-unfocused");
+    click_link(&mut app, &id, CardAction::History);
+    assert!(app.mail().note_history().is_some());
+    let rects = app.mail().note_rects();
+    let (_, card) = rects.iter().find(|(note, _)| *note == id).expect("drawn");
+    // A press in the thread, below the history, takes the keyboard from it.
+    app.click(egui::pos2(card.center().x, card.bottom() + 300.0));
+    assert!(app.mail().note_history().is_some(), "still open");
+    app.key(Key::Escape);
+    assert_eq!(app.mail().note_history(), None, "Escape closed it");
+    assert!(app.mail().thread().is_some(), "and not the thread");
+    app.key(Key::Escape);
+    assert!(app.mail().thread().is_none(), "the next one does");
+}
+
+#[test]
+fn typing_past_the_fold_keeps_the_caret_in_view() {
+    let mut app = start_thread_note("notes-caret-in-view");
+    for line in 0..60 {
+        let events = &mut app.harness.input_mut().events;
+        events.push(egui::Event::Text(format!("Line {line}")));
+        events.push(egui::Event::Key {
+            key: Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        });
+        app.harness.run_steps(2);
+    }
+    app.type_text("the end");
+    let text = app.mail().note_editor_text().expect("the editor is open");
+    assert!(
+        text.ends_with("the end") && text.contains("Line 59"),
+        "{text}"
+    );
+    let editor = app.mail().note_editor_rect().expect("the editor is open");
+    assert!(
+        editor.height() > 900.0,
+        "taller than the window: {editor:?}"
+    );
+    // The caret is on the last line, just over the editor's foot.
+    let caret = editor.bottom() - 40.0;
+    assert!(
+        (0.0..=800.0).contains(&caret),
+        "the line being typed is on screen: {editor:?}"
+    );
+}
+
+#[test]
+fn a_printed_thread_has_no_notes() {
+    for placement in [NotesPlacement::Thread, NotesPlacement::Pane] {
+        let mut app = start_with_settings(
+            &format!("notes-print-{placement:?}").to_lowercase(),
+            &move |settings| settings.notes_placement = placement,
+        );
+        open_debrief(&mut app);
+        write_note(&mut app, |app| app.key(Key::T), "Zebra crossing budget");
+        write_note(
+            &mut app,
+            |app| app.press(Key::T, Modifiers::SHIFT),
+            "Quokka on the last email",
+        );
+        assert_eq!(labels(&app), ["Thread note", "Note 1"]);
+        let subject = open_subject(&app);
+        let printed = app.mail().printed().expect("it prints");
+        assert!(printed.contains(&subject), "the thread is there");
+        for absent in ["Zebra", "Quokka", "Thread note", "Note 1", "Notes \u{b7}"] {
+            assert!(
+                !printed.contains(absent),
+                "{placement:?}: {absent} is in the printout"
+            );
+        }
+        // Nor one being written.
+        app.key(Key::T);
+        app.type_text("Okapi unsaved");
+        let printed = app.mail().printed().expect("it prints");
+        assert!(!printed.contains("Okapi"), "{placement:?}");
+    }
+}
+
+#[test]
+fn notes_ask_gmail_for_nothing() {
+    let mut app = start_thread_note("notes-no-gmail");
+    // Opening the thread fetched what it needed. From here, nothing a note does reaches Gmail.
+    app.wait(0.5);
+    let units = app.units();
+    app.type_text("Zebra crossing budget");
+    app.wait(1.5);
+    assert_eq!(app.mail().notes().drafts.len(), 1, "kept as a draft");
+    app.press(Key::Enter, COMMAND);
+    let id = app.mail().notes().notes[0].id.clone();
+    click_link(&mut app, &id, CardAction::Edit);
+    app.type_text(" and more");
+    app.press(Key::Enter, COMMAND);
+    click_link(&mut app, &id, CardAction::Delete);
+    app.key(Key::Z);
+    assert_eq!(app.mail().notes().notes.len(), 1, "deleted and restored");
+    click_link(&mut app, &id, CardAction::History);
+    app.key(Key::Escape);
+    app.key(Key::Escape);
+    search_for(&mut app, "notes:zebra");
+    assert_eq!(app.mail().inbox().threads().len(), 1, "found by its note");
+    app.wait(0.5);
+    assert_eq!(
+        app.units(),
+        units,
+        "a draft, a save, an edit, a delete, a restore, a history and a notes search"
+    );
 }

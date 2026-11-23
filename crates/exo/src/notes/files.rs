@@ -4,13 +4,19 @@
 //! Content-ID; anything else, an image that doesn't decode too, is listed.
 //!
 //! What's added is read, decoded and copied off the UI thread, and goes into the editor it was
-//! added to when done. The images the editors show (the open one's, and each card's) are read
+//! added to when done. Until then the editor lists it as a dimmed card, and an editor asked to
+//! close waits for it, so the save has it. One whose editor has gone by then (the thread was
+//! left) is removed again, and the user is told. The images the editors show (the open one's, and each card's) are read
 //! and decoded off the UI thread too, and kept while the thread is open.
 
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
-    sync::mpsc::{Receiver, Sender, channel},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+        mpsc::{Receiver, Sender, channel},
+    },
 };
 
 use egui::{CornerRadius, Rect, Sense, Ui, pos2, vec2};
@@ -157,40 +163,100 @@ enum Adding {
 
 /// A file kept for editor `editor`, or why it couldn't be.
 struct Added {
+    /// Which of the files being added it is.
+    token: u64,
     editor: String,
     file: Result<NoteFile, Refused>,
+}
+
+/// A file on its way into a note.
+struct Pending {
+    token: u64,
+    editor: String,
+    /// Its name, as its card shows it meanwhile.
+    name: String,
+}
+
+/// What became of the files added since last asked ([`Notes::take_added`]).
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Taken {
+    /// Why the last one that couldn't be kept wasn't.
+    pub refused: Option<Refused>,
+    /// The names of those whose editor had gone, which aren't on its note.
+    pub left_out: Vec<String>,
 }
 
 /// The files being added to notes off the UI thread, which come back to their editors.
 pub(super) struct Adder {
     sender: Sender<Added>,
     receiver: Receiver<Added>,
+    /// Those not back yet, oldest first.
+    pending: Vec<Pending>,
+    next: u64,
+    /// While set, files being added wait before they're kept (tests).
+    held: Arc<AtomicBool>,
 }
 
 impl Default for Adder {
     fn default() -> Self {
         let (sender, receiver) = channel();
-        Self { sender, receiver }
+        Self {
+            sender,
+            receiver,
+            pending: Vec::new(),
+            next: 0,
+            held: Arc::default(),
+        }
     }
 }
 
 impl Adder {
     /// Keeps `adding` in `folder` on another thread, for editor `editor`.
-    fn start(&self, ctx: &egui::Context, folder: &Path, editor: &str, adding: Adding) {
-        let (sender, ctx, folder, editor) = (
+    fn start(&mut self, ctx: &egui::Context, folder: &Path, editor: &str, adding: Adding) {
+        let token = self.next;
+        self.next += 1;
+        let name = match &adding {
+            Adding::Path(path) => path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            Adding::Image(name, _) => name.clone(),
+        };
+        self.pending.push(Pending {
+            token,
+            editor: editor.to_owned(),
+            name,
+        });
+        let (sender, ctx, folder, editor, held) = (
             self.sender.clone(),
             ctx.clone(),
             folder.to_owned(),
             editor.to_owned(),
+            self.held.clone(),
         );
         std::thread::spawn(move || {
+            while held.load(Ordering::SeqCst) {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
             let file = match adding {
                 Adding::Path(path) => add_path(&folder, &path),
                 Adding::Image(name, bytes) => add_image(&folder, &name, &bytes),
             };
-            let _ = sender.send(Added { editor, file });
+            let _ = sender.send(Added {
+                token,
+                editor,
+                file,
+            });
             ctx.request_repaint();
         });
+    }
+
+    /// The names of the files on their way into editor `editor`'s note, oldest first.
+    pub(super) fn pending_for<'a>(&'a self, editor: &'a str) -> impl Iterator<Item = &'a str> {
+        self.pending
+            .iter()
+            .filter(move |pending| pending.editor == editor)
+            .map(|pending| pending.name.as_str())
     }
 }
 
@@ -227,9 +293,30 @@ pub(super) fn chips_height(files: &[NoteFile], width: f32) -> f32 {
     CHIPS_GAP + rows as f32 * (card.y + exo_ui::CARD_MARGIN_BOTTOM)
 }
 
+/// A card for a file still on its way into the note, which [`chips`] draws dimmed and takes no
+/// click on: it has a name and nothing else yet.
+pub(super) fn pending_file(at: usize, name: &str) -> NoteFile {
+    NoteFile {
+        uuid: format!("{PENDING}{at}"),
+        name: name.to_owned(),
+        mime_type: crate::compose::mime_type(name).to_owned(),
+        size: 0,
+        content_id: None,
+    }
+}
+
+/// What starts the uuid of a [`pending_file`], which no kept file's does.
+const PENDING: &str = "pending:";
+
+/// Whether `file` is a [`pending_file`].
+fn is_pending(file: &NoteFile) -> bool {
+    file.uuid.starts_with(PENDING)
+}
+
 /// Draws the cards of `files`' listed files at the top of `area` (which [`chips_height`] sized),
-/// of which `clip` shows. With `removable`, a hovered card shows its remove cross. `salt` tells
-/// one note's cards from another's.
+/// of which `clip` shows. With `removable`, a hovered card shows its remove cross. A file still
+/// being added ([`pending_file`]) is dimmed and takes no click. `salt` tells one note's cards
+/// from another's.
 pub(super) fn chips(
     ui: &Ui,
     files: &[NoteFile],
@@ -252,6 +339,17 @@ pub(super) fn chips(
             card,
         );
         let id = exo_ui::id(&ctx, ("note-file", salt, &file.uuid));
+        if is_pending(file) {
+            // Not there to open or remove yet: its card under a wash of the note's own fill.
+            exo_ui::paint_attachment_card(ui, rect, &file.name, &file.mime_type, 0.0);
+            ui.painter().rect_filled(
+                rect.expand(1.0),
+                CornerRadius::same(4),
+                palette.note_background_default.gamma_multiply(0.6),
+            );
+            ctx.request_repaint_after_secs(0.1);
+            continue;
+        }
         let response = ui
             .interact(rect.intersect(clip), id, Sense::click())
             .on_hover_cursor(egui::CursorIcon::PointingHand);
@@ -383,6 +481,22 @@ impl Notes {
         refused
     }
 
+    /// The names of the files still on their way into the open editor's note, oldest first.
+    pub fn adding(&self) -> Vec<String> {
+        self.editing.as_ref().map_or_else(Vec::new, |open| {
+            self.adder
+                .pending_for(&open.id)
+                .map(str::to_owned)
+                .collect()
+        })
+    }
+
+    /// Holds the files being added (`true`) where they are, before they're kept, until called
+    /// with `false` (tests).
+    pub fn hold_adding(&self, held: bool) {
+        self.adder.held.store(held, Ordering::SeqCst);
+    }
+
     /// Adds a pasted image's `bytes`, named `name`, to the open editor, kept in `folder` off the
     /// UI thread.
     pub fn add_image(
@@ -401,32 +515,44 @@ impl Notes {
         None
     }
 
-    /// Puts the files kept since the last call in the editors they were added to. Returns why
-    /// the last one that couldn't be kept wasn't. A file whose editor closed meanwhile stays out
-    /// of its note.
-    pub fn take_added(&mut self) -> Option<Refused> {
-        let mut refused = None;
+    /// Puts the files kept in `folder` since the last call in the editors they were added to,
+    /// and says what became of the rest: why the last one that couldn't be kept wasn't, and
+    /// which had no editor left to go to. Those are named, and their bytes removed, as nothing
+    /// lists them.
+    pub fn take_added(&mut self, folder: &Path) -> Taken {
+        let mut taken = Taken::default();
         while let Ok(added) = self.adder.receiver.try_recv() {
+            self.adder
+                .pending
+                .retain(|pending| pending.token != added.token);
             match added.file {
-                Ok(file) => self.add(&added.editor, file),
-                Err(why) => refused = Some(why),
+                Ok(file) => {
+                    if let Err(file) = self.add(&added.editor, file) {
+                        if let Err(error) = std::fs::remove_file(folder.join(&file.uuid)) {
+                            log::warn!("removing a file its note never got: {error}");
+                        }
+                        taken.left_out.push(file.name);
+                    }
+                }
+                Err(why) => taken.refused = Some(why),
             }
         }
-        refused
+        taken
     }
 
     /// Puts `file` on editor `editor`'s note, and in its text at the caret when it's an image to
-    /// show.
-    fn add(&mut self, editor: &str, file: NoteFile) {
+    /// show. Hands it back when that editor isn't open any more.
+    fn add(&mut self, editor: &str, file: NoteFile) -> Result<(), NoteFile> {
         let time = self.time;
         let Some(open) = self.editing.as_mut().filter(|open| open.id == editor) else {
-            return;
+            return Err(file);
         };
         if let Some(cid) = &file.content_id {
             open.editor.insert_image(cid);
         }
         open.files.push(file);
         open.changed = Some(time);
+        Ok(())
     }
 
     /// Takes file `uuid` off the open editor's note. Its bytes stay: a version may list it.

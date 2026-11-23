@@ -282,6 +282,11 @@ impl Printout {
     pub fn on(&self, page: Page) -> Conversation {
         (self.lay_out)(page)
     }
+
+    /// The document that prints for `page`, as HTML: everything a printout holds.
+    pub fn html(&self, page: Page) -> String {
+        document::html(&self.on(page))
+    }
 }
 
 /// Prints the open conversation through the macOS print panel over Exo's window (⌘P,

@@ -327,9 +327,9 @@ pub struct Mail {
     /// A note of the open thread to scroll to once its notes are in: a search result's first
     /// matching note.
     notes_reveal: Option<String>,
-    /// A share waiting for the open editor's save, which it closed with: the note's id and the
-    /// version the save makes.
-    notes_share_after: Option<(String, u32)>,
+    /// A share waiting for the save the open editor closed with: the store's answer, then the
+    /// note it saved in the thread's notes.
+    notes_share_after: Option<notes::ShareAfter>,
     /// Whether the notes folder failing to be written has been said this session, which it is
     /// once.
     notes_folder_failed: bool,
@@ -609,6 +609,9 @@ impl Mail {
     /// Stops the account without sending what it holds, for signing out
     /// ([`Account::discard`]).
     pub(crate) fn discard(&mut self) {
+        // What an open note editor holds is kept as its draft, which the notes' backup takes
+        // before the store goes.
+        self.notes_keep();
         self.account.discard();
     }
 
@@ -650,6 +653,24 @@ impl Mail {
     /// What's typed in the open note editor, as plain text (for tests).
     pub fn note_editor_text(&self) -> Option<String> {
         self.notes.editing().map(notes::Editing::text)
+    }
+
+    /// The files of the note being written, by name, as its editor has them (for tests).
+    pub fn note_editor_files(&self) -> Option<Vec<String>> {
+        self.notes
+            .editing()
+            .map(|open| open.files().iter().map(|file| file.name.clone()).collect())
+    }
+
+    /// The names of the files still on their way into the note being written (for tests).
+    pub fn note_files_adding(&self) -> Vec<String> {
+        self.notes.adding()
+    }
+
+    /// Holds the files being added to notes before they're kept, until called with `false` (for
+    /// tests).
+    pub fn hold_note_files(&self, held: bool) {
+        self.notes.hold_adding(held);
     }
 
     /// Where each of the open thread's notes was last painted: its id and its card (for tests).
@@ -1317,6 +1338,11 @@ impl Mail {
         }
     }
 
+    /// The open conversation's printed document, as HTML (for tests).
+    pub fn printed(&self) -> Option<String> {
+        Some(self.printout()?.html(print::Page::default()))
+    }
+
     /// The open conversation as it prints, with the drafts open in it. `None` before it loads.
     fn printout(&self) -> Option<print::Printout> {
         let thread = self.thread.as_ref()?;
@@ -1502,6 +1528,8 @@ impl Mail {
                 self.commands
                     .hint(Hint::new().text(verb).keys(["shift", "M"]));
             }
+            // A note's history open in the thread or its pane closes first, keyboard or not.
+            Action::ThreadBack if self.notes.history_showing() => self.notes.close_history(),
             Action::ThreadBack => {
                 if !self
                     .thread
@@ -1996,18 +2024,25 @@ impl Mail {
                 }
                 Event::Unsent(unsent) => self.sign_out_unsent(unsent),
                 Event::Thread { id, detail } => self.unsubscribe_thread_read(id, detail),
-                Event::Unavailable { id, offline } => self.thread_unavailable(&id, offline),
+                Event::Unavailable { id, offline, noted } => {
+                    self.thread_unavailable(&id, offline, noted);
+                }
                 Event::NoteVersions { id, versions } => self.notes.show_history(&id, versions),
+                Event::NoteSaved { editor, note } => {
+                    let now = self.ctx.input(|input| input.time);
+                    self.notes_saved(&editor, note, now);
+                }
+                Event::NoteSaveFailed(editor) => self.notes_save_failed(&editor),
+                // It stays until dismissed: the file it names is the only copy of those notes.
+                Event::NotesBackupSetAside(name) => self.commands.toast(
+                    Toast::new(format!(
+                        "Your notes backup couldn't be restored. It was kept as {name}."
+                    ))
+                    .kind(ToastKind::Error)
+                    .sticky(),
+                ),
                 // Once for an open editor, however often its draft fails.
                 Event::NoteFailed(id) => {
-                    // A share waiting for this save waits no more.
-                    if self
-                        .notes_share_after
-                        .as_ref()
-                        .is_some_and(|(waiting, _)| *waiting == id)
-                    {
-                        self.notes_share_after = None;
-                    }
                     if self.notes.failed(&id) {
                         self.commands
                             .toast(Toast::new("Couldn't save the note.").kind(ToastKind::Error));

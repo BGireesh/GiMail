@@ -9,8 +9,9 @@ const TEXT: &str =
 impl crate::Mail {
     /// Thread `id`, opened though the store didn't have it, couldn't be fetched: Gmail can't be
     /// reached (`offline`), or doesn't have it. If it's still open, it closes, back to its list,
-    /// under the alert when offline.
-    pub(crate) fn thread_unavailable(&mut self, id: &str, offline: bool) {
+    /// under the alert when offline. One Gmail no longer has that has notes (`noted`) stays
+    /// open instead, for its notes alone.
+    pub(crate) fn thread_unavailable(&mut self, id: &str, offline: bool, noted: bool) {
         // A thread whose mail is gone is shown for its notes, which Gmail can't take away.
         if self.thread.as_ref().is_none_or(|open| open.id() != id)
             || self
@@ -18,6 +19,21 @@ impl crate::Mail {
                 .as_ref()
                 .is_some_and(|alone| alone.id == id)
         {
+            return;
+        }
+        // Gmail has just said it's gone: its notes show alone, as when a search lists it so.
+        if noted && !offline {
+            let subject = self
+                .inbox
+                .threads()
+                .iter()
+                .find(|thread| thread.id == id)
+                .map(|thread| thread.subject.clone())
+                .unwrap_or_default();
+            self.notes_alone = Some(crate::notes::Alone {
+                id: id.to_owned(),
+                subject,
+            });
             return;
         }
         self.close_thread();

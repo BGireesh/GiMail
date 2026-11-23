@@ -6,8 +6,9 @@
 //!
 //! One editor is open at a time. What's typed in it is kept as a draft a second after it last
 //! changed, so a crash loses nothing, and closing the editor saves the note
-//! ([`Notes::close`]). A note's history ([`history`]) opens in place of its card, and only while
-//! no editor is open.
+//! ([`Notes::close`]). What a closed editor held is kept here until the store says it's saved,
+//! and a save that fails opens the editor on it again ([`Notes::save_failed`]). A note's history
+//! ([`history`]) opens in place of its card, and only while no editor is open.
 
 mod card;
 mod editor;
@@ -36,7 +37,7 @@ use jiff::{Timestamp, Zoned};
 pub use self::{
     card::{ADD_HEIGHT, CardAction, add_thread_note, count_chip, count_chip_width},
     editor::EditorAction,
-    files::{MAX_FILE, Refused, add_file, add_path},
+    files::{MAX_FILE, Refused, Taken, add_file, add_path},
     pane::{Item, PaneAction},
 };
 use crate::account::Account;
@@ -78,6 +79,10 @@ pub enum Control {
     DeletedNotes,
     /// A deleted note's `Restore`, by the note's id.
     RestoreDeleted(String),
+    /// `← Back`, over a thread's notes shown alone.
+    Back,
+    /// `Share notes by email`, under a thread's notes shown alone.
+    Share,
 }
 
 /// What a new editor is for.
@@ -117,6 +122,9 @@ pub struct Editing {
     drafted: bool,
     /// Whether saving it has failed and said so.
     failed: bool,
+    /// Whether it was asked to close while files were still being added, and closes once they're
+    /// in ([`Notes::close_when_ready`]).
+    closing: bool,
     /// The editor's left edge on screen when last drawn, which its layout is kept for.
     left: f32,
 }
@@ -151,6 +159,11 @@ impl Editing {
             })
             .cloned()
             .collect()
+    }
+
+    /// The note's files, as the editor has them (for tests).
+    pub fn files(&self) -> &[NoteFile] {
+        &self.files
     }
 
     /// What's typed, as the draft that keeps it.
@@ -224,9 +237,20 @@ pub struct Notes {
     /// Whether the editor has been painted this frame. One that isn't on screen (its pane shows
     /// something else) doesn't hold the keyboard.
     painted: bool,
-    /// Whether the editor was painted last frame: it's on screen, and files dropped on the
-    /// window go to it.
+    /// Whether the editor (or a history) was painted last frame.
     shown: bool,
+    /// Whether any of the editor's card was inside what its column or pane shows, this frame and
+    /// last. One scrolled out of view is still painted, clipped away.
+    in_view: bool,
+    was_in_view: bool,
+    /// The saves sent to the store and not answered yet, each as its editor closed with it. One
+    /// that fails opens its editor again on what it held.
+    pending: Vec<SaveNote>,
+    /// Where the caret is on screen, after an edit or a move this frame: what shows the editor
+    /// scrolls to keep it in view.
+    caret: Option<Rect>,
+    /// Where the caret last was within the editor's text, which a move is told by.
+    last_caret: Option<Rect>,
     /// The images the notes' editors show.
     pictures: files::Pictures,
     /// The files being added to the open editor.
@@ -271,6 +295,11 @@ impl Notes {
             editor_rect: None,
             painted: false,
             shown: false,
+            in_view: false,
+            was_in_view: false,
+            pending: Vec::new(),
+            caret: None,
+            last_caret: None,
             pictures: files::Pictures::default(),
             adder: files::Adder::default(),
             opening: None,
@@ -312,8 +341,9 @@ impl Notes {
 
     /// Takes the open thread's notes from a snapshot of it, and where they show. The first
     /// time since the thread opened, a draft that no editor is open for opens its editor
-    /// again, without the keyboard: it was being typed when Exo last quit.
-    pub fn set(&mut self, notes: Arc<ThreadNotes>, placement: NotesPlacement) {
+    /// again, without the keyboard: it was being typed when Exo last quit. A draft of edits to a
+    /// note deleted since has nothing to open on: its id comes back, to be discarded.
+    pub fn set(&mut self, notes: Arc<ThreadNotes>, placement: NotesPlacement) -> Option<String> {
         if placement != self.placement {
             self.placement = placement;
             self.rects.clear();
@@ -335,18 +365,19 @@ impl Notes {
         }
         // Only what the thread opened with: a draft that turns up later is another window's.
         if std::mem::replace(&mut self.recovered, true) || self.editing.is_some() {
-            return;
+            return None;
         }
-        let Some(draft) = self.notes.drafts.iter().rev().find(|draft| {
+        let draft = self.notes.drafts.iter().rev().find(|draft| {
             Some(&draft.thread_id) == self.thread.as_ref() && !self.closed.contains(&draft.id)
-        }) else {
-            return;
-        };
+        })?;
         let (saved, saved_files) = match &draft.note_id {
             Some(id) => match self.notes.notes.iter().find(|note| note.id == *id) {
                 Some(note) => (note_editor(&note.html).html(), note.files.clone()),
-                // Its note was deleted since.
-                None => return,
+                // Its note was deleted since, so it isn't kept forever.
+                None => {
+                    self.closed.insert(draft.id.clone());
+                    return Some(draft.id.clone());
+                }
             },
             None => (note_editor("").html(), Vec::new()),
         };
@@ -363,8 +394,10 @@ impl Notes {
             changed: None,
             drafted: true,
             failed: false,
+            closing: false,
             left: 0.0,
         });
+        None
     }
 
     /// The thread's notes, as the latest snapshot has them.
@@ -540,6 +573,7 @@ impl Notes {
             changed: None,
             drafted: false,
             failed: false,
+            closing: false,
             left: 0.0,
         });
         self.reveal = true;
@@ -566,11 +600,36 @@ impl Notes {
         std::mem::take(&mut self.reveal)
     }
 
-    /// Closes the open editor. A note that changed is saved, an empty new note is dropped, and
-    /// what was kept of the editor's text goes either way. Returns the note saved, if one was:
-    /// its id and the version the save makes.
-    pub fn close(&mut self, account: &Account) -> Option<(String, u32)> {
+    /// Closes the open editor as ⌘↩, `Save` and Escape do: now, unless files are still being
+    /// added to it. Then it closes once they're in ([`Self::closes_now`]), so the save has them,
+    /// and lists them dimmed meanwhile.
+    pub fn close_when_ready(&mut self, account: &Account) {
+        let Some(open) = &mut self.editing else {
+            return;
+        };
+        if self.adder.pending_for(&open.id).next().is_some() {
+            open.closing = true;
+            open.focused = false;
+            return;
+        }
+        self.close(account);
+    }
+
+    /// Whether the open editor was asked to close and the files it waited for are in.
+    pub fn closes_now(&self) -> bool {
+        self.editing
+            .as_ref()
+            .is_some_and(|open| open.closing && self.adder.pending_for(&open.id).next().is_none())
+    }
+
+    /// Closes the open editor now. A note that changed is saved, an empty new note is dropped,
+    /// and what was kept of the editor's text goes either way. Returns the editor's id when a
+    /// save was sent: [`Self::saved`] or [`Self::save_failed`] takes the store's answer. A file
+    /// still being added is left off the note ([`Self::take_added`] says so).
+    pub fn close(&mut self, account: &Account) -> Option<String> {
         let open = self.editing.take()?;
+        self.caret = None;
+        self.last_caret = None;
         self.closed.insert(open.id.clone());
         // The store's rule: a new note with no text but blanks, and no files, isn't kept. The
         // files are those the save keeps, so an image taken out of the text doesn't count.
@@ -583,17 +642,8 @@ impl Notes {
             }
             return None;
         }
-        let version = open
-            .note_id
-            .as_ref()
-            .and_then(|id| self.notes.notes.iter().find(|note| note.id == *id))
-            .map_or(1, |note| note.version + 1);
-        let saved = (
-            open.note_id.clone().unwrap_or_else(|| open.id.clone()),
-            version,
-        );
         let html = open.editor.html();
-        account.save_note(SaveNote {
+        let save = SaveNote {
             files: open.kept_files(&html),
             html,
             text: open.text(),
@@ -601,8 +651,78 @@ impl Notes {
             note_id: open.note_id,
             thread_id: open.thread_id,
             message_id: open.message_id,
+        };
+        let editor = save.draft_id.clone();
+        // Kept until the store answers: typed text is never only in a request.
+        self.pending.retain(|waiting| waiting.draft_id != editor);
+        self.pending.push(save.clone());
+        account.save_note(save);
+        Some(editor)
+    }
+
+    /// The store saved what editor `editor` closed with, which needn't be kept any longer.
+    pub fn saved(&mut self, editor: &str) {
+        self.pending.retain(|waiting| waiting.draft_id != editor);
+    }
+
+    /// The store couldn't save what editor `editor` closed with. Its editor opens again on what
+    /// it held, with the keyboard, and keeps it as a draft from there. When another editor is
+    /// open by now, or another thread, what it held is kept as its draft at `now` instead, which
+    /// opens its editor the next time its thread opens. Returns whether there was such a save.
+    pub fn save_failed(&mut self, editor: &str, account: &Account, now: Timestamp) -> bool {
+        let Some(at) = self
+            .pending
+            .iter()
+            .position(|waiting| waiting.draft_id == editor)
+        else {
+            return false;
+        };
+        let save = self.pending.remove(at);
+        self.closed.remove(&save.draft_id);
+        if self.editing.is_some() || self.thread.as_ref() != Some(&save.thread_id) {
+            account.save_note_draft(NoteDraft {
+                id: save.draft_id,
+                thread_id: save.thread_id,
+                message_id: save.message_id,
+                note_id: save.note_id,
+                html: save.html,
+                text: save.text,
+                files: save.files,
+                updated_at: now,
+            });
+            return true;
+        }
+        let stored = save
+            .note_id
+            .as_ref()
+            .and_then(|id| self.notes.notes.iter().find(|note| note.id == *id));
+        let (saved, saved_files) = match stored {
+            Some(note) => (note_editor(&note.html).html(), note.files.clone()),
+            None => (note_editor("").html(), Vec::new()),
+        };
+        let mut editor = note_editor(&save.html);
+        editor.set_selection(Selection::caret(editor.document().end()));
+        self.close_history();
+        self.editing = Some(Editing {
+            id: save.draft_id,
+            note_id: save.note_id,
+            thread_id: save.thread_id,
+            message_id: save.message_id,
+            files: save.files,
+            editor,
+            saved,
+            saved_files,
+            focused: true,
+            // Not saved, so it's kept as a draft a second on.
+            changed: Some(self.time),
+            drafted: false,
+            // The failure is said where it's handled.
+            failed: true,
+            closing: false,
+            left: 0.0,
         });
-        Some(saved)
+        self.reveal = true;
+        true
     }
 
     /// Asks for note `id`'s history, which opens when its versions come
@@ -660,6 +780,7 @@ impl Notes {
         self.time = time;
         // The frame starts with the editor not drawn yet.
         self.shown = std::mem::replace(&mut self.painted, false);
+        self.was_in_view = std::mem::replace(&mut self.in_view, false);
         self.controls.clear();
         let Some(open) = &mut self.editing else {
             return;
@@ -684,8 +805,8 @@ impl Notes {
         }
     }
 
-    /// A note, or the editor's draft, by id, couldn't be saved. Returns whether to say so: once
-    /// for an open editor, however often its draft fails.
+    /// A note, or the editor's draft, by id, couldn't be kept, deleted or restored. Returns
+    /// whether to say so: once for an open editor, however often its draft fails.
     pub fn failed(&mut self, id: &str) -> bool {
         match self.editing.as_mut().filter(|open| open.id == id) {
             Some(open) => !std::mem::replace(&mut open.failed, true),
@@ -708,9 +829,22 @@ impl Notes {
         self.painted && self.history.as_ref().is_some_and(|open| open.focused)
     }
 
-    /// Whether an editor is open and was on screen last frame.
-    pub fn on_screen(&self) -> bool {
-        self.editing.is_some() && self.shown
+    /// Whether a history is open where it shows: in the thread, or the pane's Notes tab, drawn
+    /// this frame or the last. Escape closes it before anything else of the thread's.
+    pub fn history_showing(&self) -> bool {
+        self.history.is_some() && (self.painted || self.shown)
+    }
+
+    /// Whether an editor is open and any of its card was in view last frame: inside what its
+    /// column or pane shows, not scrolled out of it or behind another tab.
+    pub fn in_view(&self) -> bool {
+        self.editing.is_some() && self.was_in_view
+    }
+
+    /// Where the caret is on screen, when it moved or the text changed since this was last
+    /// asked: what shows the editor scrolls to keep it in view.
+    pub fn take_caret(&mut self) -> Option<Rect> {
+        self.caret.take()
     }
 
     /// Runs a formatting key in the open editor.
@@ -755,7 +889,9 @@ impl crate::Mail {
         if current {
             let was = self.notes.placement();
             let placement = self.account.settings().notes_placement;
-            self.notes.set(self.snapshot.notes.clone(), placement);
+            if let Some(stale) = self.notes.set(self.snapshot.notes.clone(), placement) {
+                self.account.discard_note_draft(stale);
+            }
             // Notes moving to the pane take an open editor with them: the pane shows it.
             if was != placement
                 && placement == NotesPlacement::Pane
@@ -801,10 +937,10 @@ impl crate::Mail {
         }
     }
 
-    /// Shares the notes once the save that sharing waited for is in the thread's notes, at
-    /// `now` (the frame's time).
+    /// Shares the notes once the note that sharing waited for is in the thread's notes, at `now`
+    /// (the frame's time).
     fn notes_share_pending(&mut self, now: f64) {
-        let Some((id, version)) = self.notes_share_after.clone() else {
+        let Some(ShareAfter::Snapshot(id, version)) = self.notes_share_after.clone() else {
             return;
         };
         if self
@@ -817,6 +953,48 @@ impl crate::Mail {
             self.notes_share_after = None;
             self.notes_share(now);
         }
+    }
+
+    /// The store saved what note editor `editor` closed with: `note` and its version, or nothing
+    /// for a blank new note. A share that waited for it goes ahead, once the thread's notes have
+    /// the note.
+    pub(crate) fn notes_saved(&mut self, editor: &str, note: Option<(String, u32)>, now: f64) {
+        self.notes.saved(editor);
+        if self.notes_share_after != Some(ShareAfter::Save(editor.to_owned())) {
+            return;
+        }
+        match note {
+            Some((id, version)) => {
+                self.notes_share_after = Some(ShareAfter::Snapshot(id, version));
+                self.notes_share_pending(now);
+            }
+            None => {
+                self.notes_share_after = None;
+                self.notes_share(now);
+            }
+        }
+    }
+
+    /// The store couldn't save what note editor `editor` closed with. Nothing typed is lost: its
+    /// editor opens on it again (or it's kept as its draft, when another editor or thread is
+    /// open by now). A share that waited for the save doesn't happen.
+    pub(crate) fn notes_save_failed(&mut self, editor: &str) {
+        if self.notes_share_after == Some(ShareAfter::Save(editor.to_owned())) {
+            self.notes_share_after = None;
+        }
+        let reopened = self
+            .notes
+            .save_failed(editor, &self.account, self.now.timestamp());
+        if reopened
+            && self.notes.editing().is_some_and(|open| open.id == editor)
+            && self.account.settings().notes_placement == NotesPlacement::Pane
+        {
+            self.notes_show_tab(true);
+        }
+        self.commands.toast(
+            exo_commands::Toast::new("Couldn't save the note.")
+                .kind(exo_commands::ToastKind::Error),
+        );
     }
 
     /// Keeps what's typed in the open note editor, as the window closes or the account leaves
@@ -841,13 +1019,12 @@ impl crate::Mail {
                 }
             }
             Action::EditNote(id) => self.notes_start(Target::Existing(id)),
-            Action::SaveNote | Action::CloseNote => {
-                self.notes.close(&self.account);
-            }
+            // Files still being added are waited for, so the save has them.
+            Action::SaveNote | Action::CloseNote => self.notes.close_when_ready(&self.account),
             Action::DeleteNote(id) => {
-                self.account.delete_note(id);
+                self.account.delete_note(id.clone());
                 self.commands
-                    .toast(exo_commands::Toast::new("Note deleted."));
+                    .toast(exo_commands::Toast::new("Note deleted.").undo(Action::RestoreNote(id)));
             }
             Action::FormatNote(command) => self.notes.format(command),
             Action::AttachNoteFile => {
@@ -871,7 +1048,7 @@ impl crate::Mail {
                     return;
                 }
                 match self.notes.close(&self.account) {
-                    Some(saved) => self.notes_share_after = Some(saved),
+                    Some(editor) => self.notes_share_after = Some(ShareAfter::Save(editor)),
                     None => self.notes_share(now),
                 }
             }
@@ -898,16 +1075,48 @@ impl crate::Mail {
         }
     }
 
-    /// Runs each frame, before compose sees the input. Files dropped on the window while a note
-    /// editor is on screen go to the note, keyboard or not, unless a draft has the keyboard. A
-    /// paste of files or an image (a screenshot) into the note editor goes to it too. Images that
-    /// decode go in its text, anything else is listed under it, once they're kept off the UI
-    /// thread. Then the `data:` images pasted into it are kept, the editors' images load, and a
-    /// file card clicked opens its file.
+    /// Whether files dropped on the window now are the open note editor's: it has the keyboard,
+    /// or any of it is in view and the thread has no draft open that the drop could be for. Exo
+    /// isn't told where a drop lands, so an editor scrolled out of view, or one beside a reply
+    /// being written, leaves the drop to compose.
+    fn notes_take_drop(&self) -> bool {
+        if self.notes.editing().is_none() || self.compose.focused().is_some() {
+            return false;
+        }
+        if self.commands.region() == Region::NoteEditor {
+            return true;
+        }
+        let drafts = self.compose.pane().is_some()
+            || self
+                .thread
+                .as_ref()
+                .is_some_and(|thread| self.compose.open_in(thread.id()) > 0);
+        self.notes.in_view() && !drafts
+    }
+
+    /// Runs each frame, before compose sees the input. Files dropped on the window go to the
+    /// open note editor when they're its to take ([`Self::notes_take_drop`]). A paste of files or
+    /// an image (a screenshot) into the note editor goes to it too. Images that decode go in its
+    /// text, anything else is listed under it, once they're kept off the UI thread. An editor
+    /// asked to close meanwhile closes once they're in, and a file whose editor has gone is said
+    /// to be left off. Then the `data:` images pasted into it are kept, the editors' images load,
+    /// and a file card clicked opens its file.
     pub(crate) fn notes_files_frame(&mut self, ctx: &egui::Context) {
         let folder = self.account.note_files();
-        let mut refused = self.notes.take_added();
-        if self.notes.on_screen() && self.compose.focused().is_none() {
+        let Taken {
+            mut refused,
+            left_out,
+        } = self.notes.take_added(&folder);
+        for name in left_out {
+            self.commands.toast(
+                exo_commands::Toast::new(format!("{name} wasn't added to the note."))
+                    .kind(exo_commands::ToastKind::Error),
+            );
+        }
+        if self.notes.closes_now() {
+            self.notes.close(&self.account);
+        }
+        if self.notes_take_drop() {
             // Taken, so compose never sees them.
             let dropped: Vec<std::path::PathBuf> = ctx.input_mut(|input| {
                 input
@@ -1105,9 +1314,19 @@ impl crate::Mail {
             }
             PaneAction::Save => self.run(Action::SaveNote, now),
             PaneAction::Share => self.run(Action::ShareNotes, now),
+            PaneAction::Back => self.run(Action::ThreadBack, now),
             PaneAction::RestoreDeleted(id) => self.run(Action::RestoreNote(id), now),
         }
     }
+}
+
+/// What a share of the notes waits for, having closed the open editor with a save.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum ShareAfter {
+    /// The store's answer to the save editor `.0` closed with.
+    Save(String),
+    /// The thread's notes to have note `.0` at version `.1` or later, which the store saved.
+    Snapshot(String, u32),
 }
 
 /// A thread shown for its notes alone, its mail gone: its id, and the subject its search result

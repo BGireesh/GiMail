@@ -112,8 +112,9 @@ pub struct SearchMarks {
     pub names: Vec<String>,
     /// The thread's notes the query matched, which show under the row.
     pub notes: Vec<exo_store::NoteHit>,
-    /// The thread's mail is gone and only its notes are left: the row says `Email deleted`, and
-    /// opening it shows the notes alone.
+    /// Gmail has said the thread's mail is gone, and only its notes are left: the row says
+    /// `Email deleted`, and opening it shows the notes alone. A noted thread that merely isn't
+    /// stored (until sync fetches it again) is an ordinary row, which opening fetches.
     pub deleted: bool,
 }
 

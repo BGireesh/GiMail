@@ -151,9 +151,10 @@ impl crate::Mail {
     }
 
     /// `Share notes by email`: a new message holding a thread's notes, popped out with no
-    /// recipients. The notes' images go as its inline images. Their files are attached in order
-    /// while the message stays under Gmail's limit, and the one that wouldn't fit and every file
-    /// after it are listed at the body's end instead. Then it's a draft like any other.
+    /// recipients. The notes' images go as its inline images. Their files are attached in order,
+    /// each one that keeps the message under Gmail's limit: one that would take it past is listed
+    /// at the body's end instead, and a smaller one after it that still fits is attached. Then
+    /// it's a draft like any other.
     pub(crate) fn compose_share_popped(&mut self, shared: crate::notes::share::Shared, now: f64) {
         let notes = self.account.note_files();
         let folder = self.account.draft_files().to_owned();
@@ -176,14 +177,13 @@ impl crate::Mail {
         }
         let mut left_out: Vec<&str> = Vec::new();
         for file in &shared.files {
-            let fits = left_out.is_empty()
-                && !files::exceeds_gmail_limit(
-                    attachments
-                        .iter()
-                        .map(|attachment| attachment.size)
-                        .chain([file.size]),
-                    &shared.html,
-                );
+            let fits = !files::exceeds_gmail_limit(
+                attachments
+                    .iter()
+                    .map(|attachment| attachment.size)
+                    .chain([file.size]),
+                &shared.html,
+            );
             if !fits {
                 left_out.push(&file.name);
                 continue;
