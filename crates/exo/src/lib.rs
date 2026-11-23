@@ -330,6 +330,9 @@ pub struct Mail {
     /// A share waiting for the open editor's save, which it closed with: the note's id and the
     /// version the save makes.
     notes_share_after: Option<(String, u32)>,
+    /// Whether the notes folder failing to be written has been said this session, which it is
+    /// once.
+    notes_folder_failed: bool,
     /// The right pane inside its border, as last laid out.
     right_pane: Rect,
     /// Message bodies, rendered off the UI thread.
@@ -409,6 +412,7 @@ impl Mail {
             notes_alone: None,
             notes_reveal: None,
             notes_share_after: None,
+            notes_folder_failed: false,
             right_pane: Rect::NOTHING,
             link_preview: link_preview::LinkPreview::default(),
             attachment_files: attachment_files::AttachmentFiles::new(ctx, account.email()),
@@ -1526,6 +1530,7 @@ impl Mail {
             | Action::CloseNoteHistory
             | Action::RestoreNoteVersion(..)
             | Action::RestoreNote(_) => self.notes_run(action, now),
+            Action::RebuildNotesFolder => self.account.rebuild_notes_folder(),
             Action::ShowNewMessages => {
                 if self
                     .thread
@@ -2007,6 +2012,17 @@ impl Mail {
                         self.commands
                             .toast(Toast::new("Couldn't save the note.").kind(ToastKind::Error));
                     }
+                }
+                // Once a session, unless a rebuild the user asked for failed.
+                Event::NotesFolderFailed { asked } => {
+                    if asked || !std::mem::replace(&mut self.notes_folder_failed, true) {
+                        self.commands.toast(
+                            Toast::new("Couldn't write the notes folder.").kind(ToastKind::Error),
+                        );
+                    }
+                }
+                Event::NotesFolderRebuilt => {
+                    self.commands.toast(Toast::new("Notes folder rebuilt."));
                 }
                 event => self.compose_event(event),
             }
@@ -3318,6 +3334,10 @@ impl Mail {
         );
         self.register_new_split();
         out_of_office::register(&mut self.commands, &self.out_of_office);
+        commands::register_notes_folder(
+            &mut self.commands,
+            self.account.device_settings().notes_folder.is_some(),
+        );
         // After the calendar's, whose T goes to today everywhere but in a thread.
         if self.thread.is_some() && self.compose.pane().is_none() {
             commands::register_notes(

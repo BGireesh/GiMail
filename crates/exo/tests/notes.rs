@@ -1432,3 +1432,150 @@ fn share_with_a_blank_new_note_goes_ahead() {
     let body = app.mail().compose_body().expect("a draft with a body");
     assert!(body.contains("Saved before"), "{body}");
 }
+
+/// Keeps the Markdown copy of the notes in `folder` from now on, as the Notes dialog does.
+fn keep_markdown_in(app: &mut Fixture, folder: &std::path::Path) {
+    let folder = folder.display().to_string();
+    app.mail_mut()
+        .account_mut()
+        .update_device_settings(|device| device.notes_folder = Some(folder));
+    app.settle();
+}
+
+/// The text of the file in `folder` whose name ends with `suffix`, if there's one.
+fn file_ending(folder: &std::path::Path, suffix: &str) -> Option<String> {
+    let entries = std::fs::read_dir(folder).ok()?;
+    entries
+        .filter_map(Result::ok)
+        .find(|entry| entry.file_name().to_string_lossy().ends_with(suffix))
+        .map(|entry| std::fs::read_to_string(entry.path()).expect("readable"))
+}
+
+/// Saves a thread note saying `text` on `thread`, through the account.
+fn save_thread_note(app: &mut Fixture, thread: &str, id: &str, text: &str) {
+    app.mail_mut().account_mut().save_note(SaveNote {
+        draft_id: id.to_owned(),
+        note_id: None,
+        thread_id: ThreadId::new(thread),
+        message_id: None,
+        html: format!("<div>{text}</div>"),
+        text: text.to_owned(),
+        files: Vec::new(),
+    });
+    app.settle();
+}
+
+#[test]
+fn saving_a_note_writes_its_markdown_file_when_the_folder_is_on() {
+    let mut app = start("notes-folder-save");
+    let folder = app.folder("Email Notes");
+    keep_markdown_in(&mut app, &folder);
+    app.key(Key::Enter);
+    let thread = app.mail().thread().expect("open").id().to_owned();
+    write_note(&mut app, |app| app.key(Key::T), "Ask about the budget");
+    let markdown = file_ending(&folder, &format!("-{thread}.md")).expect("the thread's file");
+    assert!(
+        markdown.starts_with(&format!("---\nthread_id: \"{thread}\"\n")),
+        "{markdown}"
+    );
+    assert!(
+        markdown.contains("\n## Thread note\n") && markdown.contains("\nAsk about the budget\n"),
+        "{markdown}"
+    );
+    let history =
+        file_ending(&folder, &format!("-{thread}.history.jsonl")).expect("the thread's history");
+    assert_eq!(history.lines().count(), 1, "{history}");
+    assert!(history.contains("\"change\":\"created\""), "{history}");
+    // Deleting the thread's only note takes its file away, and the history stays.
+    let id = app.mail().notes().notes[0].id.clone();
+    app.mail_mut().account_mut().delete_note(id);
+    app.settle();
+    assert_eq!(file_ending(&folder, &format!("-{thread}.md")), None);
+    let history =
+        file_ending(&folder, &format!("-{thread}.history.jsonl")).expect("the thread's history");
+    assert_eq!(history.lines().count(), 2, "{history}");
+}
+
+#[test]
+fn no_markdown_is_written_while_the_folder_is_off() {
+    let mut app = start("notes-folder-off");
+    app.key(Key::Enter);
+    write_note(&mut app, |app| app.key(Key::T), "Ask about the budget");
+    assert_eq!(app.mail().account().device_settings().notes_folder, None);
+    assert!(
+        !app.folder("Email Notes").exists(),
+        "nothing is written to a folder"
+    );
+}
+
+#[test]
+fn rebuild_writes_every_thread() {
+    let mut app = start("notes-folder-rebuild");
+    app.key(Key::Enter);
+    let first = app.mail().thread().expect("open").id().to_owned();
+    app.key(Key::J);
+    let second = app.mail().thread().expect("open").id().to_owned();
+    assert_ne!(first, second);
+    save_thread_note(
+        &mut app,
+        &first,
+        "6b0d3c55-6f43-4a8e-9a39-0c1f6f3f8a11",
+        "First",
+    );
+    save_thread_note(
+        &mut app,
+        &second,
+        "0f1e2d3c-4b5a-4968-8776-655443322110",
+        "Second",
+    );
+    let folder = app.folder("Email Notes");
+    // Turning the copy on writes every thread's notes.
+    keep_markdown_in(&mut app, &folder);
+    for (thread, text) in [(&first, "First"), (&second, "Second")] {
+        let markdown = file_ending(&folder, &format!("-{thread}.md")).expect("written");
+        assert!(markdown.contains(text), "{markdown}");
+    }
+    std::fs::remove_dir_all(&folder).expect("removed");
+    palette(&mut app, "Rebuild Notes Folder");
+    assert_eq!(app.mail().toast_text(), Some("Notes folder rebuilt."));
+    for (thread, text) in [(&first, "First"), (&second, "Second")] {
+        let markdown = file_ending(&folder, &format!("-{thread}.md")).expect("written again");
+        assert!(markdown.contains(text), "{markdown}");
+    }
+}
+
+#[test]
+fn a_folder_that_cannot_be_written_says_so_once() {
+    let mut app = start("notes-folder-unwritable");
+    let blocker = app.folder("blocker");
+    std::fs::create_dir_all(blocker.parent().expect("a parent")).expect("a folder");
+    std::fs::write(&blocker, b"a file, not a folder").expect("written");
+    keep_markdown_in(&mut app, &blocker.join("Email Notes"));
+    assert_eq!(
+        app.mail().toast_text(),
+        Some("Couldn't write the notes folder.")
+    );
+    app.wait(10.0);
+    assert_eq!(app.mail().toast_text(), None, "the toast is gone");
+    app.key(Key::Enter);
+    write_note(&mut app, |app| app.key(Key::T), "Ask about the budget");
+    assert_eq!(labels(&app), ["Thread note"], "the note is saved");
+    assert_eq!(app.mail().toast_text(), None, "said once a session");
+}
+
+#[test]
+fn a_new_note_whose_only_image_was_taken_out_shares_at_once() {
+    let mut app = start_thread_note("notes-image-only-undone");
+    // A blank, so the editor's text differs from an empty note's.
+    app.type_text(" ");
+    paste_image(&mut app, png());
+    app.press(Key::Z, COMMAND);
+    assert_eq!(app.mail().note_editor_text().as_deref(), Some(" "));
+    palette(&mut app, "Share Notes by Email");
+    assert_eq!(
+        app.mail().toast_text(),
+        Some("No notes to share."),
+        "the share doesn't wait on a note that isn't saved"
+    );
+    assert!(app.mail().notes().notes.is_empty());
+}

@@ -693,3 +693,73 @@ async fn a_backup_that_fails_halfway_restores_nothing() {
         "the backup is set aside"
     );
 }
+
+#[tokio::test]
+async fn every_noted_thread_comes_with_its_notes_and_versions() {
+    let harness = Harness::synced().await;
+    let store = &harness.store;
+    let thread = conversation(&harness).await;
+    let message = &thread.messages[0].id;
+    let kept = saved(store, save(&thread.id, None, "a", None, "Renewal"), at(0)).await;
+    let gone = saved(
+        store,
+        save(&thread.id, Some(message), "b", None, "Old"),
+        at(1),
+    )
+    .await;
+    saved(
+        store,
+        save(&thread.id, None, "a", Some("a"), "Renewal, signed"),
+        at(2),
+    )
+    .await;
+    store.delete_note(&gone.id, at(3)).await.expect("deletes");
+
+    let all = store.all_notes().await.expect("reads");
+    let [(context, notes, versions)] = all.as_slice() else {
+        panic!("one noted thread: {all:?}")
+    };
+    assert_eq!(context.subject, thread.subject);
+    assert_eq!(
+        notes
+            .iter()
+            .map(|note| note.id.as_str())
+            .collect::<Vec<_>>(),
+        ["a", "b"],
+        "deleted notes too, oldest first"
+    );
+    assert!(notes[1].deleted_at.is_some());
+    assert_eq!(
+        versions
+            .iter()
+            .map(|(note, version)| (note.as_str(), version.version, version.change))
+            .collect::<Vec<_>>(),
+        [
+            ("a", 1, NoteChange::Created),
+            ("a", 2, NoteChange::Edited),
+            ("b", 1, NoteChange::Created),
+            ("b", 2, NoteChange::Deleted),
+        ]
+    );
+    assert_eq!(store.note(&kept.id).await.expect("reads").version, 2);
+    assert_eq!(
+        store
+            .noted_thread(&thread.id)
+            .await
+            .expect("reads")
+            .as_ref(),
+        Some(&all[0])
+    );
+    assert_eq!(
+        store
+            .noted_thread(&ThreadId::new("no-notes"))
+            .await
+            .expect("reads"),
+        None
+    );
+    let missing = store
+        .missing_messages(&[message.clone(), "not-a-message".to_owned()])
+        .await
+        .expect("reads");
+    assert_eq!(missing.into_iter().collect::<Vec<_>>(), ["not-a-message"]);
+}

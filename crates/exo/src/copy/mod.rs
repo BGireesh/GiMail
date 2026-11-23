@@ -2,7 +2,7 @@
 //! message's recipients and a thread's subject. ⌘C in the list is in [`listed`].
 
 mod listed;
-mod turndown;
+pub(crate) mod turndown;
 
 use exo_store::{Contact, MessageDetail};
 use jiff::Zoned;

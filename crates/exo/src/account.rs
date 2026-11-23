@@ -297,6 +297,14 @@ pub enum Event {
     },
     /// A note, or its editor's draft, by id, couldn't be saved, deleted, restored or read.
     NoteFailed(String),
+    /// The notes folder couldn't be written, on a rebuild the user `asked` for or as notes
+    /// changed.
+    NotesFolderFailed {
+        /// Whether `Rebuild Notes Folder` asked for it.
+        asked: bool,
+    },
+    /// `Rebuild Notes Folder` wrote every thread's notes.
+    NotesFolderRebuilt,
 }
 
 /// Names one of the account's views ([`Account::view`]).
@@ -442,6 +450,8 @@ enum Request {
     DiscardNoteDraft(String),
     /// Read note `id`'s versions, for [`Event::NoteVersions`].
     NoteVersions(String),
+    /// Write every thread's notes to the notes folder, as `Rebuild Notes Folder` asks.
+    RebuildNotesFolder,
 }
 
 /// One account as one page sees it. It's a handle on the account (its store and the tasks that keep
@@ -1673,6 +1683,12 @@ impl Account {
         self.shared.note_files.clone()
     }
 
+    /// Writes every thread's notes to the notes folder again, off the UI thread.
+    /// [`Event::NotesFolderRebuilt`] or [`Event::NotesFolderFailed`] says how it went.
+    pub fn rebuild_notes_folder(&self) {
+        self.shared.requests.post(Request::RebuildNotesFolder);
+    }
+
     /// Holds draft `id` for sending at `at`, or moves its hold there.
     pub fn send_draft(&self, id: &str, at: jiff::Timestamp) {
         self.shared.requests.post(Request::SendDraft {
@@ -2396,8 +2412,17 @@ impl Worker {
                 }
             }
             Request::SaveDeviceSettings(settings) => {
+                let before = self.store.settings::<DeviceSettings>().await.ok();
                 if let Err(error) = self.store.save_settings(&settings).await {
                     log::error!("saving device settings: {error}");
+                    return;
+                }
+                // A notes folder turned on, or moved, gets every thread's notes. One turned off
+                // keeps what it has.
+                if settings.notes_folder.is_some()
+                    && before.is_none_or(|before| before.notes_folder != settings.notes_folder)
+                {
+                    self.rebuild_notes_folder(false).await;
                 }
             }
             Request::SaveDraft { draft, email } => {
@@ -2420,20 +2445,26 @@ impl Worker {
             }
             Request::SaveNote { save, now } => {
                 let id = save.draft_id.clone();
-                if let Err(error) = self.store.save_note(*save, now).await {
-                    self.note_failed(id, "saving", &error);
+                match self.store.save_note(*save, now).await {
+                    Ok(Some(note)) => self.export_notes(&note.thread_id).await,
+                    Ok(None) => {}
+                    Err(error) => self.note_failed(id, "saving", &error),
                 }
             }
-            Request::DeleteNote { id, now } => {
-                if let Err(error) = self.store.delete_note(&id, now).await {
-                    self.note_failed(id, "deleting", &error);
-                }
-            }
+            Request::DeleteNote { id, now } => match self.store.delete_note(&id, now).await {
+                Ok(()) => match self.store.note(&id).await {
+                    Ok(note) => self.export_notes(&note.thread_id).await,
+                    Err(error) => log::error!("reading note {id} to copy it: {error}"),
+                },
+                Err(error) => self.note_failed(id, "deleting", &error),
+            },
             Request::RestoreNote { id, version, now } => {
-                if let Err(error) = self.store.restore_note(&id, version, now).await {
-                    self.note_failed(id, "restoring", &error);
+                match self.store.restore_note(&id, version, now).await {
+                    Ok(note) => self.export_notes(&note.thread_id).await,
+                    Err(error) => self.note_failed(id, "restoring", &error),
                 }
             }
+            Request::RebuildNotesFolder => self.rebuild_notes_folder(true).await,
             Request::SaveNoteDraft(draft) => {
                 let id = draft.id.clone();
                 if let Err(error) = self.store.save_note_draft(*draft).await {
@@ -2877,6 +2908,104 @@ impl Worker {
         let mut snapshot = Snapshot::clone(&view.snapshot.borrow());
         snapshot.contact = Some((email, threads));
         view.snapshot.send_replace(Arc::new(snapshot));
+        self.repaint.request();
+    }
+
+    /// The notes folder this device keeps a Markdown copy of the notes in, or `None` while it
+    /// keeps none.
+    async fn notes_folder(&self) -> Option<PathBuf> {
+        match self.store.settings::<DeviceSettings>().await {
+            Ok(device) => device
+                .notes_folder
+                .as_deref()
+                .map(crate::notes::markdown::expand),
+            Err(error) => {
+                log::error!("reading the notes folder's setting: {error}");
+                None
+            }
+        }
+    }
+
+    /// Writes `thread`'s notes to the notes folder, when there is one, after they changed.
+    async fn export_notes(&self, thread: &ThreadId) {
+        let Some(folder) = self.notes_folder().await else {
+            return;
+        };
+        let noted = match self.store.noted_thread(thread).await {
+            Ok(Some(noted)) => noted,
+            Ok(None) => return,
+            Err(error) => {
+                log::error!(
+                    "reading thread {}'s notes to copy them: {error}",
+                    thread.as_str()
+                );
+                return;
+            }
+        };
+        self.write_notes_folder(folder, vec![noted], false).await;
+    }
+
+    /// Writes every thread's notes to the notes folder, when there is one. The user `asked`, or
+    /// the folder was just turned on or moved.
+    async fn rebuild_notes_folder(&self, asked: bool) {
+        let Some(folder) = self.notes_folder().await else {
+            return;
+        };
+        match self.store.all_notes().await {
+            Ok(all) => self.write_notes_folder(folder, all, asked).await,
+            Err(error) => {
+                log::error!("reading the notes to copy them: {error}");
+                if asked {
+                    let _ = self.events.send(Event::NotesFolderFailed { asked });
+                    self.repaint.request();
+                }
+            }
+        }
+    }
+
+    /// Writes `threads`' notes to `folder`, off the worker's thread, and says whether that failed
+    /// (or, when the user `asked` for it, that it's done).
+    async fn write_notes_folder(
+        &self,
+        folder: PathBuf,
+        threads: Vec<exo_store::NotedThread>,
+        asked: bool,
+    ) {
+        let messages: Vec<String> = threads
+            .iter()
+            .flat_map(|(_, notes, _)| notes.iter().filter_map(|note| note.message_id.clone()))
+            .collect();
+        let gone = match self.store.missing_messages(&messages).await {
+            Ok(gone) => gone,
+            Err(error) => {
+                log::error!("reading which noted messages are gone: {error}");
+                Default::default()
+            }
+        };
+        let files = self.store.note_files().to_owned();
+        let written = tokio::task::spawn_blocking(move || {
+            // Made even with no notes to write, so a folder that can't be is found out at once.
+            std::fs::create_dir_all(&folder).map_err(|error| (folder.clone(), error))?;
+            for (context, notes, versions) in &threads {
+                crate::notes::markdown::export(&folder, &files, context, notes, versions, &gone)
+                    .map_err(|error| (folder.clone(), error))?;
+            }
+            Ok(())
+        })
+        .await;
+        let event = match written {
+            Ok(Ok(())) if asked => Event::NotesFolderRebuilt,
+            Ok(Ok(())) => return,
+            Ok(Err((folder, error))) => {
+                log::error!("writing the notes folder {}: {error}", folder.display());
+                Event::NotesFolderFailed { asked }
+            }
+            Err(error) => {
+                log::error!("writing the notes folder: {error}");
+                Event::NotesFolderFailed { asked }
+            }
+        };
+        let _ = self.events.send(event);
         self.repaint.request();
     }
 

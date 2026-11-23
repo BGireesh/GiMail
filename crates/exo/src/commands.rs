@@ -287,6 +287,8 @@ pub enum Action {
     RestoreNoteVersion(String, u32),
     /// A deleted note's `Restore`, in the notes pane: bring note `id` back.
     RestoreNote(String),
+    /// `Rebuild Notes Folder`: write every thread's notes to the notes folder again.
+    RebuildNotesFolder,
 }
 
 /// The header's and the back gutter's keys (`ThreadMessagesHeader`, `ActionPane`).
@@ -501,6 +503,17 @@ pub fn register_thread(commands: &mut Commands<Action>, cx: &ThreadContext) {
     );
     if cx.show_images {
         register_show_images(commands);
+    }
+}
+
+/// Registers `Rebuild Notes Folder`, offered while a notes folder is kept (`kept`).
+pub fn register_notes_folder(commands: &mut Commands<Action>, kept: bool) {
+    if kept {
+        commands.add(Command::new(
+            "REBUILD_NOTES_FOLDER",
+            "Rebuild Notes Folder",
+            Action::RebuildNotesFolder,
+        ));
     }
 }
 

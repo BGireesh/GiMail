@@ -90,8 +90,8 @@ pub use model::{
 };
 pub use mutation::Mutation;
 pub use notes::{
-    Note, NoteChange, NoteDraft, NoteFile, NoteParticipant, NoteThread, NoteVersion, SaveNote,
-    ThreadNotes,
+    Note, NoteChange, NoteDraft, NoteFile, NoteParticipant, NoteThread, NoteVersion, NotedThread,
+    SaveNote, ThreadNotes,
 };
 pub use onboarding::{PreviewEmail, PreviewList, SplitPreview};
 pub use out_of_office::{

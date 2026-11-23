@@ -1006,6 +1006,10 @@ pub struct DeviceSettings {
     /// The right pane shows its Notes tab, not its Contact tab, while a thread is open.
     #[serde(skip_serializing_if = "is_false")]
     pub notes_tab: bool,
+    /// The folder a Markdown copy of every thread's notes is kept in (`~` for the home folder),
+    /// or `None` while no copy is kept.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notes_folder: Option<String>,
 }
 
 impl Document for DeviceSettings {

@@ -72,7 +72,7 @@ const MEANINGFUL_WHEN_BLANK: &[&str] = &[
 
 /// A node of the tree. `name` is upper-case, as the DOM has it.
 #[derive(Clone, Debug)]
-pub(super) enum Kind {
+pub(crate) enum Kind {
     Element {
         name: String,
         attributes: Vec<(String, String)>,
@@ -91,7 +91,7 @@ struct Node {
 
 /// A mutable HTML tree. Node 0 is the root, whose children are the converted content.
 #[derive(Clone, Debug)]
-pub(super) struct Tree {
+pub(crate) struct Tree {
     nodes: Vec<Node>,
 }
 
@@ -117,7 +117,7 @@ fn is_ascii_space(c: char) -> bool {
 
 impl Tree {
     /// `html`'s body, under a root.
-    pub(super) fn parse(html: &str) -> Self {
+    pub(crate) fn parse(html: &str) -> Self {
         let dom = parse_document(RcDom::default(), Default::default()).one(html);
         let mut tree = Self {
             nodes: vec![Node {
@@ -156,7 +156,7 @@ impl Tree {
         }
     }
 
-    pub(super) fn push(&mut self, kind: Kind, parent: usize) -> usize {
+    pub(crate) fn push(&mut self, kind: Kind, parent: usize) -> usize {
         let id = self.nodes.len();
         self.nodes.push(Node {
             kind,
@@ -167,18 +167,18 @@ impl Tree {
         id
     }
 
-    pub(super) fn kind(&self, id: usize) -> &Kind {
+    pub(crate) fn kind(&self, id: usize) -> &Kind {
         &self.nodes[id].kind
     }
 
-    pub(super) fn name(&self, id: usize) -> Option<&str> {
+    pub(crate) fn name(&self, id: usize) -> Option<&str> {
         match &self.nodes[id].kind {
             Kind::Element { name, .. } => Some(name),
             _ => None,
         }
     }
 
-    pub(super) fn attribute(&self, id: usize, name: &str) -> Option<&str> {
+    pub(crate) fn attribute(&self, id: usize, name: &str) -> Option<&str> {
         match &self.nodes[id].kind {
             Kind::Element { attributes, .. } => attributes
                 .iter()
@@ -204,7 +204,7 @@ impl Tree {
     }
 
     /// Every element named one of `names`, in document order (`querySelectorAll`).
-    pub(super) fn elements(&self, names: &[&str]) -> Vec<usize> {
+    pub(crate) fn elements(&self, names: &[&str]) -> Vec<usize> {
         let mut found = Vec::new();
         let mut stack = vec![0];
         while let Some(id) = stack.pop() {
@@ -217,7 +217,7 @@ impl Tree {
     }
 
     /// `textContent`.
-    pub(super) fn text(&self, id: usize) -> String {
+    pub(crate) fn text(&self, id: usize) -> String {
         match &self.nodes[id].kind {
             Kind::Text(text) => text.clone(),
             Kind::Other => String::new(),
@@ -237,14 +237,14 @@ impl Tree {
     }
 
     /// Takes `id` and its subtree out of the tree.
-    pub(super) fn detach(&mut self, id: usize) {
+    pub(crate) fn detach(&mut self, id: usize) {
         if let Some(parent) = self.nodes[id].parent.take() {
             self.nodes[parent].children.retain(|child| *child != id);
         }
     }
 
     /// Puts `new` (a detached node) where `old` is.
-    pub(super) fn replace(&mut self, old: usize, new: usize) {
+    pub(crate) fn replace(&mut self, old: usize, new: usize) {
         let Some(parent) = self.nodes[old].parent.take() else {
             return;
         };
@@ -260,7 +260,17 @@ impl Tree {
     }
 
     /// A new element with no parent yet.
-    pub(super) fn create(&mut self, name: &str) -> usize {
+    /// Sets element `id`'s attribute `name` to `value`, adding it when it has none.
+    pub(crate) fn set_attribute(&mut self, id: usize, name: &str, value: &str) {
+        if let Kind::Element { attributes, .. } = &mut self.nodes[id].kind {
+            match attributes.iter_mut().find(|(key, _)| key == name) {
+                Some((_, old)) => *old = value.to_owned(),
+                None => attributes.push((name.to_owned(), value.to_owned())),
+            }
+        }
+    }
+
+    pub(crate) fn create(&mut self, name: &str) -> usize {
         self.nodes.push(Node {
             kind: Kind::Element {
                 name: name.into(),
@@ -273,7 +283,7 @@ impl Tree {
     }
 
     /// Sets an element's text: its children become `text`, with `<br>` for line breaks.
-    pub(super) fn set_inner_text(&mut self, id: usize, text: &str) {
+    pub(crate) fn set_inner_text(&mut self, id: usize, text: &str) {
         for child in std::mem::take(&mut self.nodes[id].children) {
             self.nodes[child].parent = None;
         }
@@ -418,7 +428,7 @@ fn collapse(text: &str) -> String {
 }
 
 /// Converts `tree`'s content to Markdown.
-pub(super) fn turndown(mut tree: Tree) -> String {
+pub(crate) fn turndown(mut tree: Tree) -> String {
     tree.collapse_whitespace();
     let output = process(&tree, 0, false);
     // No line breaks or tabs at the start, nor whitespace at the end.
@@ -588,6 +598,40 @@ fn rule(tree: &Tree, id: usize, content: &str) -> String {
             format!("\n\n    {}\n\n", code.replace('\n', "\n    "))
         }
         "HR" => "\n\n* * *\n\n".into(),
+        // `inlineLink`.
+        "A" if tree
+            .attribute(id, "href")
+            .is_some_and(|href| !href.is_empty()) =>
+        {
+            let href = tree
+                .attribute(id, "href")
+                .unwrap_or_default()
+                .replace('(', "\\(")
+                .replace(')', "\\)");
+            let title = clean_attribute(tree.attribute(id, "title"));
+            let title = if title.is_empty() {
+                String::new()
+            } else {
+                format!(" \"{}\"", title.replace('"', "\\\""))
+            };
+            format!("[{content}]({href}{title})")
+        }
+        // `image`.
+        "IMG" => {
+            let alt = clean_attribute(tree.attribute(id, "alt"));
+            let src = tree.attribute(id, "src").unwrap_or_default();
+            let title = clean_attribute(tree.attribute(id, "title"));
+            let title = if title.is_empty() {
+                String::new()
+            } else {
+                format!(" \"{title}\"")
+            };
+            if src.is_empty() {
+                String::new()
+            } else {
+                format!("![{alt}]({src}{title})")
+            }
+        }
         "EM" | "I" if !content.trim_matches(is_space).is_empty() => format!("_{content}_"),
         "STRONG" | "B" if !content.trim_matches(is_space).is_empty() => format!("**{content}**"),
         "EM" | "I" | "STRONG" | "B" => String::new(),
@@ -602,6 +646,23 @@ fn rule(tree: &Tree, id: usize, content: &str) -> String {
         _ if block => format!("\n\n{content}\n\n"),
         _ => content.to_owned(),
     }
+}
+
+/// `cleanAttribute`: runs of line breaks (and the whitespace after them) become one.
+fn clean_attribute(attribute: Option<&str>) -> String {
+    let mut out = String::new();
+    let mut chars = attribute.unwrap_or_default().chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\n' {
+            while chars.peek().is_some_and(|next| is_space(*next)) {
+                chars.next();
+            }
+            out.push('\n');
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 /// A list item: `*` or its number, and its content indented under it.
@@ -751,6 +812,20 @@ mod tests {
             "1\\. not a list \\*really\\* \\[x\\] under\\_score"
         );
         assert_eq!(md("<p>- dash</p><p># hash</p>"), "\\- dash\n\n\\# hash");
+    }
+
+    #[test]
+    fn links_and_images() {
+        assert_eq!(
+            md("<p>See <a href=\"https://a.co/x_(1)\" title=\"The &quot;x&quot;\">the doc</a></p>"),
+            "See [the doc](https://a.co/x_\\(1\\) \"The \\\"x\\\"\")"
+        );
+        assert_eq!(md("<a>no href</a>"), "no href");
+        assert_eq!(
+            md("<img alt=\"Board\" src=\"files/b.png\">"),
+            "![Board](files/b.png)"
+        );
+        assert_eq!(md("<p>a<img alt=\"x\">b</p>"), "ab");
     }
 
     #[test]

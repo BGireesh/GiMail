@@ -3211,7 +3211,9 @@ impl crate::Mail {
             | Event::Thread { .. }
             | Event::Unavailable { .. }
             | Event::NoteVersions { .. }
-            | Event::NoteFailed(_) => {}
+            | Event::NoteFailed(_)
+            | Event::NotesFolderFailed { .. }
+            | Event::NotesFolderRebuilt => {}
         }
     }
 

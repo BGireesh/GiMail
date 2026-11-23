@@ -77,6 +77,10 @@ pub enum Action {
     SetTheme(Theme),
     /// Change where thread notes show.
     SetNotesPlacement(exo_store::NotesPlacement),
+    /// Keep a Markdown copy of the notes in this folder, or (`None`) keep none.
+    SetNotesFolder(Option<String>),
+    /// The Notes dialog's `Choose…`: pick the notes folder in a folder chooser.
+    ChooseNotesFolder,
     /// Change which remote images bodies load.
     SetImages(RemoteContentBlocking),
     /// Open the shortcuts sheet.
@@ -431,6 +435,24 @@ impl Settings {
             Action::SetTheme(theme) => account.update_settings(|settings| settings.theme = theme),
             Action::SetNotesPlacement(placement) => {
                 account.update_settings(|settings| settings.notes_placement = placement)
+            }
+            // Turning the copy on, or moving it, writes every thread's notes there.
+            Action::SetNotesFolder(folder) => {
+                account.update_device_settings(|device| device.notes_folder = folder)
+            }
+            Action::ChooseNotesFolder => {
+                let current = account
+                    .device_settings()
+                    .notes_folder
+                    .as_deref()
+                    .map_or_else(
+                        || crate::notes::markdown::default_folder(account.email()),
+                        crate::notes::markdown::expand,
+                    );
+                if let Some(folder) = crate::downloads::pick(Some(&current)) {
+                    let folder = folder.display().to_string();
+                    account.update_device_settings(|device| device.notes_folder = Some(folder));
+                }
             }
             // The messages whose images were shown are forgotten as the body sees the change.
             Action::SetImages(images) => {
@@ -1288,11 +1310,18 @@ impl Settings {
             return response.inner.flatten();
         }
         if dialog == Dialog::Notes {
+            let default = crate::notes::markdown::default_folder(account.email())
+                .display()
+                .to_string();
             let response = notes::dialog(
                 ctx,
                 area,
                 self.dialog_open,
                 account.settings().notes_placement,
+                &notes::Folder {
+                    kept: account.device_settings().notes_folder.as_deref(),
+                    default: &default,
+                },
             );
             if response.inner.is_none() {
                 self.dialog = None;

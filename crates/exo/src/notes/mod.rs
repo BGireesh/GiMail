@@ -13,6 +13,7 @@ mod card;
 mod editor;
 mod files;
 mod history;
+pub mod markdown;
 pub mod pane;
 pub mod share;
 
@@ -570,9 +571,11 @@ impl Notes {
     pub fn close(&mut self, account: &Account) -> Option<(String, u32)> {
         let open = self.editing.take()?;
         self.closed.insert(open.id.clone());
-        // The store's rule: a new note with no text but blanks, and no files, isn't kept.
-        let empty =
-            open.note_id.is_none() && open.text().trim().is_empty() && open.files.is_empty();
+        // The store's rule: a new note with no text but blanks, and no files, isn't kept. The
+        // files are those the save keeps, so an image taken out of the text doesn't count.
+        let empty = open.note_id.is_none()
+            && open.text().trim().is_empty()
+            && open.kept_files(&open.editor.html()).is_empty();
         if empty || !open.differs() {
             if open.drafted {
                 account.discard_note_draft(open.id);

@@ -149,8 +149,10 @@ pub enum NoteChange {
 }
 
 impl NoteChange {
-    /// How it's stored.
-    fn as_str(self) -> &'static str {
+    /// How it's stored, and how the notes folder's history names it: `created`, `edited`,
+    /// `deleted` or `restored`.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
         match self {
             Self::Created => "created",
             Self::Edited => "edited",
@@ -198,6 +200,11 @@ pub struct ThreadNotes {
     /// Its editors' unsaved text, oldest first, to open again.
     pub drafts: Vec<NoteDraft>,
 }
+
+/// A noted thread's context, all its notes (deleted ones too), and every version of each, as the
+/// notes folder writes them. Notes come oldest first, and versions by note in that order, oldest
+/// version first, each with its note's id.
+pub type NotedThread = (NoteThread, Vec<Note>, Vec<(String, NoteVersion)>);
 
 /// A note's save, as the editor makes it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -584,8 +591,94 @@ impl Store {
         std::fs::rename(&temporary, path).map_err(io(path))
     }
 
-    /// Note `id` as stored.
-    async fn note(&self, id: &str) -> Result<Note> {
+    /// Every noted thread, as [`noted_thread`](Self::noted_thread) has each, by thread id.
+    ///
+    /// # Errors
+    /// On database failures.
+    pub async fn all_notes(&self) -> Result<Vec<NotedThread>> {
+        let mut db = self.inner.db.clone();
+        let threads: Vec<String> = strings(
+            toasty::sql::query("SELECT DISTINCT thread_id FROM notes ORDER BY thread_id")
+                .exec(&mut db)
+                .await?,
+        )
+        .collect();
+        let mut all = Vec::with_capacity(threads.len());
+        for thread in threads {
+            if let Some(noted) = self.noted_thread(&ThreadId::new(thread)).await? {
+                all.push(noted);
+            }
+        }
+        Ok(all)
+    }
+
+    /// `thread`'s context, all its notes, deleted ones too, and every version of each, or `None`
+    /// when it has no notes. A thread whose context was never saved gets an empty one.
+    ///
+    /// # Errors
+    /// On database failures.
+    pub async fn noted_thread(&self, thread: &ThreadId) -> Result<Option<NotedThread>> {
+        let ThreadNotes {
+            context,
+            notes,
+            deleted,
+            ..
+        } = self.thread_notes(thread).await?;
+        if notes.is_empty() && deleted.is_empty() {
+            return Ok(None);
+        }
+        let context = context.unwrap_or_else(|| NoteThread {
+            thread_id: thread.clone(),
+            subject: String::new(),
+            participants: Vec::new(),
+            first_date: None,
+            last_date: None,
+            messages: 0,
+        });
+        let mut all: Vec<Note> = notes.into_iter().chain(deleted).collect();
+        all.sort_by(|a, b| (a.created_at, a.number, &a.id).cmp(&(b.created_at, b.number, &b.id)));
+        let mut versions = Vec::new();
+        for note in &all {
+            let mut of_note = self.note_versions(&note.id).await?;
+            of_note.reverse();
+            versions.extend(
+                of_note
+                    .into_iter()
+                    .map(|version| (note.id.clone(), version)),
+            );
+        }
+        Ok(Some((context, all, versions)))
+    }
+
+    /// Which of the messages `ids` the store doesn't have: they were deleted, or never came.
+    ///
+    /// # Errors
+    /// On database failures.
+    pub async fn missing_messages(&self, ids: &[String]) -> Result<BTreeSet<String>> {
+        if ids.is_empty() {
+            return Ok(BTreeSet::new());
+        }
+        let mut db = self.inner.db.clone();
+        let list: Vec<&str> = ids.iter().map(String::as_str).collect();
+        let stored: BTreeSet<String> =
+            MessageRow::filter(MessageRow::fields().id().in_list(list.as_slice()))
+                .exec(&mut db)
+                .await?
+                .into_iter()
+                .map(|row| row.id)
+                .collect();
+        Ok(ids
+            .iter()
+            .filter(|id| !stored.contains(*id))
+            .cloned()
+            .collect())
+    }
+
+    /// Note `id` as stored, deleted or not.
+    ///
+    /// # Errors
+    /// [`Error::UnknownNote`] for a note that isn't stored, or on database failures.
+    pub async fn note(&self, id: &str) -> Result<Note> {
         let mut db = self.inner.db.clone();
         let row = NoteRow::filter_by_id(id)
             .first()
