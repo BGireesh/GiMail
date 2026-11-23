@@ -319,9 +319,7 @@ mod tests {
              <a href=\"https://x.example/tw\"><span><img src=\"cid:tw\"></span></a></p>"
         ));
         // Still marketing: a border with a line style, and centered words.
-        assert!(marketing(
-            "<div style=\"border:1px solid #ddd\">Hi</div>"
-        ));
+        assert!(marketing("<div style=\"border:1px solid #ddd\">Hi</div>"));
         assert!(marketing(
             "<span style=\"border:1pt windowtext solid\">Box</span>"
         ));

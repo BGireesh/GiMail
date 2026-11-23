@@ -1861,9 +1861,17 @@ mod tests {
             draft_backdrop(&ctx, true),
             Some(exo_ui::palette(&ctx).background_elevated_default)
         );
-        assert_eq!(draft_backdrop(&ctx, false), None, "the card is already dark");
+        assert_eq!(
+            draft_backdrop(&ctx, false),
+            None,
+            "the card is already dark"
+        );
         exo_ui::set_theme(&ctx, Theme::Snow);
-        assert_eq!(draft_backdrop(&ctx, true), None, "in Snow every card is white");
+        assert_eq!(
+            draft_backdrop(&ctx, true),
+            None,
+            "in Snow every card is white"
+        );
     }
 
     #[test]
