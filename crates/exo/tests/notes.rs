@@ -679,3 +679,137 @@ fn a_hidden_editor_lets_go_of_the_keyboard_and_keeps_its_text() {
     assert_eq!(labels(&app), ["Thread note"]);
     assert_eq!(app.mail().notes().notes[0].text, "Kept");
 }
+
+/// A file dropped on the window.
+#[derive(Debug)]
+struct Dropped(std::path::PathBuf);
+
+impl egui::DroppedFile for Dropped {
+    fn path(&self) -> &std::path::Path {
+        &self.0
+    }
+
+    fn bytes(&self) -> Result<Vec<u8>, String> {
+        std::fs::read(&self.0).map_err(|error| error.to_string())
+    }
+}
+
+/// Drops the file `name` holding `bytes` on the window.
+fn drop_file(app: &mut Fixture, name: &str, bytes: &[u8]) {
+    let folder = app.folder("drops");
+    std::fs::create_dir_all(&folder).expect("a folder");
+    let path = folder.join(name);
+    std::fs::write(&path, bytes).expect("written");
+    app.harness
+        .input_mut()
+        .dropped_files
+        .push(std::sync::Arc::new(Dropped(path)));
+    app.harness.run_steps(2);
+}
+
+/// A small PNG.
+fn png() -> Vec<u8> {
+    let image = image::RgbaImage::from_pixel(40, 30, image::Rgba([40, 90, 200, 255]));
+    let mut png = Vec::new();
+    image::DynamicImage::ImageRgba8(image)
+        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+        .expect("encoded");
+    png
+}
+
+/// Pastes `png` as an image on the clipboard.
+fn paste_image(app: &mut Fixture, png: Vec<u8>) {
+    exo::clipboard::capture_image(&app.harness.ctx, png);
+    app.harness
+        .input_mut()
+        .events
+        .push(egui::Event::Paste(String::new()));
+    app.harness.run_steps(2);
+}
+
+#[test]
+fn a_dropped_file_is_listed_under_the_note_and_saved() {
+    let mut app = start_thread_note("notes-drop-file");
+    app.type_text("Agenda attached");
+    drop_file(&mut app, "agenda.txt", b"1. Budget");
+    assert!(
+        !app.mail().compose_pane_open() && app.mail().compose_body().is_none(),
+        "no draft takes the drop"
+    );
+    app.press(Key::Enter, COMMAND);
+    let note = &app.mail().notes().notes[0];
+    assert_eq!(note.files.len(), 1, "{:?}", note.files);
+    let file = &note.files[0];
+    assert_eq!(
+        (file.name.as_str(), file.content_id.as_deref()),
+        ("agenda.txt", None)
+    );
+    let kept = app.mail().account().note_files().join(&file.uuid);
+    assert_eq!(
+        std::fs::read(kept).expect("its bytes are kept"),
+        b"1. Budget"
+    );
+}
+
+#[test]
+fn a_pasted_image_goes_inline() {
+    let mut app = start_thread_note("notes-paste-image");
+    app.type_text("Whiteboard");
+    paste_image(&mut app, png());
+    app.wait(0.5);
+    assert!(
+        app.mail().compose_body().is_none(),
+        "the paste makes no draft"
+    );
+    app.press(Key::Enter, COMMAND);
+    let note = &app.mail().notes().notes[0];
+    assert!(note.html.contains("src-cid"), "inline: {}", note.html);
+    let [file] = note.files.as_slice() else {
+        panic!("one file: {:?}", note.files)
+    };
+    let cid = file.content_id.as_deref().expect("a content id");
+    assert!(note.html.contains(cid), "the text shows it: {}", note.html);
+    assert_eq!(file.mime_type, "image/png");
+    assert!(
+        app.mail().account().note_files().join(&file.uuid).is_file(),
+        "its bytes are kept"
+    );
+}
+
+#[test]
+fn an_image_taken_out_of_the_text_is_not_saved() {
+    let mut app = start_thread_note("notes-image-undone");
+    app.type_text("Whiteboard");
+    paste_image(&mut app, png());
+    app.press(Key::Z, COMMAND);
+    app.press(Key::Enter, COMMAND);
+    let note = &app.mail().notes().notes[0];
+    assert!(!note.html.contains("src-cid"), "{}", note.html);
+    assert!(note.files.is_empty(), "{:?}", note.files);
+}
+
+#[test]
+fn an_empty_file_is_refused_with_a_toast() {
+    let mut app = start_thread_note("notes-empty-file");
+    drop_file(&mut app, "empty.txt", b"");
+    assert_eq!(app.mail().toast_text(), Some("That file is empty."));
+    app.type_text("Nothing attached");
+    app.press(Key::Enter, COMMAND);
+    assert!(app.mail().notes().notes[0].files.is_empty());
+}
+
+#[test]
+fn command_v_in_a_note_pastes_into_it_not_a_new_draft() {
+    let mut app = start_thread_note("notes-paste-text");
+    exo::clipboard::capture(&app.harness.ctx);
+    app.harness
+        .input_mut()
+        .events
+        .push(egui::Event::Paste("Pasted".to_owned()));
+    app.harness.run_steps(2);
+    assert_eq!(app.mail().note_editor_text().as_deref(), Some("Pasted"));
+    assert!(
+        !app.mail().compose_pane_open() && app.mail().compose_body().is_none(),
+        "no draft is made of the clipboard"
+    );
+}

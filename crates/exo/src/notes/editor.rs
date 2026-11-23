@@ -4,7 +4,10 @@
 use egui::{CornerRadius, Rect, Sense, Stroke, StrokeKind, Ui, UiBuilder, pos2, vec2};
 use exo_editor::EditorStyle;
 
-use super::{Editing, LABEL, META, Notes, PADDING_X, RADIUS};
+use super::{
+    Editing, LABEL, META, Notes, PADDING_X, RADIUS,
+    files::{chips, chips_height},
+};
 
 /// The padding above the label, and under the text and the foot.
 const PADDING_Y: f32 = 8.0;
@@ -51,11 +54,16 @@ impl Notes {
         let Some(open) = &mut self.editing else {
             return 0.0;
         };
-        let text = open
-            .editor
-            .height(ui, width - 2.0 * PADDING_X, open.left)
-            .max(MIN_HEIGHT);
-        PADDING_Y + LABEL.line_height + PADDING_Y + text + PADDING_Y + META.line_height + PADDING_Y
+        let inner = width - 2.0 * PADDING_X;
+        let text = open.editor.height(ui, inner, open.left).max(MIN_HEIGHT);
+        PADDING_Y
+            + LABEL.line_height
+            + PADDING_Y
+            + text
+            + chips_height(&open.files, inner)
+            + PADDING_Y
+            + META.line_height
+            + PADDING_Y
     }
 
     /// Draws the open editor's card in `rect` and handles its typing. Returns what was clicked
@@ -115,9 +123,19 @@ impl Notes {
         );
         let saved = response.clicked();
 
+        // The listed files' cards over the foot, each with its remove cross.
+        let files = Rect::from_min_max(
+            pos2(
+                left,
+                foot - PADDING_Y - chips_height(&open.files, right - left),
+            ),
+            pos2(right, foot - PADDING_Y),
+        );
+        let chip = chips(ui, &open.files, files, ui.clip_rect(), true, &open.id);
+
         let text = Rect::from_min_max(
             pos2(left, rect.top() + PADDING_Y + LABEL.line_height + PADDING_Y),
-            pos2(right, foot - PADDING_Y),
+            pos2(right, files.top()),
         );
         open.left = text.left();
         let mut child = ui.new_child(UiBuilder::new().max_rect(text).id_salt("note-editor"));
@@ -163,6 +181,9 @@ impl Notes {
             ui.memory_mut(|memory| memory.request_focus(edited.response.id));
         } else if !wanted && has {
             ui.memory_mut(|memory| memory.surrender_focus(edited.response.id));
+        }
+        if let Some(chip) = chip {
+            self.chip(chip);
         }
         saved.then_some(EditorAction::Save)
     }

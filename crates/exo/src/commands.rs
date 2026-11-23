@@ -266,6 +266,8 @@ pub enum Action {
     DeleteNote(String),
     /// A formatting key in the note editor.
     FormatNote(exo_editor::FormatCommand),
+    /// `Attach File to Note`: pick files to add to the note being written.
+    AttachNoteFile,
     /// ⌘⇧N, `Show Notes`: switch the right pane between its Notes and Contact tabs.
     ToggleNotesPane,
     /// `Show Notes in Thread`, `Show Notes in Pane Only`: where the notes show.
@@ -561,6 +563,14 @@ pub fn register_notes(commands: &mut Commands<Action>, cx: &NotesContext<'_>) {
         Command::shortcut("SAVE_NOTE", Action::SaveNote)
             .key("mod+enter")
             .regions(NOTE_EDITOR),
+    );
+    commands.add(
+        Command::new(
+            "ATTACH_NOTE_FILE",
+            "Attach File to Note",
+            Action::AttachNoteFile,
+        )
+        .regions(NOTE_EDITOR),
     );
     if !editor.wants_escape() {
         commands.add(

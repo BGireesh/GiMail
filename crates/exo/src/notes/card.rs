@@ -6,7 +6,11 @@ use exo_editor::EditorStyle;
 use exo_store::Note;
 use exo_ui::{Family, Font, TextStyle};
 
-use super::{Body, LABEL, META, Notes, PADDING_X, RADIUS, date, note_editor, where_line};
+use super::{
+    Body, LABEL, META, Notes, PADDING_X, RADIUS, date,
+    files::{chips, chips_height},
+    note_editor, where_line,
+};
 
 /// The bar on a card's left.
 const BAR: f32 = 3.0;
@@ -46,13 +50,17 @@ impl Notes {
         body
     }
 
-    /// How tall `note`'s card is at `width`.
+    /// How tall `note`'s card is at `width`: its text, and the cards of its listed files.
     pub fn card_height(&mut self, ui: &Ui, note: &Note, width: f32) -> f32 {
+        let inner = width - BAR - 2.0 * PADDING_X;
         let body = self.body(note);
-        let text = body
-            .editor
-            .height(ui, width - BAR - 2.0 * PADDING_X, body.left);
-        PADDING_Y + LABEL.line_height + LABEL_GAP + text + PADDING_Y
+        let text = body.editor.height(ui, inner, body.left);
+        PADDING_Y
+            + LABEL.line_height
+            + LABEL_GAP
+            + text
+            + chips_height(&note.files, inner)
+            + PADDING_Y
     }
 
     /// Draws `note`'s card in `rect`, of which `clip` shows, and returns what was clicked on it.
@@ -147,10 +155,22 @@ impl Notes {
             Some((meta_right - left - label).max(0.0)),
         );
 
+        // The listed files' cards at the foot: a click opens one.
+        let files = Rect::from_min_max(
+            pos2(
+                left,
+                rect.bottom() - PADDING_Y - chips_height(&note.files, right - left),
+            ),
+            pos2(right, rect.bottom() - PADDING_Y),
+        );
+        if let Some(chip) = chips(ui, &note.files, files, clip, false, &note.id) {
+            self.chip(chip);
+        }
+
         // The text, which takes no clicks and no keys.
         let text = Rect::from_min_max(
             pos2(left, line + LABEL.line_height + LABEL_GAP),
-            pos2(right, rect.bottom() - PADDING_Y),
+            pos2(right, files.top()),
         );
         let body = self.body(note);
         body.left = text.left();

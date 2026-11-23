@@ -53,9 +53,12 @@ use jiff::{SignedDuration, Timestamp};
 
 pub(crate) use draft::{Field, Open};
 pub(crate) use factory::{Fields, uuid_v4};
+pub(crate) use files::{is_inline_image, mime_type};
 pub(crate) use form::Surface;
 use form::from_menu;
+pub(crate) use images::decode;
 pub(crate) use mailto::fields as mailto_fields;
+pub(crate) use picker::pick_files;
 pub(crate) use reminder::team_domains;
 pub(crate) use snippet_editor::Leaving;
 
@@ -3778,7 +3781,7 @@ impl crate::Mail {
 /// A paste: egui's paste event, which egui-winit makes of ⌘V only while the clipboard has text,
 /// or the ⌘V key itself. The key is all that reaches egui when a paste (from the keyboard, or
 /// from Edit ▸ Paste) holds nothing but an image or files.
-fn is_paste(event: &egui::Event) -> bool {
+pub(crate) fn is_paste(event: &egui::Event) -> bool {
     match event {
         egui::Event::Paste(_) => true,
         egui::Event::Key {
@@ -3792,7 +3795,7 @@ fn is_paste(event: &egui::Event) -> bool {
 }
 
 /// HTML with nothing in it but images (an image copied from a page).
-fn is_just_images(html: &str) -> bool {
+pub(crate) fn is_just_images(html: &str) -> bool {
     if html.len() > 4096 {
         return false;
     }

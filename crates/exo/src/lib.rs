@@ -1424,6 +1424,7 @@ impl Mail {
             | Action::EditNote(_)
             | Action::DeleteNote(_)
             | Action::FormatNote(_)
+            | Action::AttachNoteFile
             | Action::ToggleNotesPane
             | Action::SetNotesPlacement(_)
             | Action::ShareNotes => self.notes_run(action),
@@ -2494,6 +2495,7 @@ impl Mail {
         self.calendar_frame(&ctx);
         self.compose_sync();
         self.compose_tick(now);
+        self.notes_files_frame(&ctx);
         self.compose_paste_events(&ctx);
         self.compose_images(&ctx);
         self.inbox.settle(now);

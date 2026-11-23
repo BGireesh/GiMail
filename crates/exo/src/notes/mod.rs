@@ -10,6 +10,7 @@
 
 mod card;
 mod editor;
+mod files;
 pub mod pane;
 
 use std::{
@@ -27,6 +28,7 @@ use jiff::{Timestamp, Zoned};
 pub use self::{
     card::{ADD_HEIGHT, CardAction, add_thread_note, count_chip, count_chip_width},
     editor::EditorAction,
+    files::{MAX_FILE, Refused, add_file, add_path},
     pane::{Item, PaneAction},
 };
 use crate::account::Account;
@@ -73,12 +75,14 @@ pub struct Editing {
     pub thread_id: ThreadId,
     /// The message the note is on, or `None` for a thread note.
     pub message_id: Option<String>,
-    /// The note's files.
+    /// The note's files: the images its text shows and the files listed under it.
     pub files: Vec<NoteFile>,
     editor: Editor,
     /// The HTML the note has saved (a new note's is the empty editor's), which closing compares
     /// with.
     saved: String,
+    /// The files the note has saved, which closing compares with too.
+    saved_files: Vec<NoteFile>,
     /// Whether the editor has the keyboard.
     focused: bool,
     /// When the content last changed without being kept since.
@@ -103,21 +107,37 @@ impl Editing {
         document.text(Pos::default(), document.end())
     }
 
-    /// Whether what's typed differs from what the note has saved.
+    /// Whether what's typed, or the files, differ from what the note has saved.
     fn differs(&self) -> bool {
-        self.editor.html() != self.saved
+        let html = self.editor.html();
+        html != self.saved || self.kept_files(&html) != self.saved_files
+    }
+
+    /// The files to save with `html`: those listed, and the images it still shows. An image
+    /// deleted from the text is left out (its bytes stay, for the versions that list it).
+    fn kept_files(&self, html: &str) -> Vec<NoteFile> {
+        self.files
+            .iter()
+            .filter(|file| {
+                file.content_id
+                    .as_ref()
+                    .is_none_or(|cid| html.contains(cid.as_str()))
+            })
+            .cloned()
+            .collect()
     }
 
     /// What's typed, as the draft that keeps it.
     fn draft(&self, now: Timestamp) -> NoteDraft {
+        let html = self.editor.html();
         NoteDraft {
             id: self.id.clone(),
             thread_id: self.thread_id.clone(),
             message_id: self.message_id.clone(),
             note_id: self.note_id.clone(),
-            html: self.editor.html(),
+            files: self.kept_files(&html),
+            html,
             text: self.text(),
-            files: self.files.clone(),
             updated_at: now,
         }
     }
@@ -169,6 +189,10 @@ pub struct Notes {
     /// Whether the editor has been painted this frame. One that isn't on screen (its pane shows
     /// something else) doesn't hold the keyboard.
     painted: bool,
+    /// The images the notes' editors show.
+    pictures: files::Pictures,
+    /// A file a card was clicked to open, and whether to preview it.
+    opening: Option<(NoteFile, bool)>,
 }
 
 impl Notes {
@@ -193,6 +217,8 @@ impl Notes {
             time: 0.0,
             editor_rect: None,
             painted: false,
+            pictures: files::Pictures::default(),
+            opening: None,
         }
     }
 
@@ -213,6 +239,8 @@ impl Notes {
         self.timeline.clear();
         self.pane_scroll = 0.0;
         self.flash = None;
+        self.pictures.clear();
+        self.opening = None;
     }
 
     /// Takes the open thread's notes from a snapshot of it, and where they show. The first
@@ -239,13 +267,13 @@ impl Notes {
         }) else {
             return;
         };
-        let saved = match &draft.note_id {
+        let (saved, saved_files) = match &draft.note_id {
             Some(id) => match self.notes.notes.iter().find(|note| note.id == *id) {
-                Some(note) => note_editor(&note.html).html(),
+                Some(note) => (note_editor(&note.html).html(), note.files.clone()),
                 // Its note was deleted since.
                 None => return,
             },
-            None => note_editor("").html(),
+            None => (note_editor("").html(), Vec::new()),
         };
         self.editing = Some(Editing {
             id: draft.id.clone(),
@@ -255,6 +283,7 @@ impl Notes {
             files: draft.files.clone(),
             editor: note_editor(&draft.html),
             saved,
+            saved_files,
             focused: false,
             changed: None,
             drafted: true,
@@ -365,7 +394,11 @@ impl Notes {
             note_id: note.as_ref().map(|note| note.id.clone()),
             thread_id,
             message_id,
-            files: note.map(|note| note.files).unwrap_or_default(),
+            files: note
+                .as_ref()
+                .map(|note| note.files.clone())
+                .unwrap_or_default(),
+            saved_files: note.map(|note| note.files).unwrap_or_default(),
             saved: editor.html(),
             editor,
             focused: true,
@@ -412,14 +445,15 @@ impl Notes {
             }
             return;
         }
+        let html = open.editor.html();
         account.save_note(SaveNote {
-            html: open.editor.html(),
+            files: open.kept_files(&html),
+            html,
             text: open.text(),
             draft_id: open.id,
             note_id: open.note_id,
             thread_id: open.thread_id,
             message_id: open.message_id,
-            files: open.files,
         });
     }
 
@@ -539,6 +573,11 @@ impl crate::Mail {
                     .toast(exo_commands::Toast::new("Note deleted."));
             }
             Action::FormatNote(command) => self.notes.format(command),
+            Action::AttachNoteFile => {
+                let paths = crate::compose::pick_files(&[]);
+                let refused = self.notes.add_paths(&self.account.note_files(), &paths);
+                self.notes_refused(refused);
+            }
             Action::ToggleNotesPane => {
                 let shown = self.account.device_settings().notes_tab;
                 self.notes_show_tab(!shown);
@@ -550,6 +589,89 @@ impl crate::Mail {
                 "Sharing arrives with the next update.",
             )),
             _ => {}
+        }
+    }
+
+    /// Runs each frame, before compose sees the input. Files dropped while the note editor has
+    /// the keyboard, or on it, go to the note, and so does a paste of files or an image (a
+    /// screenshot) into it: images that decode in its text, anything else listed under it. Then
+    /// the `data:` images pasted into it are kept, the editors' images load, and a file card
+    /// clicked opens its file.
+    pub(crate) fn notes_files_frame(&mut self, ctx: &egui::Context) {
+        let folder = self.account.note_files();
+        let mut refused = None;
+        if self.notes.editing().is_some() {
+            let focused = self.commands.region() == Region::NoteEditor;
+            let over = self
+                .notes
+                .editor_rect()
+                .zip(ctx.input(|input| input.pointer.latest_pos()))
+                .is_some_and(|(rect, at)| rect.contains(at));
+            if focused || over {
+                // Taken, so compose never sees them.
+                let dropped: Vec<std::path::PathBuf> = ctx.input_mut(|input| {
+                    input
+                        .raw
+                        .dropped_files
+                        .drain(..)
+                        .map(|file| file.path().to_owned())
+                        .collect()
+                });
+                refused = self.notes.add_paths(&folder, &dropped).or(refused);
+            }
+            if focused && ctx.input(|input| input.events.iter().any(crate::compose::is_paste)) {
+                refused = self.notes_paste(ctx, &folder).or(refused);
+            }
+        }
+        refused = self.notes.take_uploads(&folder).or(refused);
+        self.notes_refused(refused);
+        self.notes.load_images(&folder, ctx);
+        if let Some((file, preview)) = self.notes.take_opening() {
+            self.attachment_files.open_file(
+                folder.join(&file.uuid),
+                &file.uuid,
+                file.name,
+                preview,
+            );
+        }
+    }
+
+    /// A paste into the note editor of files (copied in Finder) or an image puts them in, as
+    /// if dropped, and takes the paste from the editor. Other pastes (text, HTML) are the
+    /// editor's.
+    fn notes_paste(&mut self, ctx: &egui::Context, folder: &std::path::Path) -> Option<Refused> {
+        let files = crate::clipboard::read_files(ctx);
+        let image = if files.is_empty() {
+            crate::clipboard::read_image(ctx)
+        } else {
+            None
+        };
+        if files.is_empty() && image.is_none() {
+            return None;
+        }
+        if crate::clipboard::read_html(ctx)
+            .is_some_and(|html| !crate::compose::is_just_images(&html))
+        {
+            return None;
+        }
+        ctx.input_mut(|input| {
+            input
+                .events
+                .retain(|event| !crate::compose::is_paste(event))
+        });
+        let mut refused = self.notes.add_paths(folder, &files);
+        if let Some(png) = image {
+            // Chromium names the clipboard's image `image.png`.
+            refused = self.notes.add_image(folder, "image.png", &png).or(refused);
+        }
+        refused
+    }
+
+    /// Says why a file wasn't added to a note, if one wasn't.
+    fn notes_refused(&mut self, refused: Option<Refused>) {
+        if let Some(why) = refused {
+            self.commands
+                .toast(exo_commands::Toast::new(why.text()).kind(exo_commands::ToastKind::Error));
         }
     }
 
