@@ -6,8 +6,9 @@
 //! What's added is read, decoded and copied off the UI thread, and goes into the editor it was
 //! added to when done. Until then the editor lists it as a dimmed card, and an editor asked to
 //! close waits for it, so the save has it. One whose editor has gone by then (the thread was
-//! left) is removed again, and the user is told. The images the editors show (the open one's, and each card's) are read
-//! and decoded off the UI thread too, and kept while the thread is open.
+//! left) is removed again, and the user is told. The images the editors show (the open one's,
+//! and each card's) are read and decoded off the UI thread too, and kept while the thread is
+//! open.
 
 use std::{
     collections::HashMap,
