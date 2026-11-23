@@ -18,15 +18,21 @@ use super::{
     note_editor,
 };
 
-/// A version's row: its text 4px in from the row's top and 8px from its left.
+/// A version's row's height.
 const ROW_HEIGHT: f32 = 24.0;
+/// How far a row's text is in from the row's left.
 const ROW_INSET_X: f32 = 8.0;
+/// How far a row's text is down from the row's top.
 const ROW_INSET_Y: f32 = 4.0;
+/// The corners of the selected row's fill.
 const ROW_RADIUS: u8 = 4;
+/// The most rows the list shows; more scroll within it.
+const MAX_ROWS: usize = 8;
 /// The gap between the list and the text, and between the text and the buttons.
 const GAP: f32 = 10.0;
-/// The buttons at the foot.
+/// The foot's button that makes the selected version the note's newest.
 pub const RESTORE: &str = "Restore this version";
+/// The foot's button that closes the history.
 pub const CLOSE: &str = "Close";
 
 /// The open history: the note's versions and the one selected.
@@ -43,6 +49,8 @@ pub struct History {
     left: f32,
     /// Whether the history has the keyboard.
     pub(super) focused: bool,
+    /// How far the list of versions is scrolled.
+    scroll: f32,
 }
 
 impl History {
@@ -56,7 +64,19 @@ impl History {
             editor,
             left: 0.0,
             focused: true,
+            scroll: 0.0,
         }
+    }
+
+    /// How tall the list of versions shows: at most [`MAX_ROWS`] rows.
+    fn list_height(&self) -> f32 {
+        self.versions.len().min(MAX_ROWS) as f32 * ROW_HEIGHT
+    }
+
+    /// Scrolls the list by `by` px, within its ends.
+    fn scroll_by(&mut self, by: f32) {
+        let max = (self.versions.len() as f32 * ROW_HEIGHT - self.list_height()).max(0.0);
+        self.scroll = (self.scroll + by).clamp(0.0, max);
     }
 
     /// Each version's number and what made it, newest first.
@@ -91,6 +111,13 @@ impl History {
     pub(super) fn step(&mut self, delta: isize) {
         let last = self.versions.len().saturating_sub(1);
         self.select(self.selected.saturating_add_signed(delta).min(last));
+        // The selected row stays in view.
+        let top = self.selected as f32 * ROW_HEIGHT;
+        if top < self.scroll {
+            self.scroll = top;
+        } else if top + ROW_HEIGHT > self.scroll + self.list_height() {
+            self.scroll = top + ROW_HEIGHT - self.list_height();
+        }
     }
 }
 
@@ -127,7 +154,7 @@ impl Notes {
         PADDING_Y
             + LABEL.line_height
             + LABEL_GAP
-            + history.versions.len() as f32 * ROW_HEIGHT
+            + history.list_height()
             + GAP
             + text
             + files
@@ -187,18 +214,26 @@ impl Notes {
         // The versions, newest first, the selected one marked as a list marks its selection.
         let history = self.history.as_mut()?;
         let mut chosen = None;
+        let list = Rect::from_min_max(pos2(left, y), pos2(right, y + history.list_height()));
+        let list_clip = list.intersect(clip);
+        let rows = painter.with_clip_rect(list_clip.intersect(painter.clip_rect()));
+        let mut row_top = y - history.scroll;
         for (index, version) in history.versions.iter().enumerate() {
-            let row = Rect::from_min_max(pos2(left, y), pos2(right, y + ROW_HEIGHT));
+            let row = Rect::from_min_max(pos2(left, row_top), pos2(right, row_top + ROW_HEIGHT));
+            row_top += ROW_HEIGHT;
+            if !row.intersects(list_clip) {
+                continue;
+            }
             let response = ui
                 .interact(
-                    row.intersect(clip),
+                    row.intersect(list_clip),
                     exo_ui::id(&ctx, ("note-history-row", &note.id, version.version)),
                     Sense::click(),
                 )
                 .on_hover_cursor(egui::CursorIcon::PointingHand);
             let selected = index == history.selected;
             let ink = if selected {
-                painter.rect_filled(
+                rows.rect_filled(
                     exo_ui::pixel_snap(row),
                     CornerRadius::same(ROW_RADIUS),
                     palette.select_fill_default,
@@ -210,7 +245,7 @@ impl Notes {
                 palette.ink(0.6, 0.65)
             };
             META.paint_line(
-                &painter,
+                &rows,
                 pos2(row.left() + ROW_INSET_X, row.top() + ROW_INSET_Y),
                 &row_text(version, &now),
                 ink,
@@ -219,12 +254,17 @@ impl Notes {
             if response.clicked() {
                 chosen = Some(index);
             }
-            y += ROW_HEIGHT;
+            controls.push((Control::Version(version.version), row.intersect(list_clip)));
         }
         if let Some(index) = chosen {
             history.select(index);
         }
-        y += GAP;
+        // The wheel scrolls the list while the pointer is over it.
+        if ui.rect_contains_pointer(list_clip) {
+            let delta = ui.input(|input| input.smooth_scroll_delta.y);
+            history.scroll_by(-delta);
+        }
+        y = list.bottom() + GAP;
 
         // `Close`, and `Restore this version` before it on any but the newest, at the foot's right.
         let foot = rect.bottom() - PADDING_Y - META.line_height;
@@ -259,12 +299,12 @@ impl Notes {
             };
             style.paint_line(&painter, button.min, text, ink, None);
             if response.clicked() {
-                clicked = Some(match control {
-                    Control::RestoreVersion => {
-                        CardAction::Restore(history.selected().map_or(0, |version| version.version))
-                    }
-                    _ => CardAction::CloseHistory,
-                });
+                clicked = match control {
+                    Control::RestoreVersion => history
+                        .selected()
+                        .map(|version| CardAction::Restore(version.version)),
+                    _ => Some(CardAction::CloseHistory),
+                };
             }
             controls.push((control.clone(), button));
             x = button.left() - 2.0 * LINK_GAP;

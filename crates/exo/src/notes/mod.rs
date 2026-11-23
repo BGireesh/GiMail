@@ -70,6 +70,8 @@ pub enum Control {
     RestoreVersion,
     /// The history's `Close`.
     CloseHistory,
+    /// The history's row for a version, by its number, while it's in view.
+    Version(u32),
     /// `Deleted notes ({n})`, which shows or hides them.
     DeletedNotes,
     /// A deleted note's `Restore`, by the note's id.
@@ -568,7 +570,9 @@ impl Notes {
     pub fn close(&mut self, account: &Account) -> Option<(String, u32)> {
         let open = self.editing.take()?;
         self.closed.insert(open.id.clone());
-        let empty = open.note_id.is_none() && open.editor.is_empty() && open.files.is_empty();
+        // The store's rule: a new note with no text but blanks, and no files, isn't kept.
+        let empty =
+            open.note_id.is_none() && open.text().trim().is_empty() && open.files.is_empty();
         if empty || !open.differs() {
             if open.drafted {
                 account.discard_note_draft(open.id);
@@ -858,7 +862,10 @@ impl crate::Mail {
                 .update_settings(|settings| settings.notes_placement = placement),
             Action::ShareNotes => {
                 // What's on screen is what's shared: an open editor is saved first, and the
-                // notes are shared once its save is in.
+                // notes are shared once its save is in. A share waiting for one makes no other.
+                if self.notes_share_after.is_some() {
+                    return;
+                }
                 match self.notes.close(&self.account) {
                     Some(saved) => self.notes_share_after = Some(saved),
                     None => self.notes_share(now),

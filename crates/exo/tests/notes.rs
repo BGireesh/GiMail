@@ -1208,10 +1208,9 @@ fn history_lists_every_save_newest_first() {
         Some(thread.as_str()),
         "the thread is still open"
     );
-    // T closes it too, for the editor.
+    // T closes it too, for the editor, while the history has the keyboard.
     click_link(&mut app, &id, CardAction::History);
     assert!(app.mail().note_history().is_some());
-    app.click(app.mail().right_pane().center());
     app.key(Key::T);
     assert_eq!(app.mail().note_history(), None, "T closed it");
     assert_eq!(app.mail().note_editor_text().as_deref(), Some(""));
@@ -1361,4 +1360,75 @@ fn share_includes_a_new_note_being_written() {
     assert_eq!(labels(&app), ["Thread note"]);
     let body = app.mail().compose_body().expect("a draft with a body");
     assert!(body.contains("Not saved yet"), "{body}");
+}
+
+#[test]
+fn a_long_history_scrolls_and_keeps_the_selection_in_view() {
+    let mut app = start_thread_note("notes-history-long");
+    app.type_text("Version 1");
+    app.press(Key::Enter, COMMAND);
+    let note = app.mail().notes().notes[0].clone();
+    for n in 2..=11 {
+        app.mail_mut().account_mut().save_note(SaveNote {
+            draft_id: note.id.clone(),
+            note_id: Some(note.id.clone()),
+            thread_id: note.thread_id.clone(),
+            message_id: None,
+            html: format!("<div>Version {n}</div>"),
+            text: format!("Version {n}"),
+            files: Vec::new(),
+        });
+        app.settle();
+    }
+    assert_eq!(app.mail().notes().notes[0].version, 11);
+    click_link(&mut app, &note.id, CardAction::History);
+    assert_eq!(app.mail().note_history().map(|list| list.len()), Some(11));
+    let rows = |app: &Fixture| -> Vec<u32> {
+        app.mail()
+            .note_controls()
+            .iter()
+            .filter_map(|(control, rect)| match control {
+                Control::Version(version) if rect.height() > 0.0 => Some(*version),
+                _ => None,
+            })
+            .collect()
+    };
+    assert_eq!(
+        rows(&app),
+        (4..=11).rev().collect::<Vec<_>>(),
+        "8 rows show"
+    );
+    for _ in 0..10 {
+        app.key(Key::ArrowDown);
+    }
+    let shown = rows(&app);
+    assert!(
+        shown.contains(&1),
+        "the oldest, selected, is in view: {shown:?}"
+    );
+    assert!(!shown.contains(&11), "the newest scrolled away: {shown:?}");
+    assert_eq!(shown.len(), 8);
+}
+
+/// Starts an empty bulleted list in the open note editor: blank text the editor doesn't count as
+/// empty, which the store doesn't keep.
+fn blank_list(app: &mut Fixture) {
+    app.press(Key::Num8, COMMAND_SHIFT);
+    app.type_text("  ");
+}
+
+#[test]
+fn share_with_a_blank_new_note_goes_ahead() {
+    let mut app = start_thread_note("notes-share-blank-new");
+    blank_list(&mut app);
+    palette(&mut app, "Share Notes by Email");
+    assert_eq!(app.mail().note_editor_text(), None, "the editor closed");
+    assert_eq!(app.mail().toast_text(), Some("No notes to share."));
+    write_note(&mut app, |app| app.key(Key::T), "Saved before");
+    app.key(Key::T);
+    blank_list(&mut app);
+    palette(&mut app, "Share Notes by Email");
+    assert_eq!(labels(&app), ["Thread note"], "the blank note isn't kept");
+    let body = app.mail().compose_body().expect("a draft with a body");
+    assert!(body.contains("Saved before"), "{body}");
 }

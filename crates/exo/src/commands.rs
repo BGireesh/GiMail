@@ -576,6 +576,17 @@ pub fn register_notes(commands: &mut Commands<Action>, cx: &NotesContext<'_>) {
         Command::new("SHARE_NOTES", "Share Notes by Email", Action::ShareNotes).regions(NOTES_PANE),
     );
     if cx.history {
+        // The history takes no typed text: T and ⇧T close it for a new note.
+        commands.add(
+            Command::shortcut("HISTORY_NEW_THREAD_NOTE", Action::NewThreadNote)
+                .key("t")
+                .regions(NOTE_EDITOR),
+        );
+        commands.add(
+            Command::shortcut("HISTORY_NEW_MESSAGE_NOTE", Action::NewMessageNote)
+                .key("shift+t")
+                .regions(NOTE_EDITOR),
+        );
         commands.add(
             Command::shortcut("NEWER_NOTE_VERSION", Action::NewerNoteVersion)
                 .key("up")
