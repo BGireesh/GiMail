@@ -574,7 +574,7 @@ mod tests {
         );
         assert_eq!(
             replacements(&suggest("ne", &labels(), &[vec![]])),
-            ["in:newsletters"],
+            ["in:newsletters", "in:done"],
             "a word no operator starts is as it was"
         );
         // `no` names no label here, and with one that it names, `notes:` is still first.
