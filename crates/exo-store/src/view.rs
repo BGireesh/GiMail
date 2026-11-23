@@ -237,6 +237,14 @@ impl ThreadView {
                     message.labels.insert(label.clone());
                 }
             }
+            Step::ModifyMessages { ids, add, remove } => {
+                for message in messages.filter(|m| ids.contains(&m.row.id)) {
+                    message.labels.extend(add.iter().cloned());
+                    for label in remove.iter().filter(|label| !add.contains(label)) {
+                        message.labels.remove(label);
+                    }
+                }
+            }
             Step::Refresh => {}
         }
     }

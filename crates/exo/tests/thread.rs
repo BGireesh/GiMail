@@ -191,6 +191,25 @@ fn trash_with_an_older_message_already_trashed_trashes_the_rest_and_moves_on() {
             .all(|message| message.label_ids.iter().any(|label| label == "TRASH")),
         "every message is in Trash"
     );
+    // Undo brings back what this trashed, and leaves the message trashed before in Trash.
+    app.key(Key::Z);
+    assert!(
+        app.mail().inbox().threads().iter().any(|row| row.id == id),
+        "undo puts it back in the inbox"
+    );
+    app.settle();
+    let undone = app
+        .block_on(async { gmail.gmail().thread(&id, gmail::Format::Minimal, &[]).await })
+        .expect("threads.get");
+    let trashed = |message: &gmail::Message| message.label_ids.iter().any(|label| label == "TRASH");
+    assert!(
+        trashed(&undone.messages[0]),
+        "the older message stays in Trash"
+    );
+    assert!(
+        undone.messages[1..].iter().all(|message| !trashed(message)),
+        "the rest come back out of Trash"
+    );
 }
 
 #[test]

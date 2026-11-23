@@ -444,6 +444,17 @@ impl Inner {
                     .call(Lane::Act, 1, |gmail| gmail.batch_modify_messages(&request))
                     .await
             }
+            Step::ModifyMessages { ids, add, remove } => {
+                let request = BatchModifyMessagesRequest {
+                    ids: ids.clone(),
+                    add_label_ids: add.clone(),
+                    remove_label_ids: remove.clone(),
+                    ..BatchModifyMessagesRequest::default()
+                };
+                self.api
+                    .call(Lane::Act, 1, |gmail| gmail.batch_modify_messages(&request))
+                    .await
+            }
             Step::ModifyThread { add, remove } => {
                 let request = ModifyThreadRequest {
                     add_label_ids: add.clone(),

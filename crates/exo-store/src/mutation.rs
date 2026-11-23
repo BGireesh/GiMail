@@ -85,6 +85,12 @@ pub(crate) enum Intent {
         add: Vec<String>,
         remove: Vec<String>,
     },
+    /// Labels added to and removed from these messages only, not the rest of the thread.
+    ChangeMessages {
+        ids: Vec<String>,
+        add: Vec<String>,
+        remove: Vec<String>,
+    },
     /// A star on the message `message_to_star` picks.
     Star,
     /// Unread on the message `message_to_mark_unread` picks.
@@ -116,6 +122,12 @@ pub(crate) enum Step {
     },
     /// `messages.modify` adding one label to one message (star, mark unread).
     AddToMessage { id: String, label: String },
+    /// `messages.batchModify` adding and removing labels on these messages only.
+    ModifyMessages {
+        ids: Vec<String>,
+        add: Vec<String>,
+        remove: Vec<String>,
+    },
     /// `threads.get` for the thread's rows, which replace the local copy's rows (bodies stay).
     Refresh,
 }
@@ -200,12 +212,29 @@ impl Mutation {
                 .then(|| (read(), refreshed(vec![MarkUnread]))),
             Self::MarkUnread => (!view.has(UNREAD)).then(|| (refreshed(vec![MarkUnread]), read())),
             Self::Trash => (!trash).then(|| {
-                let undo = if spam {
-                    change(&[SPAM], &[TRASH])
+                let back: &[&str] = if spam {
+                    &[SPAM]
                 } else if done {
-                    change(&[], &[TRASH])
+                    &[]
                 } else {
-                    change(&[INBOX], &[TRASH])
+                    &[INBOX]
+                };
+                // With a message already in Trash on its own, undo takes back only the messages
+                // this moved there, and leaves that one in Trash.
+                let undo = if view.has(TRASH) {
+                    let ids = view
+                        .messages
+                        .iter()
+                        .filter(|m| !m.has(TRASH))
+                        .map(|m| m.row.id.clone())
+                        .collect();
+                    Intent::ChangeMessages {
+                        ids,
+                        add: back.iter().map(|label| (*label).to_owned()).collect(),
+                        remove: vec![TRASH.to_owned()],
+                    }
+                } else {
+                    change(back, &[TRASH])
                 };
                 (
                     refreshed(vec![change(&[TRASH], &[SPAM, INBOX])]),
@@ -491,6 +520,15 @@ pub(crate) fn resolve(intents: &[Intent], view: &ThreadView, me: &Identity) -> V
                     });
                 }
             }
+            Intent::ChangeMessages { ids, add, remove } => {
+                if !ids.is_empty() && (!add.is_empty() || !remove.is_empty()) {
+                    steps.push(Step::ModifyMessages {
+                        ids: ids.clone(),
+                        add: add.clone(),
+                        remove: remove.clone(),
+                    });
+                }
+            }
             Intent::Star => steps.extend(view.message_to_star(me).map(|id| Step::AddToMessage {
                 id,
                 label: STARRED.to_owned(),
@@ -748,6 +786,31 @@ mod tests {
                 remove: Vec::new(),
             }
         );
+    }
+
+    #[test]
+    fn undoing_trash_leaves_a_message_trashed_before_in_trash() {
+        let mut partly = thread(vec![
+            message("a", 1, "ann@x.com", &[ME], &["TRASH"]),
+            message("b", 2, ME, &["ann@x.com"], &["SENT"]),
+            message("c", 3, "ann@x.com", &[ME], &["INBOX"]),
+        ]);
+        let (_, inverse) = Mutation::Trash.plan(&partly, &me()).unwrap().unwrap();
+        assert_eq!(
+            resolve(&inverse.intents, &partly, &me())[0],
+            Step::ModifyMessages {
+                ids: strings(&["b", "c"]),
+                add: strings(&["INBOX"]),
+                remove: strings(&["TRASH"]),
+            }
+        );
+        partly.apply(&Step::ModifyMessages {
+            ids: strings(&["b", "c"]),
+            add: strings(&["INBOX"]),
+            remove: strings(&["TRASH"]),
+        });
+        assert!(partly.messages[0].has("TRASH"), "a stays in Trash");
+        assert!(!partly.messages[2].has("TRASH") && partly.messages[2].has("INBOX"));
     }
 
     #[test]
