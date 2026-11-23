@@ -558,3 +558,110 @@ async fn concurrent_saves_leave_one_version_each_and_a_whole_backup() {
         "no temp file is left"
     );
 }
+
+/// The backups beside the store in `dir` that couldn't be restored, with what each holds.
+fn set_aside(dir: &Path) -> Vec<String> {
+    std::fs::read_dir(dir)
+        .expect("lists")
+        .map(|entry| entry.expect("an entry").path())
+        .filter(|path| {
+            path.file_name()
+                .is_some_and(|name| name.to_string_lossy().contains(".notes-backup.unrestored-"))
+        })
+        .map(|path| std::fs::read_to_string(path).expect("reads"))
+        .collect()
+}
+
+/// Signs out of `harness`'s store, leaves `backup` as its notes' backup, and opens it again.
+async fn reopen_with_backup(harness: Harness, backup_text: &str) -> (Harness, Store) {
+    let Harness {
+        server,
+        dir,
+        store,
+        gmail,
+    } = harness;
+    drop(store);
+    Store::delete(dir.path(), ACCOUNT).expect("signs out");
+    std::fs::write(backup(dir.path()), backup_text).expect("writes the backup");
+    let store = support::open(&server, dir.path()).await;
+    (
+        Harness {
+            server,
+            dir,
+            store: store.clone(),
+            gmail,
+        },
+        store,
+    )
+}
+
+#[tokio::test]
+async fn a_backup_that_wont_restore_is_set_aside_not_overwritten() {
+    let harness = Harness::synced().await;
+    let thread = conversation(&harness).await;
+    let (harness, store) = reopen_with_backup(harness, "not a backup {").await;
+    let dir = harness.dir.path();
+    assert!(
+        store
+            .thread_notes(&thread.id)
+            .await
+            .expect("reads")
+            .notes
+            .is_empty(),
+        "the store opens without notes"
+    );
+    assert_eq!(
+        set_aside(dir),
+        ["not a backup {"],
+        "the backup is set aside"
+    );
+
+    saved(&store, save(&thread.id, None, "a", None, "Fresh"), at(0)).await;
+    assert_eq!(
+        set_aside(dir),
+        ["not a backup {"],
+        "a save doesn't overwrite it"
+    );
+    let text = std::fs::read_to_string(backup(dir)).expect("a new backup");
+    let new: serde_json::Value = serde_json::from_str(&text).expect("a whole JSON document");
+    assert_eq!(new["notes"].as_array().expect("the notes").len(), 1);
+}
+
+#[tokio::test]
+async fn a_backup_that_fails_halfway_restores_nothing() {
+    let harness = Harness::synced().await;
+    let thread = conversation(&harness).await;
+    // The thread's context is fine, but the note lacks columns that can't be empty.
+    let broken = serde_json::json!({
+        "note_threads": [{
+            "thread_id": thread.id.as_str(),
+            "subject": "Renewal",
+            "participants": "[]",
+            "first_date": null,
+            "last_date": null,
+            "messages": 1,
+            "next_number": 2,
+        }],
+        "notes": [{ "id": "a", "thread_id": thread.id.as_str() }],
+        "note_versions": [],
+        "note_files": [],
+        "note_drafts": [],
+    })
+    .to_string();
+    let (harness, store) = reopen_with_backup(harness, &broken).await;
+    assert_eq!(
+        store.thread_notes(&thread.id).await.expect("reads"),
+        exo_store::ThreadNotes {
+            context: None,
+            notes: Vec::new(),
+            deleted: Vec::new(),
+            drafts: Vec::new(),
+        },
+        "not even the thread's context is restored"
+    );
+    assert_eq!(
+        set_aside(harness.dir.path()),
+        [broken],
+        "the backup is set aside"
+    );
+}

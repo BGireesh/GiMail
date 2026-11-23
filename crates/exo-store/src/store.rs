@@ -261,8 +261,8 @@ impl Store {
     }
 
     /// Deletes `account`'s store in `dir` (its database, its drafts' attachments and any parts
-    /// kept beside them), as signing out does. Its notes' files and backup stay, so signing in
-    /// again brings the notes back. Close every [`Store`] on it first. A store that isn't there
+    /// kept beside them), as signing out does. Its notes' files and backup (and any backup set
+    /// aside as unrestorable) stay, so signing in again brings the notes back. Close every [`Store`] on it first. A store that isn't there
     /// deletes fine.
     ///
     /// # Errors

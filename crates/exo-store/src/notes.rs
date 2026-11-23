@@ -618,12 +618,20 @@ pub(crate) async fn live_counts(
 /// search index when it's missing some (a Clear Cache makes it again, empty).
 pub(crate) async fn recover(db: &mut Db, backup: &Path) -> Result<()> {
     if query_i64(db, "SELECT count(*) FROM notes").await? == 0 {
-        // A backup that can't be read is logged, not a reason the store can't open.
+        // A backup that can't be restored isn't a reason the store can't open, but it may be the
+        // only copy of the notes, so it's set aside where the next backup can't overwrite it (and
+        // signing out leaves it). A restore is all or nothing, so the tables stay empty.
         if let Err(error) = restore(db, backup).await {
+            let aside = set_aside(backup);
             log::error!(
-                "the notes' backup at {} can't be restored: {error}",
-                backup.display()
+                "the notes' backup at {} can't be restored, and is kept as {}: {error}",
+                backup.display(),
+                aside.display()
             );
+            std::fs::rename(backup, &aside).map_err(|source| Error::Io {
+                path: backup.to_owned(),
+                source,
+            })?;
         }
     }
     let live = query_i64(db, "SELECT count(*) FROM notes WHERE deleted_at IS NULL").await?;
@@ -647,8 +655,19 @@ pub(crate) async fn recover(db: &mut Db, backup: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Copies the backup at `path` into the notes' tables, which are empty. A backup without notes
-/// copies nothing.
+/// Where a backup at `backup` that can't be restored is kept:
+/// `{account}.notes-backup.unrestored-{epoch milliseconds}.json` beside it.
+fn set_aside(backup: &Path) -> PathBuf {
+    let base = backup.with_extension("");
+    PathBuf::from(format!(
+        "{}.unrestored-{}.json",
+        base.display(),
+        Timestamp::now().as_millisecond()
+    ))
+}
+
+/// Copies the backup at `path` into the notes' tables, which are empty, in one transaction, so a
+/// failure leaves them empty. A backup without notes copies nothing.
 async fn restore(db: &mut Db, path: &Path) -> Result<()> {
     let text = match std::fs::read_to_string(path) {
         Ok(text) => text,
@@ -660,15 +679,16 @@ async fn restore(db: &mut Db, path: &Path) -> Result<()> {
             });
         }
     };
-    let backup: serde_json::Value = match serde_json::from_str(&text) {
-        Ok(backup) => backup,
-        Err(error) => {
-            log::error!("the notes' backup isn't JSON: {error}");
-            return Ok(());
-        }
+    let unreadable = |error: String| Error::Io {
+        path: path.to_owned(),
+        source: std::io::Error::new(std::io::ErrorKind::InvalidData, error),
     };
-    if backup["notes"].as_array().is_none_or(Vec::is_empty) {
-        return Ok(());
+    let backup: serde_json::Value =
+        serde_json::from_str(&text).map_err(|error| unreadable(error.to_string()))?;
+    match backup["notes"].as_array() {
+        None => return Err(unreadable("it has no notes table".to_owned())),
+        Some(notes) if notes.is_empty() => return Ok(()),
+        Some(_) => {}
     }
     let mut tx = db.transaction().await?;
     for table in TABLES {
