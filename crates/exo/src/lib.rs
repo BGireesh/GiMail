@@ -1502,7 +1502,7 @@ impl Mail {
             | Action::AttachNoteFile
             | Action::ToggleNotesPane
             | Action::SetNotesPlacement(_)
-            | Action::ShareNotes => self.notes_run(action),
+            | Action::ShareNotes => self.notes_run(action, now),
             Action::ShowNewMessages => {
                 if self
                     .thread

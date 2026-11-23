@@ -12,6 +12,7 @@ mod card;
 mod editor;
 mod files;
 pub mod pane;
+pub mod share;
 
 use std::{
     collections::{HashMap, HashSet},
@@ -396,12 +397,46 @@ impl Notes {
 
     /// What `note` is on, as its card says.
     pub fn where_text(&self, note: &Note) -> String {
-        let on = match note.message_id.as_ref().map(|id| self.senders.get(id)) {
+        where_line(note, self.on_message(note), &self.now)
+    }
+
+    /// Whose `note`'s message is, or that it's gone, by the thread's messages.
+    fn on_message(&self, note: &Note) -> OnMessage {
+        match note.message_id.as_ref().map(|id| self.senders.get(id)) {
             Some(Some((_, true))) => OnMessage::Mine,
             Some(None) if self.senders_known => OnMessage::Deleted,
             _ => OnMessage::Theirs,
-        };
-        where_line(note, on, &self.now)
+        }
+    }
+
+    /// The message sharing the open thread's live notes, which go by `subject` (the one the view
+    /// shows) when they kept nothing of the thread, for the user `me`. `None` when there are no
+    /// notes to share.
+    pub fn share(&self, subject: &str, me: &str) -> Option<share::Shared> {
+        let thread_id = self.thread.clone()?;
+        if self.notes.notes.is_empty() {
+            return None;
+        }
+        let context = self
+            .notes
+            .context
+            .clone()
+            .filter(|context| !context.subject.trim().is_empty())
+            .unwrap_or_else(|| exo_store::NoteThread {
+                thread_id,
+                subject: subject.to_owned(),
+                participants: Vec::new(),
+                first_date: None,
+                last_date: None,
+                messages: 0,
+            });
+        Some(share::build(
+            &context,
+            &self.notes.notes,
+            me,
+            |note| self.on_message(note),
+            &self.now,
+        ))
     }
 
     /// Says whether the editor may hold the keyboard this frame: the note editor's region is the
@@ -649,7 +684,7 @@ impl crate::Mail {
     }
 
     /// Carries out a note command.
-    pub(crate) fn notes_run(&mut self, action: crate::commands::Action) {
+    pub(crate) fn notes_run(&mut self, action: crate::commands::Action, now: f64) {
         use crate::commands::Action;
         match action {
             Action::NewThreadNote => self.notes_start(Target::Thread),
@@ -685,9 +720,7 @@ impl crate::Mail {
             Action::SetNotesPlacement(placement) => self
                 .account
                 .update_settings(|settings| settings.notes_placement = placement),
-            Action::ShareNotes => self.commands.toast(exo_commands::Toast::new(
-                "Sharing arrives with the next update.",
-            )),
+            Action::ShareNotes => self.notes_share(now),
             _ => {}
         }
     }
@@ -764,6 +797,29 @@ impl crate::Mail {
                 .or(refused);
         }
         refused
+    }
+
+    /// Opens a new message holding the open thread's notes, popped out, or says there are none.
+    /// The notes are as they were saved: an editor open on one stays open.
+    fn notes_share(&mut self, now: f64) {
+        let Some(open) = self.thread.as_ref().map(|thread| thread.id().to_owned()) else {
+            return;
+        };
+        let subject = match self.notes_alone.as_ref().filter(|alone| alone.id == open) {
+            Some(alone) => alone.subject(&self.notes.all()),
+            None => self
+                .thread
+                .as_ref()
+                .and_then(crate::thread::ThreadView::detail)
+                .map(|detail| detail.subject.clone())
+                .unwrap_or_default(),
+        };
+        match self.notes.share(&subject, self.account.email()) {
+            Some(shared) => self.compose_share_popped(shared, now),
+            None => self
+                .commands
+                .toast(exo_commands::Toast::new("No notes to share.")),
+        }
     }
 
     /// Says why a file wasn't added to a note, if one wasn't.

@@ -43,12 +43,27 @@ pub(crate) fn add(
         let text = "We can't yet attach folders. You can try attaching a compressed archive of the folder.".into();
         return (Vec::new(), Some(Notice { title: None, text }));
     }
-    let named: Vec<(&PathBuf, String, Option<u64>)> = paths
+    let named: Vec<(PathBuf, String)> = paths
         .iter()
-        .map(|path| {
+        .map(|path| (path.clone(), name(path)))
+        .collect();
+    add_named(&named, kept, html, folder)
+}
+
+/// Adds files to a draft as [`add`] does, each the file at its path attached under its name: a
+/// note's files, kept under ids, go by the names the note lists them by.
+pub(crate) fn add_named(
+    files: &[(PathBuf, String)],
+    kept: &[DraftAttachment],
+    html: &str,
+    folder: &Path,
+) -> (Vec<DraftAttachment>, Option<Notice>) {
+    let named: Vec<(&PathBuf, String, Option<u64>)> = files
+        .iter()
+        .map(|(path, name)| {
             (
                 path,
-                name(path),
+                name.clone(),
                 std::fs::metadata(path).ok().map(|meta| meta.len()),
             )
         })
@@ -147,6 +162,33 @@ pub(crate) fn add_inline(
         content_id: Some(cid.to_owned()),
         source: AttachmentSource::Local,
     })
+}
+
+/// An image put in the body from a file: copies the file at `source` into `folder` as the inline
+/// attachment `name` that the body shows by Content-ID `cid`. Its size isn't checked here: sending
+/// checks the whole message.
+pub(crate) fn add_inline_file(
+    source: &Path,
+    name: &str,
+    mime_type: &str,
+    cid: &str,
+    folder: &Path,
+) -> Result<DraftAttachment, Notice> {
+    let uuid = super::factory::uuid_v4();
+    match std::fs::create_dir_all(folder).and_then(|()| std::fs::copy(source, folder.join(&uuid))) {
+        Ok(size) => Ok(DraftAttachment {
+            uuid,
+            name: name.to_owned(),
+            mime_type: mime_type.to_owned(),
+            size,
+            content_id: Some(cid.to_owned()),
+            source: AttachmentSource::Local,
+        }),
+        Err(error) => {
+            log::warn!("keeping an inline image: {error}");
+            Err(unreadable(name))
+        }
+    }
 }
 
 /// Whether a file of this name goes in the body rather than on the draft when it's the only one

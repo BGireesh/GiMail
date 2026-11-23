@@ -155,7 +155,7 @@ pub fn show(
     let bottom = pane.bottom() - FOOTER_HEIGHT;
     let mut action = None;
 
-    // `Share notes by email`, at the foot: it looks disabled until sharing arrives.
+    // `Share notes by email`, at the foot.
     let share = Rect::from_min_max(pos2(left, bottom - SHARE_HEIGHT), pos2(right, bottom));
     let response = ui
         .interact(share, exo_ui::id(&ctx, "notes-share"), Sense::click())
@@ -167,7 +167,7 @@ pub fn show(
     };
     let painter = ui.painter_at(pane);
     painter.rect_filled(exo_ui::pixel_snap(share), CornerRadius::same(5), fill);
-    let muted = palette.ink(0.4, 0.4);
+    let ink = palette.text_base_default;
     let label = META.width(&ctx, SHARE);
     let start = share.center().x - (SHARE_ICON + SHARE_ICON_GAP + label) / 2.0;
     exo_ui::paint_icon(
@@ -177,7 +177,7 @@ pub fn show(
             pos2(start, share.center().y - SHARE_ICON / 2.0),
             vec2(SHARE_ICON, SHARE_ICON),
         )),
-        muted,
+        ink,
     );
     META.paint_line(
         &painter,
@@ -186,7 +186,7 @@ pub fn show(
             share.center().y - META.line_height / 2.0,
         ),
         SHARE,
-        muted,
+        ink,
         None,
     );
     if response.clicked() {

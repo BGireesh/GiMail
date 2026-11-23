@@ -272,7 +272,8 @@ pub enum Action {
     ToggleNotesPane,
     /// `Show Notes in Thread`, `Show Notes in Pane Only`: where the notes show.
     SetNotesPlacement(exo_store::NotesPlacement),
-    /// The notes pane's `Share notes by email`.
+    /// The notes pane's `Share notes by email`, `Share Notes by Email`: a new message holding
+    /// the open thread's notes.
     ShareNotes,
 }
 
@@ -555,6 +556,9 @@ pub fn register_notes(commands: &mut Commands<Action>, cx: &NotesContext<'_>) {
             Action::SetNotesPlacement(placement.2),
         )
         .regions(NOTES_PANE),
+    );
+    commands.add(
+        Command::new("SHARE_NOTES", "Share Notes by Email", Action::ShareNotes).regions(NOTES_PANE),
     );
     let Some(editor) = cx.editor else {
         return;

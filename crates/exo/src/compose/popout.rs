@@ -6,7 +6,7 @@ use egui::{Color32, CornerRadius, Rect, Sense, pos2, vec2};
 use exo_store::DraftAction;
 use jiff::Timestamp;
 
-use super::{Fields, Open, PendingReply, clean_up, factory, form, form::Surface};
+use super::{Fields, Open, PendingReply, clean_up, factory, files, form, form::Surface};
 
 /// The card's padding: `14px 2rem 4px`.
 const CARD_PADDING_TOP: f32 = 14.0;
@@ -148,6 +148,80 @@ impl crate::Mail {
         let id = open.id.clone();
         self.compose.drafts.push(open);
         self.pop_out(&id);
+    }
+
+    /// `Share notes by email`: a new message holding a thread's notes, popped out with no
+    /// recipients. The notes' images go as its inline images. Their files are attached in order
+    /// while the message stays under Gmail's limit, and the one that wouldn't fit and every file
+    /// after it are listed at the body's end instead. Then it's a draft like any other.
+    pub(crate) fn compose_share_popped(&mut self, shared: crate::notes::share::Shared, now: f64) {
+        let notes = self.account.note_files();
+        let folder = self.account.draft_files().to_owned();
+        let mut attachments = Vec::new();
+        let mut notice = None;
+        for image in &shared.images {
+            let Some(cid) = &image.content_id else {
+                continue;
+            };
+            match files::add_inline_file(
+                &notes.join(&image.uuid),
+                &image.name,
+                &image.mime_type,
+                cid,
+                &folder,
+            ) {
+                Ok(attachment) => attachments.push(attachment),
+                Err(why) => notice = Some(why),
+            }
+        }
+        let mut left_out: Vec<&str> = Vec::new();
+        for file in &shared.files {
+            let fits = left_out.is_empty()
+                && !files::exceeds_gmail_limit(
+                    attachments
+                        .iter()
+                        .map(|attachment| attachment.size)
+                        .chain([file.size]),
+                    &shared.html,
+                );
+            if !fits {
+                left_out.push(&file.name);
+                continue;
+            }
+            let (added, why) = files::add_named(
+                &[(notes.join(&file.uuid), file.name.clone())],
+                &attachments,
+                &shared.html,
+                &folder,
+            );
+            attachments.extend(added);
+            notice = why.or(notice);
+        }
+        let mut body = shared.html.clone();
+        if !left_out.is_empty() {
+            body.push_str("<hr><div><b>Not attached (too large)</b></div><ul>");
+            for name in left_out {
+                body.push_str(&format!("<li>{}</li>", crate::notes::share::escape(name)));
+            }
+            body.push_str("</ul>");
+        }
+        let fields = Fields {
+            subject: shared.subject,
+            body,
+            ..Fields::default()
+        };
+        let mut record = factory::compose(&self.compose_account(), fields, Timestamp::now());
+        record.attachments = attachments;
+        record.fingerprint = factory::fingerprint(&record);
+        let mut open = Open::new(factory::new_id(), None, record);
+        self.with_auto_bcc(&mut open);
+        open.touch(now);
+        let id = open.id.clone();
+        self.compose.drafts.push(open);
+        self.pop_out(&id);
+        if let Some(notice) = notice {
+            self.compose_alert_notice(&id, notice);
+        }
     }
 
     /// ⇧R, ⇧A, ⇧F: a reply, reply all or forward, popped out once its draft exists.

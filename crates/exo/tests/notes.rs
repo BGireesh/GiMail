@@ -1027,3 +1027,130 @@ fn a_note_whose_message_is_gone_stays_in_place() {
     assert!(rect.top() >= above.bottom(), "{rect:?} {above:?}");
     assert!(rect.bottom() <= below.top(), "{rect:?} {below:?}");
 }
+
+/// The open thread's subject.
+fn open_subject(app: &Fixture) -> String {
+    app.mail()
+        .thread()
+        .and_then(|open| open.detail())
+        .expect("a thread is loaded")
+        .subject
+        .clone()
+}
+
+#[test]
+fn share_opens_a_draft_with_the_notes() {
+    let mut app = start("notes-share");
+    open_debrief(&mut app);
+    let subject = open_subject(&app);
+    write_note(&mut app, |app| app.key(Key::T), "Ask about the budget");
+    write_note(
+        &mut app,
+        |app| app.press(Key::T, Modifiers::SHIFT),
+        "Strong on systems",
+    );
+    let before = app.mail().notes().clone();
+    palette(&mut app, "Share Notes by Email");
+    assert!(app.mail().compose_popped_out(), "a draft pops out");
+    let (to, said) = app.mail().compose_focus().expect("it has the keyboard");
+    assert!(to.is_empty(), "{to:?}");
+    assert_eq!(said, format!("Notes: {subject}"));
+    assert_eq!(
+        app.mail().compose_recipients(),
+        Some([Vec::new(), Vec::new(), Vec::new()]),
+        "no recipients"
+    );
+    let body = app.mail().compose_body().expect("a body");
+    for text in [
+        "Ask about the budget",
+        "Strong on systems",
+        "Thread note",
+        "Note 1",
+    ] {
+        assert!(body.contains(text), "{text} in {body}");
+    }
+    assert!(
+        body.find("Ask about the budget") < body.find("Strong on systems"),
+        "in time order: {body}"
+    );
+    app.settle();
+    assert_eq!(*app.mail().notes(), before, "the notes are unchanged");
+}
+
+#[test]
+fn shared_files_ride_along_and_oversized_ones_are_listed() {
+    let mut app = start("notes-share-files");
+    app.key(Key::Enter);
+    let thread = app.mail().thread().expect("open").id().to_owned();
+    let folder = app.mail().account().note_files();
+    std::fs::create_dir_all(&folder).expect("a folder");
+    std::fs::write(folder.join("small-uuid"), b"1. Budget").expect("written");
+    std::fs::write(folder.join("after-uuid"), b"2. Hiring").expect("written");
+    std::fs::File::create(folder.join("big-uuid"))
+        .and_then(|file| file.set_len(40 * 1024 * 1024))
+        .expect("written");
+    std::fs::write(folder.join("image-uuid"), png()).expect("written");
+    let file = |uuid: &str, name: &str, size: u64, cid: Option<&str>| exo_store::NoteFile {
+        uuid: uuid.to_owned(),
+        name: name.to_owned(),
+        mime_type: "application/octet-stream".to_owned(),
+        size,
+        content_id: cid.map(str::to_owned),
+    };
+    app.mail_mut().account_mut().save_note(SaveNote {
+        draft_id: "6b0d3c55-6f43-4a8e-9a39-0c1f6f3f8a11".to_owned(),
+        note_id: None,
+        thread_id: ThreadId::new(thread),
+        message_id: None,
+        html: "<div>Files</div><div><img class=\"Exo-inline-image\" src-cid=\"board\"></div>"
+            .to_owned(),
+        text: "Files".to_owned(),
+        files: vec![
+            file("small-uuid", "agenda.txt", 9, None),
+            file("big-uuid", "walkthrough.mov", 40 * 1024 * 1024, None),
+            file("after-uuid", "after.txt", 9, None),
+            file("image-uuid", "board.png", png().len() as u64, Some("board")),
+        ],
+    });
+    app.settle();
+    palette(&mut app, "Share Notes by Email");
+    assert_eq!(
+        app.mail().compose_attachments(),
+        ["agenda.txt"],
+        "the file that fits is attached"
+    );
+    let body = app.mail().compose_body().expect("a body");
+    assert!(
+        body.contains("Not attached (too large)") && body.contains("walkthrough.mov"),
+        "{body}"
+    );
+    assert!(
+        body.contains("after.txt"),
+        "and every file after the one that didn't fit: {body}"
+    );
+    assert!(body.contains("board"), "the image is shown inline: {body}");
+    assert_eq!(app.mail().compose_alert(), None);
+}
+
+#[test]
+fn sharing_nothing_says_so() {
+    let mut app = start("notes-share-nothing");
+    app.key(Key::Enter);
+    palette(&mut app, "Share Notes by Email");
+    assert_eq!(app.mail().toast_text(), Some("No notes to share."));
+    assert!(!app.mail().compose_popped_out(), "no draft");
+}
+
+#[test]
+fn notes_on_a_deleted_thread_are_shared_too() {
+    let (mut app, _, subject) = deleted_result("notes-share-deleted");
+    app.key(Key::Enter);
+    palette(&mut app, "Share Notes by Email");
+    let (_, said) = app
+        .mail()
+        .compose_focus()
+        .expect("a draft has the keyboard");
+    assert_eq!(said, format!("Notes: {subject}"));
+    let body = app.mail().compose_body().expect("a body");
+    assert!(body.contains("Ask about the overage fee"), "{body}");
+}
