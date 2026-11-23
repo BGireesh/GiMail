@@ -58,6 +58,16 @@ const NEXT_CONVERSATION: &[Region] = &[
     Region::ReadOnlySnippet,
 ];
 
+/// Where T and ⇧T start a note: the thread pane, but not a draft or a note being typed in.
+const NOTE_KEYS: &[Region] = &[
+    Region::ThreadMessagesHeader,
+    Region::ActionPane,
+    Region::ThreadMessages,
+    Region::ThreadMessagesNewMessages,
+];
+/// Where the note editor's own keys live.
+const NOTE_EDITOR: &[Region] = &[Region::NoteEditor];
+
 /// A key in the list's header.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HeaderKey {
@@ -231,6 +241,20 @@ pub enum Action {
     Achievements(crate::achievements::Action),
     /// Something about Inbox Zero's photo.
     Backdrop(crate::backdrop::Action),
+    /// T, `+ Add thread note`: a new note on the open thread.
+    NewThreadNote,
+    /// ⇧T: a new note on the focused message.
+    NewMessageNote,
+    /// ⌘↩ in the note editor, or its `Save`: save the note and close the editor.
+    SaveNote,
+    /// Escape in the note editor: close it, keeping what was typed.
+    CloseNote,
+    /// A note card's `Edit`: open that note in the editor.
+    EditNote(String),
+    /// A note card's `Delete`: delete that note.
+    DeleteNote(String),
+    /// A formatting key in the note editor.
+    FormatNote(exo_editor::FormatCommand),
 }
 
 /// The header's and the back gutter's keys (`ThreadMessagesHeader`, `ActionPane`).
@@ -445,6 +469,47 @@ pub fn register_thread(commands: &mut Commands<Action>, cx: &ThreadContext) {
     );
     if cx.show_images {
         register_show_images(commands);
+    }
+}
+
+/// Registers the open thread's note keys for this frame: T and ⇧T in the thread pane, and with
+/// `editor` (the open note editor, while it has the keyboard) ⌘↩, Escape when the editor has
+/// nothing of its own to close, and the formatting keys that apply.
+pub fn register_notes(commands: &mut Commands<Action>, editor: Option<&exo_editor::Editor>) {
+    commands.add(
+        Command::shortcut("NEW_THREAD_NOTE", Action::NewThreadNote)
+            .key("t")
+            .regions(NOTE_KEYS),
+    );
+    commands.add(
+        Command::shortcut("NEW_MESSAGE_NOTE", Action::NewMessageNote)
+            .key("shift+t")
+            .regions(NOTE_KEYS),
+    );
+    let Some(editor) = editor else {
+        return;
+    };
+    commands.add(
+        Command::shortcut("SAVE_NOTE", Action::SaveNote)
+            .key("mod+enter")
+            .regions(NOTE_EDITOR),
+    );
+    if !editor.wants_escape() {
+        commands.add(
+            Command::shortcut("CLOSE_NOTE", Action::CloseNote)
+                .key("esc")
+                .regions(NOTE_EDITOR),
+        );
+    }
+    for command in exo_editor::FormatCommand::ALL
+        .into_iter()
+        .filter(|command| command.applies(editor))
+    {
+        commands.add(
+            Command::shortcut(command.id(), Action::FormatNote(command))
+                .keys(command.keys().iter().copied())
+                .regions(NOTE_EDITOR),
+        );
     }
 }
 

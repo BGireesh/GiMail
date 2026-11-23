@@ -206,7 +206,7 @@ fn a_download_goes_to_the_folder_chosen() {
     }
     app.key(Key::Enter);
     // ⌘-click on the deck's card downloads it rather than previewing it.
-    let card = egui::pos2(320.0, 320.0);
+    let card = egui::pos2(320.0, 368.0);
     app.hover(card);
     app.harness
         .input_mut()

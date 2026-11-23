@@ -151,7 +151,7 @@ fn a_match_past_a_widened_columns_edge_scrolls_it_sideways() {
         app.key(Key::K);
     }
     app.key(Key::Enter);
-    let at = egui::pos2(800.0, 200.0);
+    let at = egui::pos2(800.0, 248.0);
     assert_eq!(
         app.hover(at),
         egui::CursorIcon::Default,

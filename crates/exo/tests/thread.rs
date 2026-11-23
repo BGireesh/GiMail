@@ -295,18 +295,18 @@ fn clicking_the_participants_expands_the_header_and_its_chevron_folds_it() {
         open_subject(&app).as_deref(),
         Some("Design crit moved to 3pm")
     );
-    // "Tom to Me & Priya", at 1280×800.
+    // "Tom to Me & Priya", at 1280×800, under `+ Add thread note`.
     assert_eq!(
-        app.hover(egui::pos2(260.0, 125.0)),
+        app.hover(egui::pos2(260.0, 173.0)),
         egui::CursorIcon::PointingHand
     );
-    app.click(egui::pos2(260.0, 125.0));
+    app.click(egui::pos2(260.0, 173.0));
     let thread = app.mail().thread().expect("open");
     assert!(thread.header_expanded(), "the header lists every recipient");
     assert_eq!(thread.expanded(), [true], "and the message stays open");
     // The full header is text, and its chevron (after the date) folds it.
-    assert_eq!(app.hover(egui::pos2(300.0, 150.0)), egui::CursorIcon::Text);
-    app.click(egui::pos2(540.0, 180.0));
+    assert_eq!(app.hover(egui::pos2(300.0, 198.0)), egui::CursorIcon::Text);
+    app.click(egui::pos2(540.0, 228.0));
     assert!(!app.mail().thread().expect("open").header_expanded());
 }
 
@@ -334,7 +334,7 @@ fn clicking_an_attachment_previews_it_from_the_cache() {
         .join(format!("{}-{}", attachment.message_id, attachment.part_id))
         .join(&attachment.filename);
     // The deck's card, under the body.
-    let card = egui::pos2(320.0, 320.0);
+    let card = egui::pos2(320.0, 368.0);
     assert_eq!(app.hover(card), egui::CursorIcon::PointingHand);
     app.click(card);
     assert!(
@@ -411,7 +411,7 @@ fn the_cursor_follows_a_body_that_moves_under_a_still_pointer() {
     app.key(Key::Enter);
     app.press(Key::H, Modifiers::SHIFT);
     // On the second line of "Board deck — draft 2", under the full header.
-    let at = egui::pos2(560.0, 247.0);
+    let at = egui::pos2(560.0, 295.0);
     assert_eq!(app.hover(at), egui::CursorIcon::Text);
     // The header folds and the body moves up, so the pointer is now past the end of a shorter
     // line.
@@ -669,13 +669,13 @@ fn the_cursor_is_an_ibeam_over_text_an_arrow_elsewhere_and_a_hand_over_whole_but
     assert!(open_subject(&app).is_some_and(|subject| subject.starts_with("Tuesday, Nov 17")));
     // The Morning Ledger: a paragraph, the empty end of the headline's line, and the
     // "Read today's edition" button, in its padding.
-    assert_eq!(app.hover(egui::pos2(400.0, 419.0)), egui::CursorIcon::Text);
+    assert_eq!(app.hover(egui::pos2(400.0, 467.0)), egui::CursorIcon::Text);
     assert_eq!(
-        app.hover(egui::pos2(832.0, 368.0)),
+        app.hover(egui::pos2(832.0, 416.0)),
         egui::CursorIcon::Default
     );
     assert_eq!(
-        app.hover(egui::pos2(310.0, 625.0)),
+        app.hover(egui::pos2(310.0, 673.0)),
         egui::CursorIcon::PointingHand
     );
 }
@@ -708,7 +708,7 @@ fn a_body_too_wide_for_the_column_widens_it_and_the_column_scrolls_sideways() {
     assert_eq!(open_subject(&app).as_deref(), Some("Black Friday is here"));
     // The column now runs from the back gutter to 2rem from the pane's right. The empty end of
     // its first cell is under the pointer, and the link is past the right edge.
-    let at = egui::pos2(800.0, 200.0);
+    let at = egui::pos2(800.0, 248.0);
     assert_eq!(app.hover(at), egui::CursorIcon::Default);
     let region = |app: &Fixture| app.mail().thread().expect("open").region();
     // → scrolls the whole column 175px at a time, as far as it goes, and the link comes into
@@ -754,9 +754,9 @@ fn a_body_too_wide_for_the_column_widens_it_and_the_column_scrolls_sideways() {
 fn a_new_accounts_focused_message_labels_its_reply_buttons() {
     let mut app = start("thread-reply-labels");
     app.key(Key::Enter);
-    // Tom to Me & Priya. With labels, Reply all's label sits where the participants' row ends
-    // without them (reply buttons have labels in the account's first week).
-    let label = egui::pos2(725.0, 133.0);
+    // Tom to Me & Priya. With labels, Reply all's label sits where `+ Note` is without them
+    // (reply buttons have labels in the account's first week).
+    let label = egui::pos2(725.0, 181.0);
     let replies = |app: &mut Fixture, joined: &str| {
         let joined: Option<jiff::Timestamp> =
             (!joined.is_empty()).then(|| joined.parse().expect("a timestamp"));
@@ -773,7 +773,8 @@ fn a_new_accounts_focused_message_labels_its_reply_buttons() {
         app.settle();
         app.click(label);
         let to = app.mail().compose_focus().map(|(to, _)| to);
-        if to.is_some() {
+        // The reply closes, or the note that `+ Note` opened.
+        if to.is_some() || app.mail().note_editor_text().is_some() {
             app.key(Key::Escape);
         }
         to
@@ -959,7 +960,7 @@ fn a_full_headers_addresses_select_and_suggest_copy_recipients() {
     app.key(Key::Enter);
     app.press(Key::H, Modifiers::SHIFT);
     // Along the From row's name and address.
-    drag(&mut app, egui::pos2(310.0, 130.0), egui::pos2(480.0, 130.0));
+    drag(&mut app, egui::pos2(310.0, 178.0), egui::pos2(480.0, 178.0));
     assert_eq!(
         app.mail().hint_text().as_deref(),
         Some("To copy recipients faster, hit ⌘ K → Copy Recipients!")

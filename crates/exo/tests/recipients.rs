@@ -309,7 +309,7 @@ fn chips_drag_between_fields_in_one_undo_step() {
     app.press(Key::O, COMMAND.plus(Modifiers::SHIFT));
     app.wait(0.2);
     // Tom's chip in To (where it sits at 1280×800) onto Bcc.
-    app.drag(egui::pos2(340.0, 215.0), egui::pos2(320.0, 280.0));
+    app.drag(egui::pos2(340.0, 263.0), egui::pos2(320.0, 328.0));
     assert_eq!(
         recipients(&app),
         [
@@ -334,7 +334,7 @@ fn chips_drag_between_fields_in_one_undo_step() {
         "one undo step"
     );
     // Within a list, a chip lands where the cursor is.
-    app.drag(egui::pos2(350.0, 247.0), egui::pos2(305.0, 215.0));
+    app.drag(egui::pos2(350.0, 295.0), egui::pos2(305.0, 263.0));
     assert_eq!(
         recipients(&app)[0],
         ["priya@brightmoor.co", "tom@brightmoor.co"],

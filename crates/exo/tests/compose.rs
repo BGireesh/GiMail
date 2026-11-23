@@ -564,8 +564,8 @@ fn share_availabilitys_tip_shows_a_week_after_joining_until_its_closed() {
         "joined over a week ago"
     );
     // The tip's close icon, at the right of the tip's title, under the reply's calendar icon at
-    // 1280×800.
-    app.click(egui::pos2(859.0, 382.0));
+    // 1280×800 (the card starts under `+ Add thread note`).
+    app.click(egui::pos2(859.0, 430.0));
     assert!(
         app.mail()
             .account()

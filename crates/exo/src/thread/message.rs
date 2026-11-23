@@ -50,6 +50,9 @@ const ACTION_SIZE: Vec2 = Vec2::new(13.0, 9.0);
 const LABEL_PADDING: Vec2 = Vec2::new(8.0, 10.0);
 const LABEL_GAP: f32 = 4.0;
 const LABEL_MARGIN_LEFT: f32 = 8.0;
+/// `+ Note`, before the reply buttons: a new note on the message, this far from them.
+const NOTE: &str = "+ Note";
+const NOTE_GAP: f32 = 16.0;
 /// A labelled header 500px wide or less condenses its participants
 /// (`@container message-pane-header (max-width: 500px)`).
 const CONDENSED_WIDTH: f32 = 500.0;
@@ -191,6 +194,8 @@ pub(super) enum Hit {
     Reply(exo_store::DraftAction),
     /// A failed or waiting send's status.
     Recover,
+    /// `+ Note`: a new note on the message.
+    Note,
 }
 
 /// The participants' names a header drew, and where it drew them. Each name has a tooltip and
@@ -1270,7 +1275,12 @@ fn compact_header(
             }
             right = button.left() + 1.0;
         }
-        right - 1.0 - LABEL_MARGIN_LEFT
+        let left = right - 1.0 - LABEL_MARGIN_LEFT;
+        let (clicked, left) = note_button(ui, pos2(left, line + 1.0), 1.0, id);
+        if clicked {
+            replied = Some(Hit::Note);
+        }
+        left
     } else {
         let shown = state.focused || hovered;
         let opacity = exo_ui::motion::transition(
@@ -1310,7 +1320,12 @@ fn compact_header(
                     replied = Some(Hit::Reply(*action));
                 }
             }
-            date_box - ACTION_SIZE.x - (actions.len() - 1) as f32 * ACTION_PITCH
+            let left = date_box - ACTION_SIZE.x - (actions.len() - 1) as f32 * ACTION_PITCH;
+            let (clicked, left) = note_button(ui, pos2(left - NOTE_GAP, line + 1.0), opacity, id);
+            if clicked {
+                replied = Some(Hit::Note);
+            }
+            left
         } else {
             date_box
         }
@@ -1420,6 +1435,33 @@ fn compact_header(
         hit = Some(Hit::Header);
     }
     replied.or(hit)
+}
+
+/// `+ Note` ending at `right` on the date's line, at `opacity`. Returns whether it was clicked,
+/// and its left edge.
+fn note_button(ui: &Ui, right: egui::Pos2, opacity: f32, id: egui::Id) -> (bool, f32) {
+    let palette = exo_ui::palette(ui.ctx());
+    let width = DATE.width(ui.ctx(), NOTE) + DATE.letter_spacing;
+    let text = Rect::from_min_size(
+        pos2(right.x - width, right.y),
+        vec2(width, DATE.line_height),
+    );
+    let response = ui
+        .interact(text.expand(6.0), id.with("note"), Sense::click())
+        .on_hover_cursor(egui::CursorIcon::PointingHand);
+    let ink = if response.hovered() {
+        palette.note_bar_default
+    } else {
+        palette.note_label_default
+    };
+    DATE.paint_line(
+        ui.painter(),
+        text.min,
+        NOTE,
+        ink.gamma_multiply(opacity),
+        None,
+    );
+    (response.clicked(), text.left())
 }
 
 /// Where `text` sits in the date's place of the compact header of the card at `card`.

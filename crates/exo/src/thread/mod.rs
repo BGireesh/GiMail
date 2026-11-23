@@ -34,13 +34,14 @@ use std::{
 
 use egui::{Pos2, Rect, Sense, Ui, UiBuilder, pos2, vec2};
 use exo_commands::Region;
-use exo_store::{Attachment, MessageDetail, ThreadDetail};
+use exo_store::{Attachment, MessageDetail, NotesPlacement, ThreadDetail};
 use exo_ui::motion::CubicBezier;
 use jiff::Zoned;
 
 use crate::{
     body::{self, Bodies, Event, Granularity, Hit},
     format::names::Person,
+    notes::{CardAction, EditorAction, Notes},
 };
 
 /// `SANDBOX_MAX_WIDTH`: the message column's widest content.
@@ -129,6 +130,14 @@ pub(crate) enum Action {
     /// A click on a detected date, for a new event with the conversation's people and subject and
     /// the form's day set to that date.
     CreateEvent(jiff::civil::Date),
+    /// `+ Add thread note`, or with a message its `+ Note`: a new note there.
+    AddNote(Option<String>),
+    /// A note card's `Edit`.
+    EditNote(String),
+    /// A note card's `Delete`.
+    DeleteNote(String),
+    /// The note editor's `Save`.
+    SaveNote,
 }
 
 /// One message as the thread shows it.
@@ -152,6 +161,24 @@ enum Entry {
     Trashed(usize),
     /// `Reminder returned`.
     Reminder,
+    /// The thread's notes' `at`th, a note on the whole thread.
+    ThreadNote(usize),
+    /// The thread's notes' `at`th, a note on a message, under it.
+    MessageNote(usize),
+    /// The note editor, where its note is or will be.
+    NoteEditor,
+    /// `+ Add thread note`, after the thread's notes.
+    AddThreadNote,
+}
+
+impl Entry {
+    /// Whether it's a note, the note editor or `+ Add thread note`.
+    fn is_note(self) -> bool {
+        matches!(
+            self,
+            Self::ThreadNote(_) | Self::MessageNote(_) | Self::NoteEditor | Self::AddThreadNote
+        )
+    }
 }
 
 /// An entry where the last layout put it: its top in the column's content, its height (a
@@ -191,6 +218,10 @@ const DRAFT_MARGIN_BOTTOM: f32 = 28.0;
 /// or triple click, as in the editor.
 pub(crate) const MULTI_CLICK_DELAY: f64 = 0.5;
 pub(crate) const MULTI_CLICK_DISTANCE: f32 = 4.0;
+/// The gap between a message and its notes, and between notes.
+const NOTE_GAP: f32 = 8.0;
+/// How far a message's notes are indented under it.
+const NOTE_INDENT: f32 = 28.0;
 
 /// The open thread's state.
 pub struct ThreadView {
@@ -287,6 +318,8 @@ pub struct ThreadView {
     /// The column's entries as last laid out, and where its content ends.
     entries: Vec<Placed>,
     end: f32,
+    /// Where each message's card or row was painted last frame, those in view.
+    cards: Vec<(String, Rect)>,
     /// The hint under the last message: the intro hint under the only one, else the calendar
     /// tip.
     hint: Option<footer::Hint>,
@@ -374,6 +407,7 @@ impl ThreadView {
             header_tab: 1,
             entries: Vec::new(),
             end: 0.0,
+            cards: Vec::new(),
             hint: None,
             mailto_intent: exo_ui::HoverIntent::default(),
             contact: None,
@@ -784,6 +818,12 @@ impl ThreadView {
     /// Whether each message is expanded, oldest first.
     pub fn expanded(&self) -> Vec<bool> {
         self.items.iter().map(|item| item.expanded).collect()
+    }
+
+    /// Where each message in view was painted last frame: its id and its card or row (for
+    /// tests).
+    pub fn card_rects(&self) -> Vec<(String, Rect)> {
+        self.cards.clone()
     }
 
     /// How far the messages are scrolled, in px.
@@ -1204,6 +1244,7 @@ impl ThreadView {
         events: &[Event],
         mut drafts: Option<&mut crate::compose::Inline<'_>>,
         typing: bool,
+        notes: &mut Notes,
     ) -> Vec<Action> {
         let ctx = ui.ctx().clone();
         let now = ctx.input(|input| input.time);
@@ -1340,7 +1381,14 @@ impl ThreadView {
                         .then_some(footer::Hint::CalendarEvent)
                 })
             });
-        let order = self.order(&detail);
+        notes.set_senders(detail.messages.iter().filter_map(|message| {
+            let from = message.from.as_ref()?;
+            let name = from.name.as_deref().filter(|name| !name.is_empty());
+            Some((message.id.as_str(), name.unwrap_or(&from.email), from.is_me))
+        }));
+        let order = self.with_notes(self.order(&detail), notes);
+        let all_notes = notes.all();
+        let note_width = Self::spanning(&layout).card.width();
         let mut draft_heights = HashMap::new();
         let mut entries = Vec::with_capacity(order.len());
         let mut tops = vec![(0.0, 0.0); self.items.len()];
@@ -1437,6 +1485,30 @@ impl ThreadView {
                     };
                     (markers::HEIGHT, markers::HEIGHT, margin_top, margin_bottom)
                 }
+                Entry::ThreadNote(_)
+                | Entry::MessageNote(_)
+                | Entry::NoteEditor
+                | Entry::AddThreadNote => {
+                    let width = note_width - Self::note_indent(*entry, notes);
+                    let height = match *entry {
+                        Entry::ThreadNote(at) | Entry::MessageNote(at) => all_notes
+                            .notes
+                            .get(at)
+                            .map_or(0.0, |note| notes.card_height(ui, note, width)),
+                        Entry::NoteEditor => notes.editor_height(ui, width),
+                        _ => crate::notes::ADD_HEIGHT,
+                    };
+                    // The first sits where the first card would, and the last leaves a message
+                    // the room an expanded card does.
+                    let margin_top = if k == 0 { CARD_MARGIN_TOP } else { NOTE_GAP };
+                    (height, height, margin_top, message::EXPANDED_MARGIN_BOTTOM)
+                }
+            };
+            // Notes sit close under what they follow, and close to each other.
+            let margin_bottom = if next.is_some_and(|next| next.is_note()) {
+                NOTE_GAP
+            } else {
+                margin_bottom
             };
             y += previous_margin.map_or(margin_top, |previous| collapse(previous, margin_top));
             if let Entry::Message(at) | Entry::Trashed(at) = *entry {
@@ -1459,8 +1531,14 @@ impl ThreadView {
         // away, and the end can scroll a little past.
         let table_top = MESSAGES_PADDING_TOP + CARD_MARGIN_TOP;
         let natural = y - table_top;
+        // The thread's notes above the first message scroll away with them.
+        let lead = self
+            .entries
+            .iter()
+            .find(|placed| !placed.entry.is_note())
+            .map_or(0.0, |first| first.top - table_top);
         let collapsed_scroll = if collapsed_before > 4 {
-            (collapsed_before - 4) as f32 * STEP
+            (collapsed_before - 4) as f32 * STEP + lead
         } else {
             0.0
         };
@@ -1494,6 +1572,9 @@ impl ThreadView {
         }
         if let Some((id, top)) = anchored {
             self.scroll_to_anchor(ui, &layout, &id, top, bodies);
+        }
+        if notes.take_reveal() {
+            self.scroll_to_note_editor();
         }
         if typing && self.animation.is_none() {
             self.keep_draft_in_view(&draft_heights);
@@ -1560,6 +1641,7 @@ impl ThreadView {
             &mut actions,
             drafts,
             &draft_heights,
+            notes,
         );
         self.paint_highlight(&list, &layout, messages, region);
         if layout.is_wide() {
@@ -1747,7 +1829,7 @@ impl ThreadView {
                 Entry::Message(item) | Entry::Trashed(item) => self
                     .message(&self.items[item].id)
                     .map(|message| message.date),
-                Entry::Reminder => None,
+                _ => None,
             };
             let after = order
                 .iter()
@@ -1756,6 +1838,112 @@ impl ThreadView {
             order.insert(after, Entry::Reminder);
         }
         order
+    }
+
+    /// `order` with the thread's notes woven in. The thread's own notes come first, then
+    /// `+ Add thread note`, and a message's notes follow it. A note whose message the thread
+    /// no longer shows follows the last message that isn't newer than its own was. The note
+    /// editor takes the place of the note it edits, or goes after the notes of what its new
+    /// note is on. With notes shown in the pane only, the editor alone is in the column.
+    fn with_notes(&self, order: Vec<Entry>, notes: &Notes) -> Vec<Entry> {
+        let all = notes.all();
+        let in_thread = notes.placement() == NotesPlacement::Thread;
+        let editing = notes.editing();
+        let edited = editing.and_then(|open| open.note_id.as_deref());
+        // What follows each message, and with `None` what comes before them all.
+        let mut under: HashMap<Option<usize>, Vec<Entry>> = HashMap::new();
+        let mut woven = Vec::with_capacity(order.len() + all.notes.len() + 2);
+        for (at, note) in all.notes.iter().enumerate() {
+            let entry = if edited == Some(note.id.as_str()) {
+                Entry::NoteEditor
+            } else if !in_thread {
+                continue;
+            } else if note.message_id.is_some() {
+                Entry::MessageNote(at)
+            } else {
+                Entry::ThreadNote(at)
+            };
+            match &note.message_id {
+                Some(message) => under
+                    .entry(self.note_anchor(message, note.message_date))
+                    .or_default()
+                    .push(entry),
+                None => woven.push(entry),
+            }
+        }
+        if let Some(open) = editing.filter(|open| open.note_id.is_none()) {
+            match &open.message_id {
+                Some(message) => {
+                    if let Some(at) = self.items.iter().position(|item| item.id == *message) {
+                        under.entry(Some(at)).or_default().push(Entry::NoteEditor);
+                    }
+                }
+                None => woven.push(Entry::NoteEditor),
+            }
+        }
+        if in_thread && editing.is_none() {
+            woven.push(Entry::AddThreadNote);
+        }
+        woven.extend(under.remove(&None).unwrap_or_default());
+        for entry in order {
+            woven.push(entry);
+            if let Entry::Message(at) | Entry::Trashed(at) = entry {
+                woven.extend(under.remove(&Some(at)).unwrap_or_default());
+            }
+        }
+        // An editor whose note or message has gone still shows, at the end.
+        if editing.is_some() && !woven.contains(&Entry::NoteEditor) {
+            woven.push(Entry::NoteEditor);
+        }
+        woven
+    }
+
+    /// The message a note on `message`, dated `date`, goes under: that message, or once the
+    /// thread no longer shows it the last one that isn't newer. `None` puts the note before
+    /// every message.
+    fn note_anchor(&self, message: &str, date: Option<jiff::Timestamp>) -> Option<usize> {
+        self.items
+            .iter()
+            .position(|item| item.id == message)
+            .or_else(|| {
+                let date = date?;
+                self.items.iter().rposition(|item| {
+                    self.message(&item.id)
+                        .is_some_and(|message| message.date <= date)
+                })
+            })
+    }
+
+    /// How far a note entry is indented: a message's notes, and the editor of one, sit in
+    /// from the cards' edge.
+    fn note_indent(entry: Entry, notes: &Notes) -> f32 {
+        let on_message = match entry {
+            Entry::MessageNote(_) => true,
+            Entry::NoteEditor => notes
+                .editing()
+                .is_some_and(|open| open.message_id.is_some()),
+            _ => false,
+        };
+        if on_message { NOTE_INDENT } else { 0.0 }
+    }
+
+    /// Brings the note editor into view: its top under the messages' padding when it's above
+    /// the fold, else its bottom above the messages'.
+    fn scroll_to_note_editor(&mut self) {
+        let Some(placed) = self
+            .entries
+            .iter()
+            .find(|placed| placed.entry == Entry::NoteEditor)
+        else {
+            return;
+        };
+        let (top, bottom) = (placed.top, placed.top + placed.height);
+        let above = top - MESSAGES_PADDING_TOP;
+        if above < self.scroll {
+            self.animate_to(above);
+        } else if bottom > self.scroll + self.viewport - DRAFT_MARGIN_BOTTOM {
+            self.animate_to((bottom - self.viewport + DRAFT_MARGIN_BOTTOM).min(above));
+        }
     }
 
     /// Paints the visible messages and markers into `ui` (clipped to the message column) and
@@ -1776,6 +1964,7 @@ impl ThreadView {
         actions: &mut Vec<Action>,
         mut drafts: Option<&mut crate::compose::Inline<'_>>,
         draft_heights: &HashMap<String, f32>,
+        notes: &mut Notes,
     ) {
         let scale = ui.ctx().pixels_per_point();
         let theme = exo_ui::theme(ui.ctx());
@@ -1784,6 +1973,8 @@ impl ThreadView {
         self.hovered_body = None;
         self.named.clear();
         self.body_origins.clear();
+        self.cards.clear();
+        let all_notes = notes.all();
         // Failed drafts' cards, whose open tooltips go over every card.
         let mut failed = Vec::new();
         // The body holding the selection, whose hint goes over every card.
@@ -1795,13 +1986,15 @@ impl ThreadView {
         for placed in self.entries.clone() {
             let layout = &match placed.entry {
                 Entry::Message(at) => self.item_layout(layout, at),
-                Entry::Trashed(_) | Entry::Reminder => Self::spanning(layout),
+                _ => Self::spanning(layout),
             };
             let card = Rect::from_min_size(
                 origin + vec2(0.0, placed.top),
                 vec2(layout.card.width(), placed.card),
             );
+            // The note editor is drawn wherever it is, so it keeps the keyboard out of view.
             if !searching
+                && placed.entry != Entry::NoteEditor
                 && !Rect::from_min_size(card.min, vec2(card.width(), placed.height))
                     .expand(32.0)
                     .intersects(messages)
@@ -1833,11 +2026,46 @@ impl ThreadView {
                     }
                     continue;
                 }
+                Entry::ThreadNote(_)
+                | Entry::MessageNote(_)
+                | Entry::NoteEditor
+                | Entry::AddThreadNote => {
+                    let indent = Self::note_indent(placed.entry, notes);
+                    let rect = Rect::from_min_max(pos2(card.left() + indent, card.top()), card.max);
+                    match placed.entry {
+                        Entry::ThreadNote(at) | Entry::MessageNote(at) => {
+                            let Some(note) = all_notes.notes.get(at) else {
+                                continue;
+                            };
+                            match notes.card(ui, note, rect, messages) {
+                                Some(CardAction::Edit) => {
+                                    actions.push(Action::EditNote(note.id.clone()))
+                                }
+                                Some(CardAction::Delete) => {
+                                    actions.push(Action::DeleteNote(note.id.clone()))
+                                }
+                                Some(CardAction::History) | None => {}
+                            }
+                        }
+                        Entry::NoteEditor => {
+                            if notes.editor(ui, rect) == Some(EditorAction::Save) {
+                                actions.push(Action::SaveNote);
+                            }
+                        }
+                        _ => {
+                            if crate::notes::add_thread_note(ui, rect, messages) {
+                                actions.push(Action::AddNote(None));
+                            }
+                        }
+                    }
+                    continue;
+                }
             };
             let item = self.items[at].clone();
             let Some(message) = detail.messages.iter().find(|message| message.id == item.id) else {
                 continue;
             };
+            self.cards.push((item.id.clone(), card));
             let is_focus = self.focus.as_deref() == Some(&item.id);
             let state = message::State {
                 focused: is_focus,
@@ -2041,6 +2269,10 @@ impl ThreadView {
                         actions.push(Action::Compose(crate::compose::Action::Recover(
                             item.id.clone(),
                         )));
+                    }
+                    Some(message::Hit::Note) => {
+                        self.focus = Some(item.id.clone());
+                        actions.push(Action::AddNote(Some(item.id.clone())));
                     }
                     Some(message::Hit::Header) | None => {}
                 }

@@ -123,7 +123,7 @@ fn a_download_says_so_and_offers_show_until_it_goes() {
     let folder = app.folder("downloads");
     exo::downloads::choose(&app.harness.ctx, folder.clone()).expect("chosen");
     open_board_deck(&mut app);
-    cmd_click(&mut app, pos2(320.0, 320.0));
+    cmd_click(&mut app, pos2(320.0, 368.0));
     wait_for(&mut app, |_| !saved(&folder).is_empty());
     assert_eq!(saved(&folder), [DECK]);
     assert_eq!(
@@ -140,7 +140,7 @@ fn a_download_says_so_and_offers_show_until_it_goes() {
 fn a_preview_lets_its_notification_go_once_it_opens() {
     let mut app = start("attachments-preview-notification");
     open_board_deck(&mut app);
-    app.click(pos2(320.0, 320.0));
+    app.click(pos2(320.0, 368.0));
     wait_for(&mut app, |app| {
         app.previews()
             .read_dir()
@@ -159,7 +159,7 @@ fn a_file_not_kept_says_offline_that_it_isnt_available() {
     let mut app = start("attachments-offline");
     open_board_deck(&mut app);
     app.disconnect();
-    app.click(pos2(320.0, 320.0));
+    app.click(pos2(320.0, 368.0));
     wait_for(&mut app, |app| app.mail().alert().is_some());
     assert_eq!(
         app.mail().alert(),

@@ -47,6 +47,7 @@ pub mod logging;
 pub mod mail_client;
 pub mod mailbox;
 mod new_split;
+pub mod notes;
 pub mod notice;
 pub mod notifications;
 mod open_links;
@@ -317,6 +318,8 @@ pub struct Mail {
     settings: settings::Settings,
     /// The open thread, drawn over the list.
     thread: Option<ThreadView>,
+    /// The open thread's notes, and the editor one is written in.
+    notes: notes::Notes,
     /// Message bodies, rendered off the UI thread.
     bodies: Bodies,
     /// Invite `.ics` files arriving for the open thread, by message.
@@ -368,6 +371,7 @@ impl Drop for Mail {
     fn drop(&mut self) {
         // Before the account goes, which sends what it holds.
         self.save_drafts();
+        self.notes_keep();
     }
 }
 
@@ -389,6 +393,7 @@ impl Mail {
         let mut mail = Self {
             bodies: Bodies::new(ctx),
             thread: None,
+            notes: notes::Notes::new(now.clone()),
             link_preview: link_preview::LinkPreview::default(),
             attachment_files: attachment_files::AttachmentFiles::new(ctx, account.email()),
             compose: compose::Compose::default(),
@@ -572,6 +577,7 @@ impl Mail {
         if let Some(thread) = &mut self.thread {
             thread.set_now(now.clone());
         }
+        self.notes.set_now(now.clone());
         self.now = now;
     }
 
@@ -596,6 +602,7 @@ impl Mail {
     /// for no more frames.
     pub(crate) fn leave_screen(&mut self) {
         self.save_drafts();
+        self.notes_keep();
         self.account.write_drafts_now();
         self.account.set_on_screen(false);
     }
@@ -618,6 +625,16 @@ impl Mail {
     /// The open thread's notes, as the latest snapshot has them (for tests).
     pub fn notes(&self) -> &exo_store::ThreadNotes {
         &self.snapshot.notes
+    }
+
+    /// What's typed in the open note editor, as plain text (for tests).
+    pub fn note_editor_text(&self) -> Option<String> {
+        self.notes.editing().map(notes::Editing::text)
+    }
+
+    /// Where each of the open thread's notes was last painted: its id and its card (for tests).
+    pub fn note_rects(&self) -> Vec<(String, Rect)> {
+        self.notes.rects().to_vec()
     }
 
     /// The status bar at the bottom of the window, if one shows: the offline bar, else Out of
@@ -829,12 +846,16 @@ impl Mail {
         if unread {
             view.set_read_on_open();
         }
+        self.notes.open(Some(view.id()));
         self.thread = Some(view);
     }
 
     /// Back to the list, its cursor where it was. The thread's bodies and their textures go.
     fn close_thread(&mut self) {
         self.pane_pin = None;
+        // A note being written is saved as the thread goes.
+        self.notes.close(&self.account);
+        self.notes.open(None);
         if let Some(id) = self.thread.as_ref().map(|thread| thread.id().to_owned()) {
             self.compose_close_thread(&id);
         }
@@ -1363,6 +1384,13 @@ impl Mail {
                 }
             }
             Action::NextConversation(delta) => self.next_conversation(delta),
+            Action::NewThreadNote
+            | Action::NewMessageNote
+            | Action::SaveNote
+            | Action::CloseNote
+            | Action::EditNote(_)
+            | Action::DeleteNote(_)
+            | Action::FormatNote(_) => self.notes_run(action),
             Action::ShowNewMessages => {
                 if self
                     .thread
@@ -1812,9 +1840,13 @@ impl Mail {
                 Event::Unsent(unsent) => self.sign_out_unsent(unsent),
                 Event::Thread { id, detail } => self.unsubscribe_thread_read(id, detail),
                 Event::Unavailable { id, offline } => self.thread_unavailable(&id, offline),
-                Event::NoteFailed(_) => self
-                    .commands
-                    .toast(Toast::new("Couldn't save the note.").kind(ToastKind::Error)),
+                // Once for an open editor, however often its draft fails.
+                Event::NoteFailed(id) => {
+                    if self.notes.failed(&id) {
+                        self.commands
+                            .toast(Toast::new("Couldn't save the note.").kind(ToastKind::Error));
+                    }
+                }
                 event => self.compose_event(event),
             }
         }
@@ -2112,9 +2144,18 @@ impl Mail {
             events,
             inline.as_mut(),
             typing,
+            &mut self.notes,
         );
         for action in actions {
             match action {
+                thread::Action::AddNote(None) => self.run(Action::NewThreadNote, now),
+                thread::Action::AddNote(Some(message)) => {
+                    self.notes
+                        .start(notes::Target::Message(message), &self.account);
+                }
+                thread::Action::EditNote(id) => self.run(Action::EditNote(id), now),
+                thread::Action::DeleteNote(id) => self.run(Action::DeleteNote(id), now),
+                thread::Action::SaveNote => self.run(Action::SaveNote, now),
                 thread::Action::Back => {
                     self.close_thread();
                     self.command_nudge_left_thread();
@@ -2412,6 +2453,7 @@ impl Mail {
         );
         self.first_run_frame();
         self.sync_snapshot();
+        self.notes_frame(now);
         self.out_of_office_frame(&ctx);
         self.calendar_frame(&ctx);
         self.compose_sync();
@@ -2877,6 +2919,8 @@ impl Mail {
             Region::Dialog
         } else if let Some(region) = self.compose.region() {
             region
+        } else if let Some(region) = self.notes.region().filter(|_| self.thread.is_some()) {
+            region
         } else if self.folders.is_open() {
             Region::LabelSwitcher
         } else if let Some(thread) = &self.thread {
@@ -3098,6 +3142,16 @@ impl Mail {
         );
         self.register_new_split();
         out_of_office::register(&mut self.commands, &self.out_of_office);
+        // After the calendar's, whose T goes to today everywhere but in a thread.
+        if self.thread.is_some() && self.compose.pane().is_none() {
+            commands::register_notes(
+                &mut self.commands,
+                self.notes
+                    .editing()
+                    .filter(|_| region == Region::NoteEditor)
+                    .map(notes::Editing::editor),
+            );
+        }
         self.settings
             .register_escape(&mut self.commands, Action::Settings);
         if self.settings.dialog_open() {

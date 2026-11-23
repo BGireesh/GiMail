@@ -152,5 +152,5 @@ fn the_eye_shows_only_when_read_receipts_are_blocked() {
 }
 
 /// The middle of the eye after `Liam O'Connell <liam.oconnell@fastmail.com>` in the full header
-/// at 1280×800.
-const EYE: egui::Pos2 = egui::pos2(617.0, 133.0);
+/// at 1280×800 (the card starts under `+ Add thread note`).
+const EYE: egui::Pos2 = egui::pos2(617.0, 181.0);

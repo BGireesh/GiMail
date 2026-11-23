@@ -69,6 +69,11 @@ impl ThreadView {
                             when: Some(dates::row(at, &self.now)),
                         });
                     }
+                    // Notes are the user's own, and never print.
+                    Entry::ThreadNote(_)
+                    | Entry::MessageNote(_)
+                    | Entry::NoteEditor
+                    | Entry::AddThreadNote => return None,
                 };
                 let item = &self.items[at];
                 let message = detail
