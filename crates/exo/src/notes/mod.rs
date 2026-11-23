@@ -166,6 +166,9 @@ pub struct Notes {
     time: f64,
     /// Where the editor was last painted.
     editor_rect: Option<Rect>,
+    /// Whether the editor has been painted this frame. One that isn't on screen (its pane shows
+    /// something else) doesn't hold the keyboard.
+    painted: bool,
 }
 
 impl Notes {
@@ -189,6 +192,7 @@ impl Notes {
             flash: None,
             time: 0.0,
             editor_rect: None,
+            painted: false,
         }
     }
 
@@ -423,6 +427,8 @@ impl Notes {
     /// dated `now`.
     pub fn tick(&mut self, account: &Account, time: f64, now: Timestamp) {
         self.time = time;
+        // The frame starts with the editor not drawn yet.
+        self.painted = false;
         let Some(open) = &mut self.editing else {
             return;
         };
@@ -455,11 +461,11 @@ impl Notes {
         }
     }
 
-    /// The region the editor holds the keyboard in, while it does.
+    /// The region the editor holds the keyboard in, while it does: it has the focus and was
+    /// painted this frame. An editor that's open but hidden keeps its text and its focus, and has
+    /// the keyboard again once it shows.
     pub fn region(&self) -> Option<Region> {
-        self.editing
-            .as_ref()
-            .is_some_and(|open| open.focused)
+        (self.painted && self.editing.as_ref().is_some_and(|open| open.focused))
             .then_some(Region::NoteEditor)
     }
 
@@ -484,10 +490,16 @@ impl crate::Mail {
                 .is_some_and(|detail| detail.id.as_str() == thread.id())
         });
         if current {
-            self.notes.set(
-                self.snapshot.notes.clone(),
-                self.account.settings().notes_placement,
-            );
+            let was = self.notes.placement();
+            let placement = self.account.settings().notes_placement;
+            self.notes.set(self.snapshot.notes.clone(), placement);
+            // Notes moving to the pane take an open editor with them: the pane shows it.
+            if was != placement
+                && placement == NotesPlacement::Pane
+                && self.notes.editing().is_some()
+            {
+                self.notes_show_tab(true);
+            }
         }
         // A draft that took the keyboard has it.
         if self.compose.focused().is_some() {

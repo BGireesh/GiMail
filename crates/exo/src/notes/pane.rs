@@ -78,21 +78,22 @@ pub enum PaneAction {
 }
 
 /// The thread's notes and emails in time order: each email by its date, each note by when it was
-/// written, an email before a note written in the same instant.
+/// written, an email before a note written in the same instant, and notes written in the same
+/// instant by number.
 pub fn timeline(detail: &ThreadDetail, notes: &[Note]) -> Vec<Item> {
-    let mut items: Vec<(Timestamp, u8, Item)> = detail
+    let mut items: Vec<(Timestamp, u8, Option<u32>, Item)> = detail
         .messages
         .iter()
         .filter(|message| !message.is_draft())
-        .map(|message| (message.date, 0, Item::Email(message.id.clone())))
+        .map(|message| (message.date, 0, None, Item::Email(message.id.clone())))
         .chain(
             notes
                 .iter()
-                .map(|note| (note.created_at, 1, Item::Note(note.id.clone()))),
+                .map(|note| (note.created_at, 1, note.number, Item::Note(note.id.clone()))),
         )
         .collect();
-    items.sort_by_key(|(at, kind, _)| (*at, *kind));
-    items.into_iter().map(|(_, _, item)| item).collect()
+    items.sort_by_key(|(at, kind, number, _)| (*at, *kind, *number));
+    items.into_iter().map(|(_, _, _, item)| item).collect()
 }
 
 /// Draws the tab row in `row`: `Contact` and `Notes · {count}`, with the Notes tab shown when
@@ -204,7 +205,7 @@ pub fn show(
     child.set_clip_rect(list.intersect(ui.clip_rect()));
     let all = notes.all();
     let mut ordered: Vec<&Note> = all.notes.iter().collect();
-    ordered.sort_by_key(|note| note.created_at);
+    ordered.sort_by_key(|note| (note.created_at, note.number));
     let top = list.top() - notes.pane_scroll;
     let height = match notes.placement() {
         NotesPlacement::Thread => {

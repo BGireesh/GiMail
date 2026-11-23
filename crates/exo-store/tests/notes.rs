@@ -177,6 +177,34 @@ async fn numbers_are_never_reused() {
 }
 
 #[tokio::test]
+async fn notes_written_in_the_same_instant_come_back_by_number() {
+    let harness = Harness::synced().await;
+    let store = &harness.store;
+    let thread = conversation(&harness).await;
+    let message = thread.messages[0].id.as_str();
+    // Their ids sort the other way round from their numbers.
+    for (draft, text) in [("z", "First"), ("a", "Second")] {
+        saved(
+            store,
+            save(&thread.id, Some(message), draft, None, text),
+            at(0),
+        )
+        .await;
+    }
+    assert_eq!(
+        store
+            .thread_notes(&thread.id)
+            .await
+            .expect("reads")
+            .notes
+            .iter()
+            .map(exo_store::Note::label)
+            .collect::<Vec<_>>(),
+        ["Note 1", "Note 2"]
+    );
+}
+
+#[tokio::test]
 async fn an_edit_adds_a_version_and_an_unchanged_save_does_not() {
     let harness = Harness::synced().await;
     let store = &harness.store;

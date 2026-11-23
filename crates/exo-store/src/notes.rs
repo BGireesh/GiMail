@@ -230,7 +230,8 @@ impl Store {
         let mut rows = NoteRow::filter(NoteRow::fields().thread_id().eq(thread.as_str()))
             .exec(&mut db)
             .await?;
-        rows.sort_by(|a, b| (a.created_at, &a.id).cmp(&(b.created_at, &b.id)));
+        // Written in the same instant, `Note 1` still comes before `Note 2`.
+        rows.sort_by(|a, b| (a.created_at, a.number, &a.id).cmp(&(b.created_at, b.number, &b.id)));
         let ids: Vec<&str> = rows.iter().map(|row| row.id.as_str()).collect();
         let files = files_of(&mut db, &ids).await?;
         let (notes, deleted): (Vec<Note>, Vec<Note>) = rows

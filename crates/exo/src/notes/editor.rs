@@ -66,6 +66,7 @@ impl Notes {
         let title = self.title(self.editing.as_ref()?);
         let active = self.active;
         self.editor_rect = Some(rect);
+        self.painted = true;
         let open = self.editing.as_mut()?;
         let painter = ui.painter().clone();
         let snapped = exo_ui::pixel_snap(rect);

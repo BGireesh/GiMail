@@ -634,3 +634,48 @@ fn escape_closes_a_note_with_a_colon_in_it() {
     );
     assert_eq!(app.mail().notes().notes[0].text, "Ratio :smi");
 }
+
+#[test]
+fn moving_notes_to_the_pane_takes_the_open_editor_along() {
+    let mut app = start_thread_note("notes-move-to-pane");
+    app.type_text("Half");
+    palette(&mut app, "Show Notes in Pane Only");
+    assert_eq!(app.mail().notes_placement(), NotesPlacement::Pane);
+    assert!(app.mail().notes_tab(), "the pane shows the notes");
+    let editor = app.mail().note_editor_rect().expect("still open");
+    assert!(
+        app.mail().right_pane().contains_rect(editor),
+        "in the pane: {editor:?}"
+    );
+    app.type_text(" and more");
+    assert_eq!(
+        app.mail().note_editor_text().as_deref(),
+        Some("Half and more"),
+        "and it still has the keyboard"
+    );
+}
+
+#[test]
+fn a_hidden_editor_lets_go_of_the_keyboard_and_keeps_its_text() {
+    let mut app = start_with_settings("notes-hidden-editor", &|settings| {
+        settings.notes_placement = NotesPlacement::Pane;
+    });
+    app.key(Key::Enter);
+    let thread = app.mail().thread().expect("open").id().to_owned();
+    app.key(Key::T);
+    app.type_text("Kept");
+    // The settings menu takes the right pane, and the editor with it.
+    palette(&mut app, "Settings");
+    assert!(app.mail().settings_visible());
+    assert_eq!(app.mail().note_editor_text().as_deref(), Some("Kept"));
+    // J now moves to the next conversation, which saves the note.
+    app.key(Key::J);
+    assert_ne!(
+        app.mail().thread().map(|open| open.id().to_owned()),
+        Some(thread),
+        "J went to the next conversation"
+    );
+    app.key(Key::K);
+    assert_eq!(labels(&app), ["Thread note"]);
+    assert_eq!(app.mail().notes().notes[0].text, "Kept");
+}

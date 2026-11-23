@@ -1140,6 +1140,7 @@ pub(super) fn expanded(
             now,
             Status::of(message, state),
             bodies.tracking_blocked(&message.id),
+            state.notes,
             &ink,
             selection,
         )
@@ -1679,7 +1680,8 @@ pub(crate) fn header_job(
 
 /// Shift-H's full header: From, To, Cc, Bcc with names and addresses, then the full date (or a
 /// failed or waiting send's status) and the chevron that folds it back. Its text is selectable
-/// (`cursor: text`), and only the chevron folds it. With `tracking_blocked`, an eye follows From.
+/// (`cursor: text`), and only the chevron folds it. With `tracking_blocked`, an eye follows From,
+/// and with `notes` (notes in the pane only) their count chip follows From and the eye.
 #[expect(
     clippy::too_many_arguments,
     reason = "one header, drawn from the card's state"
@@ -1692,6 +1694,7 @@ fn full_header(
     now: &Zoned,
     status: Option<Status>,
     tracking_blocked: bool,
+    notes: usize,
     ink: &Ink,
     selection: &mut exo_ui::TextSelection,
 ) -> Option<Hit> {
@@ -1707,8 +1710,10 @@ fn full_header(
         ("Cc", &message.cc),
         ("Bcc", &message.bcc),
     ];
-    // Where the eye's baseline is, after From.
+    // Where the eye's baseline is, after From, and where the note count chip goes: its left edge
+    // and its line's middle.
     let mut eye = None;
+    let mut chip = None;
     for (label, contacts) in rows {
         if contacts.is_empty() {
             continue;
@@ -1735,12 +1740,18 @@ fn full_header(
             exo_ui::palette(ui.ctx()).text_selection_default,
         );
         exo_ui::paint_text(painter, pos2(left, top), galley, &HEADER);
-        if label == "From" && tracking_blocked {
+        if label == "From" {
             let line = top + HEADER_ROW * (lines - 1.0);
-            eye = Some(pos2(
-                left + end + PIXEL_BLOCKING_GAP,
-                line + HEADER.baseline(ui.ctx()),
-            ));
+            let mut after = left + end;
+            if tracking_blocked {
+                eye = Some(pos2(
+                    after + PIXEL_BLOCKING_GAP,
+                    line + HEADER.baseline(ui.ctx()),
+                ));
+                let size = exo_ui::icon_size(ui.ctx(), PIXEL_BLOCKING).unwrap_or(vec2(13.0, 10.0));
+                after += PIXEL_BLOCKING_GAP + size.x;
+            }
+            chip = (notes > 0).then_some((after + NOTES_CHIP_GAP, line + HEADER_ROW / 2.0));
         }
         top += HEADER_ROW * lines;
     }
@@ -1754,10 +1765,13 @@ fn full_header(
         Sense::hover(),
     )
     .on_hover_cursor(egui::CursorIcon::Text);
-    // The eye goes over the text and takes the pointer from it.
+    // The eye and the chip go over the text and take the pointer from it.
     if let Some(baseline) = eye {
         pixel_blocking(ui, baseline, id.with("pixel-blocking"));
     }
+    let chip_clicked = chip.is_some_and(|(chip_left, middle)| {
+        crate::notes::count_chip(ui, chip_left, middle, notes, &message.id)
+    });
     let date_width = match status {
         // The 12px/16px slot sits as an inline block on the header's 24px line, aligned by
         // baselines, then moved by `top: 1px`. It says just `Send failed` (with no chevron), or
@@ -1803,6 +1817,9 @@ fn full_header(
             shift: 0.0,
         },
     );
+    if chip_clicked {
+        return Some(Hit::Notes);
+    }
     response
         .clicked()
         .then_some(Hit::HeaderToggle { hint: true })
