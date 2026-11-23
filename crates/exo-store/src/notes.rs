@@ -58,9 +58,9 @@ pub(crate) struct Backup {
     dirty: AtomicBool,
     /// Whether a write is waiting out the pace.
     scheduled: AtomicBool,
-    /// Whether the file holds notes that couldn't be restored and must not be overwritten, so
-    /// nothing is written this session.
-    disabled: AtomicBool,
+    /// Where this session's backups go while the file at `path` holds notes that couldn't be
+    /// restored and must not be overwritten. The next open restores it after that file.
+    session: Option<PathBuf>,
     /// One backup written at a time, so a later one is never overwritten by an earlier one.
     writing: tokio::sync::Mutex<()>,
     /// The file a backup that couldn't be restored was kept as, until the app has said so.
@@ -75,10 +75,15 @@ impl Backup {
             pace,
             dirty: AtomicBool::new(false),
             scheduled: AtomicBool::new(false),
-            disabled: AtomicBool::new(recovered.disabled),
+            session: recovered.session,
             writing: tokio::sync::Mutex::new(()),
             set_aside: std::sync::Mutex::new(recovered.set_aside),
         }
+    }
+
+    /// The file a backup is written to now.
+    fn target(&self) -> &Path {
+        self.session.as_deref().unwrap_or(&self.path)
     }
 }
 
@@ -87,8 +92,9 @@ impl Backup {
 pub(crate) struct Recovered {
     /// The file name a backup that couldn't be restored was kept as.
     set_aside: Option<String>,
-    /// Whether the backup is left where it is, unrestored, so nothing may overwrite it.
-    disabled: bool,
+    /// Where this session's backups go, when the backup is left where it is, unrestored, so
+    /// nothing may overwrite it.
+    session: Option<PathBuf>,
 }
 
 /// A name and address of one of a noted thread's participants, as the thread had them when a
@@ -642,16 +648,14 @@ impl Store {
     /// latest notes. Note changes ask for it on their own, [`BACKUP_PACE`] on; closing the store
     /// (quitting, signing out) calls it so nothing waits unwritten.
     ///
-    /// Nothing is written while the file holds a backup that couldn't be restored.
+    /// While the file holds a backup that couldn't be restored, it's left alone and the backup
+    /// is written beside it, as this session's own file, which the next open restores too.
     ///
     /// # Errors
     /// On database failures, or when the file can't be written. The backup stays due, and is
     /// tried again after the next note change and the next open.
     pub async fn backup_notes(&self) -> Result<()> {
         let backup = &self.inner.backup;
-        if backup.disabled.load(Ordering::SeqCst) {
-            return Ok(());
-        }
         let _turn = backup.writing.lock().await;
         // What changes from here on is the next backup's.
         backup.dirty.store(false, Ordering::SeqCst);
@@ -662,11 +666,28 @@ impl Store {
         written
     }
 
+    /// Leaves nothing of the backup unwritten, as the store closes: waits for a write under way
+    /// to reach the disk, then writes again if the notes changed since. With nothing changed
+    /// and nothing under way, nothing is written.
+    ///
+    /// # Errors
+    /// As [`backup_notes`](Self::backup_notes).
+    pub async fn finish_notes_backup(&self) -> Result<()> {
+        let due = {
+            let _turn = self.inner.backup.writing.lock().await;
+            self.notes_backup_due()
+        };
+        if due {
+            self.backup_notes().await
+        } else {
+            Ok(())
+        }
+    }
+
     /// Whether the notes changed since the backup last held them.
     #[must_use]
     pub fn notes_backup_due(&self) -> bool {
-        let backup = &self.inner.backup;
-        backup.dirty.load(Ordering::SeqCst) && !backup.disabled.load(Ordering::SeqCst)
+        self.inner.backup.dirty.load(Ordering::SeqCst)
     }
 
     /// The file name a notes' backup that couldn't be restored was kept as when the store
@@ -684,7 +705,7 @@ impl Store {
     /// Reads the notes' tables and writes them over the backup.
     async fn write_backup(&self) -> Result<()> {
         let mut db = self.inner.db.clone();
-        let path = self.inner.backup.path.clone();
+        let path = self.inner.backup.target().to_owned();
         let text = dump(&mut db).await?.ok_or_else(|| Error::Io {
             path: path.clone(),
             source: std::io::Error::new(
@@ -728,7 +749,7 @@ impl Store {
     pub(crate) fn notes_changed(&self) {
         let backup = &self.inner.backup;
         backup.dirty.store(true, Ordering::SeqCst);
-        if backup.disabled.load(Ordering::SeqCst) || backup.scheduled.swap(true, Ordering::SeqCst) {
+        if backup.scheduled.swap(true, Ordering::SeqCst) {
             return;
         }
         let Ok(runtime) = tokio::runtime::Handle::try_current() else {
@@ -1073,9 +1094,12 @@ pub(crate) async fn live_texts(exec: &mut dyn Executor, thread: &str) -> Result<
 ///
 /// A backup whose content can't be restored (it isn't JSON, isn't a backup, or has rows the
 /// tables refuse) may be the only copy of the notes, so it's set aside where the next backup
-/// can't overwrite it, and the app says so. One the database couldn't take just now stays where
-/// it is for the next open to try, which a marker beside it asks for even if notes are written
-/// meanwhile, and nothing overwrites it this session. Neither stops the store opening.
+/// can't overwrite it, and the app says so. One the database couldn't take just now, or one that
+/// couldn't be set aside, stays where it is for the next open to try, which a marker beside it
+/// asks for even if notes are written meanwhile. Nothing overwrites it this session: the
+/// session's backups go to a file of their own beside it ([`session_file`]), and every open
+/// restores those files too, after the backup, so what was written meanwhile survives a sign-out.
+/// None of this stops the store opening.
 pub(crate) async fn recover(db: &mut Db, backup: &Path) -> Result<Recovered> {
     let mut recovered = Recovered::default();
     let marker = retry_marker(backup);
@@ -1103,11 +1127,11 @@ pub(crate) async fn recover(db: &mut Db, backup: &Path) -> Result<Recovered> {
                     // It stays under its own name, and nothing is written over it.
                     Err(rename) => {
                         log::error!(
-                            "the notes' backup at {} can't be restored ({error}) or set aside ({rename}), so no backup is written this session",
+                            "the notes' backup at {} can't be restored ({error}) or set aside ({rename}), so this session's backups are written beside it",
                             backup.display()
                         );
                         recovered.set_aside = file_name(backup);
-                        recovered.disabled = true;
+                        recovered.session = Some(wait(backup, &marker));
                     }
                 }
             }
@@ -1116,11 +1140,38 @@ pub(crate) async fn recover(db: &mut Db, backup: &Path) -> Result<Recovered> {
                     "the notes' backup at {} wasn't restored, and is left for the next open: {error}",
                     backup.display()
                 );
-                if let Err(error) = std::fs::write(&marker, b"") {
-                    log::error!("marking the notes' backup to restore: {error}");
-                }
-                recovered.disabled = true;
+                recovered.session = Some(wait(backup, &marker));
             }
+        }
+    }
+    // What earlier sessions wrote beside a backup they couldn't overwrite. It's newer than that
+    // backup, and only adds what the tables lack.
+    for session in session_files(backup) {
+        match restore(db, &session, true, true).await {
+            Ok(()) => {
+                if let Err(error) = std::fs::remove_file(&session) {
+                    log::error!("removing the restored {}: {error}", session.display());
+                }
+            }
+            Err(Unrestored::Content(error)) => {
+                let aside = set_aside(&session);
+                log::error!(
+                    "the notes' backup at {} can't be restored, and is kept as {}: {error}",
+                    session.display(),
+                    aside.display()
+                );
+                match std::fs::rename(&session, &aside) {
+                    Ok(()) => recovered.set_aside = file_name(&aside),
+                    Err(rename) => {
+                        log::error!("keeping {} where it is: {rename}", session.display());
+                        recovered.set_aside = file_name(&session);
+                    }
+                }
+            }
+            Err(Unrestored::Later(error)) => log::error!(
+                "the notes' backup at {} wasn't restored, and is left for the next open: {error}",
+                session.display()
+            ),
         }
     }
     let live = query_i64(db, "SELECT count(*) FROM notes WHERE deleted_at IS NULL").await?;
@@ -1185,6 +1236,54 @@ fn set_aside(backup: &Path) -> PathBuf {
         base.display(),
         Timestamp::now().as_millisecond()
     ))
+}
+
+/// Leaves `backup` waiting for the next open, which `marker` asks to restore it, and gives the
+/// file this session's backups go to meanwhile.
+fn wait(backup: &Path, marker: &Path) -> PathBuf {
+    if let Err(error) = std::fs::write(marker, b"") {
+        log::error!("marking the notes' backup to restore: {error}");
+    }
+    session_file(backup)
+}
+
+/// Where a session's backups go while `backup` waits unrestored:
+/// `{account}.notes-backup.session-{epoch milliseconds}.json` beside it. Each session has its
+/// own, so one never overwrites another's that hasn't been restored yet.
+fn session_file(backup: &Path) -> PathBuf {
+    let base = backup.with_extension("");
+    PathBuf::from(format!(
+        "{}.session-{}.json",
+        base.display(),
+        Timestamp::now().as_millisecond()
+    ))
+}
+
+/// The session backups beside `backup` that are still to restore, oldest first. Those set aside
+/// as unrestorable aren't among them.
+fn session_files(backup: &Path) -> Vec<PathBuf> {
+    let (Some(folder), Some(base)) = (backup.parent(), file_name(&backup.with_extension("")))
+    else {
+        return Vec::new();
+    };
+    let prefix = format!("{base}.session-");
+    let Ok(entries) = std::fs::read_dir(folder) else {
+        return Vec::new();
+    };
+    let mut found: Vec<PathBuf> = entries
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .filter(|path| {
+            file_name(path).is_some_and(|name| {
+                name.strip_prefix(&prefix)
+                    .and_then(|rest| rest.strip_suffix(".json"))
+                    .is_some_and(|stamp| {
+                        !stamp.is_empty() && stamp.bytes().all(|b| b.is_ascii_digit())
+                    })
+            })
+        })
+        .collect();
+    found.sort();
+    found
 }
 
 /// The file beside `backup` that says the next open should restore it, whatever the tables

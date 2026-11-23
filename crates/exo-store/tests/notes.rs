@@ -604,6 +604,146 @@ fn set_aside(dir: &Path) -> Vec<String> {
         .collect()
 }
 
+/// The backups in `dir` written beside a standing backup that couldn't be overwritten, oldest
+/// first.
+fn session_backups(dir: &Path) -> Vec<PathBuf> {
+    let mut found: Vec<PathBuf> = std::fs::read_dir(dir)
+        .expect("lists")
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .filter(|path| {
+            path.file_name()
+                .is_some_and(|name| name.to_string_lossy().contains(".notes-backup.session-"))
+        })
+        .collect();
+    found.sort();
+    found
+}
+
+/// The texts of the notes on `thread`, in order.
+async fn note_texts(store: &Store, thread: &ThreadId) -> Vec<String> {
+    let mut texts: Vec<String> = store
+        .thread_notes(thread)
+        .await
+        .expect("reads")
+        .notes
+        .into_iter()
+        .map(|note| note.text)
+        .collect();
+    texts.sort_unstable();
+    texts
+}
+
+#[tokio::test]
+async fn notes_written_while_the_backup_waits_are_kept_through_a_sign_out() {
+    let harness = Harness::synced().await;
+    let thread = conversation(&harness).await;
+    let Harness {
+        server,
+        dir,
+        store,
+        gmail: _gmail,
+    } = harness;
+    let dir = dir.path();
+    let marker = dir.join(format!("{ACCOUNT}.notes-backup.pending"));
+    // The backup can't be read just now (a folder stands where the file should be), so opening
+    // leaves it for a later open and mustn't write over it.
+    drop(store);
+    Store::delete(dir, ACCOUNT).expect("signs out");
+    std::fs::create_dir(backup(dir)).expect("stands in the backup's place");
+    let store = support::open(&server, dir).await;
+    saved(
+        &store,
+        save(&thread.id, None, "a", None, "Written meanwhile"),
+        at(0),
+    )
+    .await;
+    store.backup_notes().await.expect("backs up");
+    assert!(backup(dir).is_dir(), "what waits isn't written over");
+    assert!(marker.exists(), "the next open is asked to restore it");
+    let sessions = session_backups(dir);
+    assert_eq!(
+        sessions.len(),
+        1,
+        "the session's notes are backed up beside it"
+    );
+    let text = std::fs::read_to_string(&sessions[0]).expect("reads");
+    let session: serde_json::Value = serde_json::from_str(&text).expect("a whole JSON document");
+    assert_eq!(backed_up_ids(&session, "notes", "id"), ["a"]);
+
+    // Signed out and in again with the backup still unreadable: the session's notes come back,
+    // and what is written next goes beside it again, not over it.
+    drop(store);
+    Store::delete(dir, ACCOUNT).expect("signs out");
+    let store = support::open(&server, dir).await;
+    assert_eq!(note_texts(&store, &thread.id).await, ["Written meanwhile"]);
+    saved(
+        &store,
+        save(&thread.id, None, "b", None, "And another"),
+        at(1),
+    )
+    .await;
+    store.backup_notes().await.expect("backs up");
+    assert!(backup(dir).is_dir());
+    let sessions = session_backups(dir);
+    assert_eq!(
+        sessions.len(),
+        1,
+        "the restored one is gone, this session's is there"
+    );
+    let text = std::fs::read_to_string(&sessions[0]).expect("reads");
+    let session: serde_json::Value = serde_json::from_str(&text).expect("a whole JSON document");
+    assert_eq!(backed_up_ids(&session, "notes", "id"), ["a", "b"]);
+
+    // Signed out and in once the backup can be read (there is none, here): everything is back,
+    // nothing waits, and backups are the standing file's again.
+    drop(store);
+    Store::delete(dir, ACCOUNT).expect("signs out");
+    std::fs::remove_dir(backup(dir)).expect("clears the way");
+    let store = support::open(&server, dir).await;
+    assert_eq!(
+        note_texts(&store, &thread.id).await,
+        ["And another", "Written meanwhile"]
+    );
+    assert!(!marker.exists(), "restored, so no longer waiting");
+    assert_eq!(session_backups(dir), Vec::<PathBuf>::new());
+    store.backup_notes().await.expect("backs up");
+    assert_eq!(backed_up_ids(&backed_up(dir), "notes", "id"), ["a", "b"]);
+}
+
+#[tokio::test]
+async fn a_session_backup_that_wont_restore_is_set_aside_and_others_are_left_alone() {
+    let mut harness = Harness::synced().await;
+    let dir = harness.dir.path().to_owned();
+    let beside = |name: &str| dir.join(format!("{ACCOUNT}.notes-backup.{name}"));
+    // One that isn't a backup, one already set aside, and one that isn't a session's at all.
+    std::fs::write(beside("session-5.json"), "not a backup {").expect("writes");
+    std::fs::write(beside("session-4.unrestored-9.json"), "kept").expect("writes");
+    std::fs::write(beside("session-mine.json"), "mine").expect("writes");
+    harness.reopen().await;
+
+    assert!(!beside("session-5.json").exists(), "it isn't tried again");
+    let name = harness
+        .store
+        .take_notes_backup_set_aside()
+        .expect("the store says what it was kept as");
+    assert!(
+        name.starts_with(&format!("{ACCOUNT}.notes-backup.session-5.unrestored-")),
+        "{name}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.join(&name)).expect("kept"),
+        "not a backup {"
+    );
+    assert_eq!(
+        std::fs::read_to_string(beside("session-4.unrestored-9.json")).expect("kept"),
+        "kept"
+    );
+    assert_eq!(
+        std::fs::read_to_string(beside("session-mine.json")).expect("kept"),
+        "mine"
+    );
+}
+
 /// Signs out of `harness`'s store, leaves `backup` as its notes' backup, and opens it again.
 async fn reopen_with_backup(harness: Harness, backup_text: &str) -> (Harness, Store) {
     let Harness {

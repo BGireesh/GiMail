@@ -2544,9 +2544,7 @@ impl Worker {
                 self.repaint.request();
             }
             Request::BackUpNotes(done) => {
-                if self.store.notes_backup_due()
-                    && let Err(error) = self.store.backup_notes().await
-                {
+                if let Err(error) = self.store.finish_notes_backup().await {
                     log::error!("writing the notes' backup as the account closes: {error}");
                 }
                 let _ = done.send(());
