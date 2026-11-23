@@ -1003,6 +1003,9 @@ pub struct DeviceSettings {
     /// The calendar accounts whose calendars the week's list folds away.
     #[serde(skip_serializing_if = "std::collections::BTreeSet::is_empty")]
     pub folded_calendar_accounts: std::collections::BTreeSet<String>,
+    /// The right pane shows its Notes tab, not its Contact tab, while a thread is open.
+    #[serde(skip_serializing_if = "is_false")]
+    pub notes_tab: bool,
 }
 
 impl Document for DeviceSettings {

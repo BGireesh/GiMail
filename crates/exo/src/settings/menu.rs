@@ -28,6 +28,7 @@
 //! | | Hide Empty Split Inboxes | **built** |
 //! | `Writing` | Emoji, Signatures, Convert Hyphen to Bulleted List | **built** |
 //! | `Workflow` | Auto Advance, Auto Bcc, Blocked Senders, Downloads, Images, Instant Intro | **built** |
+//! | | Notes | **Exo's own**: where thread notes show (`crate::notes`) |
 //! | | Out of Office Reply | **built** (the app's dialog, `crate::out_of_office`) |
 //! | | Redirect to Exo | hidden: web only |
 //! | | Read Statuses | hidden: needs a server |
@@ -224,6 +225,7 @@ const SECTIONS: &[Section] = &[
             ("Downloads", Action::Open(Dialog::Downloads)),
             ("Images", Action::Open(Dialog::Images)),
             ("Instant Intro", Action::Open(Dialog::InstantIntro)),
+            ("Notes", Action::Open(Dialog::Notes)),
             ("Out of Office Reply", Action::OutOfOffice),
         ],
     },
@@ -548,23 +550,23 @@ mod tests {
 
     #[test]
     fn warn_before_quitting_follows_open_at_login() {
-        // `Open at Login` at 1104, then `Warn Before Quitting` at 1128, a toggle's row apart.
+        // `Open at Login` at 1128, then `Warn Before Quitting` at 1152, a toggle's row apart.
         assert_eq!(
-            click_with(pos2(32.0 + 5.0, 1112.0), Some(true)),
+            click_with(pos2(32.0 + 5.0, 1136.0), Some(true)),
             Some(Action::OpenAtLogin)
         );
         assert_eq!(
-            click_with(pos2(32.0 + 5.0, 1136.0), Some(true)),
+            click_with(pos2(32.0 + 5.0, 1160.0), Some(true)),
             Some(Action::WarnBeforeQuitting),
             "the label"
         );
         assert_eq!(
-            click_with(pos2(400.0 - 32.0 - 10.0, 1136.0), Some(true)),
+            click_with(pos2(400.0 - 32.0 - 10.0, 1160.0), Some(true)),
             Some(Action::WarnBeforeQuitting),
             "the slider"
         );
         assert_eq!(
-            click_with(pos2(32.0 + 5.0, 1188.0), Some(true)),
+            click_with(pos2(32.0 + 5.0, 1212.0), Some(true)),
             Some(Action::SignOut),
             "Sign Out moved down a row"
         );
@@ -675,14 +677,19 @@ mod tests {
         );
         assert_eq!(
             click(pos2(32.0 + 5.0, 964.0)),
+            Some(Action::Open(Dialog::Notes)),
+            "Notes, after Instant Intro"
+        );
+        assert_eq!(
+            click(pos2(32.0 + 5.0, 988.0)),
             Some(Action::OutOfOffice),
-            "Out of Office Reply, after Instant Intro"
+            "Out of Office Reply, after Notes"
         );
     }
 
     #[test]
     fn advanced_toggles_flip_from_anywhere_on_their_rows_and_open_at_login_comes_last() {
-        // `Advanced` comes after `Workflow`, with its header at 984 and its rows from 1008,
+        // `Advanced` comes after `Workflow`, with its header at 1008 and its rows from 1032,
         // Backtick as Escape first.
         let flip = |setting| {
             Some(Action::Flip {
@@ -691,31 +698,31 @@ mod tests {
             })
         };
         assert_eq!(
-            click(pos2(32.0 + 5.0, 1016.0)),
+            click(pos2(32.0 + 5.0, 1040.0)),
             flip(Toggle::BacktickAsEscape)
         );
-        assert_eq!(click(pos2(32.0 + 5.0, 1040.0)), flip(Toggle::SendAndDone));
+        assert_eq!(click(pos2(32.0 + 5.0, 1064.0)), flip(Toggle::SendAndDone));
         assert_eq!(
-            click(pos2(400.0 - 32.0 - 10.0, 1064.0)),
+            click(pos2(400.0 - 32.0 - 10.0, 1088.0)),
             flip(Toggle::RsvpAndDone),
             "the slider"
         );
         assert_eq!(
-            click(pos2(32.0 + 5.0, 1088.0)),
+            click(pos2(32.0 + 5.0, 1112.0)),
             flip(Toggle::SenderFullNames)
         );
         assert_eq!(
-            click(pos2(32.0 + 5.0, 1112.0)),
+            click(pos2(32.0 + 5.0, 1136.0)),
             Some(Action::OpenAtLogin),
             "the label"
         );
         assert_eq!(
-            click(pos2(400.0 - 32.0 - 10.0, 1112.0)),
+            click(pos2(400.0 - 32.0 - 10.0, 1136.0)),
             Some(Action::OpenAtLogin),
             "the slider"
         );
         assert_eq!(
-            click(pos2(32.0 + 5.0, 1164.0)),
+            click(pos2(32.0 + 5.0, 1188.0)),
             Some(Action::SignOut),
             "Sign Out after Advanced"
         );

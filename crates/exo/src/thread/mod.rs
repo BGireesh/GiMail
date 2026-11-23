@@ -138,6 +138,8 @@ pub(crate) enum Action {
     DeleteNote(String),
     /// The note editor's `Save`.
     SaveNote,
+    /// A note count chip, with notes in the pane only: show the pane's Notes tab.
+    ShowNotes,
 }
 
 /// One message as the thread shows it.
@@ -244,6 +246,12 @@ pub struct ThreadView {
     draft_was_in_view: bool,
     /// Scroll to the end once everything is measured (a reply was just sent).
     reveal_end: bool,
+    /// A note to bring into view on the next frame.
+    reveal_note: Option<String>,
+    /// With notes in the pane only, how many the thread has, which its subject's chip counts.
+    pane_notes: usize,
+    /// The message column on screen, under the header, from the last frame.
+    messages: Rect,
     /// The message column's visible height and the content's, from the last frame.
     viewport: f32,
     content: f32,
@@ -368,6 +376,9 @@ impl ThreadView {
             reveal_draft: None,
             draft_was_in_view: false,
             reveal_end: false,
+            reveal_note: None,
+            pane_notes: 0,
+            messages: Rect::NOTHING,
             viewport: 0.0,
             content: 0.0,
             tops: Vec::new(),
@@ -1199,6 +1210,16 @@ impl ThreadView {
         });
     }
 
+    /// Scrolls note `id`'s card into view on the next frame, from the notes pane's timeline.
+    pub fn reveal_note(&mut self, id: &str) {
+        self.reveal_note = Some(id.to_owned());
+    }
+
+    /// The message column on screen, under the header, as last drawn.
+    pub fn messages_rect(&self) -> Rect {
+        self.messages
+    }
+
     /// Focuses message `id` and scrolls its new draft into view on the next frame.
     pub fn reveal_draft(&mut self, id: &str) {
         self.focus = Some(id.to_owned());
@@ -1270,6 +1291,11 @@ impl ThreadView {
         };
         let popped_out = drafts.as_ref().is_some_and(|drafts| drafts.popped_out());
         let mut layout = Layout::new(rect, rem, window_width, popped_out);
+        self.pane_notes = if notes.placement() == NotesPlacement::Pane {
+            notes.all().notes.len()
+        } else {
+            0
+        };
 
         // The header's height depends on how the subject wraps, and the messages start under it.
         self.status = header::status(
@@ -1285,6 +1311,7 @@ impl ThreadView {
             &detail,
             &self.chips,
             !self.spam_view,
+            self.pane_notes,
             self.status.is_some(),
         );
         let messages_top = layout.header.top() + header_height + MESSAGES_MARGIN_TOP;
@@ -1326,6 +1353,7 @@ impl ThreadView {
         (self.scroll_x, self.max_scroll_x) = layout.scroll_x();
         let messages = layout.viewport(messages_top, rect.bottom());
         self.viewport = messages.height();
+        self.messages = messages;
 
         // The back gutter: all of its clickable goes back, and hovering it lights the back
         // button, with a pointer cursor. The rail's back area lights it too, even while the
@@ -1573,8 +1601,12 @@ impl ThreadView {
         if let Some((id, top)) = anchored {
             self.scroll_to_anchor(ui, &layout, &id, top, bodies);
         }
-        if notes.take_reveal() {
+        // With notes in the pane only, the pane scrolls to its own editor.
+        if notes.placement() == NotesPlacement::Thread && notes.take_reveal() {
             self.scroll_to_note_editor();
+        }
+        if let Some(id) = self.reveal_note.take() {
+            self.scroll_to_note(&id, &all_notes);
         }
         if typing && self.animation.is_none() {
             self.keep_draft_in_view(&draft_heights);
@@ -1680,6 +1712,7 @@ impl ThreadView {
                 &detail,
                 &self.chips,
                 !self.spam_view,
+                self.pane_notes,
                 header_height,
                 self.status.as_ref(),
                 scrolled,
@@ -1775,8 +1808,15 @@ impl ThreadView {
                 contact.email.clone(),
             ));
         }
-        let subject = header::subject_rect(ui, layout, detail, &self.chips, !self.spam_view)
-            .map(|rect| (rect, header::title(detail)));
+        let subject = header::subject_rect(
+            ui,
+            layout,
+            detail,
+            &self.chips,
+            !self.spam_view,
+            self.pane_notes,
+        )
+        .map(|rect| (rect, header::title(detail)));
         match self
             .tooltips
             .show(ui, &named, subject, layout.column.x_range())
@@ -1844,10 +1884,12 @@ impl ThreadView {
     /// `+ Add thread note`, and a message's notes follow it. A note whose message the thread
     /// no longer shows follows the last message that isn't newer than its own was. The note
     /// editor takes the place of the note it edits, or goes after the notes of what its new
-    /// note is on. With notes shown in the pane only, the editor alone is in the column.
+    /// note is on. With notes shown in the pane only, none of them is in the column.
     fn with_notes(&self, order: Vec<Entry>, notes: &Notes) -> Vec<Entry> {
+        if notes.placement() != NotesPlacement::Thread {
+            return order;
+        }
         let all = notes.all();
-        let in_thread = notes.placement() == NotesPlacement::Thread;
         let editing = notes.editing();
         let edited = editing.and_then(|open| open.note_id.as_deref());
         // What follows each message, and with `None` what comes before them all.
@@ -1856,8 +1898,6 @@ impl ThreadView {
         for (at, note) in all.notes.iter().enumerate() {
             let entry = if edited == Some(note.id.as_str()) {
                 Entry::NoteEditor
-            } else if !in_thread {
-                continue;
             } else if note.message_id.is_some() {
                 Entry::MessageNote(at)
             } else {
@@ -1881,7 +1921,7 @@ impl ThreadView {
                 None => woven.push(Entry::NoteEditor),
             }
         }
-        if in_thread && editing.is_none() {
+        if editing.is_none() {
             woven.push(Entry::AddThreadNote);
         }
         woven.extend(under.remove(&None).unwrap_or_default());
@@ -1925,6 +1965,27 @@ impl ThreadView {
             _ => false,
         };
         if on_message { NOTE_INDENT } else { 0.0 }
+    }
+
+    /// Brings note `id`'s card into view, as the notes pane's timeline asks: its top under the
+    /// messages' padding when it's above the fold, else its bottom above the messages'. A note
+    /// the column doesn't show is left alone.
+    fn scroll_to_note(&mut self, id: &str, notes: &exo_store::ThreadNotes) {
+        let Some(placed) = self.entries.iter().find(|placed| match placed.entry {
+            Entry::ThreadNote(at) | Entry::MessageNote(at) => {
+                notes.notes.get(at).is_some_and(|note| note.id == id)
+            }
+            _ => false,
+        }) else {
+            return;
+        };
+        let (top, bottom) = (placed.top, placed.top + placed.height);
+        let above = top - MESSAGES_PADDING_TOP;
+        if above < self.scroll {
+            self.animate_to(above);
+        } else if bottom > self.scroll + self.viewport - DRAFT_MARGIN_BOTTOM {
+            self.animate_to((bottom - self.viewport + DRAFT_MARGIN_BOTTOM).min(above));
+        }
     }
 
     /// Brings the note editor into view: its top under the messages' padding when it's above
@@ -2078,6 +2139,15 @@ impl ThreadView {
                 offline: !self.online,
                 full_names: self.full_names,
                 reply_labels: is_focus && self.new_account(),
+                notes: if notes.placement() == NotesPlacement::Pane {
+                    all_notes
+                        .notes
+                        .iter()
+                        .filter(|note| note.message_id.as_deref() == Some(item.id.as_str()))
+                        .count()
+                } else {
+                    0
+                },
             };
             let response = ui.interact(
                 card.intersect(messages),
@@ -2274,13 +2344,14 @@ impl ThreadView {
                         self.focus = Some(item.id.clone());
                         actions.push(Action::AddNote(Some(item.id.clone())));
                     }
+                    Some(message::Hit::Notes) => actions.push(Action::ShowNotes),
                     Some(message::Hit::Header) | None => {}
                 }
                 if response.clicked() || response.drag_started() {
                     self.focus = Some(item.id.clone());
                 }
             } else {
-                message::collapsed(
+                let chip = message::collapsed(
                     ui,
                     card,
                     layout,
@@ -2294,7 +2365,9 @@ impl ThreadView {
                 );
                 // A pointer cursor over a collapsed row.
                 let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
-                if response.clicked() {
+                if chip {
+                    actions.push(Action::ShowNotes);
+                } else if response.clicked() {
                     self.items[at].expanded = true;
                     self.focus = Some(item.id.clone());
                     self.count_toggle(true, actions);

@@ -63,7 +63,18 @@ const NOTE_KEYS: &[Region] = &[
     Region::ThreadMessagesHeader,
     Region::ActionPane,
     Region::ThreadMessages,
+    Region::ThreadMessageCalendarInvite,
     Region::ThreadMessagesNewMessages,
+];
+/// Where ⌘⇧N switches the right pane's tab and the notes' palette rows show: the thread pane and
+/// the note editor.
+const NOTES_PANE: &[Region] = &[
+    Region::ThreadMessagesHeader,
+    Region::ActionPane,
+    Region::ThreadMessages,
+    Region::ThreadMessageCalendarInvite,
+    Region::ThreadMessagesNewMessages,
+    Region::NoteEditor,
 ];
 /// Where the note editor's own keys live.
 const NOTE_EDITOR: &[Region] = &[Region::NoteEditor];
@@ -255,6 +266,12 @@ pub enum Action {
     DeleteNote(String),
     /// A formatting key in the note editor.
     FormatNote(exo_editor::FormatCommand),
+    /// ⌘⇧N, `Show Notes`: switch the right pane between its Notes and Contact tabs.
+    ToggleNotesPane,
+    /// `Show Notes in Thread`, `Show Notes in Pane Only`: where the notes show.
+    SetNotesPlacement(exo_store::NotesPlacement),
+    /// The notes pane's `Share notes by email`.
+    ShareNotes,
 }
 
 /// The header's and the back gutter's keys (`ThreadMessagesHeader`, `ActionPane`).
@@ -472,21 +489,72 @@ pub fn register_thread(commands: &mut Commands<Action>, cx: &ThreadContext) {
     }
 }
 
-/// Registers the open thread's note keys for this frame: T and ⇧T in the thread pane, and with
-/// `editor` (the open note editor, while it has the keyboard) ⌘↩, Escape when the editor has
-/// nothing of its own to close, and the formatting keys that apply.
-pub fn register_notes(commands: &mut Commands<Action>, editor: Option<&exo_editor::Editor>) {
+/// What the open thread's note commands depend on this frame.
+pub struct NotesContext<'a> {
+    /// The open note editor, while it has the keyboard.
+    pub editor: Option<&'a exo_editor::Editor>,
+    /// Whether the right pane shows its Notes tab.
+    pub notes_tab: bool,
+    /// Where the notes show, which the placement rows change.
+    pub placement: exo_store::NotesPlacement,
+}
+
+/// Registers the open thread's note commands for this frame: T and ⇧T in the thread pane, ⌘⇧N,
+/// the notes' palette rows, and with an editor that has the keyboard ⌘↩, Escape when the editor
+/// has nothing of its own to close, and the formatting keys that apply.
+pub fn register_notes(commands: &mut Commands<Action>, cx: &NotesContext<'_>) {
+    use exo_store::NotesPlacement;
     commands.add(
-        Command::shortcut("NEW_THREAD_NOTE", Action::NewThreadNote)
+        Command::new("NEW_THREAD_NOTE", "Add Thread Note", Action::NewThreadNote)
             .key("t")
+            .key_code(["T"])
             .regions(NOTE_KEYS),
     );
     commands.add(
-        Command::shortcut("NEW_MESSAGE_NOTE", Action::NewMessageNote)
-            .key("shift+t")
-            .regions(NOTE_KEYS),
+        Command::new(
+            "NEW_MESSAGE_NOTE",
+            "Add Note to Message",
+            Action::NewMessageNote,
+        )
+        .key("shift+t")
+        .key_code(["shift", "T"])
+        .regions(NOTE_KEYS),
     );
-    let Some(editor) = editor else {
+    // The key switches either way, and the row shows only while the contact does.
+    commands.add(
+        Command::shortcut("TOGGLE_NOTES_PANE", Action::ToggleNotesPane)
+            .key("mod+shift+n")
+            .regions(NOTES_PANE),
+    );
+    if !cx.notes_tab {
+        commands.add(
+            Command::new("SHOW_NOTES", "Show Notes", Action::ToggleNotesPane)
+                .key_code(["⌘", "shift", "N"])
+                .regions(NOTES_PANE),
+        );
+    }
+    // Only the row that would change the setting.
+    let placement = match cx.placement {
+        NotesPlacement::Thread => (
+            "SHOW_NOTES_IN_PANE",
+            "Show Notes in Pane Only",
+            NotesPlacement::Pane,
+        ),
+        NotesPlacement::Pane => (
+            "SHOW_NOTES_IN_THREAD",
+            "Show Notes in Thread",
+            NotesPlacement::Thread,
+        ),
+    };
+    commands.add(
+        Command::new(
+            placement.0,
+            placement.1,
+            Action::SetNotesPlacement(placement.2),
+        )
+        .regions(NOTES_PANE),
+    );
+    let Some(editor) = cx.editor else {
         return;
     };
     commands.add(

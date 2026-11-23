@@ -3,6 +3,8 @@
 mod support;
 
 use egui::{Key, Modifiers};
+use exo::notes::Item;
+use exo_store::NotesPlacement;
 use exo_store::{SaveNote, ThreadId};
 use support::{Fixture, start, start_with_settings};
 
@@ -385,19 +387,6 @@ fn t_in_a_reply_is_typed_not_a_note() {
 }
 
 #[test]
-fn in_the_pane_only_the_thread_draws_no_note_cards() {
-    let mut app = start_with_settings("notes-pane-placement", &|settings| {
-        settings.notes_placement = exo_store::NotesPlacement::Pane;
-    });
-    app.key(Key::Enter);
-    app.key(Key::T);
-    app.type_text("Kept out of the column");
-    app.press(Key::Enter, COMMAND);
-    assert_eq!(labels(&app), ["Thread note"], "T still writes one");
-    assert!(app.mail().note_rects().is_empty(), "but no card is drawn");
-}
-
-#[test]
 fn a_note_stays_out_of_a_reply() {
     let mut app = start_thread_note("notes-stay-private");
     app.type_text("zebra-crossing");
@@ -410,4 +399,238 @@ fn a_note_stays_out_of_a_reply() {
             .is_some_and(|body| !body.contains("zebra-crossing")),
         "the reply quotes the mail alone"
     );
+}
+
+const COMMAND_SHIFT: Modifiers = COMMAND.plus(Modifiers::SHIFT);
+
+/// Opens the palette and runs the row `query` ranks first.
+fn palette(app: &mut Fixture, query: &str) {
+    app.press(Key::K, COMMAND);
+    app.harness
+        .input_mut()
+        .events
+        .push(egui::Event::Text(query.to_owned()));
+    app.harness.run_steps(1);
+    app.key(Key::Enter);
+}
+
+/// Writes a note with the editor `open` opens, and saves it.
+fn write_note(app: &mut Fixture, open: impl FnOnce(&mut Fixture), text: &str) {
+    open(app);
+    app.type_text(text);
+    app.press(Key::Enter, COMMAND);
+}
+
+#[test]
+fn command_shift_n_switches_the_pane_to_notes_and_back() {
+    let mut app = start("notes-command-shift-n");
+    app.key(Key::Enter);
+    assert!(!app.mail().notes_tab(), "the pane starts on the contact");
+    app.press(Key::N, COMMAND_SHIFT);
+    assert!(app.mail().notes_tab(), "\u{2318}\u{21e7}N shows the notes");
+    app.press(Key::N, COMMAND_SHIFT);
+    assert!(!app.mail().notes_tab(), "and again the contact");
+    app.press(Key::N, COMMAND_SHIFT);
+    // The pane remembers the tab from one thread to the next, and across a relaunch.
+    app.key(Key::Escape);
+    assert!(!app.mail().notes_tab(), "no notes tab without a thread");
+    app.key(Key::Enter);
+    assert!(app.mail().notes_tab(), "remembered for the next thread");
+    app.relaunch();
+    app.key(Key::Enter);
+    assert!(app.mail().notes_tab(), "and after a relaunch");
+}
+
+#[test]
+fn the_timeline_lists_notes_and_emails_in_order() {
+    let mut app = start("notes-timeline-order");
+    open_debrief(&mut app);
+    let messages: Vec<(String, jiff::Timestamp)> = app
+        .mail()
+        .thread()
+        .expect("open")
+        .messages()
+        .iter()
+        .map(|message| (message.id.clone(), message.date))
+        .collect();
+    let zone = jiff::tz::TimeZone::UTC;
+    // A note on the first email, written before the second arrived.
+    app.set_now((messages[0].1 + jiff::SignedDuration::from_mins(1)).to_zoned(zone.clone()));
+    app.key(Key::P);
+    app.key(Key::P);
+    write_note(
+        &mut app,
+        |app| app.press(Key::T, Modifiers::SHIFT),
+        "Ask about the offer deadline",
+    );
+    // A thread note, written after the last.
+    app.set_now((messages[2].1 + jiff::SignedDuration::from_mins(1)).to_zoned(zone));
+    write_note(&mut app, |app| app.key(Key::T), "Decide by Friday");
+    app.press(Key::N, COMMAND_SHIFT);
+    let notes = &app.mail().notes().notes;
+    let id = |text: &str| {
+        notes
+            .iter()
+            .find(|note| note.text == text)
+            .map(|note| note.id.clone())
+            .expect("the note was saved")
+    };
+    let expected = vec![
+        Item::Email(messages[0].0.clone()),
+        Item::Note(id("Ask about the offer deadline")),
+        Item::Email(messages[1].0.clone()),
+        Item::Email(messages[2].0.clone()),
+        Item::Note(id("Decide by Friday")),
+    ];
+    let listed: Vec<Item> = app
+        .mail()
+        .notes_timeline()
+        .into_iter()
+        .map(|(item, _)| item)
+        .collect();
+    assert_eq!(listed, expected);
+    let pane = app.mail().right_pane();
+    assert!(
+        app.mail()
+            .notes_timeline()
+            .iter()
+            .all(|(_, rect)| pane.contains_rect(*rect)),
+        "in the right pane"
+    );
+}
+
+#[test]
+fn clicking_a_timeline_entry_reveals_the_note() {
+    let mut app = start("notes-timeline-reveal");
+    open_debrief(&mut app);
+    // Tall thread notes push the messages down past the fold.
+    for _ in 0..5 {
+        write_note(
+            &mut app,
+            |app| {
+                app.key(Key::T);
+                for line in ["One", "Two", "Three", "Four"] {
+                    app.type_text(line);
+                    app.key(Key::Enter);
+                }
+            },
+            "Five",
+        );
+    }
+    // The topmost of them.
+    let id = app
+        .mail()
+        .note_rects()
+        .into_iter()
+        .min_by(|(_, a), (_, b)| a.top().total_cmp(&b.top()))
+        .map(|(id, _)| id)
+        .expect("the notes are drawn");
+    // The messages take the keyboard, and the thread scrolls to its end, where the note is out
+    // of view.
+    app.click(egui::pos2(640.0, 700.0));
+    app.press(Key::G, Modifiers::SHIFT);
+    app.settle();
+    let card = |app: &Fixture| {
+        app.mail()
+            .note_rects()
+            .into_iter()
+            .find(|(note, _)| *note == id)
+            .map(|(_, rect)| rect)
+            .expect("the card is drawn")
+    };
+    let content = app.mail().thread().expect("still open").messages_rect();
+    assert!(
+        !content.contains_rect(card(&app)),
+        "scrolled away: {:?} in {content:?}",
+        card(&app)
+    );
+    app.press(Key::N, COMMAND_SHIFT);
+    let (_, entry) = app
+        .mail()
+        .notes_timeline()
+        .into_iter()
+        .find(|(item, _)| *item == Item::Note(id.clone()))
+        .expect("the note is listed");
+    app.click(entry.center());
+    assert_eq!(
+        app.mail().flashing_note(),
+        Some(id.as_str()),
+        "the note flashes"
+    );
+    app.wait(1.2);
+    assert_eq!(app.mail().flashing_note(), None, "for a second");
+    let card = card(&app);
+    assert!(
+        content.contains_rect(card),
+        "in view: {card:?} in {content:?}"
+    );
+}
+
+#[test]
+fn pane_only_mode_keeps_notes_out_of_the_thread() {
+    let mut app = start_with_settings("notes-pane-only", &|settings| {
+        settings.notes_placement = NotesPlacement::Pane;
+    });
+    app.key(Key::Enter);
+    let pane = app.mail().right_pane();
+    app.key(Key::T);
+    assert!(app.mail().notes_tab(), "T shows the notes");
+    let editor = app.mail().note_editor_rect().expect("an editor is open");
+    assert!(pane.contains_rect(editor), "in the pane: {editor:?}");
+    app.type_text("Kept out of the column");
+    app.press(Key::Enter, COMMAND);
+    assert_eq!(labels(&app), ["Thread note"]);
+    let rects = app.mail().note_rects();
+    assert_eq!(rects.len(), 1, "its card is drawn");
+    assert!(
+        rects.iter().all(|(_, rect)| pane.contains_rect(*rect)),
+        "in the pane alone: {rects:?}"
+    );
+}
+
+#[test]
+fn the_command_switches_placement() {
+    let mut app = start("notes-placement-command");
+    app.key(Key::Enter);
+    assert_eq!(app.mail().notes_placement(), NotesPlacement::Thread);
+    palette(&mut app, "Show Notes in Pane Only");
+    assert_eq!(app.mail().notes_placement(), NotesPlacement::Pane);
+    palette(&mut app, "Show Notes in Thread");
+    assert_eq!(app.mail().notes_placement(), NotesPlacement::Thread);
+}
+
+#[test]
+fn a_thread_with_notes_is_marked_in_the_inbox() {
+    let mut app = start_thread_note("notes-inbox-icon");
+    let thread = app.mail().thread().expect("open").id().to_owned();
+    app.type_text("Follow up");
+    app.press(Key::Enter, COMMAND);
+    app.key(Key::Escape);
+    app.settle();
+    let threads = app.mail().inbox().threads();
+    let row = threads
+        .iter()
+        .find(|row| row.id == thread)
+        .expect("still listed");
+    assert_eq!(row.notes, 1);
+    assert!(
+        threads
+            .iter()
+            .filter(|row| row.id != thread)
+            .all(|row| row.notes == 0),
+        "the others have none"
+    );
+}
+
+#[test]
+fn escape_closes_a_note_with_a_colon_in_it() {
+    let mut app = start_thread_note("notes-escape-colon");
+    app.type_text("Ratio :smi");
+    app.key(Key::Escape);
+    assert_eq!(
+        app.mail().note_editor_text(),
+        None,
+        "the first Escape closed it"
+    );
+    assert_eq!(app.mail().notes().notes[0].text, "Ratio :smi");
 }

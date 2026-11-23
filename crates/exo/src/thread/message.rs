@@ -118,6 +118,8 @@ pub(super) struct State {
     pub full_names: bool,
     /// Its reply buttons have labels.
     pub reply_labels: bool,
+    /// With notes in the pane only, how many it has, which a chip after its sender counts.
+    pub notes: usize,
 }
 
 /// What a draft that's sending, scheduled or failed shows in place of its date. The status opens
@@ -196,6 +198,8 @@ pub(super) enum Hit {
     Recover,
     /// `+ Note`: a new note on the message.
     Note,
+    /// The note count chip after the sender: show the notes pane.
+    Notes,
 }
 
 /// The participants' names a header drew, and where it drew them. Each name has a tooltip and
@@ -792,25 +796,56 @@ fn reply_tooltip(action: exo_store::DraftAction) -> [KeyTooltip<'static>; 2] {
 }
 
 /// Paints the participants' `pieces` on the line at `at`, cut at `room`, and adds where each
-/// name went to `named` (the 17px of its text, from 1px above the line).
+/// name went to `named` (the 17px of its text, from 1px above the line). With a `gap`, the rest
+/// follow the sender that much further on, to leave room for a chip, and the sender is cut first.
+/// Returns how wide the sender is as painted.
 fn paint_participants(
     painter: &egui::Painter,
     at: egui::Pos2,
     pieces: &[(String, Option<&Contact>)],
     color: Color32,
     room: f32,
+    gap: f32,
     named: &mut Named,
-) {
-    let text: String = pieces.iter().map(|(text, _)| text.as_str()).collect();
-    FROM.paint_line(painter, at, &text, color, Some(room));
+) -> f32 {
+    let width = |text: &str| {
+        FROM.single_line(painter, text, Color32::PLACEHOLDER, None)
+            .size()
+            .x
+    };
+    let sender = pieces
+        .first()
+        .map_or(0.0, |(text, _)| width(text).min(room));
+    if gap > 0.0 {
+        if let Some((text, _)) = pieces.first() {
+            FROM.paint_line(painter, at, text, color, Some(room));
+        }
+        let rest: String = pieces
+            .iter()
+            .skip(1)
+            .map(|(text, _)| text.as_str())
+            .collect();
+        let rest_room = room - sender - gap;
+        if !rest.is_empty() && rest_room > 0.0 {
+            FROM.paint_line(
+                painter,
+                at + vec2(sender + gap, 0.0),
+                &rest,
+                color,
+                Some(rest_room),
+            );
+        }
+    } else {
+        let text: String = pieces.iter().map(|(text, _)| text.as_str()).collect();
+        FROM.paint_line(painter, at, &text, color, Some(room));
+    }
     let mut x = 0.0;
     let mut prefix = String::new();
-    for (piece, contact) in pieces {
+    for (k, (piece, contact)) in pieces.iter().enumerate() {
         prefix.push_str(piece);
-        let end = FROM
-            .single_line(painter, &prefix, Color32::PLACEHOLDER, None)
-            .size()
-            .x;
+        // What follows the sender sits past the gap.
+        let shift = if k == 0 { 0.0 } else { gap };
+        let end = width(&prefix) + shift;
         if let Some(contact) = contact.filter(|_| x < room) {
             named.push((
                 Rect::from_min_max(
@@ -820,9 +855,23 @@ fn paint_participants(
                 (*contact).clone(),
             ));
         }
-        x = end;
+        x = if k == 0 { end.min(sender) + gap } else { end };
+    }
+    sender
+}
+
+/// The room a note count chip takes after a sender (its width and the 6px each side of it), or
+/// none without `notes`.
+fn notes_gap(ctx: &egui::Context, notes: usize) -> f32 {
+    if notes == 0 {
+        0.0
+    } else {
+        crate::notes::count_chip_width(ctx, notes) + 2.0 * NOTES_CHIP_GAP
     }
 }
+
+/// The space either side of a note count chip after a sender.
+const NOTES_CHIP_GAP: f32 = 6.0;
 
 /// Where a date's hover target is: the 15px of its text on the line, starting 1px down.
 fn date_target(left: f32, width: f32, line: f32) -> Rect {
@@ -878,7 +927,7 @@ pub(super) fn collapsed(
     now: &Zoned,
     hovered: bool,
     named: &mut Named,
-) {
+) -> bool {
     let palette = exo_ui::palette(ui.ctx());
     let painter = ui.painter();
     let focused = state.focused && state.show_focus;
@@ -895,16 +944,26 @@ pub(super) fn collapsed(
         .single_line(painter, &from, Color32::PLACEHOLDER, None)
         .size()
         .x;
-    let from_box = (from_width + FROM_PADDING).max(FROM_MIN_WIDTH);
+    let gap = notes_gap(ui.ctx(), state.notes);
+    let from_box = (from_width + gap + FROM_PADDING).max(FROM_MIN_WIDTH);
     // The sender and snippet: `rgba(0, 0, 0, .6)`.
-    paint_participants(
+    let sender = paint_participants(
         painter,
         pos2(left, line),
         &pieces,
         palette.ink(0.6, 0.6),
         from_box - FROM_PADDING,
+        gap,
         named,
     );
+    let chip = state.notes > 0
+        && crate::notes::count_chip(
+            ui,
+            left + sender + NOTES_CHIP_GAP,
+            line + FROM.line_height / 2.0,
+            state.notes,
+            &message.id,
+        );
 
     // A failed or waiting send says so in the date's place, at `top: 1px`. The date's trailing
     // letter-spacing stays inside the right-aligned box.
@@ -963,6 +1022,7 @@ pub(super) fn collapsed(
         palette.ink(0.6, 0.6),
         Some(available),
     );
+    chip
 }
 
 /// Paints a collapsed row's attachment icon before its date, which starts at `date_left`, on the
@@ -1349,15 +1409,31 @@ fn compact_header(
     };
     let pieces = participant_pieces(message, thread, true, state.full_names);
     let text: String = pieces.iter().map(|(text, _)| text.as_str()).collect();
+    let gap = notes_gap(ui.ctx(), state.notes);
     let room = (from_right - left - chevron_room).max(0.0);
-    let names = match &condensed {
-        Some(condensed) => condensed.paint(painter, pos2(left, line), ink.names, room, named),
+    // The note count chip follows the sender, or a condensed list as a whole.
+    let (names, chip_left) = match &condensed {
+        Some(condensed) => {
+            let names = condensed.paint(painter, pos2(left, line), ink.names, room - gap, named);
+            (names + gap, left + names + NOTES_CHIP_GAP)
+        }
         None => {
-            paint_participants(painter, pos2(left, line), &pieces, ink.names, room, named);
-            FROM.single_line(painter, &text, Color32::PLACEHOLDER, None)
+            let sender = paint_participants(
+                painter,
+                pos2(left, line),
+                &pieces,
+                ink.names,
+                room,
+                gap,
+                named,
+            );
+            let names = (FROM
+                .single_line(painter, &text, Color32::PLACEHOLDER, None)
                 .size()
                 .x
-                .min(room)
+                + gap)
+                .min(room);
+            (names, left + sender + NOTES_CHIP_GAP)
         }
     };
     // A pointer cursor over the row, and over the participants' label on the row.
@@ -1372,6 +1448,15 @@ fn compact_header(
     let label = ui
         .interact(names_rect, id.with("names"), Sense::click())
         .on_hover_cursor(egui::CursorIcon::PointingHand);
+    // Over the names, so it takes its own clicks.
+    let chip = state.notes > 0
+        && crate::notes::count_chip(
+            ui,
+            chip_left,
+            line + FROM.line_height / 2.0,
+            state.notes,
+            &message.id,
+        );
 
     // The Shift-H chevron after the names. Without labels, it takes room and clicks while the
     // message is hovered. It fades in while the names or the chevron are hovered
@@ -1430,6 +1515,9 @@ fn compact_header(
     }
     if hit.is_none() && label.clicked() {
         hit = Some(Hit::HeaderToggle { hint: false });
+    }
+    if chip {
+        hit = Some(Hit::Notes);
     }
     if hit.is_none() && row.clicked() {
         hit = Some(Hit::Header);

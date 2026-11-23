@@ -50,6 +50,8 @@ const STATUS_HEIGHT: f32 = 8.0 + 16.0 + 1.0 + 3.0;
 const CHIP_TOP: f32 = 11.0;
 /// The space after each label chip.
 const CHIP_MARGIN: f32 = 6.0;
+/// The note count chip's middle, below the line box's top: a label chip's.
+const NOTES_CHIP_MIDDLE: f32 = CHIP_TOP + 9.0;
 
 /// A pending bulk action's status: `#ef8e8e`, a literal in Snow and Carbon.
 const PENDING: Color32 = Color32::from_rgb(0xef, 0x8e, 0x8e);
@@ -274,17 +276,21 @@ struct Arrangement {
     ellipsis: bool,
     /// Each chip's name, line and left edge.
     chips: Vec<(String, usize, f32)>,
+    /// The note count chip's line and left edge, before the label chips.
+    notes_chip: Option<(usize, f32)>,
     /// The subject's and chips' height.
     height: f32,
 }
 
-/// Where the subject and `chips` go, beside actions that have Mark Done when `archivable`.
+/// Where the subject and `chips` go, beside actions that have Mark Done when `archivable`. With
+/// `notes` (notes in the pane only), their count chip goes before the label chips.
 fn arrange(
     ui: &Ui,
     layout: &Layout,
     detail: &ThreadDetail,
     chips: &[String],
     archivable: bool,
+    notes: usize,
 ) -> Arrangement {
     let painter = ui.painter();
     let label = layout.label;
@@ -316,9 +322,8 @@ fn arrange(
             .x;
         (last, label.left() + end + SUBJECT_MARGIN)
     };
-    let mut placed = Vec::new();
-    for name in chips {
-        let width = LabelChip::new(painter, name, false).width();
+    // Each chip goes on the line it fits on, else on the next.
+    let mut place = |width: f32| {
         let limit = if line == 0 {
             label.left() + float_left
         } else {
@@ -328,18 +333,32 @@ fn arrange(
             line += 1;
             x = label.left();
         }
-        placed.push((name.clone(), line, x));
+        let at = (line, x);
         x += width + CHIP_MARGIN;
-    }
-    let height = match (clamped, placed.last()) {
+        at
+    };
+    let notes_chip = (notes > 0).then(|| place(crate::notes::count_chip_width(ui.ctx(), notes)));
+    let placed: Vec<_> = chips
+        .iter()
+        .map(|name| {
+            let (line, x) = place(LabelChip::new(painter, name, false).width());
+            (name.clone(), line, x)
+        })
+        .collect();
+    let last_chip = placed
+        .last()
+        .map(|(_, line, _)| *line)
+        .or(notes_chip.map(|(line, _)| line));
+    let height = match (clamped, last_chip) {
         (true, None) => lines.len() as f32 * SUBJECT_LINE + CLAMPED_EMPTY_LINE,
-        (_, Some((_, last, _))) => (last + 1) as f32 * SUBJECT_LINE,
+        (_, Some(last)) => (last + 1) as f32 * SUBJECT_LINE,
         (false, None) => lines.len() as f32 * SUBJECT_LINE,
     };
     Arrangement {
         lines,
         ellipsis,
         chips: placed,
+        notes_chip,
         height,
     }
 }
@@ -372,11 +391,12 @@ pub(super) fn subject_rect(
     detail: &ThreadDetail,
     chips: &[String],
     archivable: bool,
+    notes: usize,
 ) -> Option<Rect> {
     if detail.subject.trim().is_empty() {
         return None;
     }
-    let arrangement = arrange(ui, layout, detail, chips, archivable);
+    let arrangement = arrange(ui, layout, detail, chips, archivable, notes);
     let painter = ui.painter();
     let width = |text: &str| {
         SUBJECT
@@ -406,10 +426,11 @@ pub(super) fn height(
     detail: &ThreadDetail,
     chips: &[String],
     archivable: bool,
+    notes: usize,
     has_status: bool,
 ) -> f32 {
     PADDING_TOP
-        + arrange(ui, layout, detail, chips, archivable).height
+        + arrange(ui, layout, detail, chips, archivable, notes).height
         + if has_status { STATUS_HEIGHT } else { 0.0 }
         + PADDING_BOTTOM
 }
@@ -417,7 +438,8 @@ pub(super) fn height(
 /// Paints the header over the messages' top and handles its clicks. Once the messages have
 /// scrolled under it, it gets a background and a bottom border. Its actions have Mark Done when
 /// `archivable`. `typing` says one of the thread's drafts has the keyboard, and `focus` is the
-/// control the keyboard is on.
+/// control the keyboard is on. With `notes`, the count of notes kept in the pane only follows
+/// the subject, and clicking it shows them.
 #[expect(
     clippy::too_many_arguments,
     reason = "one header, drawn from the thread view's state; a struct would only rename them"
@@ -428,6 +450,7 @@ pub(super) fn show(
     detail: &ThreadDetail,
     chips: &[String],
     archivable: bool,
+    notes: usize,
     height: f32,
     status: Option<&Status>,
     scrolled: bool,
@@ -566,7 +589,7 @@ pub(super) fn show(
     }
 
     // The subject, its star and its labels.
-    let arrangement = arrange(ui, layout, detail, chips, archivable);
+    let arrangement = arrange(ui, layout, detail, chips, archivable, notes);
     let starred = detail
         .messages
         .iter()
@@ -614,6 +637,12 @@ pub(super) fn show(
                 palette.text_base_default,
                 None,
             );
+        }
+    }
+    if let Some((line, x)) = arrangement.notes_chip {
+        let middle = label.top() + line as f32 * SUBJECT_LINE + NOTES_CHIP_MIDDLE;
+        if crate::notes::count_chip(ui, x, middle, notes, detail.id.as_str()) {
+            actions.push(Action::ShowNotes);
         }
     }
     for (name, line, x) in arrangement.chips {

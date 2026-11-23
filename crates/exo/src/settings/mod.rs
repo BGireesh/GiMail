@@ -16,6 +16,7 @@ mod images;
 mod instant_intro;
 mod login_item;
 mod menu;
+mod notes;
 mod notifications;
 mod reminders;
 mod signatures;
@@ -74,6 +75,8 @@ pub enum Action {
     CloseDialog,
     /// Change the theme.
     SetTheme(Theme),
+    /// Change where thread notes show.
+    SetNotesPlacement(exo_store::NotesPlacement),
     /// Change which remote images bodies load.
     SetImages(RemoteContentBlocking),
     /// Open the shortcuts sheet.
@@ -196,6 +199,8 @@ pub enum Dialog {
     Emoji,
     /// `AUTOCORRECT_SETTINGS`: Autocorrect.
     Autocorrect,
+    /// Notes: where thread notes show (Exo's own).
+    Notes,
 }
 
 /// The settings menu and dialogs on screen.
@@ -373,7 +378,7 @@ impl Settings {
             Action::Escape => self.hide(),
             Action::Open(dialog) => {
                 match dialog {
-                    Dialog::Theme | Dialog::Images | Dialog::Autocorrect => {}
+                    Dialog::Theme | Dialog::Images | Dialog::Autocorrect | Dialog::Notes => {}
                     Dialog::SplitInbox => self.splits.open_list(),
                     Dialog::HideEmptySplits => self.splits.open_hide_empty(),
                     Dialog::BlockedSenders => self.blocked.reset(),
@@ -424,6 +429,9 @@ impl Settings {
             }
             Action::CloseDialog => self.dialog_open = false,
             Action::SetTheme(theme) => account.update_settings(|settings| settings.theme = theme),
+            Action::SetNotesPlacement(placement) => {
+                account.update_settings(|settings| settings.notes_placement = placement)
+            }
             // The messages whose images were shown are forgotten as the body sees the change.
             Action::SetImages(images) => {
                 account.update_settings(|settings| settings.remote_content_blocking = Some(images))
@@ -1270,6 +1278,21 @@ impl Settings {
                     .settings()
                     .remote_content_blocking
                     .unwrap_or_default(),
+            );
+            if response.inner.is_none() {
+                self.dialog = None;
+            }
+            if response.close {
+                return Some(Action::CloseDialog);
+            }
+            return response.inner.flatten();
+        }
+        if dialog == Dialog::Notes {
+            let response = notes::dialog(
+                ctx,
+                area,
+                self.dialog_open,
+                account.settings().notes_placement,
             );
             if response.inner.is_none() {
                 self.dialog = None;

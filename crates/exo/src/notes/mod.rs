@@ -10,6 +10,7 @@
 
 mod card;
 mod editor;
+pub mod pane;
 
 use std::{
     collections::{HashMap, HashSet},
@@ -24,13 +25,16 @@ use exo_ui::{Family, Font, TextStyle};
 use jiff::{Timestamp, Zoned};
 
 pub use self::{
-    card::{ADD_HEIGHT, CardAction, add_thread_note},
+    card::{ADD_HEIGHT, CardAction, add_thread_note, count_chip, count_chip_width},
     editor::EditorAction,
+    pane::{Item, PaneAction},
 };
 use crate::account::Account;
 
 /// How long after the last change the editor's content is kept as a draft.
 const AUTOSAVE_AFTER: f64 = 1.0;
+/// How long a note the thread scrolled to flashes.
+const FLASH_FOR: f64 = 1.0;
 
 /// A note's text, read or being written: 14px in 20px lines, with the content area (17px)
 /// centred and the odd pixel of leading below.
@@ -152,6 +156,16 @@ pub struct Notes {
     reveal: bool,
     /// Whether the open thread's drafts have been looked through for one to open again.
     recovered: bool,
+    /// The notes pane's timeline entries where they were last painted.
+    timeline: Vec<(Item, Rect)>,
+    /// How far the notes pane's list is scrolled.
+    pane_scroll: f32,
+    /// The note the thread last scrolled to, and when, which flashes for [`FLASH_FOR`].
+    flash: Option<(String, f64)>,
+    /// The frame's time.
+    time: f64,
+    /// Where the editor was last painted.
+    editor_rect: Option<Rect>,
 }
 
 impl Notes {
@@ -170,6 +184,11 @@ impl Notes {
             active: false,
             reveal: false,
             recovered: false,
+            timeline: Vec::new(),
+            pane_scroll: 0.0,
+            flash: None,
+            time: 0.0,
+            editor_rect: None,
         }
     }
 
@@ -187,6 +206,9 @@ impl Notes {
         self.rects.clear();
         self.senders.clear();
         self.recovered = false;
+        self.timeline.clear();
+        self.pane_scroll = 0.0;
+        self.flash = None;
     }
 
     /// Takes the open thread's notes from a snapshot of it, and where they show. The first
@@ -215,11 +237,11 @@ impl Notes {
         };
         let saved = match &draft.note_id {
             Some(id) => match self.notes.notes.iter().find(|note| note.id == *id) {
-                Some(note) => editor::new(&note.html).html(),
+                Some(note) => note_editor(&note.html).html(),
                 // Its note was deleted since.
                 None => return,
             },
-            None => editor::new("").html(),
+            None => note_editor("").html(),
         };
         self.editing = Some(Editing {
             id: draft.id.clone(),
@@ -227,7 +249,7 @@ impl Notes {
             thread_id: draft.thread_id.clone(),
             message_id: draft.message_id.clone(),
             files: draft.files.clone(),
-            editor: editor::new(&draft.html),
+            editor: note_editor(&draft.html),
             saved,
             focused: false,
             changed: None,
@@ -255,6 +277,36 @@ impl Notes {
     /// Where each note's card was last painted.
     pub fn rects(&self) -> &[(String, Rect)] {
         &self.rects
+    }
+
+    /// The notes pane's timeline entries where they were last painted.
+    pub fn timeline(&self) -> &[(Item, Rect)] {
+        &self.timeline
+    }
+
+    /// Where the open editor was last painted.
+    pub fn editor_rect(&self) -> Option<Rect> {
+        self.editing.as_ref().and(self.editor_rect)
+    }
+
+    /// Flashes note `id`'s card, which the thread is scrolling to, from now on.
+    pub fn flash(&mut self, id: String) {
+        self.flash = Some((id, self.time));
+    }
+
+    /// The note flashing now, if one is.
+    pub fn flashing(&self) -> Option<&str> {
+        self.flash
+            .as_ref()
+            .filter(|(_, at)| self.time - at < FLASH_FOR)
+            .map(|(id, _)| id.as_str())
+    }
+
+    /// How far into its flash note `id` is, from 0 to 1, while it flashes.
+    fn flash_progress(&self, id: &str) -> Option<f32> {
+        let (flashing, at) = self.flash.as_ref()?;
+        let progress = (self.time - at) / FLASH_FOR;
+        (flashing == id && progress < 1.0).then_some(progress.max(0.0) as f32)
     }
 
     /// Says who the open thread's messages are from: each one's id, its sender's name or
@@ -299,7 +351,7 @@ impl Notes {
             }
         };
         self.close(account);
-        let mut editor = editor::new(note.as_ref().map_or("", |note| note.html.as_str()));
+        let mut editor = note_editor(note.as_ref().map_or("", |note| note.html.as_str()));
         // Typing goes on from the note's end.
         editor.set_selection(Selection::caret(editor.document().end()));
         self.editing = Some(Editing {
@@ -370,6 +422,7 @@ impl Notes {
     /// Keeps what's typed as a draft, [`AUTOSAVE_AFTER`] its last change at `time` (the frame's),
     /// dated `now`.
     pub fn tick(&mut self, account: &Account, time: f64, now: Timestamp) {
+        self.time = time;
         let Some(open) = &mut self.editing else {
             return;
         };
@@ -455,7 +508,7 @@ impl crate::Mail {
     pub(crate) fn notes_run(&mut self, action: crate::commands::Action) {
         use crate::commands::Action;
         match action {
-            Action::NewThreadNote => self.notes.start(Target::Thread, &self.account),
+            Action::NewThreadNote => self.notes_start(Target::Thread),
             Action::NewMessageNote => {
                 let focused = self
                     .thread
@@ -463,10 +516,10 @@ impl crate::Mail {
                     .and_then(|thread| thread.focused())
                     .map(str::to_owned);
                 if let Some(message) = focused {
-                    self.notes.start(Target::Message(message), &self.account);
+                    self.notes_start(Target::Message(message));
                 }
             }
-            Action::EditNote(id) => self.notes.start(Target::Existing(id), &self.account),
+            Action::EditNote(id) => self.notes_start(Target::Existing(id)),
             Action::SaveNote | Action::CloseNote => self.notes.close(&self.account),
             Action::DeleteNote(id) => {
                 self.account.delete_note(id);
@@ -474,7 +527,91 @@ impl crate::Mail {
                     .toast(exo_commands::Toast::new("Note deleted."));
             }
             Action::FormatNote(command) => self.notes.format(command),
+            Action::ToggleNotesPane => {
+                let shown = self.account.device_settings().notes_tab;
+                self.notes_show_tab(!shown);
+            }
+            Action::SetNotesPlacement(placement) => self
+                .account
+                .update_settings(|settings| settings.notes_placement = placement),
+            Action::ShareNotes => self.commands.toast(exo_commands::Toast::new(
+                "Sharing arrives with the next update.",
+            )),
             _ => {}
+        }
+    }
+
+    /// Opens an editor for `target`. With notes in the pane only, it opens there, and the pane
+    /// shows its Notes tab.
+    pub(crate) fn notes_start(&mut self, target: Target) {
+        self.notes.start(target, &self.account);
+        if self.notes.editing().is_some()
+            && self.account.settings().notes_placement == NotesPlacement::Pane
+        {
+            self.notes_show_tab(true);
+        }
+    }
+
+    /// Shows the right pane's Notes tab (`true`) or its Contact tab, and remembers which.
+    pub(crate) fn notes_show_tab(&mut self, notes: bool) {
+        // With notes in the pane only, an editor the Contact tab hides lets go of the keyboard.
+        if !notes && self.account.settings().notes_placement == NotesPlacement::Pane {
+            self.notes.blur();
+        }
+        self.account
+            .update_device_settings(|device| device.notes_tab = notes);
+    }
+
+    /// While a thread is open (and no new message's pane is), draws the right pane's tab row at
+    /// `pane`'s top and returns the rest of the pane, which shows the chosen tab.
+    pub(crate) fn notes_pane_tabs(&mut self, ui: &egui::Ui, pane: Rect, rem: f32) -> Option<Rect> {
+        if self.thread.is_none() || self.compose.pane().is_some() {
+            return None;
+        }
+        let row = Rect::from_min_max(
+            pane.min,
+            egui::pos2(pane.right(), pane.top() + pane::TABS_HEIGHT),
+        );
+        let shown = self.account.device_settings().notes_tab;
+        if let Some(notes) = pane::tabs(ui, row, rem, shown, self.notes.all().notes.len()) {
+            self.notes_show_tab(notes);
+        }
+        Some(Rect::from_min_max(
+            egui::pos2(pane.left(), row.bottom()),
+            pane.max,
+        ))
+    }
+
+    /// Draws the Notes tab in `pane` and carries out what's clicked in it.
+    pub(crate) fn show_notes_pane(&mut self, ui: &mut egui::Ui, pane: Rect, rem: f32, now: f64) {
+        let detail = self
+            .thread
+            .as_ref()
+            .and_then(|thread| thread.shared_detail());
+        let Some(action) = pane::show(ui, pane, rem, &mut self.notes, detail.as_deref()) else {
+            return;
+        };
+        use crate::commands::Action;
+        match action {
+            PaneAction::Reveal(id) => {
+                if let Some(thread) = &mut self.thread {
+                    thread.reveal_note(&id);
+                }
+                self.notes.flash(id);
+            }
+            PaneAction::RevealMessage(id) => {
+                if let Some(thread) = &mut self.thread {
+                    thread.focus_message(&id);
+                }
+            }
+            PaneAction::Start(Target::Thread) => self.run(Action::NewThreadNote, now),
+            PaneAction::Start(target) => self.notes_start(target),
+            PaneAction::Card(id, CardAction::Edit) => self.run(Action::EditNote(id), now),
+            PaneAction::Card(id, CardAction::Delete) => self.run(Action::DeleteNote(id), now),
+            PaneAction::Card(_, CardAction::History) => {}
+            PaneAction::Save => self.run(Action::SaveNote, now),
+            PaneAction::Share => self.run(Action::ShareNotes, now),
+            PaneAction::RestoreDeleted(id) => self.account.restore_note(id, None),
         }
     }
 }
@@ -499,9 +636,10 @@ pub fn date(at: Timestamp, now: &Zoned) -> String {
     }
 }
 
-/// What a note is on: `whole thread`, `on Dana's email of 3 Nov`, or `on my reply of 3 Nov` when
-/// `mine` says its message is the user's.
-fn where_text(note: &Note, mine: bool, now: &Zoned) -> String {
+/// What a note is on, for its card and wherever else notes are listed: `whole thread`,
+/// `on Dana's email of 3 Nov`, or `on my reply of 3 Nov` when `mine` says its message is the
+/// user's (the message's own is-me flag). Dates are told in `now`'s zone.
+pub fn where_line(note: &Note, mine: bool, now: &Zoned) -> String {
     if note.message_id.is_none() {
         return "whole thread".to_owned();
     }
@@ -516,15 +654,12 @@ fn where_text(note: &Note, mine: bool, now: &Zoned) -> String {
     }
 }
 
-/// What a note is on, for its card and wherever else notes are listed: `whole thread`,
-/// `on Dana's email of 3 Nov`, or `on my reply of 3 Nov` when its message is from `me` (the
-/// user's address, or the name their mail carries). Dates are told in `now`'s zone.
-pub fn where_line(note: &Note, me: &str, now: &Zoned) -> String {
-    let mine = note
-        .message_from
-        .as_deref()
-        .is_some_and(|from| from.eq_ignore_ascii_case(me));
-    where_text(note, mine, now)
+/// An editor on `html`, set in the notes' text: the one a note is written in, and the one its
+/// card shows it read-only in.
+fn note_editor(html: &str) -> Editor {
+    let mut editor = Editor::from_html(html);
+    editor.set_body_text(BODY);
+    editor
 }
 
 #[cfg(test)]
@@ -559,12 +694,11 @@ mod tests {
 
     #[test]
     fn where_lines_say_what_a_note_is_on() {
-        let me = "maya@brightmoor.co";
-        assert_eq!(where_line(&note(None), me, &now()), "whole thread");
+        assert_eq!(where_line(&note(None), false, &now()), "whole thread");
         assert_eq!(
             where_line(
                 &note(Some(("Dana Reyes", "2026-11-03T15:00:00Z"))),
-                me,
+                false,
                 &now()
             ),
             "on Dana's email of 3 Nov"
@@ -572,23 +706,16 @@ mod tests {
         assert_eq!(
             where_line(
                 &note(Some(("dana@example.com", "2025-11-03T15:00:00Z"))),
-                me,
+                false,
                 &now()
             ),
             "on dana's email of 3 Nov 2025"
         );
-        assert_eq!(
-            where_line(
-                &note(Some(("Maya@Brightmoor.co", "2026-11-12T15:00:00Z"))),
-                me,
-                &now()
-            ),
-            "on my reply of 12 Nov"
-        );
+        // Whatever name the message carries, the user's own is their reply.
         assert_eq!(
             where_line(
                 &note(Some(("Maya Okafor", "2026-11-12T15:00:00Z"))),
-                "Maya Okafor",
+                true,
                 &now()
             ),
             "on my reply of 12 Nov"
@@ -607,6 +734,6 @@ mod tests {
         let mut orphan = note(Some(("Dana", "2026-11-03T15:00:00Z")));
         orphan.message_from = None;
         orphan.message_date = None;
-        assert_eq!(where_line(&orphan, "me@example.com", &now()), "on an email");
+        assert_eq!(where_line(&orphan, false, &now()), "on an email");
     }
 }

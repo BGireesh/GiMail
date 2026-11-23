@@ -320,6 +320,8 @@ pub struct Mail {
     thread: Option<ThreadView>,
     /// The open thread's notes, and the editor one is written in.
     notes: notes::Notes,
+    /// The right pane inside its border, as last laid out.
+    right_pane: Rect,
     /// Message bodies, rendered off the UI thread.
     bodies: Bodies,
     /// Invite `.ics` files arriving for the open thread, by message.
@@ -394,6 +396,7 @@ impl Mail {
             bodies: Bodies::new(ctx),
             thread: None,
             notes: notes::Notes::new(now.clone()),
+            right_pane: Rect::NOTHING,
             link_preview: link_preview::LinkPreview::default(),
             attachment_files: attachment_files::AttachmentFiles::new(ctx, account.email()),
             compose: compose::Compose::default(),
@@ -635,6 +638,36 @@ impl Mail {
     /// Where each of the open thread's notes was last painted: its id and its card (for tests).
     pub fn note_rects(&self) -> Vec<(String, Rect)> {
         self.notes.rects().to_vec()
+    }
+
+    /// Where the open note editor was last painted (for tests).
+    pub fn note_editor_rect(&self) -> Option<Rect> {
+        self.notes.editor_rect()
+    }
+
+    /// The notes pane's timeline entries where they were last painted (for tests).
+    pub fn notes_timeline(&self) -> Vec<(notes::Item, Rect)> {
+        self.notes.timeline().to_vec()
+    }
+
+    /// The note the thread scrolled to, while it flashes (for tests).
+    pub fn flashing_note(&self) -> Option<&str> {
+        self.notes.flashing()
+    }
+
+    /// Whether the right pane shows its Notes tab: a thread is open and the tab was last shown.
+    pub fn notes_tab(&self) -> bool {
+        self.thread.is_some() && self.account.device_settings().notes_tab
+    }
+
+    /// Where the account's notes show.
+    pub fn notes_placement(&self) -> exo_store::NotesPlacement {
+        self.account.settings().notes_placement
+    }
+
+    /// The right pane inside its border, as last laid out (for tests).
+    pub fn right_pane(&self) -> Rect {
+        self.right_pane
     }
 
     /// The status bar at the bottom of the window, if one shows: the offline bar, else Out of
@@ -1390,7 +1423,10 @@ impl Mail {
             | Action::CloseNote
             | Action::EditNote(_)
             | Action::DeleteNote(_)
-            | Action::FormatNote(_) => self.notes_run(action),
+            | Action::FormatNote(_)
+            | Action::ToggleNotesPane
+            | Action::SetNotesPlacement(_)
+            | Action::ShareNotes => self.notes_run(action),
             Action::ShowNewMessages => {
                 if self
                     .thread
@@ -2150,12 +2186,12 @@ impl Mail {
             match action {
                 thread::Action::AddNote(None) => self.run(Action::NewThreadNote, now),
                 thread::Action::AddNote(Some(message)) => {
-                    self.notes
-                        .start(notes::Target::Message(message), &self.account);
+                    self.notes_start(notes::Target::Message(message));
                 }
                 thread::Action::EditNote(id) => self.run(Action::EditNote(id), now),
                 thread::Action::DeleteNote(id) => self.run(Action::DeleteNote(id), now),
                 thread::Action::SaveNote => self.run(Action::SaveNote, now),
+                thread::Action::ShowNotes => self.notes_show_tab(true),
                 thread::Action::Back => {
                     self.close_thread();
                     self.command_nudge_left_thread();
@@ -2614,6 +2650,7 @@ impl Mail {
             pos2(columns.right.left() + 1.0, columns.right.top()),
             columns.right.max,
         );
+        self.right_pane = pane;
         // The pane's body, first match wins: the multi-select shortcuts, the Go to…
         // panel while a `g` sequence is pending, then the contact.
         let panel = if self.inbox.is_selecting() {
@@ -2672,9 +2709,16 @@ impl Mail {
                         .map(|thread| thread.id().to_owned())
                         .or_else(|| self.pane_thread.clone())
                 };
-                let card = self.pane_card();
+                // While a thread is open, its tabs: the contact, or its notes.
+                let (pane, notes_tab) = match self.notes_pane_tabs(ui, pane, rem) {
+                    Some(body) => (body, self.account.device_settings().notes_tab),
+                    None => (pane, false),
+                };
+                let card = self.pane_card().filter(|_| !notes_tab);
                 self.pane_shown = card.as_ref().map(|card| card.person.clone());
-                if let Some(card) = card {
+                if notes_tab {
+                    self.show_notes_pane(ui, pane, rem, now);
+                } else if let Some(card) = card {
                     let is_me = card.person.email.eq_ignore_ascii_case(self.account.email());
                     match contact_pane::show(
                         ui,
@@ -3146,10 +3190,15 @@ impl Mail {
         if self.thread.is_some() && self.compose.pane().is_none() {
             commands::register_notes(
                 &mut self.commands,
-                self.notes
-                    .editing()
-                    .filter(|_| region == Region::NoteEditor)
-                    .map(notes::Editing::editor),
+                &commands::NotesContext {
+                    editor: self
+                        .notes
+                        .editing()
+                        .filter(|_| region == Region::NoteEditor)
+                        .map(notes::Editing::editor),
+                    notes_tab: self.account.device_settings().notes_tab,
+                    placement: self.account.settings().notes_placement,
+                },
             );
         }
         self.settings

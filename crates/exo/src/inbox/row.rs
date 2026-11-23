@@ -911,8 +911,12 @@ fn from_label(painter: &Painter, at: Pos2, width: f32, thread: &ThreadSummary, s
     }
 }
 
-/// The attachment icon and date, right-aligned at `top_right` (the first row's top right).
-/// Returns the column's left edge.
+/// A row's note icon, and its gap before the attachment icon.
+const NOTE_ICON: f32 = 10.0;
+const NOTE_ICON_GAP: f32 = 6.0;
+
+/// The note, attachment and done icons and the date, right-aligned at `top_right` (the first
+/// row's top right). Returns the column's left edge.
 fn metadata(
     ui: &Ui,
     painter: &Painter,
@@ -1028,6 +1032,31 @@ fn metadata(
                 palette.select_content_default
             } else {
                 palette.ink(0.4, 0.4)
+            },
+        );
+        left = icon_rect.left();
+        margin = rem;
+    }
+    // A thread with live notes: the note icon (10×10, 3px down) in the notes' amber, 6px before
+    // the paperclip or calendar, or white on a selected row.
+    if thread.notes > 0 {
+        let gap = if icon.is_some() {
+            NOTE_ICON_GAP
+        } else {
+            margin
+        };
+        let icon_rect = Rect::from_min_size(
+            pos2(left - gap - NOTE_ICON, first_row + 3.0),
+            vec2(NOTE_ICON, NOTE_ICON),
+        );
+        paint_icon(
+            ui,
+            "legacy/DEPRECATED_notes",
+            exo_ui::pixel_snap(icon_rect),
+            if selected {
+                palette.select_content_default
+            } else {
+                palette.note_label_default
             },
         );
         left = icon_rect.left();

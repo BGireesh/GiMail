@@ -89,6 +89,8 @@ impl ThreadView {
                     offline: !self.online,
                     full_names: self.full_names,
                     reply_labels: false,
+                    // Notes never print, nor their count.
+                    notes: 0,
                 };
                 let draft = drafts
                     .iter()

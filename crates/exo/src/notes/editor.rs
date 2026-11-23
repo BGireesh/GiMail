@@ -2,9 +2,9 @@
 //! it's for, the text, and `Save`.
 
 use egui::{CornerRadius, Rect, Sense, Stroke, StrokeKind, Ui, UiBuilder, pos2, vec2};
-use exo_editor::{Editor, EditorStyle, TriggerKind};
+use exo_editor::EditorStyle;
 
-use super::{BODY, Editing, LABEL, META, Notes, PADDING_X, RADIUS};
+use super::{Editing, LABEL, META, Notes, PADDING_X, RADIUS};
 
 /// The padding above the label, and under the text and the foot.
 const PADDING_Y: f32 = 8.0;
@@ -21,13 +21,6 @@ const SAVE_GAP: f32 = 6.0;
 pub enum EditorAction {
     /// `Save`: save the note and close the editor.
     Save,
-}
-
-/// An editor on `html`, set in the notes' text.
-pub(super) fn new(html: &str) -> Editor {
-    let mut editor = Editor::from_html(html);
-    editor.set_body_text(BODY);
-    editor
 }
 
 impl Notes {
@@ -72,6 +65,7 @@ impl Notes {
         let palette = exo_ui::palette(&ctx);
         let title = self.title(self.editing.as_ref()?);
         let active = self.active;
+        self.editor_rect = Some(rect);
         let open = self.editing.as_mut()?;
         let painter = ui.painter().clone();
         let snapped = exo_ui::pixel_snap(rect);
@@ -120,14 +114,6 @@ impl Notes {
         );
         let saved = response.clicked();
 
-        // Only the emoji trigger opens here: snippets and mentions are compose's.
-        if open
-            .editor
-            .trigger()
-            .is_some_and(|trigger| trigger.kind != TriggerKind::Emoji)
-        {
-            open.editor.dismiss_trigger();
-        }
         let text = Rect::from_min_max(
             pos2(left, rect.top() + PADDING_Y + LABEL.line_height + PADDING_Y),
             pos2(right, foot - PADDING_Y),
@@ -142,6 +128,12 @@ impl Notes {
                 min_height: text.height(),
             },
         );
+        // No trigger opens a dropdown here (snippets and mentions are compose's, and the emoji
+        // picker isn't wired to notes yet), so what typing arms is dismissed at once, leaving
+        // none for Escape to dismiss before it closes the editor.
+        if open.editor.trigger().is_some() {
+            open.editor.dismiss_trigger();
+        }
         if edited.changed {
             open.changed = Some(ctx.input(|input| input.time));
         }

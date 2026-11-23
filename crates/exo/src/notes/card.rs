@@ -2,10 +2,11 @@
 //! what it's on, and its text, read-only. Pointing at it shows its `Edit` and `Delete`.
 
 use egui::{CornerRadius, Rect, Sense, Shape, Stroke, Ui, UiBuilder, pos2, vec2};
-use exo_editor::{Editor, EditorStyle};
+use exo_editor::EditorStyle;
 use exo_store::Note;
+use exo_ui::{Family, Font, TextStyle};
 
-use super::{BODY, Body, LABEL, META, Notes, PADDING_X, RADIUS, date, where_text};
+use super::{Body, LABEL, META, Notes, PADDING_X, RADIUS, date, note_editor, where_line};
 
 /// The bar on a card's left.
 const BAR: f32 = 3.0;
@@ -35,12 +36,12 @@ impl Notes {
     fn body(&mut self, note: &Note) -> &mut Body {
         let body = self.bodies.entry(note.id.clone()).or_insert_with(|| Body {
             version: note.version,
-            editor: read_only(&note.html),
+            editor: note_editor(&note.html),
             left: 0.0,
         });
         if body.version != note.version {
             body.version = note.version;
-            body.editor = read_only(&note.html);
+            body.editor = note_editor(&note.html);
         }
         body
     }
@@ -64,11 +65,19 @@ impl Notes {
         }
         let painter = ui.painter().clone();
         let snapped = exo_ui::pixel_snap(rect);
-        painter.rect_filled(
-            snapped,
-            CornerRadius::same(RADIUS),
-            palette.note_background_default,
-        );
+        // A note the thread just scrolled to fades from the flash to its own background.
+        let background = match self.flash_progress(&note.id) {
+            Some(progress) => {
+                ctx.request_repaint();
+                exo_ui::motion::mix(
+                    palette.note_flash_default,
+                    palette.note_background_default,
+                    progress,
+                )
+            }
+            None => palette.note_background_default,
+        };
+        painter.rect_filled(snapped, CornerRadius::same(RADIUS), background);
         painter.rect_filled(
             Rect::from_min_max(snapped.min, pos2(snapped.left() + BAR, snapped.bottom())),
             CornerRadius {
@@ -127,7 +136,7 @@ impl Notes {
         );
         let meta = format!(
             " · {} · {}",
-            where_text(note, mine, &self.now),
+            where_line(note, mine, &self.now),
             date(note.updated_at, &self.now)
         );
         META.paint_line(
@@ -160,13 +169,6 @@ impl Notes {
         ui.memory_mut(|memory| memory.surrender_focus(shown.response.id));
         clicked
     }
-}
-
-/// An editor that shows a note's `html` and is never typed in.
-fn read_only(html: &str) -> Editor {
-    let mut editor = Editor::from_html(html);
-    editor.set_body_text(BODY);
-    editor
 }
 
 /// The `+ Add thread note` row in `rect`, of which `clip` shows. Returns whether it was clicked.
@@ -208,6 +210,68 @@ pub fn add_thread_note(ui: &Ui, rect: Rect, clip: Rect) -> bool {
         ),
         ADD,
         ink,
+        None,
+    );
+    response.clicked()
+}
+
+/// The count chip a thread shows on its subject and on a message's sender while its notes are in
+/// the pane only: `1 note`, `3 notes`, 11px in a 16px pill with 8px at its sides.
+const CHIP: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 11.0, 16.0);
+const CHIP_PADDING: f32 = 8.0;
+const CHIP_RADIUS: u8 = 8;
+
+/// The count chip's text for `count` notes.
+fn chip_text(count: usize) -> String {
+    if count == 1 {
+        "1 note".to_owned()
+    } else {
+        format!("{count} notes")
+    }
+}
+
+/// How wide the count chip for `count` notes is.
+pub fn count_chip_width(ctx: &egui::Context, count: usize) -> f32 {
+    CHIP.width(ctx, &chip_text(count)) + 2.0 * CHIP_PADDING
+}
+
+/// Draws the count chip for `count` notes with its left edge at `left`, centred on `middle`, and
+/// returns whether it was clicked. `id` (the message's, or the thread's for its subject's) tells
+/// it apart from the thread's other chips.
+pub fn count_chip(ui: &Ui, left: f32, middle: f32, count: usize, id: &str) -> bool {
+    let ctx = ui.ctx();
+    let palette = exo_ui::palette(ctx);
+    let text = chip_text(count);
+    let rect = Rect::from_min_size(
+        pos2(left, middle - CHIP.line_height / 2.0),
+        vec2(count_chip_width(ctx, count), CHIP.line_height),
+    );
+    let response = ui
+        .interact(
+            rect.intersect(ui.clip_rect()),
+            exo_ui::id(ctx, ("notes-count-chip", id)),
+            Sense::click(),
+        )
+        .on_hover_cursor(egui::CursorIcon::PointingHand);
+    let snapped = exo_ui::pixel_snap(rect);
+    ui.painter().rect_filled(
+        snapped,
+        CornerRadius::same(CHIP_RADIUS),
+        palette.note_background_default,
+    );
+    if response.hovered() {
+        ui.painter().rect_stroke(
+            snapped,
+            CornerRadius::same(CHIP_RADIUS),
+            Stroke::new(1.0, palette.note_bar_default),
+            egui::StrokeKind::Inside,
+        );
+    }
+    CHIP.paint_line(
+        ui.painter(),
+        pos2(rect.left() + CHIP_PADDING, rect.top()),
+        &text,
+        palette.note_label_default,
         None,
     );
     response.clicked()
