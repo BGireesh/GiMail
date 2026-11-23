@@ -1920,6 +1920,7 @@ mod tests {
             starred: false,
             done: false,
             muted: false,
+            trashed: false,
             attachment: Attachments::None,
             contact: None,
             removed_by: Vec::new(),

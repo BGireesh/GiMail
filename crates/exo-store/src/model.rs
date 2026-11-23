@@ -76,6 +76,8 @@ pub struct ThreadSummary {
     pub muted: bool,
     /// Done: not routed to the inbox.
     pub done: bool,
+    /// In Trash: every message is, not just an older one.
+    pub trashed: bool,
     /// Every label id on the thread's messages, including pending changes. The UI picks which
     /// ones become chips.
     pub labels: Vec<String>,

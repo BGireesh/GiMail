@@ -718,7 +718,7 @@ fn conversation(commands: &mut Commands<Action>, cx: &Context<'_>) {
         .key("s"),
     );
 
-    let trashed = all(|thread| thread.has_label("TRASH"));
+    let trashed = all(|thread| thread.trashed);
     let trash_action = Action::Apply(if trashed {
         Mutation::Untrash
     } else {

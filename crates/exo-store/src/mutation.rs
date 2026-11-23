@@ -164,7 +164,7 @@ impl Mutation {
                 .clone()
                 .ok_or(Error::NotSynced("the reminder labels"))
         };
-        let (done, spam, trash) = (view.is_done(me), view.has(SPAM), view.has(TRASH));
+        let (done, spam, trash) = (view.is_done(me), view.has(SPAM), view.is_trashed());
         Ok(match self {
             Self::MarkDone => (!done).then(|| {
                 (

@@ -120,6 +120,80 @@ fn trash_moves_on_to_the_next_conversation_and_undo_comes_back() {
 }
 
 #[test]
+fn trash_with_an_older_message_already_trashed_trashes_the_rest_and_moves_on() {
+    let mut app = start("thread-trash-partly-trashed");
+    let gmail = app.gmail();
+    // An inbox conversation of several messages, whose oldest was trashed on its own.
+    let inbox = gmail::ListQuery {
+        q: Some("in:inbox".into()),
+        max_results: Some(100),
+        ..gmail::ListQuery::default()
+    };
+    let listed = app
+        .block_on(async { gmail.gmail().threads(&inbox).await })
+        .expect("threads.list")
+        .threads;
+    let thread = listed
+        .iter()
+        .filter_map(|thread| thread.id.as_deref())
+        .map(|id| {
+            app.block_on(async {
+                gmail
+                    .gmail()
+                    .thread(id, gmail::Format::Metadata, &["Subject"])
+                    .await
+            })
+            .expect("threads.get")
+        })
+        .find(|thread| thread.messages.len() > 1)
+        .expect("an inbox conversation with replies");
+    let id = thread.id.clone().expect("an id");
+    let oldest = thread.messages[0].id.clone().expect("a message id");
+    let trash = gmail::ModifyMessageRequest {
+        add_label_ids: vec!["TRASH".into()],
+        remove_label_ids: vec!["INBOX".into()],
+        ..gmail::ModifyMessageRequest::default()
+    };
+    app.block_on(async { gmail.gmail().modify_message(&oldest, &trash).await })
+        .expect("one message trashed");
+    app.sync();
+    let row = app
+        .mail()
+        .inbox()
+        .threads()
+        .iter()
+        .position(|row| row.id == id)
+        .expect("still in the inbox, by its other messages");
+    for _ in 0..row {
+        app.key(Key::J);
+    }
+    app.key(Key::Enter);
+    let opened = open_subject(&app).expect("a thread is open");
+    assert_eq!(app.mail().thread().expect("open").id(), id);
+    app.press(Key::Num3, Modifiers::SHIFT);
+    assert!(
+        !app.mail().inbox().threads().iter().any(|row| row.id == id),
+        "trashed, not taken out of Trash"
+    );
+    let next = open_subject(&app);
+    assert!(
+        next.as_ref().is_some_and(|subject| *subject != opened),
+        "auto-advance to the next conversation, not {next:?}"
+    );
+    app.settle();
+    let after = app
+        .block_on(async { gmail.gmail().thread(&id, gmail::Format::Minimal, &[]).await })
+        .expect("threads.get");
+    assert!(
+        after
+            .messages
+            .iter()
+            .all(|message| message.label_ids.iter().any(|label| label == "TRASH")),
+        "every message is in Trash"
+    );
+}
+
+#[test]
 fn trash_in_all_mail_moves_on_to_the_next_conversation() {
     let mut app = start("thread-trash-all-mail");
     app.key(Key::G);

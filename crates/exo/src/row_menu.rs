@@ -34,7 +34,7 @@ pub(crate) fn entries(threads: &[&ThreadSummary], exact: bool, list: &ListId) ->
     let unread = every(&messages, |thread| {
         thread.unread || thread.reminder_unread()
     });
-    let trashed = every(&messages, |thread| thread.has_label("TRASH"));
+    let trashed = every(&messages, |thread| thread.trashed);
     let snoozable = !threads.is_empty() && threads.iter().all(|thread| !thread.draft_only);
     // A draft can be started on one conversation with messages.
     let draftable = matches!(threads, [thread] if !thread.draft_only);
@@ -204,6 +204,7 @@ mod tests {
             starred: false,
             done: false,
             muted: false,
+            trashed: false,
             attachment: crate::mailbox::Attachments::None,
             contact: None,
             removed_by: Vec::new(),

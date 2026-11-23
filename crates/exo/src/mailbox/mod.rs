@@ -53,6 +53,9 @@ pub struct ThreadSummary {
     pub starred: bool,
     /// Whether it's not routed to the inbox, which non-inbox lists mark with a check.
     pub done: bool,
+    /// Whether it's in Trash, which means every message is. One trashed message among others
+    /// leaves the thread where the others are.
+    pub trashed: bool,
     /// Whether it's muted, which means it has the mute label and no newer message added you as a
     /// recipient.
     pub muted: bool,
@@ -138,6 +141,7 @@ impl ThreadSummary {
             // Spam doesn't count as done, so its rows have no check.
             done: thread.done && !thread.labels.iter().any(|label| label == SPAM),
             muted: thread.muted,
+            trashed: thread.trashed,
             attachment: thread.attachments,
             contact: thread
                 .contact

@@ -253,6 +253,12 @@ impl ThreadView {
         self.messages.iter().any(|message| message.has(label))
     }
 
+    /// Whether the thread is in Trash, which, as in Gmail, means every message is. A thread
+    /// with one older message trashed is still where its other messages are.
+    pub fn is_trashed(&self) -> bool {
+        !self.messages.is_empty() && self.messages.iter().all(|message| message.has(TRASH))
+    }
+
     /// Whether the thread is muted. It is when some message carries the mute label and no newer
     /// message added one of your addresses as a new recipient.
     pub fn is_muted(&self, me: &Identity) -> bool {
@@ -645,6 +651,7 @@ impl ThreadView {
             starred: any(STARRED),
             muted: self.is_muted(me),
             done: self.is_done(me),
+            trashed: self.is_trashed(),
             labels: labels.into_iter().map(str::to_owned).collect(),
             attachments: attachments_of(&shown, attachments),
             files: attached_files(&shown, attachments),
