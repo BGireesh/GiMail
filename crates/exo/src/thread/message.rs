@@ -415,6 +415,28 @@ pub(super) fn card(ui: &Ui, rect: Rect, layout: &Layout, kind: CardKind, marketi
     }
 }
 
+/// What goes under a draft's form on a card. The form is drawn in the theme's colours, so on a
+/// marketing card in Carbon (white) it gets the dark card back; elsewhere the card is right.
+pub(super) fn draft_backdrop(ctx: &egui::Context, marketing: bool) -> Option<Color32> {
+    (marketing && exo_ui::theme(ctx) == Theme::Carbon)
+        .then(|| exo_ui::palette(ctx).background_elevated_default)
+}
+
+/// Paints [`draft_backdrop`] from `top` to the card's bottom, inside its rounded corners.
+pub(super) fn paint_draft_backdrop(ui: &Ui, card: Rect, top: f32, marketing: bool) {
+    let Some(color) = draft_backdrop(ui.ctx(), marketing) else {
+        return;
+    };
+    let rect = exo_ui::pixel_snap(Rect::from_min_max(pos2(card.left(), top), card.max));
+    let radius = CornerRadius {
+        nw: 0,
+        ne: 0,
+        sw: RADIUS,
+        se: RADIUS,
+    };
+    ui.painter().rect_filled(rect, radius, color);
+}
+
 /// The focused card's bar: 3px of `rgb(190.2, 192.6, 227.8)`, fading in over 66ms.
 pub(super) const FOCUS: Color32 = Color32::from_rgb(190, 193, 228);
 const FOCUS_FADE: f32 = 0.066;
@@ -1828,6 +1850,20 @@ mod tests {
             Color32::from_white_alpha(204),
             "other cards keep the theme's"
         );
+    }
+
+    #[test]
+    fn a_draft_on_a_marketing_card_in_dark_mode_keeps_the_dark_card_under_it() {
+        // The form is drawn in the theme's colours, so on the white card its text vanished.
+        let ctx = egui::Context::default();
+        exo_ui::set_theme(&ctx, Theme::Carbon);
+        assert_eq!(
+            draft_backdrop(&ctx, true),
+            Some(exo_ui::palette(&ctx).background_elevated_default)
+        );
+        assert_eq!(draft_backdrop(&ctx, false), None, "the card is already dark");
+        exo_ui::set_theme(&ctx, Theme::Snow);
+        assert_eq!(draft_backdrop(&ctx, true), None, "in Snow every card is white");
     }
 
     #[test]

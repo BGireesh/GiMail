@@ -1986,6 +1986,7 @@ impl ThreadView {
                     && let Some(drafts) = drafts.as_mut()
                 {
                     let top = card.bottom() - message::PADDING_BOTTOM - draft;
+                    message::paint_draft_backdrop(ui, card, top, marketing);
                     let form = Rect::from_min_size(
                         pos2(layout.inner.left(), top),
                         vec2(layout.inner.width(), draft),
