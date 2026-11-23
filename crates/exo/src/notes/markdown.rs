@@ -24,6 +24,13 @@ use crate::copy::turndown::{self, Tree};
 
 /// The longest a file name's slug of the subject gets, in characters.
 const SLUG_LENGTH: usize = 60;
+/// The longest a file's name may be on disk, in bytes.
+const NAME_MAX: usize = 255;
+/// The longest a thread's stem gets, in bytes, so the longest name written with it stays within
+/// [`NAME_MAX`]: its history's temporary file, `.{stem}.history.jsonl.{pid}-{count}.tmp`
+/// ([`write_whole`]), whose process id has at most 10 digits and whose count at most 20.
+const STEM_MAX: usize =
+    NAME_MAX - ".".len() - ".history.jsonl".len() - ".".len() - 10 - "-".len() - 20 - ".tmp".len();
 /// The longest a copied file's name gets, in bytes, past its uuid.
 const NAME_LENGTH: usize = 150;
 /// The folder the notes' files are copied into, by thread.
@@ -66,7 +73,10 @@ fn home() -> PathBuf {
 
 /// The name a thread's files share, past their extensions: the subject lowercased, with every
 /// run of anything but letters and digits made one `-`, trimmed, at most 60 characters, then
-/// `-{thread_id}`. A subject that gives nothing makes `notes-{thread_id}`.
+/// `-{thread_id}`. A subject that gives nothing makes `notes-{thread_id}`. The slug is cut
+/// shorter, at a character, where the whole stem would pass [`STEM_MAX`] bytes (a subject in a
+/// script of three or four bytes a letter), so every file written with it has a name the disk
+/// takes.
 pub fn file_stem(context: &NoteThread) -> String {
     let mut slug = String::new();
     for c in context.subject.to_lowercase().chars() {
@@ -76,9 +86,16 @@ pub fn file_stem(context: &NoteThread) -> String {
             slug.push('-');
         }
     }
-    let slug: String = slug.trim_matches('-').chars().take(SLUG_LENGTH).collect();
-    let slug = slug.trim_end_matches('-');
     let id = safe_id(context.thread_id.as_str());
+    let room = STEM_MAX.saturating_sub("-".len() + id.len());
+    let mut cut = String::new();
+    for c in slug.trim_matches('-').chars().take(SLUG_LENGTH) {
+        if cut.len() + c.len_utf8() > room {
+            break;
+        }
+        cut.push(c);
+    }
+    let slug = cut.trim_end_matches('-');
     if slug.is_empty() {
         format!("notes-{id}")
     } else {
@@ -234,8 +251,9 @@ pub fn export(
 /// of the stem recorded. Without a manifest nothing is removed.
 ///
 /// # Errors
-/// When the folder can't be made, read or written. The threads before the one that failed are
-/// written, and recorded.
+/// When the folder can't be made or read, or a thread can't be written. A thread that fails
+/// doesn't stop the rest: every other thread is written and recorded, and the first failure is
+/// the one error returned.
 pub fn export_all(
     folder: &Path,
     files: &Path,
@@ -246,9 +264,16 @@ pub fn export_all(
     let mut manifest = Manifest::read(folder);
     let mut exported = Ok(());
     for (context, notes, versions) in threads {
-        exported = export_thread(folder, files, &mut manifest, context, notes, versions, gone);
-        if exported.is_err() {
-            break;
+        if let Err(error) =
+            export_thread(folder, files, &mut manifest, context, notes, versions, gone)
+        {
+            log::error!(
+                "writing the notes of thread {} to the notes folder: {error}",
+                context.thread_id.as_str()
+            );
+            if exported.is_ok() {
+                exported = Err(error);
+            }
         }
     }
     exported.and(manifest.write(folder))
@@ -337,10 +362,12 @@ fn export_thread(
             if copy.exists() {
                 continue;
             }
-            match std::fs::read(files.join(&file.uuid)) {
-                Ok(bytes) => {
+            let kept = files.join(&file.uuid);
+            match std::fs::symlink_metadata(&kept) {
+                // Copied, not read, so a file of any size never sits in memory.
+                Ok(_) => {
                     std::fs::create_dir_all(&copies)?;
-                    write_whole(&copy, &bytes)?;
+                    copy_whole(&kept, &copy)?;
                 }
                 // The note's file isn't kept on this device: its link goes nowhere.
                 Err(error) if error.kind() == io::ErrorKind::NotFound => {
@@ -404,6 +431,19 @@ fn one_line(text: &str) -> String {
 /// Writes `bytes` to `path` whole: to a temporary file beside it, renamed over it, so a reader
 /// never sees half of it.
 fn write_whole(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    place_whole(path, |temporary| std::fs::write(temporary, bytes))
+}
+
+/// Copies the file at `from` to `path` whole, as [`write_whole`] writes, without reading it into
+/// memory.
+fn copy_whole(from: &Path, path: &Path) -> io::Result<()> {
+    place_whole(path, |temporary| std::fs::copy(from, temporary).map(|_| ()))
+}
+
+/// Has `fill` make a temporary file beside `path`, then renames it over `path`. The temporary
+/// file's name is `path`'s with a dot before and `.{pid}-{count}.tmp` after ([`STEM_MAX`] leaves
+/// room for it), and it's removed when either step fails.
+fn place_whole(path: &Path, fill: impl FnOnce(&Path) -> io::Result<()>) -> io::Result<()> {
     static WRITES: AtomicU64 = AtomicU64::new(0);
     let name = path
         .file_name()
@@ -414,8 +454,7 @@ fn write_whole(path: &Path, bytes: &[u8]) -> io::Result<()> {
         std::process::id(),
         WRITES.fetch_add(1, Ordering::Relaxed)
     ));
-    let written =
-        std::fs::write(&temporary, bytes).and_then(|()| std::fs::rename(&temporary, path));
+    let written = fill(&temporary).and_then(|()| std::fs::rename(&temporary, path));
     if written.is_err() {
         let _ = std::fs::remove_file(&temporary);
     }
@@ -874,6 +913,107 @@ mod tests {
             folder.join("new-18c2f0a9d3e4b5a6.history.jsonl").is_file(),
             "the history stays"
         );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_long_subject_in_any_script_makes_names_the_disk_takes() {
+        let (root, folder, files) = scratch("long-names");
+        // Sixty letters of three bytes each, and of four.
+        for subject in ["\u{4f1a}".repeat(80), "\u{10400}".repeat(80)] {
+            let context = context(&subject);
+            let stem = file_stem(&context);
+            assert!(stem.len() <= STEM_MAX, "{} bytes", stem.len());
+            assert!(stem.ends_with("-18c2f0a9d3e4b5a6"), "{stem}");
+            let longest = format!(".{stem}.history.jsonl.{}-{}.tmp", u32::MAX, u64::MAX);
+            assert!(longest.len() <= NAME_MAX, "{} bytes", longest.len());
+            let (live, versions) = agenda("u2");
+            std::fs::write(files.join("u2"), b"1. Budget").expect("written");
+            export(
+                &folder,
+                &files,
+                &context,
+                &[live],
+                &versions,
+                &BTreeSet::new(),
+            )
+            .expect("the disk takes its names");
+            assert!(folder.join(format!("{stem}.md")).is_file());
+            assert!(folder.join(format!("{stem}.history.jsonl")).is_file());
+        }
+        // A short subject keeps all sixty characters.
+        let ascii = file_stem(&context(&"a".repeat(100)));
+        assert_eq!(ascii.len(), 60 + "-18c2f0a9d3e4b5a6".len());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_thread_that_cant_be_written_doesnt_stop_the_rest() {
+        let (root, folder, files) = scratch("one-fails");
+        let (live, versions) = agenda("u2");
+        std::fs::write(files.join("u2"), b"1. Budget").expect("written");
+        let thread = |id: &str, subject: &str| {
+            let mut context = context(subject);
+            context.thread_id = ThreadId::new(id);
+            let mut note = live.clone();
+            note.thread_id = ThreadId::new(id);
+            (context, vec![note], versions.to_vec())
+        };
+        let threads = [
+            thread("aaa1", "First"),
+            thread("bbb2", "Blocked"),
+            thread("ccc3", "Third"),
+        ];
+        // A folder where the second thread's Markdown goes, which no file can be renamed over.
+        std::fs::create_dir_all(folder.join("blocked-bbb2.md").join("in the way"))
+            .expect("a folder");
+        let error = export_all(&folder, &files, &threads, &BTreeSet::new())
+            .expect_err("the failure is reported");
+        assert!(!error.to_string().is_empty());
+        assert!(folder.join("first-aaa1.md").is_file());
+        assert!(
+            folder.join("third-ccc3.md").is_file(),
+            "the thread after the failure is written"
+        );
+        let manifest = std::fs::read_to_string(folder.join(MANIFEST)).expect("a manifest");
+        assert!(
+            manifest.contains("aaa1") && manifest.contains("ccc3") && !manifest.contains("bbb2"),
+            "what was written is recorded: {manifest}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_notes_file_is_copied_whole() {
+        let (root, folder, files) = scratch("copies");
+        let (live, versions) = agenda("u2");
+        let bytes: Vec<u8> = (0..200_000u32).map(|i| (i % 251) as u8).collect();
+        std::fs::write(files.join("u2"), &bytes).expect("written");
+        export(
+            &folder,
+            &files,
+            &context("Agenda"),
+            &[live],
+            &versions,
+            &BTreeSet::new(),
+        )
+        .expect("exported");
+        let copies = folder.join("files/18c2f0a9d3e4b5a6");
+        assert_eq!(
+            std::fs::read(copies.join("u2-agenda.txt")).expect("copied"),
+            bytes
+        );
+        let left: Vec<String> = std::fs::read_dir(&copies)
+            .expect("listed")
+            .map(|entry| {
+                entry
+                    .expect("an entry")
+                    .file_name()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect();
+        assert_eq!(left, ["u2-agenda.txt"], "no temporary file is left");
         let _ = std::fs::remove_dir_all(&root);
     }
 }
