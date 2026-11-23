@@ -2,7 +2,9 @@
 
 mod support;
 
-use exo_store::{Highlighted, ListId, Mutation, Search, SearchPage};
+use exo_store::{
+    Highlighted, ListId, Mutation, SaveNote, Search, SearchPage, ThreadId, ThreadSummary,
+};
 use gmail::ListQuery;
 use support::Harness;
 
@@ -420,5 +422,434 @@ async fn filters_narrow_a_list_and_keep_sticky_rows() {
         no_reply
             .iter()
             .all(|thread| sent.contains(thread.id.as_str()))
+    );
+}
+
+/// A time `minutes` after a fixed start, so notes sort by when they were written.
+fn at(minutes: i64) -> jiff::Timestamp {
+    "2026-11-23T10:00:00Z"
+        .parse::<jiff::Timestamp>()
+        .expect("a time")
+        + jiff::SignedDuration::from_mins(minutes)
+}
+
+/// Saves `text` as a new note on `thread` (on its first message when `message` is given), from
+/// the editor `draft`.
+async fn note(
+    harness: &Harness,
+    thread: &ThreadId,
+    message: Option<&str>,
+    draft: &str,
+    text: &str,
+    minutes: i64,
+) -> exo_store::Note {
+    harness
+        .store
+        .save_note(
+            SaveNote {
+                draft_id: draft.into(),
+                note_id: None,
+                thread_id: thread.clone(),
+                message_id: message.map(str::to_owned),
+                html: format!("<p>{text}</p>"),
+                text: text.into(),
+                files: Vec::new(),
+            },
+            at(minutes),
+        )
+        .await
+        .expect("saves")
+        .expect("a note")
+}
+
+/// The Thanksgiving conversation, whose mail says `potato`.
+async fn thanksgiving(harness: &Harness) -> ThreadSummary {
+    search(harness, "potato")
+        .await
+        .results
+        .into_iter()
+        .find(|result| result.thread.subject.starts_with("Thanksgiving"))
+        .expect("found locally")
+        .thread
+}
+
+/// An inbox conversation other than `not`.
+async fn another(harness: &Harness, not: &ThreadId) -> ThreadSummary {
+    harness
+        .all(&ListId::Inbox)
+        .await
+        .into_iter()
+        .find(|thread| thread.id != *not && thread.drafts == 0)
+        .expect("another inbox thread")
+}
+
+fn ids(page: &SearchPage) -> Vec<&str> {
+    page.results
+        .iter()
+        .map(|result| result.thread.id.as_str())
+        .collect()
+}
+
+#[tokio::test]
+async fn notes_terms_find_threads_by_their_notes() {
+    let harness = Harness::synced().await;
+    assert!(search(&harness, "overage").await.results.is_empty());
+    let noted = thanksgiving(&harness).await;
+    let other = another(&harness, &noted.id).await;
+    let saved = note(
+        &harness,
+        &noted.id,
+        None,
+        "a",
+        "Ask about the overage fee",
+        0,
+    )
+    .await;
+    note(&harness, &other.id, None, "b", "Nothing to see", 1).await;
+
+    let page = search(&harness, "notes:overage").await;
+    assert_eq!(ids(&page), [noted.id.as_str()]);
+    let result = &page.results[0];
+    assert!(!result.deleted);
+    assert_eq!(result.thread.notes, 1);
+    assert_eq!(result.notes.len(), 1, "{:?}", result.notes);
+    let hit = &result.notes[0];
+    assert_eq!(hit.note_id, saved.id);
+    assert_eq!(hit.label, "Thread note");
+    assert_eq!(hit.date, at(0));
+    assert_eq!(bold(&hit.snippet), ["overage"], "{:?}", hit.snippet);
+    assert!(search(&harness, "notes:zzqx").await.results.is_empty());
+}
+
+#[tokio::test]
+async fn a_bare_notes_term_lists_every_noted_thread() {
+    let harness = Harness::synced().await;
+    let first = thanksgiving(&harness).await;
+    let second = another(&harness, &first.id).await;
+    assert!(search(&harness, "notes:").await.results.is_empty());
+    note(&harness, &first.id, None, "a", "One", 0).await;
+    note(&harness, &second.id, None, "b", "Two", 1).await;
+
+    let page = search(&harness, "notes:").await;
+    let mut found = ids(&page);
+    found.sort_unstable();
+    let mut expected = vec![first.id.as_str(), second.id.as_str()];
+    expected.sort_unstable();
+    assert_eq!(found, expected);
+    assert!(
+        page.results.iter().all(|result| result.notes.is_empty()),
+        "the row's own icon says it has notes"
+    );
+}
+
+#[tokio::test]
+async fn has_notes_is_the_same() {
+    let harness = Harness::synced().await;
+    let first = thanksgiving(&harness).await;
+    let second = another(&harness, &first.id).await;
+    note(&harness, &first.id, None, "a", "One", 0).await;
+    note(&harness, &second.id, None, "b", "Two overage", 1).await;
+    let bare = search(&harness, "notes:").await;
+    for query in ["has:notes", "has:note", "note:"] {
+        assert_eq!(ids(&search(&harness, query).await), ids(&bare), "{query}");
+    }
+    assert_eq!(
+        ids(&search(&harness, "note:overage").await),
+        [second.id.as_str()]
+    );
+}
+
+#[tokio::test]
+async fn plain_words_match_mail_or_notes() {
+    let harness = Harness::synced().await;
+    let noted = thanksgiving(&harness).await;
+    note(
+        &harness,
+        &noted.id,
+        None,
+        "a",
+        "Ask about the overage fee",
+        0,
+    )
+    .await;
+
+    let page = search(&harness, "overage").await;
+    assert_eq!(ids(&page), [noted.id.as_str()], "a word only in a note");
+    let hits = &page.results[0].notes;
+    assert_eq!(hits.len(), 1);
+    assert_eq!(bold(&hits[0].snippet), ["overage"]);
+
+    let page = search(&harness, "potato").await;
+    let result = page
+        .results
+        .iter()
+        .find(|result| result.thread.id == noted.id)
+        .expect("a word only in mail");
+    assert!(result.notes.is_empty(), "{:?}", result.notes);
+    assert_eq!(
+        bold(result.snippet.as_ref().expect("an excerpt")),
+        ["potato"],
+        "the mail's excerpt keeps its highlight"
+    );
+
+    let page = search(&harness, "potato overage").await;
+    assert_eq!(ids(&page), [noted.id.as_str()], "one in each");
+}
+
+#[tokio::test]
+async fn notes_and_plain_words_combine() {
+    let harness = Harness::synced().await;
+    let renewal = search(&harness, "renewal").await;
+    let with_renewal = renewal.results[0].thread.id.clone();
+    let without = harness
+        .all(&ListId::Inbox)
+        .await
+        .into_iter()
+        .find(|thread| !renewal.results.iter().any(|r| r.thread.id == thread.id))
+        .expect("a thread without renewal");
+    note(&harness, &with_renewal, None, "a", "Ping them on Slack", 0).await;
+    note(&harness, &without.id, None, "b", "Slack them too", 1).await;
+
+    let page = search(&harness, "notes:slack renewal").await;
+    assert_eq!(ids(&page), [with_renewal.as_str()]);
+    assert_eq!(page.results[0].notes.len(), 1);
+    assert_eq!(bold(&page.results[0].notes[0].snippet), ["Slack"]);
+}
+
+#[tokio::test]
+async fn from_combines_with_notes() {
+    let harness = Harness::synced().await;
+    let noted = thanksgiving(&harness).await;
+    note(
+        &harness,
+        &noted.id,
+        None,
+        "a",
+        "Ask about the overage fee",
+        0,
+    )
+    .await;
+    assert_eq!(
+        ids(&search(&harness, "from:emekao@gmail.com notes:overage").await),
+        [noted.id.as_str()]
+    );
+    assert!(
+        search(&harness, "from:nobody@nowhere.example notes:overage")
+            .await
+            .results
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn a_phrase_matches_within_one_note() {
+    let harness = Harness::synced().await;
+    let split = thanksgiving(&harness).await;
+    let whole = another(&harness, &split.id).await;
+    note(&harness, &split.id, None, "a", "We should keep the cost", 0).await;
+    note(&harness, &split.id, None, "b", "flat next year", 1).await;
+    note(
+        &harness,
+        &whole.id,
+        None,
+        "c",
+        "Please keep the cost flat",
+        2,
+    )
+    .await;
+
+    let page = search(&harness, "notes:\"keep the cost flat\"").await;
+    assert_eq!(ids(&page), [whole.id.as_str()]);
+    assert_eq!(
+        bold(&page.results[0].notes[0].snippet),
+        ["keep the cost flat"]
+    );
+    assert_eq!(
+        ids(&search(&harness, "\"keep the cost flat\"").await),
+        [whole.id.as_str()],
+        "a plain phrase too"
+    );
+}
+
+#[tokio::test]
+async fn a_prefix_star_matches() {
+    let harness = Harness::synced().await;
+    let noted = thanksgiving(&harness).await;
+    note(
+        &harness,
+        &noted.id,
+        None,
+        "a",
+        "Ask about the overage fee",
+        0,
+    )
+    .await;
+    assert_eq!(
+        ids(&search(&harness, "notes:overa*").await),
+        [noted.id.as_str()]
+    );
+    assert!(search(&harness, "notes:overa").await.results.is_empty());
+}
+
+#[tokio::test]
+async fn a_deleted_note_is_not_found() {
+    let harness = Harness::synced().await;
+    let noted = thanksgiving(&harness).await;
+    let saved = note(
+        &harness,
+        &noted.id,
+        None,
+        "a",
+        "Ask about the overage fee",
+        0,
+    )
+    .await;
+    harness
+        .store
+        .delete_note(&saved.id, at(1))
+        .await
+        .expect("deletes");
+    assert!(search(&harness, "notes:overage").await.results.is_empty());
+    assert!(search(&harness, "overage").await.results.is_empty());
+    assert!(search(&harness, "has:notes").await.results.is_empty());
+}
+
+#[tokio::test]
+async fn negated_notes_excludes() {
+    let harness = Harness::synced().await;
+    let noted = thanksgiving(&harness).await;
+    note(
+        &harness,
+        &noted.id,
+        None,
+        "a",
+        "Ask about the overage fee",
+        0,
+    )
+    .await;
+    let has = |page: &SearchPage| page.results.iter().any(|r| r.thread.id == noted.id);
+    assert!(has(&search(&harness, "potato").await));
+    assert!(!has(&search(&harness, "potato -notes:overage").await));
+    assert!(!has(&search(&harness, "potato -has:notes").await));
+    assert!(!has(&search(&harness, "potato -notes:").await));
+    assert!(
+        !has(&search(&harness, "potato -overage").await),
+        "a word in a note"
+    );
+    assert!(has(&search(&harness, "potato -notes:zzqx").await));
+    assert!(has(&search(&harness, "potato -notes:potato").await));
+}
+
+#[tokio::test]
+async fn fts_syntax_in_a_notes_term_is_harmless() {
+    let harness = Harness::synced().await;
+    let noted = thanksgiving(&harness).await;
+    note(&harness, &noted.id, None, "a", "a-b OR (overage)", 0).await;
+    for query in [
+        "notes:\"",
+        "notes:a-b",
+        "notes:*",
+        "notes:OR",
+        "notes:(",
+        "notes:\"x\"\" OR 1\"",
+        "notes:NEAR(a",
+        "-notes:\"",
+        "notes:' OR 1=1 --",
+        "overage*",
+        "\"a-b\" notes:",
+    ] {
+        let mut session = Search::new(query);
+        harness
+            .store
+            .search(&mut session, 100, true, 15)
+            .await
+            .unwrap_or_else(|error| panic!("{query}: {error}"));
+    }
+    assert_eq!(
+        ids(&search(&harness, "notes:a-b").await),
+        [noted.id.as_str()]
+    );
+}
+
+#[tokio::test]
+async fn notes_terms_never_ask_gmail() {
+    let harness = Harness::synced().await;
+    let session = Search::new("notes:overage from:ana");
+    assert!(session.gmail_done(), "answered locally");
+    let page = harness
+        .store
+        .search_gmail(&session)
+        .await
+        .expect("no call to make");
+    assert!(page.hits.is_empty() && page.next.is_none());
+    assert!(!Search::new("overage").gmail_done());
+}
+
+#[tokio::test]
+async fn notes_on_a_deleted_thread_are_still_found() {
+    let harness = Harness::synced().await;
+    let noted = thanksgiving(&harness).await;
+    let kept = another(&harness, &noted.id).await;
+    note(
+        &harness,
+        &noted.id,
+        None,
+        "a",
+        "Ask about the overage fee",
+        0,
+    )
+    .await;
+    note(&harness, &kept.id, None, "b", "Some overage here too", 1).await;
+    harness
+        .gmail
+        .gmail()
+        .delete_thread(noted.id.as_str())
+        .await
+        .expect("deletes");
+    harness.store.sync().await.expect("syncs");
+    assert!(
+        harness
+            .store
+            .thread(&noted.id)
+            .await
+            .expect("reads")
+            .is_none()
+    );
+
+    for query in ["notes:overage", "overage", "has:notes"] {
+        let page = search(&harness, query).await;
+        let gone = page
+            .results
+            .iter()
+            .find(|result| result.thread.id == noted.id)
+            .unwrap_or_else(|| panic!("{query}: {:?}", ids(&page)));
+        assert!(gone.deleted, "{query}");
+        assert_eq!(gone.thread.subject, noted.subject, "{query}");
+        assert_eq!(gone.thread.notes, 1);
+        assert!(!gone.thread.participants.is_empty());
+        let other = page
+            .results
+            .iter()
+            .find(|result| result.thread.id == kept.id)
+            .expect("the stored one too");
+        assert!(!other.deleted);
+        assert!(
+            page.results
+                .windows(2)
+                .all(|pair| pair[0].thread.date >= pair[1].thread.date),
+            "{query}: by date"
+        );
+    }
+    let page = search(&harness, "notes:overage").await;
+    let gone = page
+        .results
+        .iter()
+        .find(|result| result.thread.id == noted.id)
+        .expect("found");
+    assert_eq!(bold(&gone.notes[0].snippet), ["overage"]);
+    assert!(
+        !ids(&search(&harness, "notes:overage from:emekao@gmail.com").await)
+            .contains(&noted.id.as_str()),
+        "a mail term can't match a thread whose mail is gone"
     );
 }

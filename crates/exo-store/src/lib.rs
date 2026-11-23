@@ -102,7 +102,7 @@ pub use outbox::{FailedMutation, FlushReport, Undo, Unsent};
 pub use parts::PartsCache;
 pub use query::{LastToken, SearchQuery, TokenKind};
 pub use quota::Quota;
-pub use search::{GmailPage, Highlighted, Search, SearchPage, SearchResult};
+pub use search::{GmailPage, Highlighted, NoteHit, Search, SearchPage, SearchResult};
 pub use settings::{
     AdditionalTimezone, AutoAdvance, CalendarAccount, CalendarEventNotifications,
     CalendarNotifications, CalendarSetting, CalendarSettings, DeviceSettings, Document,

@@ -19,7 +19,7 @@ use crate::db::{
 };
 use crate::error::{Error, Result};
 use crate::ids::ThreadId;
-use crate::search::{index_note, unindex_note};
+use crate::search::{Highlighted, NoteHit, index_note, unindex_note};
 use crate::store::{Store, load_view};
 
 /// The tables the backup holds, in the order they're restored.
@@ -92,10 +92,15 @@ impl Note {
     /// What the UI calls it: `Thread note`, or `Note 3`.
     #[must_use]
     pub fn label(&self) -> String {
-        match self.number {
-            Some(number) => format!("Note {number}"),
-            None => "Thread note".to_owned(),
-        }
+        label(self.number)
+    }
+}
+
+/// What the UI calls a note numbered `number`: `Thread note`, or `Note 3`.
+fn label(number: Option<u32>) -> String {
+    match number {
+        Some(number) => format!("Note {number}"),
+        None => "Thread note".to_owned(),
     }
 }
 
@@ -612,6 +617,65 @@ pub(crate) async fn live_counts(
             },
             _ => None,
         })
+        .collect())
+}
+
+/// The live notes of `threads` that the notes' index matches with `expression`, each thread's in
+/// note order, with an excerpt of `snippet_tokens` words that has the matches in bold.
+pub(crate) async fn hits(
+    exec: &mut dyn Executor,
+    threads: &[String],
+    expression: &str,
+    snippet_tokens: i64,
+) -> Result<HashMap<String, Vec<NoteHit>>> {
+    let ids = serde_json::to_string(threads).expect("ids serialize");
+    let rows = toasty::sql::query("SELECT note_id, snippet(notes_fts, 2, char(58704), char(58705), char(8230), ?1) FROM notes_fts WHERE notes_fts MATCH ?2 AND thread_id IN (SELECT value FROM json_each(?3))")
+        .bind(snippet_tokens)
+        .bind(expression)
+        .bind(ids)
+        .exec(exec)
+        .await?;
+    let snippets: HashMap<String, String> = rows
+        .into_iter()
+        .filter_map(|row| match row {
+            Value::Record(row) => match &row.fields[..] {
+                [Value::String(note), Value::String(snippet)] => {
+                    Some((note.clone(), snippet.clone()))
+                }
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
+    let ids: Vec<&str> = snippets.keys().map(String::as_str).collect();
+    let mut rows = NoteRow::filter(NoteRow::fields().id().in_list(ids.as_slice()))
+        .exec(exec)
+        .await?;
+    rows.retain(|row| row.deleted_at.is_none());
+    rows.sort_by(|a, b| (a.created_at, a.number, &a.id).cmp(&(b.created_at, b.number, &b.id)));
+    let mut hits: HashMap<String, Vec<NoteHit>> = HashMap::new();
+    for row in rows {
+        let Some(snippet) = snippets.get(&row.id) else {
+            continue;
+        };
+        hits.entry(row.thread_id).or_default().push(NoteHit {
+            label: label(row.number),
+            date: row.created_at,
+            snippet: Highlighted::from_marked(snippet),
+            note_id: row.id,
+        });
+    }
+    Ok(hits)
+}
+
+/// The text of `thread`'s live notes.
+pub(crate) async fn live_texts(exec: &mut dyn Executor, thread: &str) -> Result<Vec<String>> {
+    Ok(NoteRow::filter(NoteRow::fields().thread_id().eq(thread))
+        .exec(exec)
+        .await?
+        .into_iter()
+        .filter(|row| row.deleted_at.is_none())
+        .map(|row| row.text)
         .collect())
 }
 

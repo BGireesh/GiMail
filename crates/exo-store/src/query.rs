@@ -31,6 +31,8 @@ enum Kind {
     Category,
     AutoLabel,
     Shared,
+    /// `notes:`, `note:`, `has:notes`: the thread's live notes. Gmail never sees it.
+    Notes,
     Text,
 }
 
@@ -40,8 +42,8 @@ struct Token {
     kind: Kind,
     /// The operator (`from`, `subject`, `in`, `is`, `label`…), empty for the kinds without one.
     field: String,
-    /// The value with its double quotes removed, or `None` for `has:attachment` and `is:shared`,
-    /// which carry none.
+    /// The value with its double quotes removed, or `None` for `has:attachment`, `is:shared` and
+    /// a `notes:` with no value (`has:notes`), which carry none.
     value: Option<String>,
     quoted: bool,
     negated: bool,
@@ -548,7 +550,12 @@ impl SearchQuery {
             Kind::Contact => TokenKind::Contact,
             Kind::Filename => TokenKind::Filename,
             Kind::Text => TokenKind::Text,
-            _ => TokenKind::Other,
+            Kind::Header
+            | Kind::After
+            | Kind::Attachment
+            | Kind::AutoLabel
+            | Kind::Shared
+            | Kind::Notes => TokenKind::Other,
         };
         Some(LastToken {
             kind,
@@ -613,6 +620,43 @@ impl SearchQuery {
             }
         }
         walk(&self.tree)
+    }
+
+    /// Whether the query has a `notes:` term. Such a query is answered locally alone: threads
+    /// with notes are stored whole, and Gmail can't search notes.
+    pub fn has_notes_terms(&self) -> bool {
+        fn walk(node: &Node) -> bool {
+            match node {
+                Node::And(children, _) | Node::Or(children, _) => children.iter().any(walk),
+                Node::Leaf(token) => token.kind == Kind::Notes,
+            }
+        }
+        walk(&self.tree)
+    }
+
+    /// Whether a thread whose mail isn't stored can match, from its notes alone: every term is a
+    /// word or a `notes:` term (or `in:all`), and some term must be found in a note.
+    pub(crate) fn notes_can_answer(&self) -> bool {
+        fn walk(node: &Node, positive: &mut bool) -> bool {
+            match node {
+                Node::And(children, _) | Node::Or(children, _) => {
+                    children.iter().all(|child| walk(child, positive))
+                }
+                Node::Leaf(token) if token.is_empty_text() => true,
+                Node::Leaf(token) => match token.kind {
+                    Kind::Text | Kind::Notes => {
+                        *positive |= !token.negated;
+                        true
+                    }
+                    Kind::Label => {
+                        matches!(token.value().to_lowercase().as_str(), "all" | "anywhere")
+                    }
+                    _ => false,
+                },
+            }
+        }
+        let mut positive = false;
+        walk(&self.tree, &mut positive) && positive
     }
 
     /// A quick test that rules `thread` out (a Gmail hit that no longer matches).
@@ -696,6 +740,24 @@ impl SearchQuery {
         for token in tokens.into_iter().chain(&defaults) {
             fts_token(token, labels, me, &mut terms, &mut fts);
         }
+        if terms.iter().any(|term| term.word) {
+            let loose = terms
+                .iter()
+                .map(|term| {
+                    if term.word {
+                        Term {
+                            negated: false,
+                            group: true,
+                            word: false,
+                            text: format!("{} OR meta:{FTS_ANCHOR}", term.text),
+                        }
+                    } else {
+                        term.clone()
+                    }
+                })
+                .collect();
+            fts.loose = Some(full_table_match(loose));
+        }
         fts.matches.insert(0, (false, full_table_match(terms)));
         fts
     }
@@ -703,18 +765,33 @@ impl SearchQuery {
 
 /// The local index lookup for a [`SearchQuery`]: FTS5 expressions over the whole table, and
 /// bounds on the thread's date. Every expression must hold, except a negated one, which must not.
+///
+/// A word may be found in the thread's notes instead (`notes_fts`). Each of `words` is then
+/// looked up on its own, in the mail's index or the notes', and `loose` stands in for the first
+/// expression, with every word in it made optional so it still highlights them.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(crate) struct Fts {
     /// `(negated, expression)`. The first is never negated.
     pub matches: Vec<(bool, String)>,
     /// `(before, epoch ms)`: `sort < ms` when `before`, else `sort >= ms`.
     pub dates: Vec<(bool, i64)>,
+    /// `(negated, expression)` over the notes' index: the thread has a live note matching it,
+    /// or, negated, none. An empty expression is any live note. A `notes:` term gives one, and so
+    /// does a negated word, which mustn't be in a note either.
+    pub notes: Vec<(bool, String)>,
+    /// The words that must be in the mail or a note, as FTS5 expressions.
+    pub words: Vec<String>,
+    /// The first expression with each of `words` optional, or `None` when there are none.
+    pub loose: Option<String>,
 }
 
 /// A term of the full-table expression.
+#[derive(Clone)]
 struct Term {
     negated: bool,
     group: bool,
+    /// A word that the thread's notes may have instead of its mail.
+    word: bool,
     text: String,
 }
 
@@ -734,6 +811,7 @@ fn full_table_match(mut terms: Vec<Term>) -> String {
             Term {
                 negated: false,
                 group: false,
+                word: false,
                 text: format!("meta:{FTS_ANCHOR}"),
             },
         ),
@@ -767,22 +845,41 @@ fn fts_token(
     let column = |column: &str, value: &str| Term {
         negated,
         group: false,
+        word: false,
         text: column_term(column, value),
     };
     match token.kind {
-        Kind::Text if token.quoted && negated => fts
-            .matches
-            .push((true, fts5_prefix_or_phrase(token.value()))),
-        Kind::Text if token.quoted => terms.push(Term {
-            negated: false,
-            group: false,
-            text: fts5_prefix_or_phrase(token.value()),
-        }),
-        Kind::Text => terms.push(Term {
+        Kind::Text if token.quoted && negated => {
+            let phrase = fts5_prefix_or_phrase(token.value());
+            fts.notes.push((true, phrase.clone()));
+            fts.matches.push((true, phrase));
+        }
+        Kind::Text => {
+            let text = if token.quoted {
+                fts5_prefix_or_phrase(token.value())
+            } else {
+                fts5_value(token.value())
+            };
+            if negated {
+                fts.notes.push((true, text.clone()));
+            } else {
+                fts.words.push(text.clone());
+            }
+            terms.push(Term {
+                negated,
+                group: false,
+                word: !negated,
+                text,
+            });
+        }
+        Kind::Notes => fts.notes.push((
             negated,
-            group: false,
-            text: fts5_value(token.value()),
-        }),
+            token
+                .value
+                .as_deref()
+                .map(fts5_prefix_or_phrase)
+                .unwrap_or_default(),
+        )),
         Kind::Attachment => terms.push(column("meta", "attachment")),
         Kind::Shared => terms.push(column("meta", "shared")),
         Kind::Filename => column_or_phrase("attachments", token, terms, fts),
@@ -815,18 +912,21 @@ fn fts_token(
                 terms.extend(each.into_iter().map(|text| Term {
                     negated: true,
                     group: false,
+                    word: false,
                     text,
                 }));
             } else if each.len() > 1 {
                 terms.push(Term {
                     negated: false,
                     group: true,
+                    word: false,
                     text: each.join(" OR "),
                 });
             } else if let Some(text) = each.into_iter().next() {
                 terms.push(Term {
                     negated: false,
                     group: false,
+                    word: false,
                     text,
                 });
             }
@@ -891,6 +991,7 @@ fn column_or_phrase(column: &str, token: &Token, terms: &mut Vec<Term>, fts: &mu
         terms.push(Term {
             negated: token.negated,
             group: false,
+            word: false,
             text: column_term(column, token.value()),
         });
     }
@@ -1078,8 +1179,10 @@ fn says_yes(value: &str) -> bool {
 
 /// Parses one token, its `field:` prefix included.
 fn parse_leaf(text: &str, negated: bool) -> Token {
-    static PATTERNS: LazyLock<[Regex; 14]> = LazyLock::new(|| {
+    static PATTERNS: LazyLock<[Regex; 16]> = LazyLock::new(|| {
         [
+            r"(?i)^has:\s*notes?$",
+            r"(?i)^notes?:\s*(.*)",
             r"(?i)^has:\s*attachment$",
             r"(?i)^hasattachment:\s*(yes|no|true|false)$",
             r"(?i)^has:\s*star$",
@@ -1108,6 +1211,8 @@ fn parse_leaf(text: &str, negated: bool) -> Token {
         };
     let starred = |negated: bool| token(Kind::Label, "is", Some("starred".into()), false, negated);
     let [
+        has_notes,
+        notes,
         attachment,
         has_attachment,
         star,
@@ -1130,6 +1235,20 @@ fn parse_leaf(text: &str, negated: bool) -> Token {
             .map_or_else(String::new, |found| found.as_str().to_owned())
     };
 
+    if has_notes.is_match(text) {
+        return token(Kind::Notes, "notes", None, false, negated);
+    }
+    if notes.is_match(text) {
+        let value = group(notes, 1);
+        let unquoted = unquote(&value);
+        return token(
+            Kind::Notes,
+            "notes",
+            Some(unquoted).filter(|value| !value.trim().is_empty()),
+            value.starts_with('"'),
+            negated,
+        );
+    }
     if attachment.is_match(text) {
         return token(Kind::Attachment, "", None, false, negated);
     }
@@ -1485,17 +1604,25 @@ fn gmail_query(
     important: Option<&str>,
 ) -> String {
     let minus = if node.negated() { "-" } else { "" };
+    // A part Gmail never sees (`notes:`) leaves nothing, and a group of nothing else goes too.
     let join = |children: &[Node]| {
         children
             .iter()
             .map(|child| gmail_query(child, false, labels, me, important))
+            .filter(|part| !part.is_empty())
             .collect::<Vec<_>>()
             .join(" ")
     };
     let token = match node {
         Node::And(children, negated) if top && !negated => return join(children),
-        Node::And(children, _) => return format!("{minus}({})", join(children)),
-        Node::Or(children, _) => return format!("{minus}{{{}}}", join(children)),
+        Node::And(children, _) | Node::Or(children, _) => {
+            let joined = join(children);
+            return match (joined.is_empty(), node) {
+                (true, _) => String::new(),
+                (false, Node::And(..)) => format!("{minus}({joined})"),
+                (false, _) => format!("{minus}{{{joined}}}"),
+            };
+        }
         Node::Leaf(token) => token,
     };
     if token.value.as_deref() == Some("") {
@@ -1533,8 +1660,8 @@ fn gmail_query(
                 _ => format!("{minus}{}:{value}", token.field),
             }
         }
-        // Exo has no Auto Labels to name.
-        Kind::AutoLabel => String::new(),
+        // Exo has no Auto Labels to name, and notes never leave the device.
+        Kind::AutoLabel | Kind::Notes => String::new(),
         Kind::Contact if token.value().eq_ignore_ascii_case("me") && !token.quoted => {
             format!("{}:{minus}{{{}}}", token.field, me.join(" "))
         }
@@ -1671,7 +1798,14 @@ impl<'a> Matcher<'a> {
             Kind::AutoLabel => true,
             // No thread is shared without teams.
             Kind::Shared => !token.negated,
-            _ => false,
+            // Only the indexes can tell these.
+            Kind::Label
+            | Kind::Category
+            | Kind::Filename
+            | Kind::Header
+            | Kind::Contact
+            | Kind::Notes
+            | Kind::Text => false,
         }
     }
 
@@ -1780,7 +1914,8 @@ impl<'a> Matcher<'a> {
                     Found::new()
                 }
             }
-            Kind::Header | Kind::Text => return None,
+            // The notes' index answers these.
+            Kind::Header | Kind::Text | Kind::Notes => return None,
         })
     }
 
@@ -2240,10 +2375,85 @@ mod tests {
             Some((TokenKind::Label, "in".into(), "sen".into()))
         );
         assert_eq!(last(""), None);
+        assert_eq!(
+            last("notes:over"),
+            Some((TokenKind::Other, "notes".into(), "over".into()))
+        );
         assert!(SearchQuery::parse("  -- ").is_empty());
         assert!(!SearchQuery::parse("a").is_empty());
         assert!(SearchQuery::parse("in:trash").shows_label("trash"));
         assert!(!SearchQuery::parse("-in:trash").shows_label("trash"));
+    }
+
+    #[test]
+    fn notes_tokens_never_reach_gmail() {
+        let to_gmail =
+            |query: &str| SearchQuery::parse(query).to_gmail(&labels(), &[ME.to_owned()], "");
+        assert_eq!(to_gmail("notes:x from:a"), "-in:DRAFT -in:CHAT (from:a)");
+        assert_eq!(to_gmail("has:notes"), "-in:DRAFT -in:CHAT");
+        assert_eq!(to_gmail("-notes:\"a b\" -note:"), "-in:DRAFT -in:CHAT");
+        assert_eq!(
+            gmail("notes:x from:a"),
+            "-in:DRAFT -in:CHAT in:inbox from:a"
+        );
+    }
+
+    #[test]
+    fn notes_tokens_read_the_notes_index() {
+        let notes = |query: &str| fts(query).notes;
+        assert_eq!(notes("notes:overage"), [(false, "\"overage\"".to_owned())]);
+        assert_eq!(
+            notes("note:\"keep the cost\""),
+            [(false, "\"keep the cost\"".to_owned())]
+        );
+        assert_eq!(notes("notes:over*"), [(false, "\"over\"*".to_owned())]);
+        assert_eq!(notes("notes:"), [(false, String::new())]);
+        assert_eq!(notes("has:notes"), [(false, String::new())]);
+        assert_eq!(notes("-has:note"), [(true, String::new())]);
+        assert_eq!(notes("-notes:x"), [(true, "\"x\"".to_owned())]);
+        assert_eq!(
+            notes("notes:\""),
+            [(false, String::new())],
+            "nothing to match"
+        );
+        assert_eq!(
+            notes("-budget"),
+            [(true, "budget".to_owned())],
+            "a word's notes"
+        );
+        assert!(SearchQuery::parse("notes:x").has_notes_terms());
+        assert!(SearchQuery::parse("-has:notes").has_notes_terms());
+        assert!(!SearchQuery::parse("notes").has_notes_terms());
+        let words = fts("budget \"a plan\" -other notes:x");
+        assert_eq!(words.words, ["budget", "\"a plan\""]);
+        assert_eq!(
+            words.matches[0].1,
+            "budget AND \"a plan\" NOT other NOT labels:TRASH NOT labels:SPAM NOT labels:SH_SNIPPETS",
+            "the index's own expression is as it was"
+        );
+        assert_eq!(
+            words.loose.as_deref(),
+            Some(
+                "(budget OR meta:thread) AND (\"a plan\" OR meta:thread) NOT other NOT labels:TRASH NOT labels:SPAM NOT labels:SH_SNIPPETS"
+            )
+        );
+        assert_eq!(fts("from:a").loose, None);
+    }
+
+    #[test]
+    fn a_split_refuses_notes_tokens() {
+        assert_eq!(
+            invalid("from:a notes:renewal"),
+            Some("We can't split your inbox on notes:renewal\n\n            Please remove this and try again.".into())
+        );
+        assert!(invalid("has:notes").is_some());
+        assert!(
+            SearchQuery::parse("notes:x from:ann")
+                .bulk_refusal(&labels())
+                .is_some()
+        );
+        let view = thread(vec![message("m1", 1, "a@x.com", &[ME], &["INBOX"])]);
+        assert!(!SplitQuery::parse("has:notes").is_match(&view, &[], &labels(), &[ME.to_owned()]));
     }
 
     #[test]
