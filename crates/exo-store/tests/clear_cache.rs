@@ -317,7 +317,7 @@ async fn every_table_is_kept_or_refilled() {
     let Harness { dir, store, .. } = harness;
     drop(store);
     let db = rusqlite::Connection::open(database(dir.path())).expect("opens");
-    let mut statement = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '__toasty%' AND name NOT LIKE 'search_fts%'").expect("prepares");
+    let mut statement = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '__toasty%' AND name NOT LIKE 'search_fts%' AND name NOT LIKE 'notes_fts%'").expect("prepares");
     let mut tables: Vec<String> = statement
         .query_map([], |row| row.get(0))
         .expect("queries")
@@ -329,6 +329,11 @@ async fn every_table_is_kept_or_refilled() {
         "calendar_changes",
         "drafts",
         "kv",
+        "note_drafts",
+        "note_files",
+        "note_threads",
+        "note_versions",
+        "notes",
         "outbox",
         "reminders",
         "settings",

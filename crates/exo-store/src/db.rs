@@ -353,6 +353,109 @@ pub(crate) struct BulkRow {
     pub changed: Json<crate::Relabelled>,
 }
 
+/// A thread with notes, as it was when one of its notes last changed, so its notes make sense
+/// when its mail isn't stored. Not provider truth.
+#[derive(Debug, toasty::Model)]
+#[table = "note_threads"]
+pub(crate) struct NoteThreadRow {
+    #[key]
+    pub thread_id: String,
+    pub subject: String,
+    #[column(type = text)]
+    pub participants: Json<Vec<crate::NoteParticipant>>,
+    /// The dates of its first and last messages.
+    pub first_date: Option<jiff::Timestamp>,
+    pub last_date: Option<jiff::Timestamp>,
+    /// How many messages it had.
+    pub messages: u32,
+    /// The number its next message note gets. Numbers are never reused.
+    pub next_number: u32,
+}
+
+/// A note on a thread, or on one of its messages. Not provider truth.
+#[derive(Debug, toasty::Model)]
+#[table = "notes"]
+pub(crate) struct NoteRow {
+    /// A UUID v4.
+    #[key]
+    pub id: String,
+    #[index]
+    pub thread_id: String,
+    /// The message it's on, or `None` for a thread note.
+    pub message_id: Option<String>,
+    /// The message's sender and date, saved with the note.
+    pub message_from: Option<String>,
+    pub message_date: Option<jiff::Timestamp>,
+    /// Its number in the thread, or `None` for a thread note.
+    pub number: Option<u32>,
+    /// What it is: `note` for now.
+    pub kind: String,
+    pub html: String,
+    /// The plain text of `html`.
+    pub text: String,
+    /// The uuids of its files.
+    #[column(type = text)]
+    pub files: Json<Vec<String>>,
+    pub created_at: jiff::Timestamp,
+    pub updated_at: jiff::Timestamp,
+    /// When it was deleted, or `None` while it's live.
+    pub deleted_at: Option<jiff::Timestamp>,
+    /// How many times it has been saved.
+    pub version: u32,
+}
+
+/// A note as one of its saves left it, a full copy.
+#[derive(Debug, toasty::Model)]
+#[table = "note_versions"]
+#[key(note_id, version)]
+pub(crate) struct NoteVersionRow {
+    pub note_id: String,
+    pub version: u32,
+    pub html: String,
+    pub text: String,
+    /// The uuids of its files.
+    #[column(type = text)]
+    pub files: Json<Vec<String>>,
+    pub saved_at: jiff::Timestamp,
+    /// What the save was: `created`, `edited`, `deleted` or `restored`.
+    pub change: String,
+}
+
+/// A file attached to a note. Its bytes are kept apart, under its uuid.
+#[derive(Debug, toasty::Model)]
+#[table = "note_files"]
+pub(crate) struct NoteFileRow {
+    #[key]
+    pub uuid: String,
+    #[index]
+    pub note_id: String,
+    pub name: String,
+    pub mime_type: String,
+    pub size: u64,
+    /// Set for an inline image.
+    pub content_id: Option<String>,
+}
+
+/// What's typed in an open note editor and not saved yet. Not provider truth.
+#[derive(Debug, toasty::Model)]
+#[table = "note_drafts"]
+pub(crate) struct NoteDraftRow {
+    /// The note's id, or a new UUID for a note not saved yet.
+    #[key]
+    pub id: String,
+    #[index]
+    pub thread_id: String,
+    /// The message it's on, or `None` for a thread note.
+    pub message_id: Option<String>,
+    /// The note it edits, or `None` for a new one.
+    pub note_id: Option<String>,
+    pub html: String,
+    pub text: String,
+    #[column(type = text)]
+    pub files: Json<Vec<crate::NoteFile>>,
+    pub updated_at: jiff::Timestamp,
+}
+
 /// Small persistent values: the history cursor, the account's identity.
 #[derive(Debug, toasty::Model)]
 #[table = "kv"]
@@ -426,15 +529,20 @@ pub(crate) async fn clear(path: &Path) -> Result<()> {
 
 /// What Clear Cache and Restart copies from the old database, which is what Gmail doesn't have: the
 /// settings, the drafts (held and scheduled sends among them), the queued changes, the reminders'
-/// schedule, the calendar's queued changes and the bulk actions' log.
+/// schedule, the calendar's queued changes, the bulk actions' log and the notes.
 /// `every_table_is_kept_or_refilled` in `tests/clear_cache.rs` lists the rest.
-const KEPT_TABLES: [&str; 6] = [
+const KEPT_TABLES: [&str; 11] = [
     "settings",
     "drafts",
     "outbox",
     "reminders",
     "calendar_changes",
     "bulk_actions",
+    "note_threads",
+    "notes",
+    "note_versions",
+    "note_files",
+    "note_drafts",
 ];
 /// The `kv` entries kept with them, Exo's own records: which held sends gave their reminder, and
 /// the unsubscribes still to retry.

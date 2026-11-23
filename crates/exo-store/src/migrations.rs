@@ -106,6 +106,11 @@ static FILES: &[MigrationFile] = &[
         "0007_bulk_actions.sql",
         include_str!("../migrations/0007_bulk_actions.sql"),
     ),
+    MigrationFile::new(
+        0x3d5b_f125_1559_fc79,
+        "0008_notes.sql",
+        include_str!("../migrations/0008_notes.sql"),
+    ),
 ];
 
 /// Brings `db`, the file at `path`, to this build's schema.
@@ -192,7 +197,10 @@ mod tests {
     use toasty::stmt::Value;
 
     use super::*;
-    use crate::db::{self, CalendarChangeRow, ReminderRow, query_i64};
+    use crate::db::{
+        self, CalendarChangeRow, NoteDraftRow, NoteFileRow, NoteRow, NoteThreadRow, NoteVersionRow,
+        ReminderRow, query_i64,
+    };
     use crate::{Options, Settings, Store, SyncReport, Theme};
 
     const ACCOUNT: &str = "maya@brightmoor.co";
@@ -342,7 +350,7 @@ mod tests {
     type Contents = BTreeMap<String, (Vec<String>, Vec<Vec<String>>)>;
 
     async fn contents(db: &mut Db) -> Contents {
-        let columns = rows(db, "SELECT m.name, c.name FROM sqlite_master m JOIN pragma_table_info(m.name) c WHERE m.type = 'table' AND m.name NOT LIKE 'sqlite_%' AND m.name NOT LIKE 'search_fts_%' AND m.name <> '__toasty_migrations' ORDER BY m.name, c.cid").await;
+        let columns = rows(db, "SELECT m.name, c.name FROM sqlite_master m JOIN pragma_table_info(m.name) c WHERE m.type = 'table' AND m.name NOT LIKE 'sqlite_%' AND m.name NOT LIKE 'search_fts_%' AND m.name NOT LIKE 'notes_fts_%' AND m.name <> '__toasty_migrations' ORDER BY m.name, c.cid").await;
         let mut contents = Contents::new();
         for row in columns {
             contents
@@ -431,7 +439,7 @@ mod tests {
                 .collect::<Vec<_>>()
         );
         // The models as toasty makes them, with nothing else, because only the migrations make
-        // the search index.
+        // the search indexes.
         let mut models = db::connect(&dir.0.join("models.sqlite3"))
             .await
             .expect("creates a file");
@@ -442,7 +450,7 @@ mod tests {
         let ours = |lines: Vec<String>| {
             lines
                 .into_iter()
-                .filter(|line| !line.starts_with("search_fts"))
+                .filter(|line| !line.starts_with("search_fts") && !line.starts_with("notes_fts"))
                 .collect::<Vec<_>>()
         };
         let (want, got) = (
@@ -458,6 +466,13 @@ mod tests {
                 .iter()
                 .any(|line| line.starts_with("search_fts CREATE VIRTUAL TABLE")),
             "and the search index"
+        );
+        assert!(
+            schema(&mut new)
+                .await
+                .iter()
+                .any(|line| line.starts_with("notes_fts CREATE VIRTUAL TABLE")),
+            "and the notes' search index"
         );
     }
 
@@ -683,6 +698,60 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_notes_migration_starts_empty() {
+        let dir = TempDir::new("migrate-notes");
+        let path = fixture(&dir.0);
+        let mut db = db::open(&path).await.expect("upgrades the fixture");
+        assert!(
+            NoteThreadRow::all()
+                .exec(&mut db)
+                .await
+                .expect("reads")
+                .is_empty(),
+            "no thread had notes before"
+        );
+        assert!(
+            NoteRow::all()
+                .exec(&mut db)
+                .await
+                .expect("reads")
+                .is_empty(),
+            "nor notes"
+        );
+        assert!(
+            NoteVersionRow::all()
+                .exec(&mut db)
+                .await
+                .expect("reads")
+                .is_empty(),
+            "nor their versions"
+        );
+        assert!(
+            NoteFileRow::all()
+                .exec(&mut db)
+                .await
+                .expect("reads")
+                .is_empty(),
+            "nor their files"
+        );
+        assert!(
+            NoteDraftRow::all()
+                .exec(&mut db)
+                .await
+                .expect("reads")
+                .is_empty(),
+            "nor unsaved notes"
+        );
+        assert_eq!(
+            query_i64(&mut db, "SELECT count(*) FROM notes_fts")
+                .await
+                .expect("the notes' index is there"),
+            0,
+            "and nothing is indexed"
+        );
+    }
+
+    #[tokio::test]
     async fn the_calendar_changes_migration_starts_empty_and_keeps_what_is_queued() {
         let dir = TempDir::new("migrate-calendar-changes");
         let path = fixture(&dir.0);
@@ -817,6 +886,7 @@ mod tests {
                 "0005_list_floors.sql",
                 "0006_calendar_accounts.sql",
                 "0007_bulk_actions.sql",
+                "0008_notes.sql",
                 "9002_extra.sql"
             ]
         );
@@ -852,6 +922,7 @@ mod tests {
                 "0005_list_floors.sql",
                 "0006_calendar_accounts.sql",
                 "0007_bulk_actions.sql",
+                "0008_notes.sql",
                 "9002_extra.sql",
                 "9003_remind_at.sql"
             ]

@@ -45,6 +45,7 @@ mod ids;
 mod migrations;
 mod model;
 mod mutation;
+mod notes;
 mod onboarding;
 mod out_of_office;
 mod outbox;
@@ -88,6 +89,7 @@ pub use model::{
     MessageDetail, RecentThread, ReminderStatus, ThreadDetail, ThreadPage, ThreadSummary,
 };
 pub use mutation::Mutation;
+pub use notes::{NoteFile, NoteParticipant};
 pub use onboarding::{PreviewEmail, PreviewList, SplitPreview};
 pub use out_of_office::{
     DetectedEvent, EventTime, GoogleResponder, OUT_OF_OFFICE_LOOKAHEAD, OutOfOfficeDays,
