@@ -2230,10 +2230,18 @@ impl<'a> Matcher<'a> {
             Kind::Attachment => indexes(&|m| self.has_visible_attachment(m)),
             Kind::Filename => {
                 let wanted = token.value().to_lowercase();
-                indexes(&|m| {
+                // A split's calendar file counts on the latest message only: an invite answered
+                // or replied to long ago doesn't keep the thread in Calendar.
+                let latest = (self.message_level && is_calendar_file(&wanted))
+                    .then(|| self.messages.len().saturating_sub(1));
+                let mut found = indexes(&|m| {
                     self.attachments_of(m)
                         .any(|row| filename_matches(&wanted, row))
-                })
+                });
+                if let Some(latest) = latest {
+                    found.retain(|&at| at == latest);
+                }
+                found
             }
             Kind::Contact => indexes(&|m| self.contact_matches(token, m)),
             Kind::Header if token.field == "subject" => {
@@ -2389,6 +2397,14 @@ fn words(text: &str) -> Vec<&str> {
 
 /// Whether attachment `row` is the one `wanted` names, by its whole filename or MIME type or by
 /// words of them.
+/// Whether a `filename:` value asks for a calendar invitation's file.
+fn is_calendar_file(wanted: &str) -> bool {
+    matches!(
+        wanted.trim_start_matches('.'),
+        "ics" | "invite.ics" | "text/calendar" | "application/ics"
+    )
+}
+
 fn filename_matches(wanted: &str, row: &AttachmentRow) -> bool {
     let name = row.filename.to_lowercase();
     let mime = row.mime_type.to_lowercase();
@@ -2595,6 +2611,53 @@ mod tests {
             &[],
         )]);
         assert!(!matches("from:github.com", &archived), "only inbox threads");
+    }
+
+    /// A forwarded lease thread had a Teams invite as a reply a month before its latest
+    /// message. The Calendar split's `filename:ics` looks at the latest message, so an old
+    /// invite doesn't keep the thread there. Other file names still match anywhere.
+    #[test]
+    fn a_calendar_split_takes_threads_whose_latest_message_is_an_invite() {
+        let (me, labels) = ([ME.to_owned()], labels());
+        let file = |message: &str, filename: &str, mime_type: &str| AttachmentRow {
+            message_id: message.into(),
+            part_id: "1".into(),
+            attachment_id: Some(format!("{message}-{filename}")),
+            filename: filename.into(),
+            mime_type: mime_type.into(),
+            size: 1,
+            content_id: None,
+            inline: false,
+        };
+        let matches = |query: &str, view: &ThreadView, files: &[AttachmentRow]| {
+            SplitQuery::parse(query).is_match(view, files, &labels, &me)
+        };
+        let calendar = crate::split::CALENDAR_QUERY;
+        let invite = || message("m1", 1_000, "ana@x.com", &[ME], &["INBOX"]);
+        let reply = || message("m2", 2_000, "ana@x.com", &[ME], &["INBOX"]);
+        let files = [
+            file("m1", "invite.ics", "text/calendar"),
+            file("m1", "lease.pdf", "application/pdf"),
+        ];
+        assert!(matches(calendar, &thread(vec![invite()]), &files));
+        let replied = thread(vec![invite(), reply()]);
+        assert!(
+            !matches(calendar, &replied, &files),
+            "an old invite mid-thread doesn't keep the thread in Calendar"
+        );
+        assert!(!matches("filename:ics", &replied, &files));
+        let reinvited = thread(vec![
+            message("m0", 500, "ana@x.com", &[ME], &["INBOX"]),
+            invite(),
+        ]);
+        assert!(
+            matches(calendar, &reinvited, &files),
+            "a new invite on an old thread puts it there"
+        );
+        assert!(
+            matches("filename:pdf", &replied, &files),
+            "other file names still match anywhere in the thread"
+        );
     }
 
     fn fts(query: &str) -> Fts {
