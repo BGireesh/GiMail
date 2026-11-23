@@ -189,8 +189,13 @@ pub struct Notes {
     /// Whether the editor has been painted this frame. One that isn't on screen (its pane shows
     /// something else) doesn't hold the keyboard.
     painted: bool,
+    /// Whether the editor was painted last frame: it's on screen, and files dropped on the
+    /// window go to it.
+    shown: bool,
     /// The images the notes' editors show.
     pictures: files::Pictures,
+    /// The files being added to the open editor.
+    adder: files::Adder,
     /// A file a card was clicked to open, and whether to preview it.
     opening: Option<(NoteFile, bool)>,
 }
@@ -217,7 +222,9 @@ impl Notes {
             time: 0.0,
             editor_rect: None,
             painted: false,
+            shown: false,
             pictures: files::Pictures::default(),
+            adder: files::Adder::default(),
             opening: None,
         }
     }
@@ -462,7 +469,7 @@ impl Notes {
     pub fn tick(&mut self, account: &Account, time: f64, now: Timestamp) {
         self.time = time;
         // The frame starts with the editor not drawn yet.
-        self.painted = false;
+        self.shown = std::mem::replace(&mut self.painted, false);
         let Some(open) = &mut self.editing else {
             return;
         };
@@ -501,6 +508,11 @@ impl Notes {
     pub fn region(&self) -> Option<Region> {
         (self.painted && self.editing.as_ref().is_some_and(|open| open.focused))
             .then_some(Region::NoteEditor)
+    }
+
+    /// Whether an editor is open and was on screen last frame.
+    pub fn on_screen(&self) -> bool {
+        self.editing.is_some() && self.shown
     }
 
     /// Runs a formatting key in the open editor.
@@ -575,7 +587,9 @@ impl crate::Mail {
             Action::FormatNote(command) => self.notes.format(command),
             Action::AttachNoteFile => {
                 let paths = crate::compose::pick_files(&[]);
-                let refused = self.notes.add_paths(&self.account.note_files(), &paths);
+                let refused = self
+                    .notes
+                    .add_paths(&self.ctx, &self.account.note_files(), &paths);
                 self.notes_refused(refused);
             }
             Action::ToggleNotesPane => {
@@ -592,36 +606,32 @@ impl crate::Mail {
         }
     }
 
-    /// Runs each frame, before compose sees the input. Files dropped while the note editor has
-    /// the keyboard, or on it, go to the note, and so does a paste of files or an image (a
-    /// screenshot) into it: images that decode in its text, anything else listed under it. Then
-    /// the `data:` images pasted into it are kept, the editors' images load, and a file card
-    /// clicked opens its file.
+    /// Runs each frame, before compose sees the input. Files dropped on the window while a note
+    /// editor is on screen go to the note, keyboard or not, unless a draft has the keyboard. A
+    /// paste of files or an image (a screenshot) into the note editor goes to it too. Images that
+    /// decode go in its text, anything else is listed under it, once they're kept off the UI
+    /// thread. Then the `data:` images pasted into it are kept, the editors' images load, and a
+    /// file card clicked opens its file.
     pub(crate) fn notes_files_frame(&mut self, ctx: &egui::Context) {
         let folder = self.account.note_files();
-        let mut refused = None;
-        if self.notes.editing().is_some() {
-            let focused = self.commands.region() == Region::NoteEditor;
-            let over = self
-                .notes
-                .editor_rect()
-                .zip(ctx.input(|input| input.pointer.latest_pos()))
-                .is_some_and(|(rect, at)| rect.contains(at));
-            if focused || over {
-                // Taken, so compose never sees them.
-                let dropped: Vec<std::path::PathBuf> = ctx.input_mut(|input| {
-                    input
-                        .raw
-                        .dropped_files
-                        .drain(..)
-                        .map(|file| file.path().to_owned())
-                        .collect()
-                });
-                refused = self.notes.add_paths(&folder, &dropped).or(refused);
-            }
-            if focused && ctx.input(|input| input.events.iter().any(crate::compose::is_paste)) {
-                refused = self.notes_paste(ctx, &folder).or(refused);
-            }
+        let mut refused = self.notes.take_added();
+        if self.notes.on_screen() && self.compose.focused().is_none() {
+            // Taken, so compose never sees them.
+            let dropped: Vec<std::path::PathBuf> = ctx.input_mut(|input| {
+                input
+                    .raw
+                    .dropped_files
+                    .drain(..)
+                    .map(|file| file.path().to_owned())
+                    .collect()
+            });
+            refused = self.notes.add_paths(ctx, &folder, &dropped).or(refused);
+        }
+        if self.commands.region() == Region::NoteEditor
+            && self.notes.editing().is_some()
+            && ctx.input(|input| input.events.iter().any(crate::compose::is_paste))
+        {
+            refused = self.notes_paste(ctx, &folder).or(refused);
         }
         refused = self.notes.take_uploads(&folder).or(refused);
         self.notes_refused(refused);
@@ -659,10 +669,13 @@ impl crate::Mail {
                 .events
                 .retain(|event| !crate::compose::is_paste(event))
         });
-        let mut refused = self.notes.add_paths(folder, &files);
+        let mut refused = self.notes.add_paths(ctx, folder, &files);
         if let Some(png) = image {
             // Chromium names the clipboard's image `image.png`.
-            refused = self.notes.add_image(folder, "image.png", &png).or(refused);
+            refused = self
+                .notes
+                .add_image(ctx, folder, "image.png", png)
+                .or(refused);
         }
         refused
     }

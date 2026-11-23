@@ -694,7 +694,7 @@ impl egui::DroppedFile for Dropped {
     }
 }
 
-/// Drops the file `name` holding `bytes` on the window.
+/// Drops the file `name` holding `bytes` on the window, and lets it be kept.
 fn drop_file(app: &mut Fixture, name: &str, bytes: &[u8]) {
     let folder = app.folder("drops");
     std::fs::create_dir_all(&folder).expect("a folder");
@@ -705,6 +705,7 @@ fn drop_file(app: &mut Fixture, name: &str, bytes: &[u8]) {
         .dropped_files
         .push(std::sync::Arc::new(Dropped(path)));
     app.harness.run_steps(2);
+    app.wait(0.5);
 }
 
 /// A small PNG.
@@ -717,7 +718,7 @@ fn png() -> Vec<u8> {
     png
 }
 
-/// Pastes `png` as an image on the clipboard.
+/// Pastes `png` as an image on the clipboard, and lets it be kept.
 fn paste_image(app: &mut Fixture, png: Vec<u8>) {
     exo::clipboard::capture_image(&app.harness.ctx, png);
     app.harness
@@ -725,6 +726,7 @@ fn paste_image(app: &mut Fixture, png: Vec<u8>) {
         .events
         .push(egui::Event::Paste(String::new()));
     app.harness.run_steps(2);
+    app.wait(0.5);
 }
 
 #[test]
@@ -807,9 +809,48 @@ fn command_v_in_a_note_pastes_into_it_not_a_new_draft() {
         .events
         .push(egui::Event::Paste("Pasted".to_owned()));
     app.harness.run_steps(2);
-    assert_eq!(app.mail().note_editor_text().as_deref(), Some("Pasted"));
+    // The editor pastes the system clipboard's HTML over the event's text when there is some,
+    // so what's pasted depends on the machine; that it lands in the note doesn't.
+    assert!(
+        app.mail()
+            .note_editor_text()
+            .is_some_and(|text| !text.is_empty()),
+        "the paste goes into the note"
+    );
     assert!(
         !app.mail().compose_pane_open() && app.mail().compose_body().is_none(),
         "no draft is made of the clipboard"
+    );
+}
+
+#[test]
+fn a_file_dropped_while_the_note_editor_lacks_the_keyboard_goes_to_the_note() {
+    let mut app = start_thread_note("notes-drop-unfocused");
+    app.type_text("Agenda");
+    let editor = app.mail().note_editor_rect().expect("the editor is open");
+    // A press in the thread, below the editor, takes the keyboard from it.
+    app.click(egui::pos2(editor.center().x, editor.bottom() + 400.0));
+    app.type_text("x");
+    assert_eq!(
+        app.mail().note_editor_text().as_deref(),
+        Some("Agenda"),
+        "the editor no longer has the keyboard"
+    );
+    drop_file(&mut app, "agenda.txt", b"1. Budget");
+    assert!(
+        !app.mail().compose_pane_open() && app.mail().compose_body().is_none(),
+        "no draft takes the drop"
+    );
+    // Back in the editor, and saved.
+    app.click(editor.center());
+    app.press(Key::Enter, COMMAND);
+    let note = &app.mail().notes().notes[0];
+    assert_eq!(note.text, "Agenda", "the typed text is kept");
+    assert_eq!(
+        note.files
+            .iter()
+            .map(|file| file.name.as_str())
+            .collect::<Vec<_>>(),
+        ["agenda.txt"]
     );
 }

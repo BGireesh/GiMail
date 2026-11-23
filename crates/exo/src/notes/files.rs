@@ -3,13 +3,13 @@
 //! by a new uuid, and the note lists it. An image that decodes goes in the text, shown by a new
 //! Content-ID; anything else, an image that doesn't decode too, is listed.
 //!
-//! The images the editors show (the open one's, and each card's) are read and decoded off the UI
-//! thread, and kept while the thread is open.
+//! What's added is read, decoded and copied off the UI thread, and goes into the editor it was
+//! added to when done. The images the editors show (the open one's, and each card's) are read
+//! and decoded off the UI thread too, and kept while the thread is open.
 
 use std::{
     collections::HashMap,
-    io::Cursor,
-    path::Path,
+    path::{Path, PathBuf},
     sync::mpsc::{Receiver, Sender, channel},
 };
 
@@ -74,15 +74,7 @@ pub fn add_file(
 /// Copies the file at `path` into `folder` as a file of a note. An image (by its name) that
 /// decodes comes back with a new Content-ID, to go in the note's text; anything else is listed.
 pub fn add_path(folder: &Path, path: &Path) -> Result<NoteFile, Refused> {
-    let metadata = std::fs::metadata(path).map_err(|error| {
-        log::warn!("reading a file for a note: {error}");
-        Refused::Unreadable
-    })?;
-    // A folder can't be kept.
-    if metadata.is_dir() {
-        return Err(Refused::Unreadable);
-    }
-    check(metadata.len())?;
+    check_path(path)?;
     let name = path
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
@@ -127,6 +119,20 @@ pub fn add_image(folder: &Path, name: &str, bytes: &[u8]) -> Result<NoteFile, Re
     )
 }
 
+/// Turns away the file at `path` when it's a folder, can't be read, or is empty or too large: what
+/// can be told without reading it.
+fn check_path(path: &Path) -> Result<(), Refused> {
+    let metadata = std::fs::metadata(path).map_err(|error| {
+        log::warn!("reading a file for a note: {error}");
+        Refused::Unreadable
+    })?;
+    // A folder can't be kept.
+    if metadata.is_dir() {
+        return Err(Refused::Unreadable);
+    }
+    check(metadata.len())
+}
+
 /// Turns away a file of `size` bytes that's empty or too large.
 fn check(size: u64) -> Result<(), Refused> {
     match size {
@@ -136,13 +142,56 @@ fn check(size: u64) -> Result<(), Refused> {
     }
 }
 
-/// Whether `bytes` are an image the editor can show: a format it knows, with a readable size.
+/// Whether `bytes` are an image the editor can show: decoded whole, by the decoder that shows it.
 fn decodes(bytes: &[u8]) -> bool {
-    image::ImageReader::new(Cursor::new(bytes))
-        .with_guessed_format()
-        .ok()
-        .and_then(|reader| reader.into_dimensions().ok())
-        .is_some()
+    matches!(crate::compose::decode(bytes), ImageLoad::Loaded(_))
+}
+
+/// What's being added to a note, which the worker reads, decodes and keeps.
+enum Adding {
+    /// A file, by its path.
+    Path(PathBuf),
+    /// A pasted image's bytes, and its name.
+    Image(String, Vec<u8>),
+}
+
+/// A file kept for editor `editor`, or why it couldn't be.
+struct Added {
+    editor: String,
+    file: Result<NoteFile, Refused>,
+}
+
+/// The files being added to notes off the UI thread, which come back to their editors.
+pub(super) struct Adder {
+    sender: Sender<Added>,
+    receiver: Receiver<Added>,
+}
+
+impl Default for Adder {
+    fn default() -> Self {
+        let (sender, receiver) = channel();
+        Self { sender, receiver }
+    }
+}
+
+impl Adder {
+    /// Keeps `adding` in `folder` on another thread, for editor `editor`.
+    fn start(&self, ctx: &egui::Context, folder: &Path, editor: &str, adding: Adding) {
+        let (sender, ctx, folder, editor) = (
+            self.sender.clone(),
+            ctx.clone(),
+            folder.to_owned(),
+            editor.to_owned(),
+        );
+        std::thread::spawn(move || {
+            let file = match adding {
+                Adding::Path(path) => add_path(&folder, &path),
+                Adding::Image(name, bytes) => add_image(&folder, &name, &bytes),
+            };
+            let _ = sender.send(Added { editor, file });
+            ctx.request_repaint();
+        });
+    }
 }
 
 /// The note's files listed under it: those its text doesn't show.
@@ -313,35 +362,64 @@ fn by_cid<'a>(files: &'a [NoteFile], cid: &str) -> Option<&'a NoteFile> {
 impl Notes {
     /// Adds the files at `paths` to the open editor, kept in `folder`: images in the text at the
     /// caret, the rest listed. Returns why the last one turned away was, if one was.
-    pub fn add_paths(&mut self, folder: &Path, paths: &[std::path::PathBuf]) -> Option<Refused> {
+    /// They're read and kept off the UI thread, and go in when done ([`Self::take_added`]); what
+    /// can be told at once (an empty file, one too large) is refused here.
+    pub fn add_paths(
+        &mut self,
+        ctx: &egui::Context,
+        folder: &Path,
+        paths: &[PathBuf],
+    ) -> Option<Refused> {
+        let editor = self.editing.as_ref()?.id.clone();
         let mut refused = None;
         for path in paths {
-            match add_path(folder, path) {
-                Ok(file) => self.add(file),
+            match check_path(path) {
+                Ok(()) => self
+                    .adder
+                    .start(ctx, folder, &editor, Adding::Path(path.clone())),
                 Err(why) => refused = Some(why),
             }
         }
         refused
     }
 
-    /// Adds a pasted image's `bytes`, named `name`, to the open editor, kept in `folder`.
-    pub fn add_image(&mut self, folder: &Path, name: &str, bytes: &[u8]) -> Option<Refused> {
-        if self.editing.is_none() {
-            return None;
+    /// Adds a pasted image's `bytes`, named `name`, to the open editor, kept in `folder` off the
+    /// UI thread.
+    pub fn add_image(
+        &mut self,
+        ctx: &egui::Context,
+        folder: &Path,
+        name: &str,
+        bytes: Vec<u8>,
+    ) -> Option<Refused> {
+        let editor = self.editing.as_ref()?.id.clone();
+        if let Err(why) = check(bytes.len() as u64) {
+            return Some(why);
         }
-        match add_image(folder, name, bytes) {
-            Ok(file) => {
-                self.add(file);
-                None
-            }
-            Err(why) => Some(why),
-        }
+        self.adder
+            .start(ctx, folder, &editor, Adding::Image(name.to_owned(), bytes));
+        None
     }
 
-    /// Puts `file` on the open editor's note, and in its text when it's an image to show.
-    fn add(&mut self, file: NoteFile) {
+    /// Puts the files kept since the last call in the editors they were added to. Returns why
+    /// the last one that couldn't be kept wasn't. A file whose editor closed meanwhile stays out
+    /// of its note.
+    pub fn take_added(&mut self) -> Option<Refused> {
+        let mut refused = None;
+        while let Ok(added) = self.adder.receiver.try_recv() {
+            match added.file {
+                Ok(file) => self.add(&added.editor, file),
+                Err(why) => refused = Some(why),
+            }
+        }
+        refused
+    }
+
+    /// Puts `file` on editor `editor`'s note, and in its text at the caret when it's an image to
+    /// show.
+    fn add(&mut self, editor: &str, file: NoteFile) {
         let time = self.time;
-        let Some(open) = &mut self.editing else {
+        let Some(open) = self.editing.as_mut().filter(|open| open.id == editor) else {
             return;
         };
         if let Some(cid) = &file.content_id {
@@ -374,7 +452,9 @@ impl Notes {
     }
 
     /// Keeps the `data:` images pasted into the open editor as the note's images, in `folder`.
-    /// One that can't be kept takes the paste back. Returns why, if one couldn't.
+    /// One that can't be kept takes the paste back. Returns why, if one couldn't. They're kept as
+    /// they come: the editor has them in its text already, and one that doesn't decode shows as
+    /// broken there.
     pub fn take_uploads(&mut self, folder: &Path) -> Option<Refused> {
         let time = self.time;
         let open = self.editing.as_mut()?;
@@ -508,11 +588,40 @@ mod tests {
     }
 
     fn png() -> Vec<u8> {
+        let image = image::RgbaImage::from_fn(64, 64, |x, y| {
+            image::Rgba([(x * 4) as u8, (y * 4) as u8, ((x ^ y) * 4) as u8, 255])
+        });
         let mut out = Vec::new();
-        image::DynamicImage::ImageRgba8(image::RgbaImage::new(3, 2))
-            .write_to(&mut Cursor::new(&mut out), image::ImageFormat::Png)
+        image::DynamicImage::ImageRgba8(image)
+            .write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)
             .expect("encoded");
         out
+    }
+
+    #[test]
+    fn a_truncated_image_is_kept_as_a_file() {
+        let dir = folder("truncated");
+        let whole = png();
+        let half = &whole[..whole.len() / 2];
+        // Its header still reads: the format and the size.
+        assert!(
+            image::ImageReader::new(std::io::Cursor::new(half))
+                .with_guessed_format()
+                .expect("a format")
+                .into_dimensions()
+                .is_ok()
+        );
+        let path = dir.join("cut.png");
+        std::fs::write(&path, half).expect("written");
+        let file = add_path(&dir.join("kept"), &path).expect("kept");
+        assert_eq!(file.content_id, None, "listed, not shown in the text");
+        assert_eq!(
+            add_image(&dir.join("kept"), "image.png", half)
+                .expect("kept")
+                .content_id,
+            None
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
