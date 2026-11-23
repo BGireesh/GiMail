@@ -420,8 +420,9 @@ pub struct SearchResult {
     /// whose only note term is `notes:` or `has:notes` lists none, as the row's own icon says it
     /// has notes.
     pub notes: Vec<NoteHit>,
-    /// Its mail is gone (deleted in Gmail) and only its notes are left. The row is built from the
-    /// thread as it was when a note last changed.
+    /// Gmail has said its mail is gone, and only its notes are left. The row is built from the
+    /// thread as it was when a note last changed. So is the row of a noted thread that merely
+    /// isn't stored (after Clear Cache, until it's fetched again), which isn't `deleted`.
     pub deleted: bool,
 }
 
@@ -703,15 +704,15 @@ impl Store {
                 snippet,
             });
         }
-        // Threads whose mail is gone are found by their notes alone, where the query holds with
-        // no mail at all.
+        // Threads whose mail isn't stored (gone from Gmail, or not fetched again yet) are found
+        // by their notes alone, where the query holds with no mail at all.
         let candidates: BTreeSet<String> = structure
             .positive
             .iter()
             .filter_map(|at| matches.get(*at))
             .flat_map(|found| found.threads.iter().cloned())
             .collect();
-        for result in deleted(&mut db, &candidates, me).await? {
+        for result in unstored(&mut db, &candidates, me).await? {
             let id = result.thread.id.as_str().to_owned();
             if structure.cond.eval(Some(false), &in_notes(&matches, &id)) == Some(true) {
                 found.push(Local::Gone(Box::new(result)));
@@ -1237,10 +1238,12 @@ fn push_note_terms(sql: &mut String, params: &mut Vec<Value>, terms: &[(bool, St
     }
 }
 
-/// Those of `threads` whose mail is gone (none of their messages is stored), newest first, as
-/// results built from each as it was when a note last changed. (A thread's index row may outlive
-/// it, as deleting a thread leaves that row to be skipped.)
-async fn deleted(
+/// Those of `threads` none of whose messages is stored, newest first, as results built from each
+/// as it was when a note last changed. Only one Gmail has said is gone is `deleted`: after Clear
+/// Cache, or signing in again with the notes brought back, a noted thread isn't stored until
+/// sync fetches it again ([`Store::fetch_noted_threads`]). (A thread's index row may outlive it,
+/// as deleting a thread leaves that row to be skipped.)
+async fn unstored(
     exec: &mut dyn Executor,
     threads: &BTreeSet<String>,
     me: &[String],
@@ -1306,7 +1309,7 @@ async fn deleted(
                 subject: None,
                 snippet: None,
                 notes: Vec::new(),
-                deleted: true,
+                deleted: row.gone,
             }
         })
         .collect();

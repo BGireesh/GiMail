@@ -370,6 +370,9 @@ pub(crate) struct NoteThreadRow {
     pub messages: u32,
     /// The number its next message note gets. Numbers are never reused.
     pub next_number: u32,
+    /// Whether Gmail has said it no longer has the thread. A thread that merely isn't stored
+    /// (after Clear Cache, or signing in again) isn't gone.
+    pub gone: bool,
 }
 
 /// A note on a thread, or on one of its messages. Not provider truth.

@@ -5,7 +5,10 @@ mod support;
 
 use std::path::{Path, PathBuf};
 
-use exo_store::{ListId, NoteChange, NoteDraft, NoteFile, SaveNote, Store, ThreadDetail, ThreadId};
+use exo_store::{
+    ListId, NoteChange, NoteDraft, NoteFile, Options, SaveNote, Search, Store, ThreadDetail,
+    ThreadId,
+};
 use jiff::{SignedDuration, Timestamp};
 use support::{ACCOUNT, Harness};
 
@@ -548,6 +551,7 @@ async fn concurrent_saves_leave_one_version_each_and_a_whole_backup() {
         second.expect("saves").expect("a note"),
     );
     draft.expect("saves the draft");
+    store.backup_notes().await.expect("backs up");
     let mut numbers = [first.number, second.number];
     numbers.sort();
     assert_eq!(numbers, [Some(1), Some(2)], "one number each");
@@ -643,12 +647,27 @@ async fn a_backup_that_wont_restore_is_set_aside_not_overwritten() {
         ["not a backup {"],
         "the backup is set aside"
     );
+    let name = store
+        .take_notes_backup_set_aside()
+        .expect("the store says what it was kept as");
+    assert!(
+        name.starts_with(&format!("{ACCOUNT}.notes-backup.unrestored-"))
+            && dir.join(&name).exists(),
+        "{name}"
+    );
+    assert_eq!(store.take_notes_backup_set_aside(), None, "said once");
 
     saved(&store, save(&thread.id, None, "a", None, "Fresh"), at(0)).await;
     assert_eq!(
         set_aside(dir),
         ["not a backup {"],
         "a save doesn't overwrite it"
+    );
+    store.backup_notes().await.expect("backs up");
+    assert_eq!(
+        set_aside(dir),
+        ["not a backup {"],
+        "nor does the backup after it"
     );
     let text = std::fs::read_to_string(backup(dir)).expect("a new backup");
     let new: serde_json::Value = serde_json::from_str(&text).expect("a whole JSON document");
@@ -768,4 +787,421 @@ async fn every_noted_thread_comes_with_its_notes_and_versions() {
     let missing = store.missing_messages(&many).await.expect("reads");
     assert_eq!(missing.len(), 1200);
     assert!(!missing.contains(message));
+}
+
+/// The notes' backup in `dir`, read.
+fn backed_up(dir: &Path) -> serde_json::Value {
+    let text = std::fs::read_to_string(backup(dir)).expect("a backup");
+    serde_json::from_str(&text).expect("a whole JSON document")
+}
+
+/// The ids of `table`'s rows in `backup`, by `key`, sorted.
+fn backed_up_ids(backup: &serde_json::Value, table: &str, key: &str) -> Vec<String> {
+    let mut ids: Vec<String> = backup[table]
+        .as_array()
+        .unwrap_or_else(|| panic!("{table} is backed up"))
+        .iter()
+        .map(|row| row[key].as_str().expect("an id").to_owned())
+        .collect();
+    ids.sort_unstable();
+    ids
+}
+
+/// An unsaved note of `thread`'s, from editor `id`.
+fn unsaved(thread: &ThreadId, id: &str, text: &str) -> NoteDraft {
+    NoteDraft {
+        id: id.into(),
+        thread_id: thread.clone(),
+        message_id: None,
+        note_id: None,
+        html: format!("<p>{text}</p>"),
+        text: text.into(),
+        files: Vec::new(),
+        updated_at: at(0),
+    }
+}
+
+#[tokio::test]
+async fn a_save_stands_when_its_backup_cant_be_written() {
+    let harness = Harness::synced().await;
+    let store = &harness.store;
+    let thread = conversation(&harness).await;
+    let dir = harness.dir.path();
+    // A folder where the backup goes, which no file can be renamed over.
+    std::fs::create_dir_all(backup(dir).join("in the way")).expect("a folder");
+
+    let note = saved(store, save(&thread.id, None, "a", None, "Renewal"), at(0)).await;
+    assert_eq!(note.text, "Renewal", "the save is the save's own");
+    store.delete_note("a", at(1)).await.expect("deletes");
+    let restored = store
+        .restore_note("a", None, at(2))
+        .await
+        .expect("restores");
+    assert_eq!(restored.deleted_at, None);
+    store
+        .backup_notes()
+        .await
+        .expect_err("the backup can't be written");
+    assert!(store.notes_backup_due(), "it stays due");
+    assert!(
+        !PathBuf::from(format!("{}.tmp", backup(dir).display())).exists(),
+        "no temporary file is left"
+    );
+
+    // Once it can be written, the next backup holds everything.
+    std::fs::remove_dir_all(backup(dir)).expect("out of the way");
+    store.backup_notes().await.expect("backs up");
+    assert!(!store.notes_backup_due());
+    let backup = backed_up(dir);
+    assert_eq!(backed_up_ids(&backup, "notes", "id"), ["a"]);
+    assert_eq!(
+        backup["note_versions"].as_array().expect("versions").len(),
+        3
+    );
+}
+
+#[tokio::test]
+async fn note_changes_are_backed_up_on_their_own_a_burst_in_one_write() {
+    let harness = Harness::start().await;
+    harness.sync_all().await;
+    let thread = conversation(&harness).await;
+    let dir = harness.dir.path();
+    let store = Store::open_with(
+        dir,
+        ACCOUNT,
+        harness.server.endpoints(),
+        gmail::StaticToken(gmail_mock::DEV_ACCESS_TOKEN.into()),
+        Options {
+            notes_backup_pace: std::time::Duration::from_millis(300),
+            ..support::options()
+        },
+    )
+    .await
+    .expect("opens");
+    saved(&store, save(&thread.id, None, "a", None, "First"), at(0)).await;
+    saved(&store, save(&thread.id, None, "b", None, "Second"), at(1)).await;
+    store
+        .save_note_draft(unsaved(&thread.id, "c", "Typing"))
+        .await
+        .expect("keeps the draft");
+    assert!(
+        !backup(dir).exists(),
+        "nothing is written until the burst is over"
+    );
+    assert!(store.notes_backup_due());
+    for _ in 0..100 {
+        if backup(dir).exists() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    let first = backed_up(dir);
+    assert_eq!(backed_up_ids(&first, "notes", "id"), ["a", "b"]);
+    assert_eq!(backed_up_ids(&first, "note_drafts", "id"), ["c"]);
+
+    // A draft dropped goes from the backup too, with no save, delete or restore to carry it.
+    store.discard_note_draft("c").await.expect("discards");
+    assert!(store.notes_backup_due());
+    for _ in 0..100 {
+        if backed_up_ids(&backed_up(dir), "note_drafts", "id").is_empty() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert_eq!(
+        backed_up_ids(&backed_up(dir), "note_drafts", "id"),
+        Vec::<String>::new()
+    );
+}
+
+#[tokio::test]
+async fn an_unchanged_save_takes_its_draft_out_of_the_backup() {
+    let harness = Harness::synced().await;
+    let store = &harness.store;
+    let thread = conversation(&harness).await;
+    saved(store, save(&thread.id, None, "a", None, "Renewal"), at(0)).await;
+    store
+        .save_note_draft(NoteDraft {
+            note_id: Some("a".into()),
+            ..unsaved(&thread.id, "a", "Renewal")
+        })
+        .await
+        .expect("keeps the draft");
+    store.backup_notes().await.expect("backs up");
+    assert_eq!(
+        backed_up_ids(&backed_up(harness.dir.path()), "note_drafts", "id"),
+        ["a"]
+    );
+    // Closed unchanged: no version, and the draft goes.
+    store
+        .save_note(save(&thread.id, None, "a", Some("a"), "Renewal"), at(1))
+        .await
+        .expect("saves");
+    assert!(store.notes_backup_due(), "the backup has a draft to lose");
+    store.backup_notes().await.expect("backs up");
+    assert_eq!(
+        backed_up_ids(&backed_up(harness.dir.path()), "note_drafts", "id"),
+        Vec::<String>::new()
+    );
+}
+
+/// A backup of one thread note `id` on `thread`, as an Exo before the `gone` column wrote it,
+/// with an unsaved note from editor `draft`.
+fn old_backup(thread: &ThreadId, id: &str, draft: &str) -> String {
+    let time = at(0).to_string();
+    serde_json::json!({
+        "note_threads": [{
+            "thread_id": thread.as_str(),
+            "subject": "Renewal",
+            "participants": "[]",
+            "first_date": null,
+            "last_date": null,
+            "messages": 1,
+            "next_number": 4,
+        }],
+        "notes": [{
+            "id": id,
+            "thread_id": thread.as_str(),
+            "message_id": null,
+            "message_from": null,
+            "message_date": null,
+            "number": null,
+            "kind": "note",
+            "html": "<p>From the backup</p>",
+            "text": "From the backup",
+            "files": "[]",
+            "created_at": time,
+            "updated_at": time,
+            "deleted_at": null,
+            "version": 1,
+        }],
+        "note_versions": [{
+            "note_id": id,
+            "version": 1,
+            "html": "<p>From the backup</p>",
+            "text": "From the backup",
+            "files": "[]",
+            "saved_at": time,
+            "change": "created",
+        }],
+        "note_files": [],
+        "note_drafts": [{
+            "id": draft,
+            "thread_id": thread.as_str(),
+            "message_id": null,
+            "note_id": null,
+            "html": "<p>The backup's draft</p>",
+            "text": "The backup's draft",
+            "files": "[]",
+            "updated_at": time,
+        }],
+    })
+    .to_string()
+}
+
+#[tokio::test]
+async fn a_backup_restores_over_rows_left_with_its_keys() {
+    let mut harness = Harness::synced().await;
+    let thread = conversation(&harness).await;
+    // No notes, but a draft kept under the key the backup's draft has.
+    harness
+        .store
+        .save_note_draft(unsaved(&thread.id, "d", "Typed before the notes came back"))
+        .await
+        .expect("keeps the draft");
+    let text = old_backup(&thread.id, "a", "d");
+    std::fs::write(backup(harness.dir.path()), &text).expect("writes the backup");
+    harness.reopen().await;
+    let store = &harness.store;
+
+    let notes = store.thread_notes(&thread.id).await.expect("reads");
+    assert_eq!(
+        notes
+            .notes
+            .iter()
+            .map(|note| note.text.as_str())
+            .collect::<Vec<_>>(),
+        ["From the backup"],
+        "the notes are back"
+    );
+    assert_eq!(
+        notes
+            .drafts
+            .iter()
+            .map(|draft| draft.text.as_str())
+            .collect::<Vec<_>>(),
+        ["The backup's draft"],
+        "the backup's row takes the key"
+    );
+    assert_eq!(set_aside(harness.dir.path()), Vec::<String>::new());
+    assert_eq!(store.take_notes_backup_set_aside(), None);
+    // A backup from before the thread's `gone` column restores, not gone.
+    let page = store
+        .search(&mut Search::new("notes:backup"), 50, false, 15)
+        .await
+        .expect("searches");
+    assert_eq!(page.results.len(), 1);
+    // Numbers go on from the backup's.
+    let next = saved(
+        store,
+        save(
+            &thread.id,
+            Some(&thread.messages[0].id),
+            "n",
+            None,
+            "Numbered",
+        ),
+        at(5),
+    )
+    .await;
+    assert_eq!(next.number, Some(4));
+}
+
+#[tokio::test]
+async fn a_backup_left_for_the_next_open_is_merged_with_notes_written_since() {
+    let mut harness = Harness::synced().await;
+    let thread = conversation(&harness).await;
+    let dir = harness.dir.path().to_owned();
+    // The last open couldn't take the backup, and notes were written after.
+    let message = thread.messages[0].id.clone();
+    let since = saved(
+        &harness.store,
+        save(&thread.id, Some(&message), "s", None, "Written since"),
+        at(9),
+    )
+    .await;
+    assert_eq!(since.number, Some(1));
+    let text = old_backup(&thread.id, "a", "d");
+    std::fs::write(backup(&dir), &text).expect("writes the backup");
+    std::fs::write(dir.join(format!("{ACCOUNT}.notes-backup.pending")), b"").expect("marks it");
+    harness.reopen().await;
+    let store = &harness.store;
+
+    let notes = store.thread_notes(&thread.id).await.expect("reads");
+    let mut texts: Vec<&str> = notes.notes.iter().map(|note| note.text.as_str()).collect();
+    texts.sort_unstable();
+    assert_eq!(texts, ["From the backup", "Written since"], "both are kept");
+    assert_eq!(
+        notes.context.expect("the thread's context").subject,
+        thread.subject,
+        "what the store had isn't replaced"
+    );
+    assert!(
+        !dir.join(format!("{ACCOUNT}.notes-backup.pending")).exists(),
+        "restored, so no longer waiting"
+    );
+    assert_eq!(set_aside(&dir), Vec::<String>::new());
+    // The next number is past both sides' numbers.
+    let next = saved(
+        store,
+        save(&thread.id, Some(&message), "n", None, "Numbered"),
+        at(10),
+    )
+    .await;
+    assert_eq!(next.number, Some(4));
+    // And the backup written next holds them all.
+    store.backup_notes().await.expect("backs up");
+    assert_eq!(
+        backed_up_ids(&backed_up(&dir), "notes", "id"),
+        ["a", "n", "s"]
+    );
+}
+
+#[tokio::test]
+async fn a_noted_thread_that_isnt_stored_is_fetched_again_not_called_deleted() {
+    let harness = Harness::synced().await;
+    let thread = conversation(&harness).await;
+    let message = thread.messages[0].id.clone();
+    saved(
+        &harness.store,
+        save(
+            &thread.id,
+            Some(&message),
+            "a",
+            None,
+            "Ask about the quokka",
+        ),
+        at(0),
+    )
+    .await;
+    harness.store.backup_notes().await.expect("backs up");
+    // Signing out and in again brings the notes back from their backup, with no mail stored.
+    let Harness {
+        server,
+        dir,
+        store,
+        gmail,
+    } = harness;
+    drop(store);
+    Store::delete(dir.path(), ACCOUNT).expect("signs out");
+    let store = support::open(&server, dir.path()).await;
+    assert!(store.thread(&thread.id).await.expect("reads").is_none());
+    let found = |query: &'static str| {
+        let store = store.clone();
+        async move {
+            store
+                .search(&mut Search::new(query), 50, false, 15)
+                .await
+                .expect("searches")
+                .results
+        }
+    };
+    let results = found("notes:quokka").await;
+    assert_eq!(results.len(), 1, "found by its note");
+    assert!(!results[0].deleted, "not stored isn't deleted");
+    assert_eq!(results[0].thread.subject, thread.subject);
+    assert_eq!(
+        store
+            .missing_messages(std::slice::from_ref(&message))
+            .await
+            .expect("reads")
+            .len(),
+        0,
+        "nor is its message"
+    );
+
+    // Sync fetches it whole again, wherever the lists' backfill stops.
+    let harness = Harness {
+        server,
+        dir,
+        store: store.clone(),
+        gmail,
+    };
+    harness.sync_all().await;
+    assert!(
+        store.thread(&thread.id).await.expect("reads").is_some(),
+        "stored again"
+    );
+    let results = found("notes:quokka").await;
+    assert_eq!(results.len(), 1);
+    assert!(!results[0].deleted);
+    assert!(results[0].thread.messages > 0, "as a thread, with its mail");
+
+    // One Gmail no longer has is recorded as gone, and only then called deleted.
+    harness
+        .gmail
+        .gmail()
+        .delete_thread(thread.id.as_str())
+        .await
+        .expect("deletes");
+    harness.sync_all().await;
+    let results = found("notes:quokka").await;
+    assert_eq!(results.len(), 1);
+    assert!(results[0].deleted, "Gmail said it's gone");
+    assert_eq!(
+        store
+            .missing_messages(std::slice::from_ref(&message))
+            .await
+            .expect("reads")
+            .into_iter()
+            .collect::<Vec<_>>(),
+        [message],
+        "and so is its message"
+    );
+    // The flag is backed up, and comes back with the notes.
+    store.backup_notes().await.expect("backs up");
+    assert_eq!(
+        backed_up(harness.dir.path())["note_threads"][0]["gone"],
+        serde_json::json!(1)
+    );
 }

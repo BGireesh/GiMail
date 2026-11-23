@@ -121,6 +121,13 @@ impl Store {
             }
         }
         report.backfilling = inner.backfill_round().await?;
+        // Threads with notes are kept whole, so their notes are found with their mail. One the
+        // store has none of (after Clear Cache, or notes brought back from their backup) is
+        // fetched, a few a round. A failure here is the next round's to try again.
+        match self.fetch_noted_threads().await {
+            Ok(asked) => report.backfilling |= asked > 0,
+            Err(error) => log::warn!("fetching the threads with notes: {error}"),
+        }
         Ok(report)
     }
 

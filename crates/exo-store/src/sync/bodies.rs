@@ -211,11 +211,17 @@ impl Store {
     /// # Errors
     /// [`Error::Offline`](crate::Error::Offline) and the like when Gmail can't be reached.
     pub async fn load_thread(&self, thread: &ThreadId) -> Result<bool> {
+        self.load_thread_in(thread, Lane::Act).await
+    }
+
+    /// [`load_thread`](Self::load_thread) with its calls in `lane`. What Gmail says of a thread
+    /// with notes is recorded: gone when Gmail doesn't have it, and not gone when it does.
+    pub(crate) async fn load_thread_in(&self, thread: &ThreadId, lane: Lane) -> Result<bool> {
         let inner = &self.inner;
         inner.bootstrapped().await?;
-        let Some(fetched) =
-            fetch_thread(&inner.api, Lane::Act, OPEN_ATTEMPTS, thread.as_str()).await?
+        let Some(fetched) = fetch_thread(&inner.api, lane, OPEN_ATTEMPTS, thread.as_str()).await?
         else {
+            self.set_noted_thread_gone(thread.as_str(), true).await?;
             return Ok(false);
         };
         let full = fetched
@@ -233,6 +239,7 @@ impl Store {
             reindex(write.exec(), &id, &inner.router()).await?;
         }
         write.publish().await?;
+        self.set_noted_thread_gone(thread.as_str(), false).await?;
         Ok(true)
     }
 

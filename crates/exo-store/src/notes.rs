@@ -1,12 +1,18 @@
 //! Thread notes: the user's own notes on a conversation or one of its messages, kept on this
 //! device only. They never reach Gmail.
 //!
-//! Every save, delete and restore is kept as a version. After each, the notes' tables are written
-//! to a standing backup beside the store (`{account}.notes-backup.json`), which signing out leaves
-//! alone. A store opened with no notes and a backup that has some takes them from it.
+//! Every save, delete and restore is kept as a version. After each, and after an editor's draft
+//! is kept or dropped, the notes' tables are written to a standing backup beside the store
+//! (`{account}.notes-backup.json`), which signing out leaves alone. The backup is written off the
+//! change that asked for it, [`BACKUP_PACE`] after it at the latest, so a burst of changes is
+//! one write and a write that fails never fails the change. A store opened with no notes and a
+//! backup that has some takes them from it.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, PoisonError};
+use std::time::Duration;
 
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
@@ -34,6 +40,56 @@ const TABLES: [&str; 5] = [
 
 /// How many message ids [`Store::missing_messages`] looks up in one statement.
 const MESSAGE_CHUNK: usize = 500;
+
+/// How long after a note change its backup is written, at the latest. Changes within it share
+/// one write.
+pub(crate) const BACKUP_PACE: Duration = Duration::from_secs(2);
+
+/// How many noted threads that aren't stored one round of sync asks Gmail for.
+const NOTED_AT_ONCE: usize = 25;
+
+/// The notes' standing backup: where it is, and what's left to write of it.
+pub(crate) struct Backup {
+    /// The backup's file.
+    path: PathBuf,
+    /// How long after a change it's written.
+    pace: Duration,
+    /// Whether the notes changed since the backup last held them.
+    dirty: AtomicBool,
+    /// Whether a write is waiting out the pace.
+    scheduled: AtomicBool,
+    /// Whether the file holds notes that couldn't be restored and must not be overwritten, so
+    /// nothing is written this session.
+    disabled: AtomicBool,
+    /// One backup written at a time, so a later one is never overwritten by an earlier one.
+    writing: tokio::sync::Mutex<()>,
+    /// The file a backup that couldn't be restored was kept as, until the app has said so.
+    set_aside: std::sync::Mutex<Option<String>>,
+}
+
+impl Backup {
+    /// The backup at `path`, written `pace` after a change, as opening the store left it.
+    pub(crate) fn new(path: PathBuf, pace: Duration, recovered: Recovered) -> Self {
+        Self {
+            path,
+            pace,
+            dirty: AtomicBool::new(false),
+            scheduled: AtomicBool::new(false),
+            disabled: AtomicBool::new(recovered.disabled),
+            writing: tokio::sync::Mutex::new(()),
+            set_aside: std::sync::Mutex::new(recovered.set_aside),
+        }
+    }
+}
+
+/// What opening the store did with the notes' backup.
+#[derive(Debug, Default)]
+pub(crate) struct Recovered {
+    /// The file name a backup that couldn't be restored was kept as.
+    set_aside: Option<String>,
+    /// Whether the backup is left where it is, unrestored, so nothing may overwrite it.
+    disabled: bool,
+}
 
 /// A name and address of one of a noted thread's participants, as the thread had them when a
 /// note last changed.
@@ -283,12 +339,13 @@ impl Store {
     /// text and no files isn't saved, and `None` comes back. A save that changes neither the
     /// HTML nor the files of a saved note writes no version. A new note on a message takes the
     /// thread's next number. The thread's context is saved with it as the thread is stored now
-    /// (or left as it was when it isn't). The notes' backup is written after.
+    /// (or left as it was when it isn't). The notes' backup is written after, on its own: a
+    /// backup that can't be written is tried again, and the save stands.
     ///
     /// The file's bytes must be in [`note_files`](Self::note_files) already.
     ///
     /// # Errors
-    /// On database failures, or when the backup can't be written.
+    /// On database failures.
     pub async fn save_note(&self, save: SaveNote, now: Timestamp) -> Result<Option<Note>> {
         let id = save
             .note_id
@@ -311,6 +368,8 @@ impl Store {
                 .exec(write.exec())
                 .await?;
             write.publish().await?;
+            // The draft is gone from the tables, so it goes from the backup.
+            self.notes_changed();
             return match stored {
                 None => Ok(None),
                 Some(_) => self.note(&id).await.map(Some),
@@ -397,7 +456,7 @@ impl Store {
             .await?;
         index_note(write.exec(), &id).await?;
         write.publish().await?;
-        self.backup_notes().await?;
+        self.notes_changed();
         self.note(&id).await.map(Some)
     }
 
@@ -405,8 +464,7 @@ impl Store {
     /// [`restore_note`](Self::restore_note) brings it back. Deleting a deleted note does nothing.
     ///
     /// # Errors
-    /// [`Error::UnknownNote`] for a note that isn't stored, on database failures, or when the
-    /// backup can't be written.
+    /// [`Error::UnknownNote`] for a note that isn't stored, or on database failures.
     pub async fn delete_note(&self, id: &str, now: Timestamp) -> Result<()> {
         let mut db = self.inner.db.clone();
         let mut write = self.inner.begin(&mut db).await?;
@@ -437,15 +495,15 @@ impl Store {
         .await?;
         unindex_note(write.exec(), id).await?;
         write.publish().await?;
-        self.backup_notes().await
+        self.notes_changed();
+        Ok(())
     }
 
     /// Brings note `id` back at `now`: undeletes it, or with `version`, saves that version of it
     /// as its newest (and undeletes it). Undeleting a live note does nothing.
     ///
     /// # Errors
-    /// [`Error::UnknownNote`] for a note or version that isn't stored, on database failures, or
-    /// when the backup can't be written.
+    /// [`Error::UnknownNote`] for a note or version that isn't stored, or on database failures.
     pub async fn restore_note(
         &self,
         id: &str,
@@ -500,7 +558,7 @@ impl Store {
         .await?;
         index_note(write.exec(), id).await?;
         write.publish().await?;
-        self.backup_notes().await?;
+        self.notes_changed();
         self.note(id).await
     }
 
@@ -550,7 +608,9 @@ impl Store {
             .updated_at(draft.updated_at)
             .exec(write.exec())
             .await?;
-        write.commit().await
+        write.commit().await?;
+        self.notes_changed();
+        Ok(())
     }
 
     /// Drops what was kept of note editor `id`'s text.
@@ -564,7 +624,9 @@ impl Store {
             .delete()
             .exec(write.exec())
             .await?;
-        write.publish().await
+        write.publish().await?;
+        self.notes_changed();
+        Ok(())
     }
 
     /// The folder notes' files' bytes are kept in, each named by its `uuid`. The app writes them.
@@ -574,24 +636,181 @@ impl Store {
         &self.inner.notes
     }
 
-    /// Writes the notes' tables to the standing backup beside the store, whole: a temporary file
-    /// renamed over it. Backups are written one at a time, each reading the tables as they are
-    /// then, so the last one written holds the latest notes.
+    /// Writes the notes' tables to the standing backup beside the store now, whole: a temporary
+    /// file, synced to disk and renamed over it, off the runtime's threads. Backups are written
+    /// one at a time, each reading the tables as they are then, so the last one written holds the
+    /// latest notes. Note changes ask for it on their own, [`BACKUP_PACE`] on; closing the store
+    /// (quitting, signing out) calls it so nothing waits unwritten.
+    ///
+    /// Nothing is written while the file holds a backup that couldn't be restored.
     ///
     /// # Errors
-    /// On database failures, or when the file can't be written.
+    /// On database failures, or when the file can't be written. The backup stays due, and is
+    /// tried again after the next note change and the next open.
     pub async fn backup_notes(&self) -> Result<()> {
-        let _turn = self.inner.backing_up.lock().await;
+        let backup = &self.inner.backup;
+        if backup.disabled.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+        let _turn = backup.writing.lock().await;
+        // What changes from here on is the next backup's.
+        backup.dirty.store(false, Ordering::SeqCst);
+        let written = self.write_backup().await;
+        if written.is_err() {
+            backup.dirty.store(true, Ordering::SeqCst);
+        }
+        written
+    }
+
+    /// Whether the notes changed since the backup last held them.
+    #[must_use]
+    pub fn notes_backup_due(&self) -> bool {
+        let backup = &self.inner.backup;
+        backup.dirty.load(Ordering::SeqCst) && !backup.disabled.load(Ordering::SeqCst)
+    }
+
+    /// The file name a notes' backup that couldn't be restored was kept as when the store
+    /// opened, once: the app says so.
+    #[must_use]
+    pub fn take_notes_backup_set_aside(&self) -> Option<String> {
+        self.inner
+            .backup
+            .set_aside
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take()
+    }
+
+    /// Reads the notes' tables and writes them over the backup.
+    async fn write_backup(&self) -> Result<()> {
         let mut db = self.inner.db.clone();
-        let backup = dump(&mut db).await?;
-        let path = &self.inner.notes_backup;
+        let path = self.inner.backup.path.clone();
+        let text = dump(&mut db).await?.ok_or_else(|| Error::Io {
+            path: path.clone(),
+            source: std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "the notes' tables read as nothing",
+            ),
+        })?;
         let temporary = PathBuf::from(format!("{}.tmp", path.display()));
-        let io = |path: &Path| {
-            let path = path.to_owned();
-            move |source| Error::Io { path, source }
+        let write = {
+            let (path, temporary) = (path.clone(), temporary.clone());
+            move || {
+                use std::io::Write as _;
+                let io = |path: &Path| {
+                    let path = path.to_owned();
+                    move |source| Error::Io { path, source }
+                };
+                let mut file = std::fs::File::create(&temporary).map_err(io(&temporary))?;
+                file.write_all(text.as_bytes()).map_err(io(&temporary))?;
+                // On disk before it takes the old backup's place.
+                file.sync_all().map_err(io(&temporary))?;
+                drop(file);
+                std::fs::rename(&temporary, &path).map_err(io(&path))
+            }
         };
-        std::fs::write(&temporary, backup).map_err(io(&temporary))?;
-        std::fs::rename(&temporary, path).map_err(io(path))
+        let written = tokio::task::spawn_blocking(write)
+            .await
+            .unwrap_or_else(|error| {
+                Err(Error::Io {
+                    path: path.clone(),
+                    source: std::io::Error::other(error),
+                })
+            });
+        if written.is_err() {
+            let _ = std::fs::remove_file(&temporary);
+        }
+        written
+    }
+
+    /// The notes' tables changed: their backup is due, and written [`BACKUP_PACE`] from now
+    /// unless a write is waiting already.
+    pub(crate) fn notes_changed(&self) {
+        let backup = &self.inner.backup;
+        backup.dirty.store(true, Ordering::SeqCst);
+        if backup.disabled.load(Ordering::SeqCst) || backup.scheduled.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            backup.scheduled.store(false, Ordering::SeqCst);
+            return;
+        };
+        // The wait doesn't keep the store open.
+        let (inner, pace) = (Arc::downgrade(&self.inner), backup.pace);
+        runtime.spawn(async move {
+            tokio::time::sleep(pace).await;
+            let Some(inner) = inner.upgrade() else {
+                return;
+            };
+            let store = Store { inner };
+            let backup = &store.inner.backup;
+            backup.scheduled.store(false, Ordering::SeqCst);
+            if backup.dirty.load(Ordering::SeqCst)
+                && let Err(error) = store.backup_notes().await
+            {
+                log::error!("writing the notes' backup, to try again: {error}");
+            }
+        });
+    }
+
+    /// Asks Gmail for the threads with live notes that the store has none of (after Clear Cache,
+    /// or signing in again with the notes brought back), [`NOTED_AT_ONCE`] a round, each once a
+    /// session. One Gmail has is stored whole, as a noted thread stays; one it doesn't is
+    /// recorded as gone, which is when its notes say `Email deleted`. Returns how many it asked
+    /// for.
+    ///
+    /// # Errors
+    /// [`Error::Offline`] and the like when Gmail can't be reached. What was fetched before stays.
+    pub async fn fetch_noted_threads(&self) -> Result<usize> {
+        let mut db = self.inner.db.clone();
+        let unstored: Vec<String> = strings(
+            toasty::sql::query("SELECT thread_id FROM note_threads WHERE gone = 0 AND thread_id IN (SELECT thread_id FROM notes WHERE deleted_at IS NULL) AND thread_id NOT IN (SELECT thread_id FROM messages) ORDER BY thread_id")
+                .exec(&mut db)
+                .await?,
+        )
+        .collect();
+        let wanted: Vec<String> = {
+            let asked = self
+                .inner
+                .noted_asked
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            unstored
+                .into_iter()
+                .filter(|thread| !asked.contains(thread))
+                .take(NOTED_AT_ONCE)
+                .collect()
+        };
+        for thread in &wanted {
+            self.load_thread_in(&ThreadId::new(thread.clone()), crate::quota::Lane::Sync)
+                .await?;
+            self.inner
+                .noted_asked
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .insert(thread.clone());
+        }
+        Ok(wanted.len())
+    }
+
+    /// Records whether Gmail has said noted thread `thread` is `gone`, and tells the UI when
+    /// that changed. A thread without notes has nothing to record.
+    pub(crate) async fn set_noted_thread_gone(&self, thread: &str, gone: bool) -> Result<()> {
+        let mut db = self.inner.db.clone();
+        let mut write = self.inner.begin(&mut db).await?;
+        let changed = toasty::sql::statement(
+            "UPDATE note_threads SET gone = ?1 WHERE thread_id = ?2 AND gone <> ?1",
+        )
+        .bind(i64::from(gone))
+        .bind(thread)
+        .exec(write.exec())
+        .await?;
+        if changed == 0 {
+            return write.commit().await;
+        }
+        write.publish().await?;
+        self.notes_changed();
+        Ok(())
     }
 
     /// Every noted thread, as [`noted_thread`](Self::noted_thread) has each, by thread id.
@@ -653,7 +872,9 @@ impl Store {
         Ok(Some((context, all, versions)))
     }
 
-    /// Which of the messages `ids` the store doesn't have: they were deleted, or never came.
+    /// Which of the messages `ids` are gone: the store has their thread and not them, or Gmail
+    /// has said their thread is gone. A noted message whose whole thread merely isn't stored
+    /// (after Clear Cache, until it's fetched again) isn't among them.
     ///
     /// # Errors
     /// On database failures.
@@ -674,9 +895,21 @@ impl Store {
                     .map(|row| row.id),
             );
         }
+        // Those whose thread isn't stored at all, and isn't known to be gone, may well be in
+        // Gmail still.
+        let mut unknown = BTreeSet::new();
+        for chunk in ids.chunks(MESSAGE_CHUNK) {
+            let list = serde_json::to_string(chunk).expect("ids serialize");
+            unknown.extend(strings(
+                toasty::sql::query("SELECT DISTINCT message_id FROM notes WHERE message_id IN (SELECT value FROM json_each(?1)) AND thread_id NOT IN (SELECT thread_id FROM messages) AND thread_id NOT IN (SELECT thread_id FROM note_threads WHERE gone = 1)")
+                    .bind(list)
+                    .exec(&mut db)
+                    .await?,
+            ));
+        }
         Ok(ids
             .iter()
-            .filter(|id| !stored.contains(*id))
+            .filter(|id| !stored.contains(*id) && !unknown.contains(*id))
             .cloned()
             .collect())
     }
@@ -837,22 +1070,54 @@ pub(crate) async fn live_texts(exec: &mut dyn Executor, thread: &str) -> Result<
 /// Brings back the notes from the backup at `backup` when the store has none (a store made again
 /// after signing out, or a Clear Cache whose old file couldn't be read), and fills the notes'
 /// search index when it's missing some (a Clear Cache makes it again, empty).
-pub(crate) async fn recover(db: &mut Db, backup: &Path) -> Result<()> {
-    if query_i64(db, "SELECT count(*) FROM notes").await? == 0 {
-        // A backup that can't be restored isn't a reason the store can't open, but it may be the
-        // only copy of the notes, so it's set aside where the next backup can't overwrite it (and
-        // signing out leaves it). A restore is all or nothing, so the tables stay empty.
-        if let Err(error) = restore(db, backup).await {
-            let aside = set_aside(backup);
-            log::error!(
-                "the notes' backup at {} can't be restored, and is kept as {}: {error}",
-                backup.display(),
-                aside.display()
-            );
-            std::fs::rename(backup, &aside).map_err(|source| Error::Io {
-                path: backup.to_owned(),
-                source,
-            })?;
+///
+/// A backup whose content can't be restored (it isn't JSON, isn't a backup, or has rows the
+/// tables refuse) may be the only copy of the notes, so it's set aside where the next backup
+/// can't overwrite it, and the app says so. One the database couldn't take just now stays where
+/// it is for the next open to try, which a marker beside it asks for even if notes are written
+/// meanwhile, and nothing overwrites it this session. Neither stops the store opening.
+pub(crate) async fn recover(db: &mut Db, backup: &Path) -> Result<Recovered> {
+    let mut recovered = Recovered::default();
+    let marker = retry_marker(backup);
+    let empty = query_i64(db, "SELECT count(*) FROM notes").await? == 0;
+    if empty || marker.exists() {
+        match restore(db, backup, !empty).await {
+            Ok(()) => {
+                let _ = std::fs::remove_file(&marker);
+            }
+            Err(Unrestored::Content(error)) => {
+                let aside = set_aside(backup);
+                match std::fs::rename(backup, &aside) {
+                    Ok(()) => {
+                        log::error!(
+                            "the notes' backup at {} can't be restored, and is kept as {}: {error}",
+                            backup.display(),
+                            aside.display()
+                        );
+                        recovered.set_aside = file_name(&aside);
+                        let _ = std::fs::remove_file(&marker);
+                    }
+                    // It stays under its own name, and nothing is written over it.
+                    Err(rename) => {
+                        log::error!(
+                            "the notes' backup at {} can't be restored ({error}) or set aside ({rename}), so no backup is written this session",
+                            backup.display()
+                        );
+                        recovered.set_aside = file_name(backup);
+                        recovered.disabled = true;
+                    }
+                }
+            }
+            Err(Unrestored::Later(error)) => {
+                log::error!(
+                    "the notes' backup at {} wasn't restored, and is left for the next open: {error}",
+                    backup.display()
+                );
+                if let Err(error) = std::fs::write(&marker, b"") {
+                    log::error!("marking the notes' backup to restore: {error}");
+                }
+                recovered.disabled = true;
+            }
         }
     }
     let live = query_i64(db, "SELECT count(*) FROM notes WHERE deleted_at IS NULL").await?;
@@ -873,7 +1138,39 @@ pub(crate) async fn recover(db: &mut Db, backup: &Path) -> Result<()> {
         tx.commit().await?;
         log::info!("indexed {} notes again", ids.len());
     }
-    Ok(())
+    Ok(recovered)
+}
+
+/// Why a backup wasn't restored.
+#[derive(Debug)]
+enum Unrestored {
+    /// What's in the file can't be restored, now or later.
+    Content(String),
+    /// The file couldn't be read, or the database couldn't take it, this time.
+    Later(String),
+}
+
+impl Unrestored {
+    /// A failure of the database while it took the backup's rows: the rows' own fault when a
+    /// constraint or a column's type refused them, and otherwise the database's (it's busy, the
+    /// disk is full), which the next open may not meet.
+    fn from_database(error: &toasty::Error) -> Self {
+        let text = error.to_string();
+        let lower = text.to_lowercase();
+        if lower.contains("constraint") || lower.contains("mismatch") {
+            Self::Content(text)
+        } else {
+            Self::Later(text)
+        }
+    }
+}
+
+impl std::fmt::Display for Unrestored {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Content(error) | Self::Later(error) => f.write_str(error),
+        }
+    }
 }
 
 /// Where a backup at `backup` that can't be restored is kept:
@@ -887,64 +1184,115 @@ fn set_aside(backup: &Path) -> PathBuf {
     ))
 }
 
-/// Copies the backup at `path` into the notes' tables, which are empty, in one transaction, so a
-/// failure leaves them empty. A backup without notes copies nothing.
-async fn restore(db: &mut Db, path: &Path) -> Result<()> {
+/// The file beside `backup` that says the next open should restore it, whatever the tables
+/// hold: `{account}.notes-backup.pending`.
+fn retry_marker(backup: &Path) -> PathBuf {
+    backup.with_extension("pending")
+}
+
+/// `path`'s file name, as the app shows it.
+fn file_name(path: &Path) -> Option<String> {
+    path.file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+}
+
+/// Copies the backup at `path` into the notes' tables in one transaction, so a failure leaves
+/// them as they were. Into empty tables, a backup's row replaces any row left with its key (a
+/// draft kept before the notes came back). With `merge` (the tables have notes written since a
+/// restore failed), only the rows the tables lack are added. A backup without notes copies
+/// nothing. A column the backup lacks (it's from an older Exo) takes its default.
+async fn restore(db: &mut Db, path: &Path, merge: bool) -> std::result::Result<(), Unrestored> {
     let text = match std::fs::read_to_string(path) {
         Ok(text) => text,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(source) => {
-            return Err(Error::Io {
-                path: path.to_owned(),
-                source,
-            });
+        // Not text at all.
+        Err(error) if error.kind() == std::io::ErrorKind::InvalidData => {
+            return Err(Unrestored::Content(error.to_string()));
         }
-    };
-    let unreadable = |error: String| Error::Io {
-        path: path.to_owned(),
-        source: std::io::Error::new(std::io::ErrorKind::InvalidData, error),
+        Err(error) => return Err(Unrestored::Later(error.to_string())),
     };
     let backup: serde_json::Value =
-        serde_json::from_str(&text).map_err(|error| unreadable(error.to_string()))?;
-    match backup["notes"].as_array() {
-        None => return Err(unreadable("it has no notes table".to_owned())),
-        Some(notes) if notes.is_empty() => return Ok(()),
-        Some(_) => {}
-    }
-    let mut tx = db.transaction().await?;
+        serde_json::from_str(&text).map_err(|error| Unrestored::Content(error.to_string()))?;
     for table in TABLES {
-        let columns = columns(&mut tx, table).await?;
+        let rows = match &backup[table] {
+            serde_json::Value::Array(rows) => rows,
+            // An older backup may lack a table, though never the notes.
+            serde_json::Value::Null if table != "notes" => continue,
+            _ => return Err(Unrestored::Content(format!("it has no {table} table"))),
+        };
+        if rows.iter().any(|row| !row.is_object()) {
+            return Err(Unrestored::Content(format!(
+                "its {table} table has a row that isn't one"
+            )));
+        }
+        if table == "notes" && rows.is_empty() {
+            return Ok(());
+        }
+    }
+    let later = |error: toasty::Error| Unrestored::Later(error.to_string());
+    let mut tx = db.transaction().await.map_err(later)?;
+    for table in TABLES {
+        let columns = table_columns(&mut tx, table)
+            .await
+            .map_err(|error| Unrestored::Later(error.to_string()))?;
         let names = columns
             .iter()
-            .map(|column| format!(r#""{column}""#))
+            .map(|column| format!(r#""{}""#, column.name))
             .collect::<Vec<_>>()
             .join(", ");
         let values = columns
             .iter()
-            .map(|column| format!(r#"json_extract(value, '$."{column}"')"#))
+            .map(Column::from_backup)
             .collect::<Vec<_>>()
             .join(", ");
-        let rows = toasty::sql::statement(format!(
-            r#"INSERT INTO "{table}" ({names}) SELECT {values} FROM json_each(?1, '$.{table}')"#
-        ))
-        .bind(text.clone())
-        .exec(&mut tx)
-        .await?;
+        let statement = if merge {
+            let same = columns
+                .iter()
+                .filter(|column| column.key)
+                .map(|column| {
+                    format!(
+                        r#"kept."{name}" = json_extract(value, '$."{name}"')"#,
+                        name = column.name
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(" AND ");
+            format!(
+                r#"INSERT INTO "{table}" ({names}) SELECT {values} FROM json_each(?1, '$.{table}') WHERE NOT EXISTS (SELECT 1 FROM "{table}" AS kept WHERE {same})"#
+            )
+        } else {
+            format!(
+                r#"INSERT OR REPLACE INTO "{table}" ({names}) SELECT {values} FROM json_each(?1, '$.{table}')"#
+            )
+        };
+        let rows = toasty::sql::statement(statement)
+            .bind(text.clone())
+            .exec(&mut tx)
+            .await
+            .map_err(|error| Unrestored::from_database(&error))?;
         log::info!("restored {rows} rows of {table} from the notes' backup");
     }
-    tx.commit().await?;
+    // Numbers are never reused, whichever side a thread's count came from: it's past the
+    // backup's count and every note's number.
+    toasty::sql::statement("UPDATE note_threads SET next_number = max(next_number, coalesce((SELECT max(json_extract(value, '$.next_number')) FROM json_each(?1, '$.note_threads') WHERE json_extract(value, '$.thread_id') = note_threads.thread_id), 0), coalesce((SELECT max(number) FROM notes WHERE notes.thread_id = note_threads.thread_id), 0) + 1)")
+        .bind(text.clone())
+        .exec(&mut tx)
+        .await
+        .map_err(|error| Unrestored::from_database(&error))?;
+    tx.commit().await.map_err(later)?;
     Ok(())
 }
 
 /// The notes' tables as one JSON document, `{table: [row, …]}`, each row an object of its
-/// columns. It's read in one statement, so it's one moment's tables.
-async fn dump(exec: &mut dyn Executor) -> Result<String> {
+/// columns, or `None` if the database gave nothing. It's read in one statement, so it's one
+/// moment's tables.
+async fn dump(exec: &mut dyn Executor) -> Result<Option<String>> {
     let mut parts = Vec::new();
     for table in TABLES {
-        let fields = columns(exec, table)
+        let fields = table_columns(exec, table)
             .await?
             .iter()
-            .map(|column| format!(r#"'{column}', "{column}""#))
+            .map(|column| format!(r#"'{name}', "{name}""#, name = column.name))
             .collect::<Vec<_>>()
             .join(", ");
         parts.push(format!(
@@ -954,18 +1302,54 @@ async fn dump(exec: &mut dyn Executor) -> Result<String> {
     let rows = toasty::sql::query(format!("SELECT json_object({})", parts.join(", ")))
         .exec(exec)
         .await?;
-    Ok(strings(rows).next().unwrap_or_default())
+    Ok(strings(rows).next().filter(|text| !text.is_empty()))
+}
+
+/// A column of a notes table.
+struct Column {
+    name: String,
+    /// Its default as the schema writes it, for a column that has one.
+    default: Option<String>,
+    /// Whether it's part of the table's key.
+    key: bool,
+}
+
+impl Column {
+    /// Its value in a backup's row (`value`, of `json_each`): what the row has, or the column's
+    /// default where the row has nothing.
+    fn from_backup(&self) -> String {
+        let read = format!(r#"json_extract(value, '$."{}"')"#, self.name);
+        match &self.default {
+            Some(default) => format!("coalesce({read}, {default})"),
+            None => read,
+        }
+    }
 }
 
 /// The columns of `table`, in order.
-async fn columns(exec: &mut dyn Executor, table: &str) -> Result<Vec<String>> {
-    Ok(strings(
-        toasty::sql::query("SELECT name FROM pragma_table_info(?1) ORDER BY cid")
+async fn table_columns(exec: &mut dyn Executor, table: &str) -> Result<Vec<Column>> {
+    let rows =
+        toasty::sql::query("SELECT name, dflt_value, pk FROM pragma_table_info(?1) ORDER BY cid")
             .bind(table)
             .exec(exec)
-            .await?,
-    )
-    .collect())
+            .await?;
+    Ok(rows
+        .into_iter()
+        .filter_map(|row| match row {
+            Value::Record(row) => match &row.fields[..] {
+                [Value::String(name), default, key] => Some(Column {
+                    name: name.clone(),
+                    default: match default {
+                        Value::String(default) => Some(default.clone()),
+                        _ => None,
+                    },
+                    key: !matches!(key, Value::I64(0)),
+                }),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect())
 }
 
 /// Saves the thread's context with a note being saved, from the thread as it's stored now (or as
@@ -1020,6 +1404,7 @@ async fn save_context(exec: &mut dyn Executor, save: &SaveNote, new: bool) -> Re
                 .last_date(context.last_date)
                 .messages(context.messages)
                 .next_number(next_number)
+                .gone(false)
                 .exec(exec)
                 .await?;
         }

@@ -111,10 +111,10 @@ pub(crate) struct Inner {
     /// The folder notes' files' bytes are kept in ([`Store::note_files`]).
     pub notes: PathBuf,
     /// The notes' standing backup ([`Store::backup_notes`]).
-    pub notes_backup: PathBuf,
-    /// One backup of the notes written at a time, so a later one is never overwritten by an
-    /// earlier one.
-    pub backing_up: Mutex<()>,
+    pub backup: crate::notes::Backup,
+    /// The noted threads the store had none of that Gmail was asked for this session
+    /// ([`Store::fetch_noted_threads`]).
+    pub noted_asked: std::sync::Mutex<HashSet<String>>,
     /// When each draft was last written to Gmail this session, which paces its next write.
     pub written: std::sync::Mutex<HashMap<String, jiff::Timestamp>>,
     /// What Gmail holds of each draft Exo wrote this session: the message the write made and its
@@ -150,6 +150,9 @@ pub struct Options {
     pub draft_pace: Duration,
     /// [`draft_pace`](Self::draft_pace) for a draft with files, which every write uploads again.
     pub draft_files_pace: Duration,
+    /// How long after a note change the notes' backup is written, so a burst of changes is one
+    /// write.
+    pub notes_backup_pace: Duration,
 }
 
 impl Default for Options {
@@ -160,6 +163,7 @@ impl Default for Options {
             debounce: Debounce::default(),
             draft_pace: Duration::from_secs(5),
             draft_files_pace: Duration::from_secs(30),
+            notes_backup_pace: crate::notes::BACKUP_PACE,
         }
     }
 }
@@ -205,10 +209,11 @@ impl Store {
         check_account(account)?;
         let mut db = db::open(&dir.as_ref().join(format!("{account}.sqlite3"))).await?;
         let notes_backup = dir.as_ref().join(format!("{account}.notes-backup.json"));
-        crate::notes::recover(&mut db, &notes_backup).await?;
+        let recovered = crate::notes::recover(&mut db, &notes_backup).await?;
+        let noted = db::query_i64(&mut db, "SELECT count(*) FROM notes").await? > 0;
         let identity = db::kv_get(&mut db, IDENTITY).await?.unwrap_or_default();
         let splits = load_splits(&mut db).await?;
-        Ok(Self {
+        let store = Self {
             inner: Arc::new(Inner {
                 db,
                 api: Api::new(
@@ -240,8 +245,12 @@ impl Store {
                 progress: watch::Sender::new(crate::SyncProgress::default()),
                 files: dir.as_ref().join(format!("{account}.files")),
                 notes: dir.as_ref().join(format!("{account}.notes")),
-                notes_backup,
-                backing_up: Mutex::new(()),
+                backup: crate::notes::Backup::new(
+                    notes_backup,
+                    options.notes_backup_pace,
+                    recovered,
+                ),
+                noted_asked: std::sync::Mutex::default(),
                 written: std::sync::Mutex::default(),
                 acked: std::sync::Mutex::default(),
                 uploads: watch::Sender::new(crate::drafts::Uploads::new()),
@@ -250,7 +259,12 @@ impl Store {
                 draft_pace: options.draft_pace,
                 draft_files_pace: options.draft_files_pace,
             }),
-        })
+        };
+        // A backup the last session couldn't write (or quit before writing) is written now.
+        if noted {
+            store.notes_changed();
+        }
+        Ok(store)
     }
 
     /// Whether `account` has a store in `dir`, which it does when it has opened on this Mac since
@@ -261,9 +275,10 @@ impl Store {
     }
 
     /// Deletes `account`'s store in `dir` (its database, its drafts' attachments and any parts
-    /// kept beside them), as signing out does. Its notes' files and backup (and any backup set
-    /// aside as unrestorable) stay, so signing in again brings the notes back. Close every [`Store`] on it first. A store that isn't there
-    /// deletes fine.
+    /// kept beside them), as signing out does. Its notes' files and backup (with any backup set
+    /// aside as unrestorable, and the mark of one still to restore) stay, so signing in again
+    /// brings the notes back. Write the backup ([`Store::backup_notes`]) and close every
+    /// [`Store`] on it first. A store that isn't there deletes fine.
     ///
     /// # Errors
     /// [`Error::InvalidAccount`], or [`Error::Delete`] for a file the OS wouldn't delete.
