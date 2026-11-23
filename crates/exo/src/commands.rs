@@ -527,6 +527,8 @@ pub struct NotesContext<'a> {
     pub notes_tab: bool,
     /// Where the notes show, which the placement rows change.
     pub placement: exo_store::NotesPlacement,
+    /// Backtick as Escape is on: a backtick closes the editor. Off, the editor types it.
+    pub backtick: bool,
 }
 
 /// Registers the open thread's note commands for this frame: T and ⇧T in the thread pane, ⌘⇧N,
@@ -636,6 +638,7 @@ pub fn register_notes(commands: &mut Commands<Action>, cx: &NotesContext<'_>) {
         commands.add(
             Command::shortcut("CLOSE_NOTE", Action::CloseNote)
                 .key("esc")
+                .backtick_escape(cx.backtick)
                 .regions(NOTE_EDITOR),
         );
     }

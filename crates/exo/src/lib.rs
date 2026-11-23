@@ -3386,6 +3386,7 @@ impl Mail {
                     history: self.notes.history_focused() && region == Region::NoteEditor,
                     notes_tab: self.account.device_settings().notes_tab,
                     placement: self.account.settings().notes_placement,
+                    backtick: self.account.settings().backtick_as_escape(),
                 },
             );
         }

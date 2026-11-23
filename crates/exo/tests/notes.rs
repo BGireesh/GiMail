@@ -158,6 +158,37 @@ fn escape_keeps_what_was_typed() {
 }
 
 #[test]
+fn a_backtick_and_a_tilde_type_in_a_note_unless_backtick_is_escape() {
+    let mut app = start_thread_note("notes-backtick-types");
+    type_key(&mut app, Key::Backtick, Modifiers::NONE, "`");
+    type_key(&mut app, Key::Backtick, Modifiers::SHIFT, "~");
+    assert_eq!(
+        app.mail().note_editor_text().as_deref(),
+        Some("`~"),
+        "still open, and both typed"
+    );
+    app.key(Key::Escape);
+    assert_eq!(
+        app.mail().note_editor_text(),
+        None,
+        "Escape still closes it"
+    );
+
+    let mut app = start_with_settings("notes-backtick-escape", &|settings| {
+        settings.enable_backtick_as_escape = Some(true)
+    });
+    app.key(Key::Enter);
+    app.key(Key::T);
+    app.type_text("Call");
+    type_key(&mut app, Key::Backtick, Modifiers::NONE, "`");
+    assert_eq!(
+        app.mail().note_editor_text(),
+        None,
+        "with Backtick as Escape on, a backtick closes the note as Escape does"
+    );
+}
+
+#[test]
 fn an_empty_note_is_dropped() {
     let mut app = start_thread_note("notes-empty-dropped");
     app.press(Key::Enter, COMMAND);
