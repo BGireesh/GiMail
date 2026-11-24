@@ -44,6 +44,9 @@ const FREQUENCIES: [(u16, &str); 3] = [(15, "15 minutes"), (30, "30 minutes"), (
 /// The last time the window can end at, midnight at the day's end.
 const DAY_END: u16 = 24 * 60;
 const STEP: u16 = 30;
+/// Most people shown at once (fewer when the window is short); the wheel scrolls the rest, so the
+/// dialog never outgrows its card.
+const PEOPLE_MAX: usize = 8;
 
 /// What the section changed in [`CalendarCache`].
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -142,6 +145,10 @@ struct Open {
 pub(crate) struct CacheInput {
     pub picker: ContactPicker,
     open: Option<Open>,
+    /// The first person shown once there are more than the rows, and a wheel scroll short
+    /// of a row.
+    first_person: usize,
+    carry: f32,
 }
 
 impl CacheInput {
@@ -158,11 +165,20 @@ impl CacheInput {
     }
 }
 
+/// How many people rows fit with the rest of the dialog, whose body is `rest` tall without them,
+/// in an area `window` tall: the card stops 36px short of it on each side, with 20px of padding
+/// either side of its 20px header.
+pub(crate) fn people_rows(window: f32, rest: f32) -> usize {
+    // The list's own 4px more under its last row.
+    let room = window - 72.0 - 2.0 * 20.0 - 20.0 - rest - (ROW - PERSON_ROW);
+    ((room / PERSON_ROW).floor().max(1.0) as usize).min(PEOPLE_MAX)
+}
+
 /// The section's height from its top, down to where the next section's gap ends.
-pub(crate) fn height(cache: &CalendarCache) -> f32 {
+pub(crate) fn height(cache: &CalendarCache, rows: usize) -> f32 {
     let checkbox = CHECK_BELOW + CHECK_ROW;
     let settings = if cache.enabled {
-        let people = cache.people.len() as f32;
+        let people = cache.people.len().min(rows) as f32;
         let list = if people > 0.0 {
             people * PERSON_ROW + (ROW - PERSON_ROW)
         } else {
@@ -183,6 +199,7 @@ pub(crate) fn show(
     cache: &CalendarCache,
     input: &mut CacheInput,
     book: Option<&contacts::Index>,
+    fit: usize,
 ) -> Vec<CacheChange> {
     let palette = exo_ui::palette(ui.ctx());
     let text = palette.ink(0.8, 0.8);
@@ -248,7 +265,23 @@ pub(crate) fn show(
         changes.push(CacheChange::Add(address));
     }
     y += ROW;
-    for person in &cache.people {
+    let shown = cache.people.len().min(fit);
+    let list = Rect::from_min_size(pos2(left, y), vec2(width, shown as f32 * PERSON_ROW));
+    if cache.people.len() > fit
+        && ui
+            .input(|input| input.pointer.hover_pos())
+            .is_some_and(|at| list.contains(at))
+    {
+        // The wheel moves the list a whole row at a time.
+        input.carry += wheel(ui);
+        let rows = (input.carry / PERSON_ROW).trunc();
+        input.carry -= rows * PERSON_ROW;
+        input.first_person = (input.first_person as isize - rows as isize).max(0) as usize;
+    }
+    input.first_person = input
+        .first_person
+        .min(cache.people.len().saturating_sub(fit));
+    for person in cache.people.iter().skip(input.first_person).take(shown) {
         let name = book
             .and_then(|book| book.name_for(person))
             .filter(|name| !name.is_empty())
@@ -281,6 +314,23 @@ pub(crate) fn show(
             changes.push(CacheChange::Remove(person.clone()));
         }
         y += PERSON_ROW;
+    }
+    if cache.people.len() > fit {
+        // A bar at the list's right edge, where the rest is.
+        let track = Rect::from_min_size(
+            pos2(left + width - 2.0, list.top()),
+            vec2(2.0, list.height()),
+        );
+        let part = shown as f32 / cache.people.len() as f32;
+        let at = input.first_person as f32 / cache.people.len() as f32;
+        ui.painter().rect_filled(
+            Rect::from_min_size(
+                pos2(track.left(), track.top() + at * track.height()),
+                vec2(2.0, part * track.height()),
+            ),
+            CornerRadius::same(1),
+            palette.ink(0.25, 0.25),
+        );
     }
     // The row after a list has its rows' 4px less.
     if !cache.people.is_empty() {

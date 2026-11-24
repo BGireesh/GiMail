@@ -141,7 +141,7 @@ impl Shown<'_> {
 }
 
 /// The body's height, down to `Sign in with Google`.
-fn body_height(shown: &Shown<'_>) -> f32 {
+fn body_height(shown: &Shown<'_>, rows: usize) -> f32 {
     let accounts = ACCOUNTS_LIST + shown.accounts.len() as f32 * ACCOUNT_PITCH
         - (ACCOUNT_PITCH - ACCOUNT_ROW)
         + SIGN_IN_GAP
@@ -151,7 +151,7 @@ fn body_height(shown: &Shown<'_>) -> f32 {
         + (MEETING_LINKS.len() as f32 - 1.0) * ROW
         + 20.0
         + ACCOUNTS_GAP
-        + options_cache::height(shown.cache)
+        + options_cache::height(shown.cache, rows)
         + NOTIFICATIONS_HEIGHT
         + accounts
 }
@@ -176,11 +176,14 @@ pub fn show(
     zone: &mut ZoneInput,
     cache: &mut CacheInput,
 ) -> Vec<OptionsAction> {
-    let response = Dialog::new("calendar-settings", "Calendar", body_height(shown)).show(
+    // The people shown fill what the window leaves.
+    let rest = body_height(shown, 0);
+    let rows = options_cache::people_rows(area.height(), rest);
+    let response = Dialog::new("calendar-settings", "Calendar", body_height(shown, rows)).show(
         ctx,
         area,
         open,
-        |ui, body| body_ui(ui, body, shown, zone, cache),
+        |ui, body| body_ui(ui, body, shown, zone, cache, rows),
     );
     let mut actions = response.inner.unwrap_or_default();
     if response.close {
@@ -195,6 +198,7 @@ fn body_ui(
     shown: &Shown<'_>,
     zone: &mut ZoneInput,
     cache: &mut CacheInput,
+    rows: usize,
 ) -> Vec<OptionsAction> {
     let palette = exo_ui::palette(ui.ctx());
     let mut actions = Vec::new();
@@ -294,11 +298,12 @@ fn body_ui(
             shown.cache,
             cache,
             shown.book,
+            rows,
         )
         .into_iter()
         .map(OptionsAction::Cache),
     );
-    let notifications = cache_top + options_cache::height(shown.cache);
+    let notifications = cache_top + options_cache::height(shown.cache, rows);
 
     // `Notifications`: a link to its dialog.
     HEADING.paint_line(

@@ -2049,3 +2049,70 @@ fn calendar_cache_settings_list_people_and_their_schedule() {
     assert!(!now.enabled);
     assert_eq!(now.people, ["lena@brightmoor.co"], "its people are kept");
 }
+
+#[test]
+fn a_long_people_list_scrolls_and_leaves_the_rest_of_calendar_settings_reachable() {
+    let people: Vec<String> = (1..=14)
+        .map(|n| format!("person{n}@brightmoor.co"))
+        .collect();
+    let seeded = people.clone();
+    let mut app = support::start_with_settings("calendar-cache-long", &move |settings| {
+        settings.calendar.cache.enabled = true;
+        settings.calendar.cache.people = seeded.clone();
+    });
+    app.key(Key::Num2);
+    app.settle();
+    palette(&mut app, "Calendar Settings");
+    assert!(app.mail().calendar_settings_open());
+    let ctx = app.harness.ctx.clone();
+    let screen = ctx.content_rect();
+    // The last control of the dialog is inside the card, which stops 36px short of the window's
+    // bottom, with 20px of padding in it.
+    let sign_in = ctx
+        .read_response(exo_ui::id(&ctx, "calendar-settings-sign-in"))
+        .expect("Sign in with Google is up")
+        .rect;
+    assert!(
+        sign_in.bottom() <= screen.bottom() - 36.0 - 20.0,
+        "Sign in with Google at {sign_in:?} is inside the card"
+    );
+    let last = people.last().expect("people").clone();
+    let remove_of = |who: &str| exo_ui::id(&ctx, ("calendar-cache-remove", who.to_owned()));
+    assert!(
+        ctx.read_response(remove_of(&last)).is_none(),
+        "the last person is below the rows shown"
+    );
+    // The wheel over the list moves it down to the last person.
+    let first = ctx
+        .read_response(remove_of(&people[0]))
+        .expect("the first person shows")
+        .rect;
+    app.hover(first.center() - egui::vec2(120.0, 0.0));
+    for _ in 0..20 {
+        app.harness.input_mut().events.push(Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, -24.0 * 3.0),
+            phase: egui::TouchPhase::Move,
+            modifiers: Modifiers::NONE,
+        });
+        app.harness.run_steps(2);
+    }
+    app.settle();
+    click_widget(&mut app, ("calendar-cache-remove", last.as_str()));
+    let now = app
+        .mail()
+        .account()
+        .settings()
+        .calendar
+        .cache
+        .people
+        .clone();
+    assert_eq!(now.len(), 13);
+    assert!(!now.contains(&last));
+    // Sign in with Google is still where it was, and clickable.
+    let again = ctx
+        .read_response(exo_ui::id(&ctx, "calendar-settings-sign-in"))
+        .expect("Sign in with Google is up")
+        .rect;
+    assert_eq!(again.bottom(), sign_in.bottom());
+}
