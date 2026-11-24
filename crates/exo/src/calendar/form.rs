@@ -1231,7 +1231,8 @@ impl EventForm {
                 palette,
             );
             let text = guest.name.clone().unwrap_or_else(|| guest.email.clone());
-            // Their calendar's swatch, or its spinner, inside the content's border and padding.
+            // Their calendar's swatch, or its spinner, or both while the latest loads, inside the
+            // content's border and padding.
             let swatch_at = content.left() + 8.0;
             let (marker, busy) = shown
                 .chips
@@ -1243,7 +1244,11 @@ impl EventForm {
                 Rect::from_min_size(pos2(swatch_at, line.center().y - 4.0), Vec2::splat(SWATCH)),
                 marker,
             );
-            let name_at = pos2(swatch_at + SWATCH + 8.0, line.top() + 5.0);
+            // A refreshing marker's spinner comes first, and the name moves over for it.
+            let name_at = pos2(
+                swatch_at + marker.extra(SWATCH) + SWATCH + 8.0,
+                line.top() + 5.0,
+            );
             let toggle_box = Rect::from_min_size(
                 pos2(content.right() - 2.0 * GUEST_BUTTON + 4.0, content.top()),
                 Vec2::splat(GUEST_BUTTON),

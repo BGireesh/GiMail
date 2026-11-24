@@ -359,12 +359,14 @@ impl Meet {
                 Rect::from_min_size(pos2(left + 6.0, row.top() + 8.0), Vec2::splat(8.0)),
                 marker,
             );
+            // A refreshing marker's spinner comes first, and the name moves over for it.
+            let extra = marker.extra(8.0);
             TEXT.paint_line(
                 ui.painter(),
-                pos2(left + 22.0, row.top() + 5.0),
+                pos2(left + 22.0 + extra, row.top() + 5.0),
                 guest.name.as_deref().unwrap_or(&guest.email),
                 palette.ink(0.9, 0.9),
-                Some(right - left - 44.0),
+                Some(right - left - 44.0 - extra),
             );
             if hovered {
                 let cross =

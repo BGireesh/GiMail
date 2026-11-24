@@ -484,18 +484,33 @@ impl crate::Mail {
     }
 
     /// The open form's guests' chips: each address, the colour of their calendar's swatch (or
-    /// `loading` / `empty`), and their busy status.
+    /// `loading` / `empty`, or `refreshing:<colour>` while a shown one loads), and their busy
+    /// status.
     pub fn calendar_form_chips(&self) -> Vec<(String, String, Option<&'static str>)> {
         self.calendar_guest_chips()
             .into_iter()
-            .map(|(email, (marker, busy))| {
-                let marker = match marker {
-                    guests::Marker::Swatch(color) => color.name().to_owned(),
-                    guests::Marker::Spinner => "loading".to_owned(),
-                    guests::Marker::Empty => "empty".to_owned(),
-                };
-                (email, marker, busy)
-            })
+            .map(|(email, (marker, busy))| (email, marker_for_test(marker), busy))
+            .collect()
+    }
+
+    /// Meet's guests' markers, by address, as [`Mail::calendar_form_chips`] names them (for
+    /// tests).
+    pub fn calendar_meet_markers_for_test(&self) -> BTreeMap<String, String> {
+        self.calendar_meet_markers()
+            .into_iter()
+            .map(|(email, marker)| (email, marker_for_test(marker)))
+            .collect()
+    }
+
+    /// The Day view's heads over the overlaid people's columns (after mine): each name, and
+    /// whether a spinner shows before its swatch (for tests).
+    pub fn calendar_day_heads_for_test(&mut self) -> Vec<(String, bool)> {
+        let now = self.now.clone();
+        let days = self.calendar_days_shown();
+        let (guests, _) = self.calendar_overlay(&now, false, &days);
+        self.calendar_overlay_heads(&guests, &now)
+            .into_iter()
+            .map(|(name, _, refreshing)| (name, refreshing))
             .collect()
     }
 
@@ -1457,13 +1472,13 @@ impl crate::Mail {
             None => events.into_iter().chain(slots).collect(),
         };
         // The Day view heads each person's column with their name and colour, mine first.
-        let heads: Vec<(String, CalendarColor)> = if view == View::Day && !guests.is_empty() {
+        let heads: Vec<(String, CalendarColor, bool)> = if view == View::Day && !guests.is_empty() {
             let mine = shows_mine.then(|| {
                 let color = listed
                     .iter()
                     .find(|calendar| calendar.shown)
                     .map_or(CalendarColor::BLUE, |calendar| calendar.color);
-                (self.calendar_my_name(), color)
+                (self.calendar_my_name(), color, false)
             });
             mine.into_iter()
                 .chain(self.calendar_overlay_heads(&guests, &now))
@@ -3441,5 +3456,16 @@ mod tests {
             .map(|calendar| (calendar.id.as_str(), calendar.color.as_deref()))
             .collect();
         assert_eq!(colors, [("maya.lin@example.com", Some("pink"))]);
+    }
+}
+
+/// A guest's marker as the tests name it: their colour, `loading`, `empty`, or
+/// `refreshing:<colour>`.
+fn marker_for_test(marker: guests::Marker) -> String {
+    match marker {
+        guests::Marker::Swatch(color) => color.name().to_owned(),
+        guests::Marker::Refreshing(color) => format!("refreshing:{}", color.name()),
+        guests::Marker::Spinner => "loading".to_owned(),
+        guests::Marker::Empty => "empty".to_owned(),
     }
 }

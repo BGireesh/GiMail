@@ -815,21 +815,87 @@ impl Task {
                 };
                 self.store.cache_guest(&email, &cached).await
             }
-            Ok(None) => {
-                let keep: Vec<String> = self
-                    .cache
-                    .borrow()
-                    .iter()
-                    .flat_map(|cache| cache.people.iter())
-                    .filter(|person| **person != email)
-                    .cloned()
-                    .collect();
-                self.store.forget_cached_guests(&keep).await
-            }
+            Ok(None) => self.forget_cached(&email).await,
             Err(error) => {
                 log::warn!("refreshing a colleague's cached calendar: {error}");
                 Ok(())
             }
+        };
+        if let Err(error) = outcome {
+            log::error!("caching a colleague's calendar: {error}");
+        }
+    }
+
+    /// Forgets `email`'s cached calendar, keeping everyone else's.
+    async fn forget_cached(&self, email: &str) -> exo_store::Result<()> {
+        let keep: Vec<String> = self
+            .cache
+            .borrow()
+            .iter()
+            .flat_map(|cache| cache.people.iter())
+            .filter(|person| !person.eq_ignore_ascii_case(email))
+            .cloned()
+            .collect();
+        self.store.forget_cached_guests(&keep).await
+    }
+
+    /// Whether the cache is on and lists `email`.
+    fn caches(&self, email: &str) -> bool {
+        self.cache.borrow().as_ref().is_some_and(|cache| {
+            cache.enabled
+                && cache
+                    .people
+                    .iter()
+                    .any(|person| person.eq_ignore_ascii_case(email))
+        })
+    }
+
+    /// `email`'s cached events, while the cache lists them.
+    async fn cached_events(&self, email: &str) -> Option<Vec<Event>> {
+        if !self.caches(email) {
+            return None;
+        }
+        match self.store.cached_guest(email).await {
+            Ok(cached) => cached.map(|cached| cached.events),
+            Err(error) => {
+                log::error!("reading a colleague's cached calendar: {error}");
+                None
+            }
+        }
+    }
+
+    /// Puts what a live read of a listed colleague's calendar over `range` found in the cache, as
+    /// a refresh would: their events replace what's cached, and a calendar Google no longer shows
+    /// is forgotten. A read that couldn't reach Google leaves the cache as it was, and so does one
+    /// that doesn't cover the cache's whole window (Meet a week ahead), which the next refresh
+    /// reads instead.
+    async fn cache_live(
+        &self,
+        email: &str,
+        range: (Timestamp, Timestamp),
+        found: &Option<Option<Vec<Event>>>,
+    ) {
+        if !self.caches(email) {
+            return;
+        }
+        let outcome = match found {
+            Some(Some(events)) => {
+                let now = self.clock.now();
+                let (today, tz) = (now.date(), now.time_zone().clone());
+                let (from, to) = cache::window_range(today, &tz);
+                if range.0 > from || range.1 < to {
+                    return;
+                }
+                let cached = CachedGuest {
+                    fetched_at: now.timestamp(),
+                    from,
+                    to,
+                    events: cache::keep_window(events.clone(), today, &tz),
+                };
+                self.store.cache_guest(email, &cached).await
+            }
+            Some(None) => self.forget_cached(email).await,
+            None => Ok(()),
         };
         if let Err(error) = outcome {
             log::error!("caching a colleague's calendar: {error}");
@@ -933,8 +999,14 @@ impl Task {
                     log::warn!("reading a series' rule: {error}");
                 }
             },
-            Request::Guests(guests, from, to) => self.load_guests(guests, (from, to)),
+            Request::Guests(guests, from, to) => self.load_guests(guests, (from, to)).await,
             Request::GuestLoaded(email, range, found) => {
+                self.cache_live(&email, range, &found).await;
+                // Google out of reach, a cached colleague's copy stands in.
+                let cached = match found {
+                    None => self.cached_events(&email).await,
+                    Some(_) => None,
+                };
                 let mut data = Data::clone(&self.shared.data.borrow());
                 // A later ask's answer stands.
                 if data
@@ -945,7 +1017,7 @@ impl Task {
                     let events = match found {
                         Some(Some(events)) => GuestEvents::Shown(events),
                         Some(None) => GuestEvents::Hidden,
-                        None => GuestEvents::Failed,
+                        None => cached.map_or(GuestEvents::Failed, GuestEvents::Shown),
                     };
                     data.guests.insert(
                         email,
@@ -1040,16 +1112,41 @@ impl Task {
     }
 
     /// Marks `guests`' calendars as loading over `range` and reads each off the task, at once and
-    /// side by side. With the connection down, they fail.
-    fn load_guests(&self, guests: Vec<String>, range: (Timestamp, Timestamp)) {
+    /// side by side. Meanwhile a cached colleague's copy shows, if nothing of theirs is shown
+    /// yet. With the connection down, they fail.
+    async fn load_guests(&self, guests: Vec<String>, range: (Timestamp, Timestamp)) {
         let down = self.down();
+        let mut cached = BTreeMap::new();
+        if !down {
+            let pending = {
+                let data = self.shared.data.borrow();
+                guests
+                    .iter()
+                    .filter(|email| {
+                        data.guests
+                            .get(*email)
+                            .is_none_or(|calendar| matches!(calendar.events, GuestEvents::Pending))
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>()
+            };
+            for email in pending {
+                if let Some(events) = self.cached_events(&email).await {
+                    cached.insert(email, events);
+                }
+            }
+        }
         let mut data = Data::clone(&self.shared.data.borrow());
         for email in &guests {
             let events = data
                 .guests
                 .remove(email)
                 .map_or(GuestEvents::Pending, |calendar| calendar.events);
-            let events = if down { GuestEvents::Failed } else { events };
+            let events = match (events, cached.remove(email)) {
+                (_, _) if down => GuestEvents::Failed,
+                (GuestEvents::Pending, Some(cached)) => GuestEvents::Shown(cached),
+                (events, _) => events,
+            };
             data.guests.insert(
                 email.clone(),
                 GuestCalendar {

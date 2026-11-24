@@ -2455,3 +2455,132 @@ fn a_colleague_taken_off_the_list_and_put_back_is_cached_at_once() {
     );
     assert_eq!(fetched(&app, LENA), Some(nine), "Lena waits for her hour");
 }
+
+/// Opens the calendar's `view` (`W`eek or `D`ay) and Meet, and types `who` into Meet's guests,
+/// leaving the suggestion to be picked.
+fn meet_typing(app: &mut Fixture, view: Key, who: &str) {
+    app.key(Key::Num2);
+    app.key(view);
+    app.settle();
+    app.key(Key::M);
+    app.type_text(who);
+    app.wait(0.3);
+}
+
+#[test]
+fn a_cached_colleague_shows_at_once_and_stays_when_the_live_read_fails() {
+    let mut app = support::start_with_settings("calendar-cached-meet", &cache_on(&[PRIYA]));
+    assert!(
+        app.mail().calendar_cached(PRIYA).is_some(),
+        "cached at launch"
+    );
+    // Every read of Priya's calendar fails from here on.
+    app.fault(Some(serde_json::json!({
+        "method": "GET",
+        "path": "/calendar/v3/calendars/priya@brightmoor.co/events",
+        "status": 500,
+        "times": 20,
+    })));
+    meet_typing(&mut app, Key::W, "priya");
+    app.key(Key::Enter);
+    app.wait(1.0);
+    app.settle();
+    app.fault(None);
+    let tuesday = date(2026, 11, 17);
+    let columns = app.mail_mut().calendar_guest_columns(tuesday);
+    assert!(
+        columns
+            .iter()
+            .any(|(email, titles)| email == PRIYA && titles.contains(&"Design crit".to_owned())),
+        "her column, from the cache: {columns:?}"
+    );
+    let markers = app.mail().calendar_meet_markers_for_test();
+    assert_eq!(
+        markers.get(PRIYA).map(String::as_str),
+        Some("pink"),
+        "her colour, not an empty swatch"
+    );
+}
+
+#[test]
+fn a_live_read_updates_the_cache() {
+    let mut app = support::start_with_settings("calendar-cached-live", &cache_on(&[PRIYA]));
+    let nine = new_york("2026-11-17T09:00").timestamp();
+    assert_eq!(
+        app.mail()
+            .calendar_cached(PRIYA)
+            .map(|cached| cached.fetched_at),
+        Some(nine)
+    );
+    // Not due again until 10:00.
+    let twenty_past = new_york("2026-11-17T09:20");
+    app.set_now(twenty_past.clone());
+    meet_typing(&mut app, Key::W, "priya");
+    app.key(Key::Enter);
+    app.wait(1.0);
+    app.settle();
+    assert_eq!(
+        app.mail()
+            .calendar_cached(PRIYA)
+            .map(|cached| cached.fetched_at),
+        Some(twenty_past.timestamp()),
+        "Meet's read of her calendar is cached"
+    );
+    assert!(
+        cached_titles(&app, PRIYA)
+            .iter()
+            .any(|title| title == "Design crit")
+    );
+}
+
+#[test]
+fn the_day_view_head_spins_before_the_swatch_while_refreshing() {
+    let mut app = support::start_with_settings("calendar-cached-spin", &cache_on(&[PRIYA]));
+    meet_typing(&mut app, Key::D, "priya");
+    // Priya's calendar answers after a retry, a second or two from now.
+    app.fault(Some(serde_json::json!({
+        "method": "GET",
+        "path": "/calendar/v3/calendars/priya@brightmoor.co/events",
+        "status": 503,
+        "times": 1,
+    })));
+    for pressed in [true, false] {
+        app.harness.input_mut().events.push(Event::Key {
+            key: Key::Enter,
+            physical_key: None,
+            pressed,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        });
+        app.harness.run_steps(1);
+    }
+    let refreshing = |app: &Fixture| {
+        app.mail()
+            .calendar_meet_markers_for_test()
+            .get(PRIYA)
+            .cloned()
+    };
+    let started = std::time::Instant::now();
+    while refreshing(&app).as_deref() != Some("refreshing:pink")
+        && started.elapsed() < std::time::Duration::from_millis(800)
+    {
+        app.harness.run_steps(1);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_eq!(
+        refreshing(&app).as_deref(),
+        Some("refreshing:pink"),
+        "her colour from the cache, and the spinner while the latest loads"
+    );
+    assert_eq!(
+        app.mail_mut().calendar_day_heads_for_test(),
+        [("Priya Raman".to_owned(), true)],
+        "her head spins"
+    );
+    app.settle();
+    assert_eq!(refreshing(&app).as_deref(), Some("pink"), "then it stops");
+    assert_eq!(
+        app.mail_mut().calendar_day_heads_for_test(),
+        [("Priya Raman".to_owned(), false)]
+    );
+}

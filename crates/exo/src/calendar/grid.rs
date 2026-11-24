@@ -117,7 +117,7 @@ pub struct Grid<'a> {
     /// The Day view's names and colours over the guests' columns, mine first when [`Self::mine`],
     /// or none. With them the columns all stay open at equal widths, each under its name, and a
     /// hover expands none.
-    pub heads: &'a [(String, exo_ui::CalendarColor)],
+    pub heads: &'a [(String, exo_ui::CalendarColor, bool)],
 }
 
 /// The grid's scroll and pointer state, kept across frames.
@@ -1289,35 +1289,47 @@ fn paint_day_headers(painter: &Painter, frame: &Frame, grid: &Grid<'_>) {
 
 /// The Day view's heads, one over each of the equal columns the day splits into: the name,
 /// semibold and in the person's colour, after a 10px swatch of it, centred, and cut short to fit.
-fn paint_heads(painter: &Painter, frame: &Frame, heads: &[(String, exo_ui::CalendarColor)]) {
+/// While the latest of a person's calendar loads, a spinner comes before their swatch.
+fn paint_heads(painter: &Painter, frame: &Frame, heads: &[(String, exo_ui::CalendarColor, bool)]) {
     const SWATCH: f32 = 10.0;
     const SWATCH_GAP: f32 = 6.0;
     let theme = exo_ui::theme(painter.ctx());
+    let palette = exo_ui::palette(painter.ctx());
     // As the columns are: the day's width less its border and the events' inset, shared equally.
     let room = (frame.columns.width() - 1.0 - EVENTS_INSET) / heads.len().max(1) as f32;
-    for (index, (name, color)) in heads.iter().enumerate() {
+    for (index, (name, color, refreshing)) in heads.iter().enumerate() {
         let left = frame.columns.left() + index as f32 * room;
-        let fit = (room - 2.0 * 8.0 - SWATCH - SWATCH_GAP).max(0.0);
+        let spinner = if *refreshing {
+            SWATCH + super::guests::REFRESHING_GAP
+        } else {
+            0.0
+        };
+        let marker = spinner + SWATCH + SWATCH_GAP;
+        let fit = (room - 2.0 * 8.0 - marker).max(0.0);
         let text = DAY_TITLE.width(painter.ctx(), name).min(fit);
-        let start = left + (room - SWATCH - SWATCH_GAP - text) / 2.0;
+        let start = left + (room - marker - text) / 2.0;
         let top = frame.headers.top() + DAY_TITLE_TOP;
         let swatch = color.guest_swatch(theme);
         // The name in the person's colour, darkened (or on Carbon lightened) until it reads.
-        let ink = readable(
-            swatch,
-            exo_ui::palette(painter.ctx()).background_base_default,
-        );
-        painter.rect_filled(
+        let ink = readable(swatch, palette.background_base_default);
+        let at = |x: f32| {
             exo_ui::pixel_snap(Rect::from_min_size(
-                pos2(start, top + (DAY_TITLE.line_height - SWATCH) / 2.0),
+                pos2(x, top + (DAY_TITLE.line_height - SWATCH) / 2.0),
                 Vec2::splat(SWATCH),
-            )),
-            2.0,
-            swatch,
-        );
+            ))
+        };
+        if *refreshing {
+            exo_ui::paint_spinner(
+                painter,
+                at(start),
+                painter.ctx().input(|input| input.time),
+                palette.ink(0.25, 0.25),
+            );
+        }
+        painter.rect_filled(at(start + spinner), 2.0, swatch);
         DAY_TITLE.paint_line(
             painter,
-            pos2(start + SWATCH + SWATCH_GAP, top + 1.0),
+            pos2(start + marker, top + 1.0),
             name,
             ink,
             Some(fit),

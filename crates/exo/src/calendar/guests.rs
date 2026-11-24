@@ -121,33 +121,49 @@ pub enum Marker {
     Swatch(CalendarColor),
     /// Their calendar is loading (`Loading availability`).
     Spinner,
+    /// Their calendar is shown (from the cache, or as last read) while the latest loads: the
+    /// spinner, then the swatch.
+    Refreshing(CalendarColor),
     /// An empty swatch, while their calendar isn't shown.
     Empty,
 }
 
-/// The marker for `email`: their colour while their calendar is overlaid, a spinner while it
-/// loads, else an empty swatch.
+/// The marker for `email`: their colour while their calendar is overlaid (after a spinner while
+/// the latest loads), a spinner while it loads, else an empty swatch.
 pub fn marker(email: &str, shown: &[(String, CalendarColor)], data: &Data, online: bool) -> Marker {
-    if let Some((_, color)) = shown
-        .iter()
-        .find(|(shown, _)| shown.eq_ignore_ascii_case(email))
-    {
-        return Marker::Swatch(*color);
-    }
-    if online
+    let loading = online
         && data
             .guests
             .get(email)
-            .is_some_and(|calendar| calendar.loading)
+            .is_some_and(|calendar| calendar.loading);
+    match shown
+        .iter()
+        .find(|(shown, _)| shown.eq_ignore_ascii_case(email))
     {
-        Marker::Spinner
-    } else {
-        Marker::Empty
+        Some((_, color)) if loading => Marker::Refreshing(*color),
+        Some((_, color)) => Marker::Swatch(*color),
+        None if loading => Marker::Spinner,
+        None => Marker::Empty,
+    }
+}
+
+/// The gap between [`Marker::Refreshing`]'s spinner and its swatch.
+pub const REFRESHING_GAP: f32 = 4.0;
+
+impl Marker {
+    /// How much wider than one `size` marker this one is: a refreshing one's spinner and its gap
+    /// come before the swatch, and what follows moves over by as much.
+    pub fn extra(self, size: f32) -> f32 {
+        match self {
+            Marker::Refreshing(_) => size + REFRESHING_GAP,
+            _ => 0.0,
+        }
     }
 }
 
 /// A guest's marker in `rect`: a swatch in their calendar's colour, an empty swatch's 1px
-/// outline at `.3`, or Classic's spinner at `.25`.
+/// outline at `.3`, or Classic's spinner at `.25`. A refreshing one's spinner takes `rect` and its
+/// swatch the same size again after [`REFRESHING_GAP`] ([`Marker::extra`]).
 pub fn paint_marker(ui: &egui::Ui, rect: egui::Rect, marker: Marker) {
     let palette = exo_ui::palette(ui.ctx());
     let theme = exo_ui::theme(ui.ctx());
@@ -163,6 +179,14 @@ pub fn paint_marker(ui: &egui::Ui, rect: egui::Rect, marker: Marker) {
                 egui::CornerRadius::same(2),
                 egui::Stroke::new(1.0, palette.ink(0.3, 0.3)),
                 egui::StrokeKind::Inside,
+            );
+        }
+        Marker::Refreshing(color) => {
+            paint_marker(ui, rect, Marker::Spinner);
+            paint_marker(
+                ui,
+                rect.translate(egui::vec2(rect.width() + REFRESHING_GAP, 0.0)),
+                Marker::Swatch(color),
             );
         }
         Marker::Spinner => exo_ui::paint_spinner(
@@ -811,13 +835,13 @@ impl crate::Mail {
             .collect()
     }
 
-    /// The Day view's heads for the overlaid `guests`' columns: each one's name and the colour
-    /// their calendar takes.
+    /// The Day view's heads for the overlaid `guests`' columns: each one's name, the colour their
+    /// calendar takes, and whether the latest of it is loading.
     pub(super) fn calendar_overlay_heads(
         &self,
         guests: &[(String, Vec<Event>)],
         now: &Zoned,
-    ) -> Vec<(String, CalendarColor)> {
+    ) -> Vec<(String, CalendarColor, bool)> {
         let colors = self
             .calendar_overlaid(now, false)
             .and_then(|(surface, ..)| match surface {
@@ -825,13 +849,23 @@ impl crate::Mail {
                 Surface::Share => Some(&self.calendar.week.as_ref()?.share.as_ref()?.colors),
                 Surface::Meet => Some(&self.calendar.week.as_ref()?.meet.colors),
             });
+        let data = self.account.calendar().data();
+        let online = self.snapshot.connection.is_online();
+        // Shown, and the latest on its way.
+        let refreshing = |email: &str| {
+            online
+                && data
+                    .guests
+                    .get(email)
+                    .is_some_and(|calendar| calendar.loading)
+        };
         guests
             .iter()
             .map(|(email, _)| {
                 let color = colors
                     .and_then(|colors| colors.of(email))
                     .unwrap_or(CalendarColor::BLUE);
-                (self.calendar_person_name(email), color)
+                (self.calendar_person_name(email), color, refreshing(email))
             })
             .collect()
     }
@@ -907,6 +941,39 @@ mod tests {
             );
         }
         data
+    }
+
+    #[test]
+    fn a_shown_guest_still_loading_is_refreshing() {
+        let priya = "priya@x.co";
+        let pink = CalendarColor::from_name("pink").expect("pink");
+        let shown = [(priya.to_owned(), pink)];
+        let with = |loading: bool, events: GuestEvents| {
+            let mut data = Data::default();
+            data.guests.insert(
+                priya.to_owned(),
+                GuestCalendar {
+                    range: (Timestamp::UNIX_EPOCH, Timestamp::UNIX_EPOCH),
+                    loading,
+                    events,
+                },
+            );
+            data
+        };
+        let refreshing = with(true, GuestEvents::Shown(Vec::new()));
+        assert_eq!(
+            marker(priya, &shown, &refreshing, true),
+            Marker::Refreshing(pink)
+        );
+        assert_eq!(
+            marker(priya, &shown, &refreshing, false),
+            Marker::Swatch(pink),
+            "offline, nothing's on its way"
+        );
+        let settled = with(false, GuestEvents::Shown(Vec::new()));
+        assert_eq!(marker(priya, &shown, &settled, true), Marker::Swatch(pink));
+        let pending = with(true, GuestEvents::Pending);
+        assert_eq!(marker(priya, &[], &pending, true), Marker::Spinner);
     }
 
     #[test]
