@@ -287,7 +287,7 @@ impl Store {
                 .exec(write.exec())
                 .await?;
         }
-        write.commit().await
+        write.publish().await
     }
 
     /// Whether `account`'s calendars are read now, which they are for the mail account and for
