@@ -11,6 +11,10 @@ use exo_ui::{
 use super::{Action, Layout};
 use crate::body::Bodies;
 
+/// The band at the header's foot that keeps `+ Add thread note` in place while the messages
+/// scroll: its 32px row and the 16px under it to the first card.
+const ADD_NOTE_BAND: f32 = 48.0;
+
 /// The header's padding: `24px 4rem 20px`.
 pub(super) const PADDING_TOP: f32 = 24.0;
 const PADDING_BOTTOM: f32 = 20.0;
@@ -419,7 +423,12 @@ pub(super) fn subject_rect(
     ))
 }
 
-/// The header's height in layout (unscrolled).
+/// The header's height in layout (unscrolled), with the band for `+ Add thread note` at its
+/// foot when `add_note` (notes show in the thread).
+#[expect(
+    clippy::too_many_arguments,
+    reason = "what the header's height depends on, from the thread view's state"
+)]
 pub(super) fn height(
     ui: &Ui,
     layout: &Layout,
@@ -428,18 +437,21 @@ pub(super) fn height(
     archivable: bool,
     notes: usize,
     has_status: bool,
+    add_note: bool,
 ) -> f32 {
     PADDING_TOP
         + arrange(ui, layout, detail, chips, archivable, notes).height
         + if has_status { STATUS_HEIGHT } else { 0.0 }
         + PADDING_BOTTOM
+        + if add_note { ADD_NOTE_BAND } else { 0.0 }
 }
 
 /// Paints the header over the messages' top and handles its clicks. Once the messages have
 /// scrolled under it, it gets a background and a bottom border. Its actions have Mark Done when
 /// `archivable`. `typing` says one of the thread's drafts has the keyboard, and `focus` is the
 /// control the keyboard is on. With `notes`, the count of notes kept in the pane only follows
-/// the subject, and clicking it shows them.
+/// the subject, and clicking it shows them. With `add_note`, `+ Add thread note` is drawn there,
+/// at the header's foot, where it stays while the messages scroll.
 #[expect(
     clippy::too_many_arguments,
     reason = "one header, drawn from the thread view's state; a struct would only rename them"
@@ -452,6 +464,7 @@ pub(super) fn show(
     archivable: bool,
     notes: usize,
     height: f32,
+    add_note: Option<Rect>,
     status: Option<&Status>,
     scrolled: bool,
     typing: bool,
@@ -723,6 +736,11 @@ pub(super) fn show(
             );
         }
         None => {}
+    }
+    if let Some(rect) = add_note
+        && crate::notes::add_thread_note(ui, rect, ui.clip_rect())
+    {
+        actions.push(Action::AddNote(None));
     }
     actions
 }

@@ -2121,6 +2121,9 @@ fn notes_ask_gmail_for_nothing() {
     assert_eq!(app.mail().notes().notes.len(), 1, "deleted and restored");
     click_link(&mut app, &id, CardAction::History);
     app.key(Key::Escape);
+    // The pointer leaves the column, so the inbox Escape goes back to doesn't take the row under
+    // it as its cursor (and fetch what that row needs).
+    app.hover(egui::pos2(1.0, 1.0));
     app.key(Key::Escape);
     search_for(&mut app, "notes:zebra");
     assert_eq!(app.mail().inbox().threads().len(), 1, "found by its note");
@@ -2129,5 +2132,77 @@ fn notes_ask_gmail_for_nothing() {
         app.units(),
         units,
         "a draft, a save, an edit, a delete, a restore, a history and a notes search"
+    );
+}
+
+/// Opens `Debrief` with a long thread note saved on it, so the thread scrolls.
+fn open_long_debrief(name: &str) -> Fixture {
+    let mut app = start(name);
+    open_debrief(&mut app);
+    let thread = app.mail().thread().expect("open").id().to_owned();
+    let lines: String = (0..80)
+        .map(|line| format!("<div>Line {line}</div>"))
+        .collect();
+    app.mail_mut().account_mut().save_note(SaveNote {
+        draft_id: "6b0d3c55-6f43-4a8e-9a39-0c1f6f3f8a11".to_owned(),
+        note_id: None,
+        thread_id: ThreadId::new(thread),
+        message_id: None,
+        html: lines,
+        text: "Lines".to_owned(),
+        files: Vec::new(),
+    });
+    app.settle();
+    app
+}
+
+#[test]
+fn add_thread_note_stays_pinned_under_the_header_while_the_thread_scrolls() {
+    let mut app = open_long_debrief("notes-add-pinned");
+    let thread = app.mail().thread().expect("open");
+    let messages = thread.messages_rect();
+    let add = thread.add_note_rect().expect("+ Add thread note is drawn");
+    assert!(
+        add.bottom() <= messages.top(),
+        "above the scrolling messages: {add:?} over {messages:?}"
+    );
+    assert_eq!(thread.scroll(), 0.0, "the thread opens at its top");
+
+    // Scrolled far down, the row stays where it was.
+    let column = egui::pos2(add.center().x, messages.center().y);
+    wheel(&mut app, column, -20_000.0);
+    let thread = app.mail().thread().expect("open");
+    assert!(thread.scroll() > 0.0, "the thread scrolled");
+    assert_eq!(thread.add_note_rect(), Some(add), "the row didn't move");
+
+    assert_eq!(
+        app.hover(add.center()),
+        egui::CursorIcon::PointingHand,
+        "it's a button"
+    );
+    app.click(add.center());
+    assert_eq!(
+        app.mail().note_editor_text().as_deref(),
+        Some(""),
+        "clicking it opens an empty thread note"
+    );
+    let editor = app.mail().note_editor_rect().expect("the editor is drawn");
+    let messages = app.mail().thread().expect("open").messages_rect();
+    assert!(
+        messages.contains_rect(editor),
+        "the new editor is scrolled into view: {editor:?} in {messages:?}"
+    );
+}
+
+#[test]
+fn pane_only_mode_pins_no_add_thread_note() {
+    let mut app = start_with_settings("notes-pane-only-no-add", &|settings| {
+        settings.notes_placement = NotesPlacement::Pane;
+    });
+    app.key(Key::Enter);
+    assert_eq!(
+        app.mail().thread().expect("open").add_note_rect(),
+        None,
+        "the notes are in the pane only"
     );
 }

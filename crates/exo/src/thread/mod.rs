@@ -175,16 +175,14 @@ enum Entry {
     MessageNote(usize),
     /// The note editor, where its note is or will be.
     NoteEditor,
-    /// `+ Add thread note`, after the thread's notes.
-    AddThreadNote,
 }
 
 impl Entry {
-    /// Whether it's a note, the note editor or `+ Add thread note`.
+    /// Whether it's a note or the note editor.
     fn is_note(self) -> bool {
         matches!(
             self,
-            Self::ThreadNote(_) | Self::MessageNote(_) | Self::NoteEditor | Self::AddThreadNote
+            Self::ThreadNote(_) | Self::MessageNote(_) | Self::NoteEditor
         )
     }
 }
@@ -258,6 +256,8 @@ pub struct ThreadView {
     pane_notes: usize,
     /// The message column on screen, under the header, from the last frame.
     messages: Rect,
+    /// `+ Add thread note` under the header, as last drawn.
+    add_note: Option<Rect>,
     /// The message column's visible height and the content's, from the last frame.
     viewport: f32,
     content: f32,
@@ -385,6 +385,7 @@ impl ThreadView {
             reveal_note: None,
             pane_notes: 0,
             messages: Rect::NOTHING,
+            add_note: None,
             viewport: 0.0,
             content: 0.0,
             tops: Vec::new(),
@@ -1227,6 +1228,12 @@ impl ThreadView {
         self.messages
     }
 
+    /// `+ Add thread note` pinned under the header, as last drawn. None while notes show in the
+    /// pane only.
+    pub fn add_note_rect(&self) -> Option<Rect> {
+        self.add_note
+    }
+
     /// Focuses message `id` and scrolls its new draft into view on the next frame.
     pub fn reveal_draft(&mut self, id: &str) {
         self.focus = Some(id.to_owned());
@@ -1312,6 +1319,8 @@ impl ThreadView {
             self.conversation_action(bodies),
             &self.own_domains,
         );
+        // With notes in the thread, `+ Add thread note` is pinned at the header's foot.
+        let add_note = notes.placement() == NotesPlacement::Thread;
         let header_height = header::height(
             ui,
             &layout,
@@ -1320,6 +1329,7 @@ impl ThreadView {
             !self.spam_view,
             self.pane_notes,
             self.status.is_some(),
+            add_note,
         );
         let messages_top = layout.header.top() + header_height + MESSAGES_MARGIN_TOP;
 
@@ -1522,18 +1532,14 @@ impl ThreadView {
                     };
                     (markers::HEIGHT, markers::HEIGHT, margin_top, margin_bottom)
                 }
-                Entry::ThreadNote(_)
-                | Entry::MessageNote(_)
-                | Entry::NoteEditor
-                | Entry::AddThreadNote => {
+                Entry::ThreadNote(_) | Entry::MessageNote(_) | Entry::NoteEditor => {
                     let width = note_width - Self::note_indent(*entry, notes);
                     let height = match *entry {
                         Entry::ThreadNote(at) | Entry::MessageNote(at) => all_notes
                             .notes
                             .get(at)
                             .map_or(0.0, |note| notes.card_height(ui, note, width)),
-                        Entry::NoteEditor => notes.editor_height(ui, width),
-                        _ => crate::notes::ADD_HEIGHT,
+                        _ => notes.editor_height(ui, width),
                     };
                     // The first sits where the first card would, and the last leaves a message
                     // the room an expanded card does.
@@ -1729,6 +1735,7 @@ impl ThreadView {
         }
         drop(scope);
         let scrolled = self.scroll > 0.0;
+        self.add_note = add_note.then(|| Self::add_note_rect_in(&layout, messages));
         let focus = if region == Region::ThreadMessagesHeader {
             self.header_focus()
         } else {
@@ -1743,6 +1750,7 @@ impl ThreadView {
                 !self.spam_view,
                 self.pane_notes,
                 header_height,
+                self.add_note,
                 self.status.as_ref(),
                 scrolled,
                 typing,
@@ -1909,11 +1917,12 @@ impl ThreadView {
         order
     }
 
-    /// `order` with the thread's notes woven in. The thread's own notes come first, then
-    /// `+ Add thread note`, and a message's notes follow it. A note whose message the thread
-    /// no longer shows follows the last message that isn't newer than its own was. The note
-    /// editor takes the place of the note it edits, or goes after the notes of what its new
-    /// note is on. With notes shown in the pane only, none of them is in the column.
+    /// `order` with the thread's notes woven in. The thread's own notes come first (under
+    /// `+ Add thread note`, which the header keeps), and a message's notes follow it. A note
+    /// whose message the thread no longer shows follows the last message that isn't newer than
+    /// its own was. The note editor takes the place of the note it edits, or goes after the notes
+    /// of what its new note is on. With notes shown in the pane only, none of them is in the
+    /// column.
     fn with_notes(&self, order: Vec<Entry>, notes: &Notes) -> Vec<Entry> {
         if notes.placement() != NotesPlacement::Thread {
             return order;
@@ -1949,9 +1958,6 @@ impl ThreadView {
                 }
                 None => woven.push(Entry::NoteEditor),
             }
-        }
-        if editing.is_none() {
-            woven.push(Entry::AddThreadNote);
         }
         woven.extend(under.remove(&None).unwrap_or_default());
         for entry in order {
@@ -2015,6 +2021,21 @@ impl ThreadView {
         } else if bottom > self.scroll + self.viewport - DRAFT_MARGIN_BOTTOM {
             self.animate_to((bottom - self.viewport + DRAFT_MARGIN_BOTTOM).min(above));
         }
+    }
+
+    /// Where `+ Add thread note` sits in the header's foot: as wide as the cards' column and in
+    /// line with it, ending where the `messages` start.
+    fn add_note_rect_in(layout: &Layout, messages: Rect) -> Rect {
+        Rect::from_min_size(
+            pos2(
+                layout.card.left(),
+                messages.top() - crate::notes::ADD_HEIGHT,
+            ),
+            vec2(
+                Self::spanning(layout).card.width(),
+                crate::notes::ADD_HEIGHT,
+            ),
+        )
     }
 
     /// Brings the note editor into view: its top under the messages' padding when it's above
@@ -2116,10 +2137,7 @@ impl ThreadView {
                     }
                     continue;
                 }
-                Entry::ThreadNote(_)
-                | Entry::MessageNote(_)
-                | Entry::NoteEditor
-                | Entry::AddThreadNote => {
+                Entry::ThreadNote(_) | Entry::MessageNote(_) | Entry::NoteEditor => {
                     let indent = Self::note_indent(placed.entry, notes);
                     let rect = Rect::from_min_max(pos2(card.left() + indent, card.top()), card.max);
                     match placed.entry {
@@ -2145,14 +2163,9 @@ impl ThreadView {
                                 None => {}
                             }
                         }
-                        Entry::NoteEditor => {
+                        _ => {
                             if notes.editor(ui, rect) == Some(EditorAction::Save) {
                                 actions.push(Action::SaveNote);
-                            }
-                        }
-                        _ => {
-                            if crate::notes::add_thread_note(ui, rect, messages) {
-                                actions.push(Action::AddNote(None));
                             }
                         }
                     }

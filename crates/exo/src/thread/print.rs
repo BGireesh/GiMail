@@ -70,10 +70,9 @@ impl ThreadView {
                         });
                     }
                     // Notes are the user's own, and never print.
-                    Entry::ThreadNote(_)
-                    | Entry::MessageNote(_)
-                    | Entry::NoteEditor
-                    | Entry::AddThreadNote => return None,
+                    Entry::ThreadNote(_) | Entry::MessageNote(_) | Entry::NoteEditor => {
+                        return None;
+                    }
                 };
                 let item = &self.items[at];
                 let message = detail

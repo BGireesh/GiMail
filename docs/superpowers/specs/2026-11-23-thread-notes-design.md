@@ -140,8 +140,9 @@ palette entries in `exo-ui` carry the colors.
 
 ### In the thread (setting: In thread)
 
-- Thread notes sit under the subject, above the first message, with `+ Add thread note` after
-  them.
+- `+ Add thread note` is pinned at the foot of the thread's header, so it stays in place while
+  the thread scrolls (also while a note editor is open, when it works as `T` does). Thread notes
+  sit under it, above the first message, and scroll with the messages.
 - A message's notes sit under its card, indented, whether the card is folded or open.
 - Pointing at a message shows `+ Note`. Pointing at a note shows `Edit`, `Delete`, `History`.
 - The editor opens in place, where the note is or will be.
