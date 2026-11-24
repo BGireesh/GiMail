@@ -1319,7 +1319,9 @@ pub(crate) fn shadow_root(
     zoom: f32,
 ) -> String {
     let mut wrapper = String::from("exo-color-transparent-bg ShadowWrapper");
-    if !render.quoted_is_marketing {
+    // A hidden quote doesn't make the card marketing (the app draws it dark, as personal mail),
+    // so it doesn't keep the shown part's colors from being restyled for the card either.
+    if !render.quoted_is_marketing || !show_quoted {
         wrapper.push_str(" styleQuotedContent");
     }
     if !render.unquoted_is_marketing {

@@ -244,3 +244,52 @@ fn image_removed_by_sender_boxes_are_hidden() {
         "other placeholders stay"
     );
 }
+
+/// A reply ("still good for today?") quoting a Google Calendar invite, whose bordered card makes
+/// the quoted part marketing. With the quote collapsed, the card is dark like any personal mail,
+/// so the reply's text is recolored light instead of staying black on the dark card.
+#[test]
+fn carbon_personal_reply_quoting_marketing_reads_light_on_dark() {
+    let invite = "<div style=\"border:1px solid #dadce0;border-radius:8px;padding:16px\">\
+                  <table><tr><td>Infisical &amp; AtoB</td></tr><tr><td>Monday 10am</td></tr>\
+                  </table></div>";
+    let previous = Message {
+        html: invite.into(),
+        from_email: "calendar-notification@google.com".into(),
+        ..Message::default()
+    };
+    let previous_render = render(&previous, None, &[]);
+    let reply = Message {
+        html: format!(
+            "<div dir=\"ltr\">Hi - are we still good for today? Reply with the time that works \
+             for your team and I will send a new invite.</div>\
+             <div class=\"gmail_quote\"><div class=\"gmail_attr\">On Mon, Ana wrote:</div>\
+             <blockquote class=\"gmail_quote\">{invite}</blockquote></div>"
+        ),
+        from_email: "diego@infisical.com".into(),
+        ..Message::default()
+    };
+    let rendered = render(&reply, Some((&previous, &previous_render)), &[]);
+    assert!(!rendered.unquoted_is_marketing, "the reply is personal");
+    assert!(rendered.quoted_is_marketing, "the invite it quotes isn't");
+    let options = ViewOptions {
+        theme: Theme::Dark,
+        show_quoted: false,
+        ..ViewOptions::default()
+    };
+    let mut view = BodyView::new(&rendered, options, &fonts(), None);
+    let height = view.layout(400.0, 2.0);
+    let region = Region {
+        top: 0.0,
+        height,
+        left: 0.0,
+        width: 400.0,
+        phase: [0.0; 2],
+    };
+    let image = view.paint(region, [40, 42, 46, 255]);
+    let count = |keep: &dyn Fn(&[u8]) -> bool| image.rgba.chunks(4).filter(|p| keep(p)).count();
+    let light = count(&|p| p[..3].iter().all(|&c| c > 180));
+    let dark = count(&|p| p[..3].iter().all(|&c| c < 25));
+    assert!(light > 200, "{light} light text pixels");
+    assert!(dark < 20, "{dark} near-black text pixels on the dark card");
+}
