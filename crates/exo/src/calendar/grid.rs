@@ -117,7 +117,7 @@ pub struct Grid<'a> {
     /// The Day view's names and colours over the guests' columns, mine first when [`Self::mine`],
     /// or none. With them the columns all stay open at equal widths, each under its name, and a
     /// hover expands none.
-    pub heads: &'a [(String, exo_ui::CalendarColor, bool)],
+    pub heads: &'a [(String, exo_ui::CalendarColor, super::guests::Marker)],
 }
 
 /// The grid's scroll and pointer state, kept across frames.
@@ -1289,17 +1289,24 @@ fn paint_day_headers(painter: &Painter, frame: &Frame, grid: &Grid<'_>) {
 
 /// The Day view's heads, one over each of the equal columns the day splits into: the name,
 /// semibold and in the person's colour, after a 10px swatch of it, centred, and cut short to fit.
-/// While the latest of a person's calendar loads, a spinner comes before their swatch.
-fn paint_heads(painter: &Painter, frame: &Frame, heads: &[(String, exo_ui::CalendarColor, bool)]) {
+/// While the latest of a person's calendar loads, a spinner comes before their swatch; while what
+/// shows is a cached copy Calendar couldn't confirm, the swatch is empty, as in Meet's list.
+fn paint_heads(
+    painter: &Painter,
+    frame: &Frame,
+    heads: &[(String, exo_ui::CalendarColor, super::guests::Marker)],
+) {
+    use super::guests::Marker;
     const SWATCH: f32 = 10.0;
     const SWATCH_GAP: f32 = 6.0;
     let theme = exo_ui::theme(painter.ctx());
     let palette = exo_ui::palette(painter.ctx());
     // As the columns are: the day's width less its border and the events' inset, shared equally.
     let room = (frame.columns.width() - 1.0 - EVENTS_INSET) / heads.len().max(1) as f32;
-    for (index, (name, color, refreshing)) in heads.iter().enumerate() {
+    for (index, (name, color, sign)) in heads.iter().enumerate() {
         let left = frame.columns.left() + index as f32 * room;
-        let spinner = if *refreshing {
+        let refreshing = matches!(sign, Marker::Refreshing(_));
+        let spinner = if refreshing {
             SWATCH + super::guests::REFRESHING_GAP
         } else {
             0.0
@@ -1318,7 +1325,7 @@ fn paint_heads(painter: &Painter, frame: &Frame, heads: &[(String, exo_ui::Calen
                 Vec2::splat(SWATCH),
             ))
         };
-        if *refreshing {
+        if refreshing {
             exo_ui::paint_spinner(
                 painter,
                 at(start),
@@ -1326,7 +1333,16 @@ fn paint_heads(painter: &Painter, frame: &Frame, heads: &[(String, exo_ui::Calen
                 palette.ink(0.25, 0.25),
             );
         }
-        painter.rect_filled(at(start + spinner), 2.0, swatch);
+        if matches!(sign, Marker::Empty) {
+            painter.rect_stroke(
+                at(start),
+                2.0,
+                egui::Stroke::new(1.0, palette.ink(0.3, 0.3)),
+                egui::StrokeKind::Inside,
+            );
+        } else {
+            painter.rect_filled(at(start + spinner), 2.0, swatch);
+        }
         DAY_TITLE.paint_line(
             painter,
             pos2(start + marker, top + 1.0),

@@ -90,23 +90,24 @@ impl Colors {
         }
     }
 
-    /// The first [`MAX`] of `guests` whose calendars show, with their colours (none while
-    /// offline).
+    /// The first [`MAX`] of `guests` whose calendars show, with their colours. While offline only
+    /// cached copies show ([`GuestEvents::Stale`]), marked as not current.
     pub fn shown(
         &self,
         guests: &[String],
         data: &Data,
         online: bool,
     ) -> Vec<(String, CalendarColor)> {
-        if !online {
-            return Vec::new();
-        }
         guests
             .iter()
             .filter(|email| {
-                data.guests
-                    .get(*email)
-                    .is_some_and(|calendar| calendar.events.events().is_some())
+                data.guests.get(*email).is_some_and(|calendar| {
+                    if online {
+                        calendar.events.events().is_some()
+                    } else {
+                        matches!(calendar.events, GuestEvents::Stale(_))
+                    }
+                })
             })
             .filter_map(|email| Some((email.clone(), self.of(email)?)))
             .take(MAX)
@@ -834,12 +835,14 @@ impl crate::Mail {
     }
 
     /// The Day view's heads for the overlaid `guests`' columns: each one's name, the colour their
-    /// calendar takes, and whether the latest of it is loading.
+    /// calendar takes, and the marker before the name: their swatch, after a spinner while the
+    /// latest of it loads, or an empty one while what shows is a cached copy Calendar couldn't
+    /// confirm, as Meet's list has it.
     pub(super) fn calendar_overlay_heads(
         &self,
         guests: &[(String, Vec<Event>)],
         now: &Zoned,
-    ) -> Vec<(String, CalendarColor, bool)> {
+    ) -> Vec<(String, CalendarColor, Marker)> {
         let colors = self
             .calendar_overlaid(now, false)
             .and_then(|(surface, ..)| match surface {
@@ -849,21 +852,14 @@ impl crate::Mail {
             });
         let data = self.account.calendar().data();
         let online = self.snapshot.connection.is_online();
-        // Shown, and the latest on its way.
-        let refreshing = |email: &str| {
-            online
-                && data
-                    .guests
-                    .get(email)
-                    .is_some_and(|calendar| calendar.loading)
-        };
         guests
             .iter()
             .map(|(email, _)| {
                 let color = colors
                     .and_then(|colors| colors.of(email))
                     .unwrap_or(CalendarColor::BLUE);
-                (self.calendar_person_name(email), color, refreshing(email))
+                let marker = marker(email, &[(email.clone(), color)], &data, online);
+                (self.calendar_person_name(email), color, marker)
             })
             .collect()
     }

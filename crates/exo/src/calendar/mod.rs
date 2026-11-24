@@ -518,15 +518,15 @@ impl crate::Mail {
             .collect()
     }
 
-    /// The Day view's heads over the overlaid people's columns (after mine): each name, and
-    /// whether a spinner shows before its swatch (for tests).
-    pub fn calendar_day_heads_for_test(&mut self) -> Vec<(String, bool)> {
+    /// The Day view's heads over the overlaid people's columns (after mine): each name, and the
+    /// marker before it as [`Mail::calendar_meet_markers_for_test`] names them (for tests).
+    pub fn calendar_day_heads_for_test(&mut self) -> Vec<(String, String)> {
         let now = self.now.clone();
         let days = self.calendar_days_shown();
         let (guests, _) = self.calendar_overlay(&now, false, &days);
         self.calendar_overlay_heads(&guests, &now)
             .into_iter()
-            .map(|(name, _, refreshing)| (name, refreshing))
+            .map(|(name, _, marker)| (name, marker_for_test(marker)))
             .collect()
     }
 
@@ -1488,20 +1488,25 @@ impl crate::Mail {
             None => events.into_iter().chain(slots).collect(),
         };
         // The Day view heads each person's column with their name and colour, mine first.
-        let heads: Vec<(String, CalendarColor, bool)> = if view == View::Day && !guests.is_empty() {
-            let mine = shows_mine.then(|| {
-                let color = listed
-                    .iter()
-                    .find(|calendar| calendar.shown)
-                    .map_or(CalendarColor::BLUE, |calendar| calendar.color);
-                (self.calendar_my_name(), color, false)
-            });
-            mine.into_iter()
-                .chain(self.calendar_overlay_heads(&guests, &now))
-                .collect()
-        } else {
-            Vec::new()
-        };
+        let heads: Vec<(String, CalendarColor, guests::Marker)> =
+            if view == View::Day && !guests.is_empty() {
+                let mine = shows_mine.then(|| {
+                    let color = listed
+                        .iter()
+                        .find(|calendar| calendar.shown)
+                        .map_or(CalendarColor::BLUE, |calendar| calendar.color);
+                    (
+                        self.calendar_my_name(),
+                        color,
+                        guests::Marker::Swatch(color),
+                    )
+                });
+                mine.into_iter()
+                    .chain(self.calendar_overlay_heads(&guests, &now))
+                    .collect()
+            } else {
+                Vec::new()
+            };
         let book = self.calendar_book();
         let zones = self.calendar_secondary_zones();
         let grid = Grid {

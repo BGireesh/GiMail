@@ -2527,6 +2527,11 @@ fn a_cached_colleague_shows_at_once_and_stays_when_the_live_read_fails() {
     );
     let marker = |app: &Fixture| app.mail().calendar_meet_markers_for_test()[PRIYA].clone();
     assert_eq!(marker(&app), "empty", "not current, as a failed read isn't");
+    assert_eq!(
+        app.mail_mut().calendar_day_heads_for_test(),
+        [("Priya Raman".to_owned(), "empty".to_owned())],
+        "her Day head says so too"
+    );
     // Once the connection comes back, she's read again.
     app.disconnect();
     app.mail().account().network_changed();
@@ -2537,6 +2542,10 @@ fn a_cached_colleague_shows_at_once_and_stays_when_the_live_read_fails() {
         Some(("shown", false))
     );
     assert_eq!(marker(&app), "pink");
+    assert_eq!(
+        app.mail_mut().calendar_day_heads_for_test(),
+        [("Priya Raman".to_owned(), "pink".to_owned())]
+    );
     assert!(
         priya_on(&mut app, next_tuesday).contains(&"Design crit".to_owned()),
         "live past the window"
@@ -2556,6 +2565,19 @@ fn a_cached_colleague_added_offline_shows_stale_and_is_read_once_online() {
         app.mail().calendar_guest_state_for_test(PRIYA),
         Some(("stale", false)),
         "her cached copy, not a failure"
+    );
+    assert!(
+        priya_on(&mut app, date(2026, 11, 17)).contains(&"Design crit".to_owned()),
+        "her column, from the cache, while offline"
+    );
+    assert_eq!(
+        app.mail().calendar_meet_markers_for_test()[PRIYA],
+        "empty",
+        "not current"
+    );
+    assert_eq!(
+        app.mail_mut().calendar_day_heads_for_test(),
+        [("Priya Raman".to_owned(), "empty".to_owned())]
     );
     back_online(&mut app);
     assert_eq!(
@@ -2594,6 +2616,29 @@ fn a_live_read_updates_the_cache() {
         cached_titles(&app, PRIYA)
             .iter()
             .any(|title| title == "Design crit")
+    );
+}
+
+#[test]
+fn a_live_read_of_someone_not_listed_is_not_cached() {
+    let mut app = support::start_with_settings("calendar-cached-unlisted", &cache_on(&[LENA]));
+    assert!(app.mail().calendar_cached(LENA).is_some(), "Lena is cached");
+    meet_typing(&mut app, Key::W, "priya");
+    app.key(Key::Enter);
+    app.wait(1.0);
+    app.settle();
+    assert_eq!(
+        app.mail().calendar_guest_state_for_test(PRIYA),
+        Some(("shown", false)),
+        "Meet read her calendar"
+    );
+    assert!(
+        priya_on(&mut app, date(2026, 11, 17)).contains(&"Design crit".to_owned()),
+        "and shows it"
+    );
+    assert!(
+        app.mail().calendar_cached(PRIYA).is_none(),
+        "but she isn't listed, so it isn't kept"
     );
 }
 
@@ -2638,13 +2683,13 @@ fn the_day_view_head_spins_before_the_swatch_while_refreshing() {
     );
     assert_eq!(
         app.mail_mut().calendar_day_heads_for_test(),
-        [("Priya Raman".to_owned(), true)],
+        [("Priya Raman".to_owned(), "refreshing:pink".to_owned())],
         "her head spins"
     );
     app.settle();
     assert_eq!(refreshing(&app).as_deref(), Some("pink"), "then it stops");
     assert_eq!(
         app.mail_mut().calendar_day_heads_for_test(),
-        [("Priya Raman".to_owned(), false)]
+        [("Priya Raman".to_owned(), "pink".to_owned())]
     );
 }
