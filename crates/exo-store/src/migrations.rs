@@ -407,10 +407,14 @@ mod tests {
                 rows.sort();
                 rows
             }
-            let (was, is) = (
+            let (was, mut is) = (
                 project(&common, columns, rows),
                 project(&common, now_columns, now_rows),
             );
+            // Opening routes the lists again once, and marks the version that did it.
+            if table == "kv" {
+                is.retain(|row| !row.contains(&"routing_version") || was.contains(row));
+            }
             let lost: Vec<&Vec<&str>> =
                 was.iter().filter(|row| !is.contains(row)).take(2).collect();
             assert!(
