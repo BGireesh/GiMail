@@ -688,6 +688,9 @@ impl Task {
             self.cache_covered.clear();
             return;
         }
+        // Someone taken off the list and put back is read again, as anyone newly listed is.
+        self.cache_covered
+            .retain(|email| settings.people.contains(email));
         // The last answer of the refresh being read looks again.
         if self.cache_reading > 0 {
             return;

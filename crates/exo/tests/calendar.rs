@@ -2429,3 +2429,29 @@ fn the_calendar_answers_other_requests_while_the_cache_is_read() {
         "then Priya's came"
     );
 }
+
+#[test]
+fn a_colleague_taken_off_the_list_and_put_back_is_cached_at_once() {
+    let mut app = support::start_with_settings("calendar-cached-back", &cache_on(&[PRIYA, LENA]));
+    let fetched = |app: &Fixture, email: &str| {
+        app.mail()
+            .calendar_cached(email)
+            .map(|cached| cached.fetched_at)
+    };
+    let nine = new_york("2026-11-17T09:00").timestamp();
+    assert_eq!(fetched(&app, PRIYA), Some(nine));
+    app.set_now(new_york("2026-11-17T09:05"));
+    change_cache(&mut app, |cache| {
+        cache.people.retain(|email| email != PRIYA)
+    });
+    assert_eq!(fetched(&app, PRIYA), None, "Priya is forgotten");
+    let ten_past = new_york("2026-11-17T09:10");
+    app.set_now(ten_past.clone());
+    change_cache(&mut app, |cache| cache.people.push(PRIYA.into()));
+    assert_eq!(
+        fetched(&app, PRIYA),
+        Some(ten_past.timestamp()),
+        "Priya at once"
+    );
+    assert_eq!(fetched(&app, LENA), Some(nine), "Lena waits for her hour");
+}
