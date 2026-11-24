@@ -1622,6 +1622,7 @@ impl crate::Mail {
             expanded: expanded.as_deref(),
             mine: true,
             zones: &[],
+            heads: &[],
         };
         let compose = self.compose.focused().is_some();
         let actions = super::day::show_compact(

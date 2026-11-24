@@ -33,6 +33,7 @@ pub(crate) use event::{Rsvp, my_attendance, unique_key as event_key};
 pub(crate) use share::Target;
 pub use sync::CalendarSync;
 pub(crate) use week::ListedCalendar;
+pub use week::View;
 
 use std::collections::BTreeMap;
 
@@ -105,7 +106,10 @@ pub enum Action {
     SeeMessage(String),
     /// `2`, `Open Week` or the rail's Calendar, which open the week view.
     OpenWeek,
-    /// The week view one week back (-1) or on (1).
+    /// `d` or `w`, or the header's toggle: the full calendar's Day or Week view, which this
+    /// device remembers.
+    View(View),
+    /// The week view one week (a day, in its Day view) back (-1) or on (1).
     WeekStep(i64),
     /// The week view on this week (`space`, `t`).
     WeekToday,
@@ -124,8 +128,8 @@ pub enum Action {
     Discard,
     /// Escape in the form, which closes an open dropdown first and is otherwise Discard.
     FormEscape,
-    /// ⌘⇧= / ⌘⇧- with the form open, which move the draft a day (a week, in the week view) on or
-    /// back.
+    /// ⌘⇧= / ⌘⇧- with the form open, which move the draft a day (a week, in the week view's
+    /// Week) on or back.
     FormStep(i64),
     /// ⌘⇧0 with the form open, which moves the draft to today.
     FormToday,
@@ -387,6 +391,36 @@ impl crate::Mail {
         } else {
             0
         }
+    }
+
+    /// The days the full calendar shows, if it's up (for tests).
+    pub fn calendar_days_shown(&self) -> Vec<Date> {
+        self.calendar_week()
+            .map(|active| self.calendar_days(active))
+            .unwrap_or_default()
+    }
+
+    /// The columns the full calendar drew last frame, day by day: each column's head (my name, or
+    /// the guest's), its width, and its events' titles (for tests).
+    pub fn calendar_columns_drawn(&self) -> Vec<(String, f32, Vec<String>)> {
+        let Some(week) = &self.calendar.week else {
+            return Vec::new();
+        };
+        week.columns_drawn()
+            .iter()
+            .map(|(guest, width, titles)| {
+                let head = match guest {
+                    Some(email) => self.calendar_person_name(email),
+                    None => self.calendar_my_name(),
+                };
+                (head, *width, titles.clone())
+            })
+            .collect()
+    }
+
+    /// The open form's start and end (for tests).
+    pub fn calendar_form_when(&self) -> Option<(Zoned, Zoned)> {
+        self.calendar.form.as_ref()?.values.when.clone()
     }
 
     /// Meet's guests' addresses, in the order they were added (for tests).
@@ -699,9 +733,16 @@ impl crate::Mail {
                 let date = self.calendar.day.map_or(today, |day| day.date);
                 self.calendar_open_week(date);
             }
-            Action::WeekStep(weeks) => {
+            Action::View(view) => self
+                .account
+                .update_device_settings(|device| device.calendar_day_view = view == View::Day),
+            Action::WeekStep(steps) => {
+                let days = match self.calendar_view() {
+                    View::Day => steps,
+                    View::Week => 7 * steps,
+                };
                 if let Some(week) = &mut self.calendar.week {
-                    week.go_to(week.active + (7 * weeks).days());
+                    week.go_to(week.active + days.days());
                 }
             }
             Action::WeekToday => {
@@ -753,7 +794,7 @@ impl crate::Mail {
                 _ => self.calendar_discard(),
             },
             Action::FormStep(steps) => {
-                let days = if self.calendar.week.is_some() {
+                let days = if self.calendar.week.is_some() && self.calendar_view() == View::Week {
                     7 * steps
                 } else {
                     steps
@@ -967,6 +1008,24 @@ impl crate::Mail {
             .map(|offset| start + offset.days())
             .filter(|day| weekends || day.weekday().to_monday_one_offset() <= 5)
             .collect()
+    }
+
+    /// The full calendar's view, as this device last left it.
+    pub(crate) fn calendar_view(&self) -> View {
+        if self.account.device_settings().calendar_day_view {
+            View::Day
+        } else {
+            View::Week
+        }
+    }
+
+    /// The days the full calendar around `active` shows: `active` alone in the Day view, weekend
+    /// or not, else its week ([`Self::calendar_week_days`]).
+    fn calendar_days(&self, active: Date) -> Vec<Date> {
+        match self.calendar_view() {
+            View::Day => vec![active],
+            View::Week => self.calendar_week_days(active),
+        }
     }
 
     /// The week's secondary time zones, while Calendar Settings shows them.
@@ -1214,6 +1273,7 @@ impl crate::Mail {
             mine: true,
             sharing: None,
             zones: &[],
+            heads: &[],
         };
         let compose = self.compose.focused().is_some();
         let actions = day::show(
@@ -1305,7 +1365,8 @@ impl crate::Mail {
         let now = self.now.clone();
         let events = self.calendar_events(&now, None);
         let start = self.calendar_week_start(active);
-        let days = self.calendar_week_days(active);
+        let view = self.calendar_view();
+        let days = self.calendar_days(active);
         let listed = self.calendar_list();
         let selected = self
             .calendar
@@ -1344,6 +1405,21 @@ impl crate::Mail {
             }
             None => events.into_iter().chain(slots).collect(),
         };
+        // The Day view heads each person's column with their name and colour, mine first.
+        let heads: Vec<(String, CalendarColor)> = if view == View::Day && !guests.is_empty() {
+            let mine = shows_mine.then(|| {
+                let color = listed
+                    .iter()
+                    .find(|calendar| calendar.shown)
+                    .map_or(CalendarColor::BLUE, |calendar| calendar.color);
+                (self.calendar_my_name(), color)
+            });
+            mine.into_iter()
+                .chain(self.calendar_overlay_heads(&guests, &now))
+                .collect()
+        } else {
+            Vec::new()
+        };
         let book = self.calendar_book();
         let zones = self.calendar_secondary_zones();
         let grid = Grid {
@@ -1368,6 +1444,7 @@ impl crate::Mail {
             mine: shows_mine,
             sharing,
             zones: &zones,
+            heads: &heads,
         };
         let loading = self.account.calendar().data().loading
             && events
@@ -1391,6 +1468,7 @@ impl crate::Mail {
             .clone();
         let page = Page {
             grid,
+            view,
             week_start: start,
             monday,
             account: self.account.email(),
@@ -1412,7 +1490,8 @@ impl crate::Mail {
                     let now = self.now.clone();
                     self.calendar_new_event(&now);
                 }
-                WeekAction::Step(weeks) => self.calendar_run(Action::WeekStep(weeks)),
+                WeekAction::Step(steps) => self.calendar_run(Action::WeekStep(steps)),
+                WeekAction::View(view) => self.calendar_run(Action::View(view)),
                 // While the form is open, a day moves the draft there.
                 WeekAction::Select(date) if self.calendar.form.is_some() => {
                     self.calendar_form_shift(|start| start.with().date(date).build().ok())
@@ -3003,7 +3082,8 @@ fn register_share(commands: &mut Commands<AppAction>) {
     );
 }
 
-/// The week view's keys. `b` waits while the details are up.
+/// The week view's keys: `d` and `w` switch between its Day and Week. `b` waits while the details
+/// are up.
 fn register_week(commands: &mut Commands<AppAction>, details: bool) {
     let action = AppAction::Calendar;
     if !details {
@@ -3030,6 +3110,16 @@ fn register_week(commands: &mut Commands<AppAction>, details: bool) {
     commands.add(
         Command::shortcut("WEEK_TODAY", action(Action::WeekToday))
             .keys(["space", "t"])
+            .regions(WEEK),
+    );
+    commands.add(
+        Command::shortcut("WEEK_DAY_VIEW", action(Action::View(View::Day)))
+            .key("d")
+            .regions(WEEK),
+    );
+    commands.add(
+        Command::shortcut("WEEK_WEEK_VIEW", action(Action::View(View::Week)))
+            .key("w")
             .regions(WEEK),
     );
     commands.add(

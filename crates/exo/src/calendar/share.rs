@@ -1285,6 +1285,16 @@ impl crate::Mail {
             .map(|share| share.minutes)
     }
 
+    /// The times Share Availability has picked, in order (for tests).
+    pub fn calendar_share_slots(&self) -> Vec<(Zoned, Zoned)> {
+        self.calendar
+            .week
+            .iter()
+            .flat_map(|week| &week.share)
+            .flat_map(|share| share.slots.values().cloned())
+            .collect()
+    }
+
     /// Share Availability's attendees' addresses, me first, while it's up (for tests).
     pub fn calendar_share_attendees(&self) -> Vec<String> {
         self.calendar

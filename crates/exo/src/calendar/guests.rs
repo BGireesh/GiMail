@@ -436,16 +436,18 @@ fn subtract(gaps: &[(Zoned, Zoned)], taken: &[Event]) -> Vec<(Zoned, Zoned)> {
 }
 
 /// The columns of the day from `midnight`: mine (when `mine` is given) then each guest's. With
-/// three or more, all but the expanded one (mine unless a hover chose another) collapse to bars.
+/// three or more, all but the expanded one (mine unless a hover chose another) collapse to bars,
+/// unless they're all kept `open` (the Day view, where each is wide enough).
 pub fn columns(
     mine: Option<Vec<&Event>>,
     guests: &[(String, Vec<Event>)],
     expanded: Option<&str>,
+    open: bool,
     midnight: &Zoned,
 ) -> Vec<Column> {
     let day = midnight.date();
     let count = usize::from(mine.is_some()) + guests.len();
-    let collapse = count >= 3;
+    let collapse = count >= 3 && !open;
     let expanded = expanded.filter(|email| guests.iter().any(|(guest, _)| guest == email));
     let mut columns = Vec::new();
     if let Some(mine) = mine {
@@ -513,14 +515,16 @@ pub type AllDayColumn<'a> = (Option<String>, bool, Vec<&'a Event>);
 
 /// The all-day row's columns while guests are overlaid: for each day, mine (every all-day event
 /// of mine on it) then each guest's (their all-day events that leave them free, on it). With two
-/// guests or more, all but the expanded one (mine unless a hover chose another) collapse.
+/// guests or more, all but the expanded one (mine unless a hover chose another) collapse, unless
+/// they're all kept `open`.
 pub fn all_day_columns<'a>(
     mine: &[&'a Event],
     guests: &'a [(String, Vec<Event>)],
     expanded: Option<&str>,
+    open: bool,
     days: &[Date],
 ) -> Vec<Vec<AllDayColumn<'a>>> {
-    let collapse = guests.len() >= 2;
+    let collapse = guests.len() >= 2 && !open;
     let expanded = expanded.filter(|email| guests.iter().any(|(guest, _)| guest == email));
     days.iter()
         .map(|day| {
@@ -807,6 +811,72 @@ impl crate::Mail {
             .collect()
     }
 
+    /// The Day view's heads for the overlaid `guests`' columns: each one's name and the colour
+    /// their calendar takes.
+    pub(super) fn calendar_overlay_heads(
+        &self,
+        guests: &[(String, Vec<Event>)],
+        now: &Zoned,
+    ) -> Vec<(String, CalendarColor)> {
+        let colors = self
+            .calendar_overlaid(now, false)
+            .and_then(|(surface, ..)| match surface {
+                Surface::Form => Some(&self.calendar.form.as_ref()?.guest_colors),
+                Surface::Share => Some(&self.calendar.week.as_ref()?.share.as_ref()?.colors),
+                Surface::Meet => Some(&self.calendar.week.as_ref()?.meet.colors),
+            });
+        guests
+            .iter()
+            .map(|(email, _)| {
+                let color = colors
+                    .and_then(|colors| colors.of(email))
+                    .unwrap_or(CalendarColor::BLUE);
+                (self.calendar_person_name(email), color)
+            })
+            .collect()
+    }
+
+    /// `email`'s name as Meet, the form or Share Availability has it, else their address.
+    pub(super) fn calendar_person_name(&self, email: &str) -> String {
+        let week = self.calendar.week.as_ref();
+        let from_meet = week
+            .into_iter()
+            .flat_map(|week| &week.meet.guests)
+            .find(|guest| guest.email.eq_ignore_ascii_case(email))
+            .and_then(|guest| guest.name.clone());
+        let from_form = || {
+            self.calendar
+                .form
+                .iter()
+                .flat_map(|form| &form.values.guests)
+                .find(|guest| guest.email.eq_ignore_ascii_case(email))
+                .and_then(|guest| guest.name.clone())
+        };
+        let from_share = || {
+            week.and_then(|week| week.share.as_ref())
+                .into_iter()
+                .flat_map(|share| &share.attendees)
+                .find(|attendee| attendee.address.email.eq_ignore_ascii_case(email))
+                .and_then(|attendee| attendee.address.name.clone())
+        };
+        from_meet
+            .or_else(from_form)
+            .or_else(from_share)
+            .filter(|name| !name.trim().is_empty())
+            .unwrap_or_else(|| email.to_owned())
+    }
+
+    /// My name, as my primary address has it, else the account's address.
+    pub(super) fn calendar_my_name(&self) -> String {
+        self.snapshot
+            .aliases
+            .iter()
+            .find(|alias| alias.primary)
+            .and_then(|alias| alias.name.clone())
+            .filter(|name| !name.trim().is_empty())
+            .unwrap_or_else(|| self.account.email().to_owned())
+    }
+
     /// A hover expanded a column of the overlaid surface.
     pub(super) fn calendar_expand(&mut self, guest: Option<String>, pane: bool) {
         let now = self.now.clone();
@@ -943,7 +1013,7 @@ mod tests {
             ("a@x.co".to_owned(), Vec::new()),
             ("b@x.co".to_owned(), Vec::new()),
         ];
-        let columns = columns(Some(Vec::new()), &guests, None, &midnight);
+        let columns = columns(Some(Vec::new()), &guests, None, false, &midnight);
         assert_eq!(
             columns
                 .iter()
@@ -952,7 +1022,7 @@ mod tests {
             [false, true, true]
         );
         assert_eq!(widths(&[false, true, true]), [0.5, 0.25, 0.25]);
-        let two = super::columns(Some(Vec::new()), &guests[..1], None, &midnight);
+        let two = super::columns(Some(Vec::new()), &guests[..1], None, false, &midnight);
         assert_eq!(
             two.iter()
                 .map(|column| column.collapsed)
@@ -960,6 +1030,23 @@ mod tests {
             [false, false]
         );
         assert_eq!(widths(&[false, false]), [0.5, 0.5]);
+    }
+
+    #[test]
+    fn the_day_view_keeps_every_column_open_and_alike() {
+        let midnight = jiff::civil::date(2026, 11, 17)
+            .to_zoned(TimeZone::UTC)
+            .expect("a day");
+        let guests = vec![
+            ("a@x.co".to_owned(), Vec::new()),
+            ("b@x.co".to_owned(), Vec::new()),
+        ];
+        let open = columns(Some(Vec::new()), &guests, Some("b@x.co"), true, &midnight);
+        let collapsed: Vec<bool> = open.iter().map(|column| column.collapsed).collect();
+        assert_eq!(collapsed, [false, false, false], "a hover expands none");
+        assert_eq!(widths(&collapsed), [1.0 / 3.0; 3]);
+        let all_day = all_day_columns(&[], &guests, None, true, &[midnight.date()]);
+        assert!(all_day[0].iter().all(|(_, collapsed, _)| !collapsed));
     }
 
     #[test]
@@ -995,7 +1082,7 @@ mod tests {
             &tz,
         );
         let midnight = tuesday.to_zoned(tz).expect("a day");
-        let timed = columns(Some(Vec::new()), &guests[..1], None, &midnight);
+        let timed = columns(Some(Vec::new()), &guests[..1], None, false, &midnight);
         assert_eq!(
             timed[1]
                 .events
@@ -1005,7 +1092,7 @@ mod tests {
             ["Conference"],
             "the busy one fills the day"
         );
-        let rows = all_day_columns(&[], &guests, None, &[tuesday]);
+        let rows = all_day_columns(&[], &guests, None, false, &[tuesday]);
         let row: Vec<(Option<&str>, bool, Vec<&str>)> = rows[0]
             .iter()
             .map(|(guest, collapsed, events)| {

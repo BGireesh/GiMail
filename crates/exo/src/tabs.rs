@@ -704,6 +704,10 @@ impl crate::Mail {
             self.list_count(&self.snapshot.counts)
         };
         match self.calendar_week() {
+            // The Day view names its day.
+            Some(day) if self.calendar_view() == crate::calendar::View::Day => {
+                format!("📆 {} - {who}", day.strftime("%b %-d"))
+            }
             Some(day) => format!(
                 "📆 {} - {who}",
                 crate::calendar::week_title(self.calendar_week_start(day))

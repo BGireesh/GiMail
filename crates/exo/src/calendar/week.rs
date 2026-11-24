@@ -34,6 +34,9 @@ const PLUS_TOP: f32 = 7.0;
 const PLUS_GAP: f32 = 4.0;
 /// Create's `margin-right: 24px`.
 const CREATE_RIGHT: f32 = 24.0;
+/// The `Day | Week` toggle sits 12px before Create, a small secondary button split in two by a
+/// 1px line.
+const TOGGLE_GAP: f32 = 12.0;
 /// 32px after Today and after the chevrons. The chevrons (8×15) are 24px apart and 8px down, with
 /// 4px of hit slop around each.
 const GAP: f32 = 32.0;
@@ -125,9 +128,18 @@ pub struct ListedCalendar {
 /// A calendar row's `…` button in Classic: 12px.
 const MENU_BUTTON: f32 = 12.0;
 
+/// The full calendar's views: a single day, or its week.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum View {
+    Day,
+    Week,
+}
+
 /// What the week view shows besides the grid.
 pub struct Page<'a> {
     pub grid: Grid<'a>,
+    /// Day or Week.
+    pub view: View,
     /// The week's first day, which names its months whatever days show.
     pub week_start: Date,
     /// Weeks start on Monday.
@@ -151,11 +163,13 @@ pub struct Page<'a> {
 /// What the user did in the week view.
 #[derive(Clone, Debug, PartialEq)]
 pub enum WeekAction {
-    /// Today, or the chevrons: this week, or one week back (-1) or on (1).
+    /// Today, or the chevrons: this week (or day), or one week (or day) back (-1) or on (1).
     Today,
     Step(i64),
     /// Create, for a new event in the week.
     Create,
+    /// The header's `Day | Week` toggle.
+    View(View),
     /// A day in the mini month.
     Select(Date),
     /// A calendar's checkbox.
@@ -229,6 +243,12 @@ impl Week {
     /// Where the form's draft was drawn last.
     pub fn draft_anchor(&self) -> Option<Rect> {
         self.grid.draft_anchor
+    }
+
+    /// The guests' columns the grid drew last frame, day by day: each one's calendar (`None` for
+    /// mine), its width, and its events' titles.
+    pub fn columns_drawn(&self) -> &[(Option<String>, f32, Vec<String>)] {
+        &self.grid.drawn
     }
 
     /// Whether something is being dragged in the grid.
@@ -322,7 +342,8 @@ impl Week {
         actions
     }
 
-    /// The top bar: Today, the chevrons, and the week's month.
+    /// The top bar: Today, the chevrons, the week's month (the Day view's date), the `Day | Week`
+    /// toggle and Create.
     fn top_bar(
         &self,
         ui: &Ui,
@@ -359,14 +380,20 @@ impl Week {
         }
         x = button.right() + GAP;
 
+        let day = page.view == View::Day;
         let chevrons = [
             (
                 -1,
                 "legacy/DEPRECATED_leftChevronLarge",
-                "Previous Week",
+                if day { "Previous Day" } else { "Previous Week" },
                 "–",
             ),
-            (1, "legacy/DEPRECATED_rightChevronLarge", "Next Week", "="),
+            (
+                1,
+                "legacy/DEPRECATED_rightChevronLarge",
+                if day { "Next Day" } else { "Next Week" },
+                "=",
+            ),
         ];
         for (step, icon, text, key) in chevrons {
             let size = exo_ui::icon_size(ui.ctx(), icon).unwrap_or(Vec2::splat(CHEVRON));
@@ -389,10 +416,14 @@ impl Week {
             }
             x = icon_rect.right() + if step < 0 { CHEVRON_GAP } else { GAP };
         }
+        let title = match (page.view, page.grid.days.first()) {
+            (View::Day, Some(day)) => day_display(*day),
+            _ => date_display(page.week_start),
+        };
         DATE.paint_line(
             painter,
             pos2(x, top + DATE_TOP),
-            &date_display(page.week_start),
+            &title,
             palette.text_base_default,
             None,
         );
@@ -413,7 +444,94 @@ impl Week {
         if create.clicked() {
             actions.push(WeekAction::Create);
         }
+        view_toggle(
+            ui,
+            create.rect.left() - TOGGLE_GAP,
+            top + BUTTON_TOP,
+            page.view,
+            actions,
+        );
     }
+}
+
+/// The `Day | Week` toggle, ending at `right`: a small secondary button's ring around both
+/// halves, a 1px line between them, and the view shown filled as a hovered button is.
+fn view_toggle(ui: &Ui, right: f32, top: f32, view: View, actions: &mut Vec<WeekAction>) {
+    let ctx = ui.ctx();
+    let palette = exo_ui::palette(ctx);
+    let carbon = palette.theme == exo_ui::Theme::Carbon;
+    let ring = if carbon {
+        Color32::from_rgb(0x47, 0x45, 0x43)
+    } else {
+        Color32::from_rgb(0xde, 0xdb, 0xd5)
+    };
+    let fill = if carbon {
+        ring
+    } else {
+        Color32::from_rgb(0xf2, 0xf0, 0xeb)
+    };
+    let halves = [(View::Day, "Day", "d"), (View::Week, "Week", "w")];
+    let widths = halves.map(|(_, text, _)| origin_button_width(ctx, text, false));
+    let mut left = right - widths.iter().sum::<f32>();
+    let whole = Rect::from_min_max(pos2(left, top), pos2(right, top + BUTTON_HEIGHT));
+    for ((shown, text, key), width) in halves.into_iter().zip(widths) {
+        let rect = Rect::from_min_size(pos2(left, top), vec2(width, BUTTON_HEIGHT));
+        let response = ui
+            .interact(
+                rect,
+                exo_ui::id(ctx, ("calendar-week-view", text)),
+                Sense::click(),
+            )
+            .on_hover_cursor(egui::CursorIcon::PointingHand);
+        let on = shown == view;
+        if on || response.hovered() {
+            let corners = if shown == View::Day {
+                egui::CornerRadius {
+                    nw: 8,
+                    sw: 8,
+                    ..egui::CornerRadius::ZERO
+                }
+            } else {
+                egui::CornerRadius {
+                    ne: 8,
+                    se: 8,
+                    ..egui::CornerRadius::ZERO
+                }
+            };
+            ui.painter()
+                .rect_filled(exo_ui::pixel_snap(rect), corners, fill);
+        }
+        let ink = match (on || response.hovered(), carbon) {
+            (true, false) => Color32::from_rgb(0x14, 0x14, 0x13),
+            (true, true) => palette.ink(0.9, 0.9),
+            _ => palette.ink(0.7, 0.7),
+        };
+        BUTTON.paint_line(
+            ui.painter(),
+            pos2(rect.left() + BUTTON_PADDING_X, top + BUTTON_TEXT_TOP),
+            text,
+            ink,
+            None,
+        );
+        KeyTooltip { text, keys: &[key] }.show_below(ui, &response, 8.0);
+        if response.clicked() && !on {
+            actions.push(WeekAction::View(shown));
+        }
+        left = rect.right();
+    }
+    let snapped = exo_ui::pixel_snap(whole);
+    ui.painter().rect_stroke(
+        snapped,
+        8.0,
+        Stroke::new(1.0, ring),
+        egui::StrokeKind::Inside,
+    );
+    let middle = whole.left() + widths[0];
+    ui.painter().vline(
+        (middle + 0.5).floor() - 0.5,
+        snapped.top()..=snapped.bottom(),
+        Stroke::new(1.0, ring),
+    );
 }
 
 /// A small secondary button's width: its text between 10px sides, after the plus.
@@ -1012,10 +1130,20 @@ pub fn date_display(start: Date) -> String {
     }
 }
 
+/// The Day view's title: `November 17, 2026`.
+pub fn day_display(day: Date) -> String {
+    day.strftime("%B %-d, %Y").to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use jiff::civil::date;
+
+    #[test]
+    fn the_day_names_its_date() {
+        assert_eq!(day_display(date(2026, 11, 7)), "November 7, 2026");
+    }
 
     #[test]
     fn the_week_names_its_months() {

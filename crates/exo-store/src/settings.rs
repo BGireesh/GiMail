@@ -1010,6 +1010,9 @@ pub struct DeviceSettings {
     /// or `None` while no copy is kept.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notes_folder: Option<String>,
+    /// The full calendar shows a single day (its Day view) rather than its week.
+    #[serde(skip_serializing_if = "is_false")]
+    pub calendar_day_view: bool,
 }
 
 impl Document for DeviceSettings {

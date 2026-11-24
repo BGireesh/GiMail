@@ -1709,3 +1709,227 @@ fn share_availability_s_who_takes_two_suggestions_clicked_in_a_row() {
     assert_eq!(added, ["priya@brightmoor.co", "lena@brightmoor.co"]);
     assert!(has_keyboard(&app, "share-who"), "Who keeps the keyboard");
 }
+
+/// Clicks the widget `source` names (through `exo_ui::id`), where it was drawn last frame.
+fn click_widget(app: &mut Fixture, source: impl egui::AsId) {
+    let ctx = app.harness.ctx.clone();
+    let rect = ctx
+        .read_response(exo_ui::id(&ctx, source))
+        .expect("the widget is up")
+        .rect;
+    app.click(rect.center());
+}
+
+/// The days the full calendar shows.
+fn days_shown(app: &Fixture) -> Vec<jiff::civil::Date> {
+    app.mail().calendar_days_shown()
+}
+
+/// The Day view at 1280×800, the morning's scroll: a time's y, and its x a `fraction` of the way
+/// across the day's column.
+fn in_day(fraction: f32, hour: f32) -> Pos2 {
+    Pos2::new(
+        104.0 + (993.0 - 104.0) * fraction,
+        194.0 + hour * 44.0 - 312.0,
+    )
+}
+
+#[test]
+fn the_calendar_shows_a_day_or_its_week_and_remembers_which() {
+    let mut app = start("calendar-day-view");
+    app.key(Key::Num2);
+    app.settle();
+    assert_eq!(days_shown(&app).len(), 7, "the week, at first");
+    app.key(Key::D);
+    assert_eq!(days_shown(&app), [date(2026, 11, 17)], "`d`: the day");
+    // Next and previous step a day, and `t` is today again.
+    app.key(Key::Equals);
+    app.key(Key::J);
+    assert_eq!(days_shown(&app), [date(2026, 11, 19)]);
+    app.key(Key::Minus);
+    assert_eq!(days_shown(&app), [date(2026, 11, 18)]);
+    app.key(Key::T);
+    assert_eq!(days_shown(&app), [date(2026, 11, 17)]);
+    app.key(Key::W);
+    assert_eq!(days_shown(&app).len(), 7, "`w`: the week");
+    // Without weekends the week is five days, but a weekend day still shows in Day.
+    palette(&mut app, "Hide Weekends");
+    assert_eq!(days_shown(&app).len(), 5);
+    app.key(Key::D);
+    for _ in 0..4 {
+        app.key(Key::Equals);
+    }
+    assert_eq!(days_shown(&app), [date(2026, 11, 21)], "Saturday");
+    // The header's toggle switches by mouse.
+    click_widget(&mut app, ("calendar-week-view", "Week"));
+    assert_eq!(days_shown(&app).len(), 5);
+    click_widget(&mut app, ("calendar-week-view", "Day"));
+    assert_eq!(days_shown(&app), [date(2026, 11, 21)]);
+    // The calendar opens in the view last used, after closing and after a relaunch.
+    app.key(Key::Escape);
+    app.key(Key::Num2);
+    assert_eq!(days_shown(&app), [date(2026, 11, 17)], "Day, on today");
+    app.relaunch();
+    app.key(Key::Num2);
+    assert_eq!(
+        days_shown(&app),
+        [date(2026, 11, 17)],
+        "Day after a relaunch"
+    );
+}
+
+#[test]
+fn jump_to_date_lands_on_the_day_in_the_day_view() {
+    let mut app = start("calendar-day-jump");
+    app.key(Key::Num2);
+    app.key(Key::D);
+    palette(&mut app, "jump to date");
+    app.harness.run_steps(1);
+    app.type_text("nov 25");
+    app.key(Key::Enter);
+    assert_eq!(days_shown(&app), [date(2026, 11, 25)]);
+}
+
+#[test]
+fn in_the_day_view_each_person_in_meet_has_a_full_width_column() {
+    let mut app = start("calendar-day-columns");
+    app.key(Key::Num2);
+    app.key(Key::D);
+    app.settle();
+    app.key(Key::M);
+    for guest in ["priya", "lena"] {
+        app.type_text(guest);
+        app.wait(0.3);
+        app.key(Key::Enter);
+    }
+    app.wait(1.0);
+    app.settle();
+    let columns = app.mail().calendar_columns_drawn();
+    let heads: Vec<&str> = columns.iter().map(|(head, ..)| head.as_str()).collect();
+    assert_eq!(
+        heads,
+        ["Maya Okafor", "Priya Raman", "Lena Fischer"],
+        "mine first, then each person in the order added"
+    );
+    let widths: Vec<f32> = columns.iter().map(|(_, width, _)| *width).collect();
+    assert!(
+        widths
+            .iter()
+            .all(|width| (width - widths[0]).abs() < 1.0 && *width > 250.0),
+        "three wide columns alike: {widths:?}"
+    );
+    assert!(
+        columns[1].2.contains(&"Design crit".to_owned()),
+        "Priya's events in her column: {columns:?}"
+    );
+    // Her Design crit, 3:00–4:00, opens its details from her column.
+    app.click(in_day(0.5, 15.5));
+    assert_eq!(
+        app.mail().calendar_details_event(),
+        Some(("Design crit".to_owned(), "priya@brightmoor.co".to_owned()))
+    );
+    app.key(Key::Escape);
+    // The week's days still split as before: one column open at half the day, two collapsed.
+    app.key(Key::W);
+    app.settle();
+    let week = app.mail().calendar_columns_drawn();
+    assert!(
+        week.len() == 21
+            && week.chunks(3).all(|day| {
+                let mut widths: Vec<f32> = day.iter().map(|(_, width, _)| *width).collect();
+                widths.sort_by(f32::total_cmp);
+                (widths[2] - 2.0 * widths[0]).abs() < 1.0
+            }),
+        "the week's columns: {week:?}"
+    );
+}
+
+#[test]
+fn a_new_event_in_the_day_view_is_on_its_day() {
+    let mut app = start("calendar-day-create");
+    app.key(Key::Num2);
+    app.key(Key::D);
+    app.key(Key::Equals);
+    app.settle();
+    // Dragged out from 1:00 to 2:00 on Wednesday, after its Focus time.
+    drag(&mut app, in_day(0.3, 13.1), in_day(0.3, 13.9));
+    let when = |app: &Fixture| {
+        app.mail()
+            .calendar_form_when()
+            .map(|(start, end)| (start.to_string(), end.to_string()))
+    };
+    assert_eq!(
+        when(&app),
+        Some((
+            "2026-11-18T13:00:00-05:00[America/New_York]".to_owned(),
+            "2026-11-18T14:00:00-05:00[America/New_York]".to_owned()
+        ))
+    );
+    app.key(Key::Escape);
+    assert_eq!(app.mail().calendar_form(), None);
+    // `b` makes one at 9:00 on the day shown.
+    app.key(Key::B);
+    assert!(
+        when(&app).is_some_and(|(start, _)| start.starts_with("2026-11-18T09:00")),
+        "{:?}",
+        when(&app)
+    );
+}
+
+#[test]
+fn find_time_in_the_day_view_offers_the_day_s_slots_and_a_slot_makes_the_meeting() {
+    let mut app = start("calendar-day-find-time");
+    app.key(Key::Num2);
+    app.key(Key::D);
+    app.settle();
+    app.key(Key::M);
+    app.type_text("lena");
+    app.key(Key::Enter);
+    app.key(Key::Enter);
+    app.wait(0.5);
+    assert!(app.mail().calendar_free_slots() > 0, "free slots");
+    // Tuesday 9:00, the first, across the day.
+    app.click(in_day(0.8, 9.25));
+    let (title, guests) = app.mail().calendar_form_values().expect("the form");
+    assert_eq!(
+        (title.as_str(), guests),
+        ("Maya / Lena", vec!["lena@brightmoor.co".to_owned()])
+    );
+}
+
+#[test]
+fn the_day_view_s_gutter_shows_the_secondary_time_zone() {
+    let mut app = support::start_with_settings("calendar-day-zones", &|settings| {
+        settings.calendar.show_additional_timezones = true;
+        settings.calendar.additional_timezones = vec![exo_store::AdditionalTimezone {
+            iana_id: "Europe/London".to_owned(),
+        }];
+    });
+    app.key(Key::Num2);
+    app.key(Key::D);
+    app.settle();
+    assert_eq!(days_shown(&app), [date(2026, 11, 17)]);
+    // London's name, left of New York's in the gutter, opens Calendar Settings.
+    app.click(Pos2::new(70.0, 180.0));
+    assert!(app.mail().calendar_settings_open());
+}
+
+#[test]
+fn share_availability_in_the_day_view_picks_times_on_the_day() {
+    let mut app = start("calendar-day-share");
+    app.key(Key::Num2);
+    app.key(Key::D);
+    app.settle();
+    app.press(Key::A, CMD.plus(Modifiers::SHIFT));
+    assert_eq!(app.mail().calendar_share_minutes(), Some(30));
+    assert_eq!(days_shown(&app), [date(2026, 11, 17)], "still a day");
+    // A click on 2:00 picks half an hour there.
+    app.click(in_day(0.5, 14.1));
+    let slots: Vec<String> = app
+        .mail()
+        .calendar_share_slots()
+        .into_iter()
+        .map(|(start, end)| format!("{} {}", start.strftime("%F %R"), end.strftime("%R")))
+        .collect();
+    assert_eq!(slots, ["2026-11-17 14:00 14:30"]);
+}

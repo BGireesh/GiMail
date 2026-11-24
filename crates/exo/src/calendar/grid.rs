@@ -114,6 +114,10 @@ pub struct Grid<'a> {
     pub sharing: Option<i64>,
     /// Secondary time zones, whose hours and names the week's gutter shows before this one's.
     pub zones: &'a [TimeZone],
+    /// The Day view's names and colours over the guests' columns, mine first when [`Self::mine`],
+    /// or none. With them the columns all stay open at equal widths, each under its name, and a
+    /// hover expands none.
+    pub heads: &'a [(String, exo_ui::CalendarColor)],
 }
 
 /// The grid's scroll and pointer state, kept across frames.
@@ -138,6 +142,9 @@ pub struct GridView {
     /// mine), and hover intent on the columns.
     column_under: Option<(Date, Option<String>)>,
     column_intent: exo_ui::HoverIntent<(Date, Option<String>)>,
+    /// The guests' columns drawn last frame, day by day: each one's calendar (`None` for mine),
+    /// its width, and its events' titles.
+    pub drawn: Vec<(Option<String>, f32, Vec<String>)>,
 }
 
 /// A drag in the grid.
@@ -282,6 +289,7 @@ impl GridView {
         variant: Variant,
     ) -> Vec<GridAction> {
         self.draft_anchor = None;
+        self.drawn.clear();
         let dragged = self.dragged(grid);
         let rows = all_day_rows(grid, dragged.as_ref());
         // With guests overlaid, as many rows as the fullest column of a day has events.
@@ -290,6 +298,7 @@ impl GridView {
                 &shown(grid, dragged.as_ref()),
                 grid.guests,
                 grid.expanded,
+                !grid.heads.is_empty(),
                 grid.days,
             )
         });
@@ -443,14 +452,15 @@ impl GridView {
         actions
     }
 
-    /// Where the form goes for a draft on a weekend day the week leaves out: a line at the
-    /// columns' left edge for a day before the first shown, else at their right edge, from the
-    /// draft's start time to its end time (none past midnight).
+    /// Where the form goes for a draft on a day not shown (a weekend day the week leaves out, or
+    /// any other day than the Day view's): a line at the columns' left edge for a day before the
+    /// first shown, else at their right edge, from the draft's start time to its end time (none
+    /// past midnight).
     fn hidden_day_anchor(&self, frame: &Frame, grid: &Grid<'_>) -> Option<Rect> {
         let draft = grid.draft?;
         let day = draft.start.date();
         let weekend = matches!(day.weekday(), Weekday::Saturday | Weekday::Sunday);
-        if !weekend || grid.days.contains(&day) {
+        if (!weekend && grid.days.len() > 1) || grid.days.contains(&day) {
             return None;
         }
         let x = if grid.days.first().is_some_and(|first| day < *first) {
@@ -1231,12 +1241,20 @@ fn all_day_rows<'a>(grid: &Grid<'a>, extra: Option<&'a Event>) -> Vec<Vec<Cell<'
 
 /// The weekday headers: `Tue 17` centred over each column, today's on a fill. Classic sets them
 /// all semibold, at `.6` (Carbon `.5`), today's at `.8` on `rgba(0,0,0,.05)` (Carbon white) with
-/// 2px corners.
+/// 2px corners. With the Day view's heads, the day's header goes over the gutter and each column
+/// has its name over it instead.
 fn paint_day_headers(painter: &Painter, frame: &Frame, grid: &Grid<'_>) {
     let palette = exo_ui::palette(painter.ctx());
     let width = frame.columns.width() / grid.days.len().max(1) as f32;
+    if !grid.heads.is_empty() {
+        paint_heads(painter, frame, grid.heads);
+    }
     for (index, day) in grid.days.iter().enumerate() {
-        let center = frame.columns.left() + (index as f32 + 0.5) * width;
+        let center = if grid.heads.is_empty() {
+            frame.columns.left() + (index as f32 + 0.5) * width
+        } else {
+            frame.gutter.center().x
+        };
         let title = Rect::from_min_size(
             pos2(
                 center - DAY_TITLE_WIDTH / 2.0,
@@ -1265,6 +1283,39 @@ fn paint_day_headers(painter: &Painter, frame: &Frame, grid: &Grid<'_>) {
             &text,
             color,
             None,
+        );
+    }
+}
+
+/// The Day view's heads, one over each of the equal columns the day splits into: the name,
+/// semibold and in the person's colour, after a 10px swatch of it, centred, and cut short to fit.
+fn paint_heads(painter: &Painter, frame: &Frame, heads: &[(String, exo_ui::CalendarColor)]) {
+    const SWATCH: f32 = 10.0;
+    const SWATCH_GAP: f32 = 6.0;
+    let theme = exo_ui::theme(painter.ctx());
+    // As the columns are: the day's width less its border and the events' inset, shared equally.
+    let room = (frame.columns.width() - 1.0 - EVENTS_INSET) / heads.len().max(1) as f32;
+    for (index, (name, color)) in heads.iter().enumerate() {
+        let left = frame.columns.left() + index as f32 * room;
+        let fit = (room - 2.0 * 8.0 - SWATCH - SWATCH_GAP).max(0.0);
+        let text = DAY_TITLE.width(painter.ctx(), name).min(fit);
+        let start = left + (room - SWATCH - SWATCH_GAP - text) / 2.0;
+        let top = frame.headers.top() + DAY_TITLE_TOP;
+        let ink = color.guest_swatch(theme);
+        painter.rect_filled(
+            exo_ui::pixel_snap(Rect::from_min_size(
+                pos2(start, top + (DAY_TITLE.line_height - SWATCH) / 2.0),
+                Vec2::splat(SWATCH),
+            )),
+            2.0,
+            ink,
+        );
+        DAY_TITLE.paint_line(
+            painter,
+            pos2(start + SWATCH + SWATCH_GAP, top + 1.0),
+            name,
+            ink,
+            Some(fit),
         );
     }
 }
@@ -1443,7 +1494,9 @@ impl GridView {
                     pos2(left, container.top()),
                     vec2(width, container.height()),
                 );
-                self.hover_column(ui, band, rect, (*day, guest.clone()));
+                if grid.heads.is_empty() {
+                    self.hover_column(ui, band, rect, (*day, guest.clone()));
+                }
                 for (row, event) in events.iter().enumerate() {
                     let block = Rect::from_min_size(
                         pos2(left + 1.0, container.top() + row as f32 * ALL_DAY_ROW),
@@ -1535,11 +1588,13 @@ impl GridView {
             .partition(|event| overlapping.contains(&event.key));
         let mut boxes: Vec<(&Event, Rect, bool, Option<InColumn>)> = Vec::new();
         // The guests' columns: mine, then theirs, side by side.
+        let open = !grid.heads.is_empty();
         let guest_columns = columns_shown.then(|| {
             super::guests::columns(
                 grid.mine.then(|| events.clone()),
                 grid.guests,
                 grid.expanded,
+                open,
                 midnight,
             )
         });
@@ -1557,7 +1612,27 @@ impl GridView {
                     pos2(left, column.top()),
                     pos2(left + room, column.bottom()),
                 );
-                self.hover_column(ui, frame.bodies, rect, (day, guest_column.guest.clone()));
+                self.drawn.push((
+                    guest_column.guest.clone(),
+                    room,
+                    guest_column
+                        .events
+                        .iter()
+                        .map(|event| event.title.clone())
+                        .collect(),
+                ));
+                if open {
+                    // The Day view's columns are parted by a line.
+                    if left > column.left() {
+                        ui.painter_at(clip).vline(
+                            snap(left) - 0.5,
+                            column.y_range(),
+                            Stroke::new(1.0, exo_ui::palette(ui.ctx()).border_base_muted),
+                        );
+                    }
+                } else {
+                    self.hover_column(ui, frame.bodies, rect, (day, guest_column.guest.clone()));
+                }
                 let spans: Vec<_> = guest_column
                     .events
                     .iter()
@@ -1571,8 +1646,9 @@ impl GridView {
                         ),
                         vec2(place.width / 100.0 * room - 2.0, place.height),
                     );
-                    // Guests' events show their time while there are two columns at most.
-                    let time = guest_column.guest.is_none() || columns.len() <= 2;
+                    // Guests' events show their time while there are two columns at most, or in
+                    // the Day view's wide ones.
+                    let time = guest_column.guest.is_none() || columns.len() <= 2 || open;
                     boxes.push((
                         &guest_column.events[place.event],
                         block,
@@ -2114,6 +2190,7 @@ mod tests {
                 mine: true,
                 sharing: None,
                 zones,
+                heads: &[],
             };
             week_gutter(&grid)
         };
