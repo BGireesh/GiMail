@@ -10,7 +10,7 @@ use crate::error::Result;
 use crate::ids::labels::{INBOX, SH_IMPORTANT, UNREAD};
 use crate::model::Contact;
 use crate::parse::unescape_html;
-use crate::store::{Inner, Store, load_view, load_views};
+use crate::store::{Inner, Store, read_view, read_views};
 use crate::view::{Identity, ThreadView, ViewMessage};
 
 /// A message new to the store. Gmail's history added it, the store didn't have it before (it
@@ -75,7 +75,7 @@ impl Inner {
             .into_iter()
             .collect();
         let mut db = self.db.clone();
-        let views = load_views(&mut db, &threads).await?;
+        let views = read_views(&mut db, &threads).await?;
         let me = self.me();
         let mut arrivals: Vec<Arrival> = messages
             .iter()
@@ -99,7 +99,7 @@ impl Store {
     /// On database failures.
     pub async fn latest_arrival(&self, thread: &str) -> Result<Option<Arrival>> {
         let mut db = self.inner.db.clone();
-        let Some(view) = load_view(&mut db, thread).await? else {
+        let Some(view) = read_view(&mut db, thread).await? else {
             return Ok(None);
         };
         let me = self.inner.me();
