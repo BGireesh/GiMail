@@ -56,6 +56,8 @@ const PEOPLE_MAX: usize = 8;
 const BUTTON: f32 = 20.0;
 const STATUS_GAP: f32 = 8.0;
 const STATUS_SPINNER: f32 = 14.0;
+/// The least time a re-sync shows as syncing, in seconds.
+const RESYNC_SHOWN: f64 = 0.8;
 
 /// What the section changed in [`CalendarCache`].
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -88,11 +90,12 @@ pub(crate) struct CacheStatus<'a> {
 }
 
 impl CacheStatus<'_> {
-    /// What a person's row says after their name: `Syncing…` while their calendar is read,
+    /// What a person's row says after their name: `Syncing…` while their calendar is read
+    /// (`syncing`),
     /// else when it was last cached (`Synced just now`, `Synced 4:12 PM` today, `Synced Nov 20,
     /// 4:12 PM` before), or `Not synced yet`.
-    pub fn label(&self, email: &str) -> String {
-        if self.syncing.contains(email) {
+    pub fn label(&self, email: &str, syncing: bool) -> String {
+        if syncing {
             return "Syncing…".to_owned();
         }
         let Some(at) = self.synced.get(email) else {
@@ -196,6 +199,9 @@ pub(crate) struct CacheInput {
     /// of a row.
     first_person: usize,
     carry: f32,
+    /// When each person's re-sync was last clicked (the UI's clock), so `Syncing…` shows for a
+    /// moment at least, however fast the read.
+    resynced: std::collections::HashMap<String, f64>,
 }
 
 impl CacheInput {
@@ -336,8 +342,16 @@ pub(crate) fn show(
             .unwrap_or_else(|| person.clone());
         // The name, then when their calendar was last cached (a spinner first while it's read),
         // then re-sync and ×.
-        let syncing = status.syncing.contains(person);
-        let said = status.label(person);
+        let clock = ui.input(|input| input.time);
+        let clicked = input
+            .resynced
+            .get(person)
+            .is_some_and(|at| clock - at < RESYNC_SHOWN);
+        if clicked {
+            ui.ctx().request_repaint();
+        }
+        let syncing = status.syncing.contains(person) || clicked;
+        let said = status.label(person, syncing);
         let said_width = TEXT.width(ui.ctx(), &said) + if syncing { STATUS_SPINNER } else { 0.0 };
         let room = width - VALUE_LEFT - 2.0 * BUTTON - 8.0;
         let name_width = TEXT.paint_line(
@@ -382,15 +396,25 @@ pub(crate) fn show(
         } else {
             hit
         };
-        let ink = if !can {
+        let ink = if syncing {
+            palette.ink(0.7, 0.7)
+        } else if !can {
             palette.ink(0.2, 0.2)
         } else if hit.hovered() {
             palette.ink(0.8, 0.8)
         } else {
             palette.ink(0.4, 0.8)
         };
-        paint_resync(ui, resync.center(), ink);
+        // While syncing, the arrow turns, once a second.
+        let turn = if syncing {
+            ui.ctx().request_repaint();
+            (clock % 1.0) as f32 * std::f32::consts::TAU
+        } else {
+            0.0
+        };
+        paint_resync(ui, resync.center(), ink, turn);
         if can && hit.clicked() {
+            input.resynced.insert(person.clone(), clock);
             changes.push(CacheChange::Resync(person.clone()));
         }
         let cross = Rect::from_min_size(pos2(left + width - 20.0, y), vec2(20.0, PERSON_ROW));
@@ -598,12 +622,12 @@ pub(crate) fn show(
     changes
 }
 
-/// A re-sync button's arrow around `center`: most of a circle, its head at the end, turning
-/// clockwise.
-fn paint_resync(ui: &Ui, center: Pos2, ink: Color32) {
+/// A re-sync button's arrow around `center`: most of a circle, its head at the end, pointing
+/// clockwise, turned on by `turn` radians (it spins while syncing).
+fn paint_resync(ui: &Ui, center: Pos2, ink: Color32, turn: f32) {
     const RADIUS: f32 = 4.5;
     const STEPS: usize = 24;
-    let start = -std::f32::consts::FRAC_PI_2 + 0.6;
+    let start = -std::f32::consts::FRAC_PI_2 + 0.6 + turn;
     let sweep = std::f32::consts::TAU - 1.2;
     let point = |t: f32| center + RADIUS * egui::Vec2::angled(start + sweep * t);
     let points: Vec<Pos2> = (0..=STEPS)
@@ -724,10 +748,10 @@ mod tests {
             now: at("2026-11-17T16:12"),
             online: true,
         };
-        assert_eq!(status.label("now@x.co"), "Synced just now");
-        assert_eq!(status.label("today@x.co"), "Synced 9:05 AM");
-        assert_eq!(status.label("before@x.co"), "Synced Nov 13, 2:40 PM");
-        assert_eq!(status.label("reading@x.co"), "Syncing…");
-        assert_eq!(status.label("never@x.co"), "Not synced yet");
+        assert_eq!(status.label("now@x.co", false), "Synced just now");
+        assert_eq!(status.label("today@x.co", false), "Synced 9:05 AM");
+        assert_eq!(status.label("before@x.co", false), "Synced Nov 13, 2:40 PM");
+        assert_eq!(status.label("today@x.co", true), "Syncing…");
+        assert_eq!(status.label("never@x.co", false), "Not synced yet");
     }
 }

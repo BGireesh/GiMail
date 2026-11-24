@@ -130,7 +130,7 @@ pub enum Marker {
 }
 
 /// The marker for `email`: their colour while their calendar is overlaid (after a spinner while
-/// the latest loads), a spinner while it loads, else an empty swatch, as for a cached copy that
+/// the latest loads), a spinner while it loads or before the task has taken it up, else an empty swatch, as for a cached copy that
 /// Calendar couldn't confirm.
 pub fn marker(email: &str, shown: &[(String, CalendarColor)], data: &Data, online: bool) -> Marker {
     let calendar = data.guests.get(email);
@@ -144,6 +144,9 @@ pub fn marker(email: &str, shown: &[(String, CalendarColor)], data: &Data, onlin
         Some(_) if stale => Marker::Empty,
         Some((_, color)) => Marker::Swatch(*color),
         None if loading => Marker::Spinner,
+        // Asked for and not taken up yet (the task is busy with something else): loading too,
+        // not an empty swatch that looks stuck.
+        None if online && calendar.is_none() => Marker::Spinner,
         None => Marker::Empty,
     }
 }
@@ -974,6 +977,10 @@ mod tests {
         assert_eq!(marker(priya, &shown, &settled, true), Marker::Swatch(pink));
         let pending = with(true, GuestEvents::Pending);
         assert_eq!(marker(priya, &[], &pending, true), Marker::Spinner);
+        // Asked for but not taken up by the task yet: loading, not stuck; offline, empty.
+        let unknown = Data::default();
+        assert_eq!(marker(priya, &[], &unknown, true), Marker::Spinner);
+        assert_eq!(marker(priya, &[], &unknown, false), Marker::Empty);
         // A cached copy Calendar couldn't confirm isn't current, as a failed read isn't.
         let stale = with(false, GuestEvents::Stale(Vec::new()));
         assert_eq!(marker(priya, &shown, &stale, true), Marker::Empty);
