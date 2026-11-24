@@ -1326,9 +1326,19 @@ impl crate::Mail {
         }
     }
 
+    /// Applies a change in Calendar Settings' cache section.
+    pub(super) fn calendar_cache_change(&mut self, change: super::options::CacheChange) {
+        self.account
+            .update_settings(|settings| change.clone().apply(&mut settings.calendar.cache));
+    }
+
     /// Calendar Settings over `page`, while it's up or fading.
     fn calendar_show_options(&mut self, ctx: &egui::Context, page: Rect) {
         use super::options::{OptionsAction, Setting};
+        if !self.calendar.options_open {
+            self.calendar.options_cache.close_menu();
+        }
+        let book = self.calendar_book();
         let settings = self.account.settings();
         let link = settings.meeting_links.default_meeting_link.clone();
         let calendar = &settings.calendar;
@@ -1373,6 +1383,8 @@ impl crate::Mail {
             now: self.now.timestamp(),
             meeting_link: link.as_deref(),
             accounts: &accounts,
+            cache: &calendar.cache,
+            book: book.as_deref(),
         };
         for action in super::options::show(
             ctx,
@@ -1380,6 +1392,7 @@ impl crate::Mail {
             self.calendar.options_open,
             &shown,
             &mut self.calendar.options_zone,
+            &mut self.calendar.options_cache,
         ) {
             match action {
                 OptionsAction::Toggle(setting) => self.account.update_settings(|settings| {
@@ -1405,6 +1418,7 @@ impl crate::Mail {
                 OptionsAction::MeetingLink(link) => self.account.update_settings(|settings| {
                     settings.meeting_links.default_meeting_link = link.clone()
                 }),
+                OptionsAction::Cache(change) => self.calendar_cache_change(change),
                 OptionsAction::Close => self.calendar.options_open = false,
                 // Adding an account closes the dialog, opens the week view, and starts Google's
                 // consent.

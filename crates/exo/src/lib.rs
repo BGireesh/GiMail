@@ -3279,6 +3279,8 @@ impl Mail {
             details,
             calendar_state,
         );
+        let cache_keys = self.calendar_cache_keys();
+        calendar::register_cache_keys(&mut self.commands, cache_keys);
         compose::register_shortcuts(
             &mut self.commands,
             &compose::Shortcuts {

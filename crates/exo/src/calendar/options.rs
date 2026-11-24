@@ -6,6 +6,8 @@ use egui::{Color32, CornerRadius, Rect, Sense, Ui, Vec2, pos2, vec2};
 use exo_ui::{Dialog, Family, Font, TextStyle};
 use jiff::Timestamp;
 
+pub use super::options_cache::CacheChange;
+use super::options_cache::{self, CacheInput};
 use super::timezones::{self, ZoneInput};
 
 /// The headings are 12px/20px bold, nudged `top: 3px`. The checkbox's label is 14px/21px weight
@@ -97,6 +99,8 @@ pub enum OptionsAction {
     /// A zone picked in the secondary time zone's input, by IANA id.
     SecondaryZone(String),
     MeetingLink(Option<String>),
+    /// A change in the Calendar Cache section.
+    Cache(CacheChange),
     /// `Manage notification settings`, which puts the Notifications dialog in this one's place.
     Notifications,
     /// `Sign in with Google`, for another calendar account.
@@ -125,6 +129,9 @@ pub struct Shown<'a> {
     pub meeting_link: Option<&'a str>,
     /// The calendar accounts, the mail account's first and the others by address.
     pub accounts: &'a [ShownAccount<'a>],
+    /// The calendar cache's settings, and the address book its people are picked from.
+    pub cache: &'a exo_store::CalendarCache,
+    pub book: Option<&'a crate::compose::contacts::Index>,
 }
 
 impl Shown<'_> {
@@ -144,6 +151,7 @@ fn body_height(shown: &Shown<'_>) -> f32 {
         + (MEETING_LINKS.len() as f32 - 1.0) * ROW
         + 20.0
         + ACCOUNTS_GAP
+        + options_cache::height(shown.cache)
         + NOTIFICATIONS_HEIGHT
         + accounts
 }
@@ -166,12 +174,13 @@ pub fn show(
     open: bool,
     shown: &Shown<'_>,
     zone: &mut ZoneInput,
+    cache: &mut CacheInput,
 ) -> Vec<OptionsAction> {
     let response = Dialog::new("calendar-settings", "Calendar", body_height(shown)).show(
         ctx,
         area,
         open,
-        |ui, body| body_ui(ui, body, shown, zone),
+        |ui, body| body_ui(ui, body, shown, zone, cache),
     );
     let mut actions = response.inner.unwrap_or_default();
     if response.close {
@@ -180,7 +189,13 @@ pub fn show(
     actions
 }
 
-fn body_ui(ui: &mut Ui, body: Rect, shown: &Shown<'_>, zone: &mut ZoneInput) -> Vec<OptionsAction> {
+fn body_ui(
+    ui: &mut Ui,
+    body: Rect,
+    shown: &Shown<'_>,
+    zone: &mut ZoneInput,
+    cache: &mut CacheInput,
+) -> Vec<OptionsAction> {
     let palette = exo_ui::palette(ui.ctx());
     let mut actions = Vec::new();
     let left = body.left();
@@ -271,7 +286,19 @@ fn body_ui(ui: &mut Ui, body: Rect, shown: &Shown<'_>, zone: &mut ZoneInput) -> 
         );
         top += ROW;
     }
-    let notifications = top - ROW + TEXT.line_height + ACCOUNTS_GAP;
+    let cache_top = top - ROW + TEXT.line_height + ACCOUNTS_GAP;
+    actions.extend(
+        options_cache::show(
+            ui,
+            (left, body.width(), cache_top),
+            shown.cache,
+            cache,
+            shown.book,
+        )
+        .into_iter()
+        .map(OptionsAction::Cache),
+    );
+    let notifications = cache_top + options_cache::height(shown.cache);
 
     // `Notifications`: a link to its dialog.
     HEADING.paint_line(

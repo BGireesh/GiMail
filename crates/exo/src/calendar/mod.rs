@@ -18,6 +18,7 @@ pub(crate) mod layout;
 mod meet;
 mod month;
 mod options;
+mod options_cache;
 pub mod places;
 mod popup;
 mod provider;
@@ -84,6 +85,8 @@ const ALERT: &[Region] = &[Region::Alert];
 pub enum Action {
     /// A key in a calendar's colour picker.
     PickerKey(exo_ui::PickerKey),
+    /// A key in Calendar Settings' people picker.
+    CachePickerKey(crate::contact_picker::PickerKey),
     /// ⌘D with the right pane's form open, which moves the keyboard to the next section.
     CycleFocus,
     /// `-` / `=`, which move the day view to the day before (-1) or after (1) the one it shows.
@@ -263,6 +266,8 @@ pub(crate) struct Calendar {
     options_open: bool,
     /// Calendar Settings' secondary time zone input.
     options_zone: timezones::ZoneInput,
+    /// Calendar Settings' cache section: its people picker and open menu.
+    options_cache: options_cache::CacheInput,
     /// The Where field's suggestions.
     places: places::Places,
     /// A calendar account's sign-in in flight, and what it's for.
@@ -372,6 +377,28 @@ impl crate::Mail {
     /// Calendar Settings is up (for tests).
     pub fn calendar_settings_open(&self) -> bool {
         self.calendar.options_open
+    }
+
+    /// The keys Calendar Settings' people picker takes over from the dialog's while it has the
+    /// keyboard.
+    pub(crate) fn calendar_cache_keys(
+        &self,
+    ) -> Vec<(
+        &'static str,
+        crate::contact_picker::PickerKey,
+        &'static [&'static str],
+    )> {
+        let picker = &self.calendar.options_cache.picker;
+        if self.calendar.options_open && picker.is_focused() {
+            picker.keys()
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// The rows the cache's open time or frequency menu shows, in Calendar Settings (for tests).
+    pub fn calendar_cache_menu(&self) -> Vec<String> {
+        self.calendar.options_cache.menu_rows()
     }
 
     /// The signed-out calendar account whose `Add Calendar` takes the day view's place, if it
@@ -933,6 +960,11 @@ impl crate::Mail {
                 }
             }
             Action::PickerKey(key) => self.calendar_picker_key(key),
+            Action::CachePickerKey(key) => {
+                if let Some(address) = self.calendar.options_cache.picker.key(key) {
+                    self.calendar_cache_change(options::CacheChange::Add(address));
+                }
+            }
             Action::CycleFocus => self.calendar_cycle_focus(),
             Action::CancelDrag => {
                 self.calendar.grid.cancel_drag();
@@ -2320,6 +2352,25 @@ pub(crate) struct State {
     picking: bool,
     /// The week shows its weekends.
     weekends: bool,
+}
+
+/// The keys of Calendar Settings' people picker, which win over the dialog's Escape while it
+/// takes them.
+pub(crate) fn register_cache_keys(
+    commands: &mut Commands<AppAction>,
+    keys: Vec<(
+        &'static str,
+        crate::contact_picker::PickerKey,
+        &'static [&'static str],
+    )>,
+) {
+    for (id, key, bindings) in keys {
+        commands.add(
+            Command::shortcut(id, AppAction::Calendar(Action::CachePickerKey(key)))
+                .keys(bindings.iter().copied())
+                .regions(&[Region::Dialog]),
+        );
+    }
 }
 
 /// ⌘D while the right pane's form is open, registered after compose's so it wins over the

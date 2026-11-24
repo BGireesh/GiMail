@@ -228,8 +228,12 @@ fn calendar_settings_start_the_week_on_monday_and_hide_weekends() {
     // The gutter's time zone opens Calendar Settings.
     app.click(Pos2::new(90.0, 180.0));
     assert!(app.mail().calendar_settings_open());
-    // `Start week on Monday`, the dialog's first option.
-    app.click(Pos2::new(480.0, 303.0));
+    // `Start week on Monday`, the dialog's first option. The dialog is centered, so its place
+    // moves with its height.
+    click_widget(
+        &mut app,
+        ("calendar-settings-option", "Start week on Monday"),
+    );
     assert_eq!(
         week(&app).first(),
         Some(&date(2026, 11, 16)),
@@ -1932,4 +1936,116 @@ fn share_availability_in_the_day_view_picks_times_on_the_day() {
         .map(|(start, end)| format!("{} {}", start.strftime("%F %R"), end.strftime("%R")))
         .collect();
     assert_eq!(slots, ["2026-11-17 14:00 14:30"]);
+}
+
+/// Opens `trigger`'s menu in Calendar Settings' cache section and picks `label`, scrolling its
+/// rows with the wheel as far as it takes.
+fn choose_in_cache_menu(app: &mut Fixture, trigger: &str, label: &str) {
+    click_widget(app, trigger);
+    let ctx = app.harness.ctx.clone();
+    let id = exo_ui::id(&ctx, "calendar-cache-menu");
+    let rect = ctx
+        .memory(|memory| memory.area_rect(id))
+        .expect("the menu is up");
+    app.hover(rect.center());
+    let wheel = |app: &mut Fixture, rows: f32| {
+        app.harness.input_mut().events.push(Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, -32.0 * rows),
+            phase: egui::TouchPhase::Move,
+            modifiers: Modifiers::NONE,
+        });
+        app.harness.run_steps(2);
+    };
+    let shown = |app: &Fixture| app.mail().calendar_cache_menu();
+    for _ in 0..30 {
+        if shown(app).iter().any(|item| item == label) {
+            break;
+        }
+        wheel(app, 4.0);
+    }
+    for _ in 0..30 {
+        if shown(app).iter().any(|item| item == label) {
+            break;
+        }
+        wheel(app, -4.0);
+    }
+    let at = shown(app)
+        .iter()
+        .position(|item| item == label)
+        .unwrap_or_else(|| panic!("{label} is in the menu: {:?}", shown(app)));
+    let rect = ctx
+        .memory(|memory| memory.area_rect(id))
+        .expect("the menu is still up");
+    app.click(rect.left_top() + egui::vec2(40.0, 11.0 + 32.0 * at as f32 + 16.0));
+    assert!(shown(app).is_empty(), "choosing {label} closes the menu");
+}
+
+#[test]
+fn calendar_cache_settings_list_people_and_their_schedule() {
+    let mut app = start("calendar-cache-settings");
+    app.key(Key::Num2);
+    app.settle();
+    palette(&mut app, "Calendar Settings");
+    assert!(app.mail().calendar_settings_open());
+    let cache = |app: &Fixture| app.mail().account().settings().calendar.cache.clone();
+    assert!(!cache(&app).enabled);
+
+    click_widget(&mut app, "calendar-cache-enabled");
+    assert!(cache(&app).enabled);
+    // People: Enter takes the typed name's top suggestion, and a click takes the next.
+    click_widget(&mut app, "calendar-cache-people");
+    app.type_text("priya");
+    app.wait(0.3);
+    app.key(Key::Enter);
+    assert_eq!(cache(&app).people, ["priya@brightmoor.co"]);
+    app.type_text("lena");
+    app.wait(0.3);
+    let ctx = app.harness.ctx.clone();
+    let list = ctx
+        .memory(|memory| memory.area_rect(exo_ui::id(&ctx, "calendar-cache-people").with("list")))
+        .expect("the suggestions are up");
+    app.click(list.left_top() + egui::vec2(40.0, 18.0));
+    assert_eq!(
+        cache(&app).people,
+        ["priya@brightmoor.co", "lena@brightmoor.co"]
+    );
+    assert!(
+        has_keyboard(&app, "calendar-cache-people"),
+        "the field keeps the keyboard after a click"
+    );
+    // The same person twice adds nothing.
+    app.type_text("priya");
+    app.wait(0.3);
+    app.key(Key::Enter);
+    assert_eq!(cache(&app).people.len(), 2);
+
+    choose_in_cache_menu(&mut app, "calendar-cache-every", "30 minutes");
+    click_widget(&mut app, ("calendar-cache-day", 4));
+    let now = cache(&app);
+    assert_eq!(now.every_minutes, 30);
+    assert_eq!(now.days, [true, true, true, true, false]);
+
+    click_widget(&mut app, ("calendar-cache-remove", "priya@brightmoor.co"));
+    assert_eq!(cache(&app).people, ["lena@brightmoor.co"]);
+
+    // Between: the second menu offers only times after the first.
+    choose_in_cache_menu(&mut app, "calendar-cache-from", "5:00 PM");
+    assert_eq!(cache(&app).from_minute, 17 * 60);
+    click_widget(&mut app, "calendar-cache-to");
+    assert_eq!(
+        app.mail().calendar_cache_menu().first().map(String::as_str),
+        Some("5:30 PM")
+    );
+    click_widget(&mut app, "calendar-cache-to");
+    assert!(app.mail().calendar_cache_menu().is_empty());
+    // A first time past the second moves the second to half an hour after it.
+    choose_in_cache_menu(&mut app, "calendar-cache-from", "7:00 PM");
+    let now = cache(&app);
+    assert_eq!((now.from_minute, now.to_minute), (19 * 60, 19 * 60 + 30));
+
+    click_widget(&mut app, "calendar-cache-enabled");
+    let now = cache(&app);
+    assert!(!now.enabled);
+    assert_eq!(now.people, ["lena@brightmoor.co"], "its people are kept");
 }
