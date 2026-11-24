@@ -91,8 +91,9 @@ pub use form::{ActionKind, DIALOG_ACTION_HEIGHT, DialogAction, DialogInput};
 pub use hover_intent::HoverIntent;
 pub use icon_button::IconButton;
 pub use icons::{
-    icon_rect, icon_size, icon_svg, paint_icon, paint_icon_on, paint_icon_rotated,
-    paint_icon_stroked, paint_icon_two_tone, paint_icon_two_tone_on, paint_spinner,
+    icon_rect, icon_size, icon_svg, paint_dots_spinner, paint_icon, paint_icon_on,
+    paint_icon_rotated, paint_icon_stroked, paint_icon_two_tone, paint_icon_two_tone_on,
+    paint_spinner,
 };
 pub use keycap::{KEYCAP_ARROW, KEYCAP_BASELINE, KEYCAP_GAP, KeycapColors, Keycaps, keycap_label};
 pub use label_chip::{LABEL_CHIP_HEIGHT, LabelChip, chip_hover, label_colors};

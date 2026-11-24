@@ -2269,6 +2269,83 @@ fn the_cache_refreshes_at_its_frequency_and_forgets_whom_it_drops() {
     assert_eq!(fetched(&app, LENA), None, "the cache is gone when it's off");
 }
 
+/// When the calendar task last cached `email`'s calendar, as Calendar Settings shows it.
+fn synced(app: &Fixture, email: &str) -> Option<jiff::Timestamp> {
+    app.mail()
+        .account()
+        .calendar()
+        .data()
+        .cache_synced
+        .get(email)
+        .copied()
+}
+
+#[test]
+fn calendar_settings_say_when_each_colleague_was_synced_and_resync_one_on_demand() {
+    let mut app = support::start_with_settings("calendar-cached-resync", &cache_on(&[PRIYA, LENA]));
+    let nine = new_york("2026-11-17T09:00").timestamp();
+    assert_eq!(
+        synced(&app, PRIYA),
+        Some(nine),
+        "known once cached at launch"
+    );
+    assert_eq!(synced(&app, LENA), Some(nine));
+    app.key(Key::Num2);
+    app.settle();
+    palette(&mut app, "Calendar Settings");
+    assert!(app.mail().calendar_settings_open());
+
+    // Re-sync works outside the schedule too: 8 PM, after its 6 PM end.
+    let eight = new_york("2026-11-17T20:00");
+    app.set_now(eight.clone());
+    app.wait(0.1);
+    assert_eq!(synced(&app, PRIYA), Some(nine), "nothing's due after hours");
+    click_widget(&mut app, ("calendar-cache-resync", PRIYA));
+    app.settle();
+    assert_eq!(
+        synced(&app, PRIYA),
+        Some(eight.timestamp()),
+        "Priya re-synced"
+    );
+    assert_eq!(
+        app.mail()
+            .calendar_cached(PRIYA)
+            .map(|cached| cached.fetched_at),
+        Some(eight.timestamp()),
+        "and her cache with her"
+    );
+    assert_eq!(synced(&app, LENA), Some(nine), "Lena wasn't asked for");
+
+    // Offline, re-sync can't be clicked.
+    app.disconnect();
+    app.set_now(new_york("2026-11-17T20:30"));
+    click_widget(&mut app, ("calendar-cache-resync", LENA));
+    app.settle();
+    assert_eq!(synced(&app, LENA), Some(nine), "nothing read offline");
+    app.reconnect();
+    app.settle();
+
+    // Taken off the list, a person's time goes with their cache.
+    click_widget(&mut app, ("calendar-cache-remove", PRIYA));
+    app.settle();
+    assert_eq!(synced(&app, PRIYA), None);
+    assert_eq!(synced(&app, LENA), Some(nine));
+}
+
+#[test]
+fn a_colleague_added_to_the_cache_shows_syncing_then_synced() {
+    let mut app = support::start_with_settings("calendar-cached-added-status", &cache_on(&[PRIYA]));
+    assert_eq!(synced(&app, LENA), None, "not listed, not cached");
+    change_cache(&mut app, |cache| cache.people.push(LENA.to_owned()));
+    let data = app.mail().account().calendar().data();
+    assert!(data.cache_syncing.is_empty(), "nothing's left reading");
+    assert_eq!(
+        synced(&app, LENA),
+        Some(new_york("2026-11-17T09:00").timestamp()),
+        "cached at once, and known"
+    );
+}
+
 #[test]
 fn a_colleague_who_stops_sharing_is_forgotten_and_an_offline_refresh_keeps_the_cache() {
     // Sam, outside the workspace, shared their calendar once and shares nothing now.
@@ -2549,6 +2626,64 @@ fn a_cached_colleague_shows_at_once_and_stays_when_the_live_read_fails() {
     assert!(
         priya_on(&mut app, next_tuesday).contains(&"Design crit".to_owned()),
         "live past the window"
+    );
+}
+
+#[test]
+fn meet_shows_a_spinner_before_a_colleague_while_their_calendar_loads() {
+    let mut app = support::start_with_latency(
+        "calendar-meet-spinner",
+        &cache_on(&[PRIYA]),
+        std::time::Duration::from_millis(300),
+    );
+    let marker = |app: &Fixture, email: &str| {
+        app.mail()
+            .calendar_meet_markers_for_test()
+            .get(email)
+            .cloned()
+    };
+    // Return picks the suggestion, and a few frames later (Google's still to answer) the list
+    // says so.
+    let pick = |app: &mut Fixture| {
+        for pressed in [true, false] {
+            app.harness.input_mut().events.push(Event::Key {
+                key: Key::Enter,
+                physical_key: None,
+                pressed,
+                repeat: false,
+                modifiers: Modifiers::NONE,
+            });
+            app.harness.run_steps(1);
+        }
+        app.harness.run_steps(3);
+    };
+    meet_typing(&mut app, Key::W, "lena");
+    pick(&mut app);
+    assert_eq!(
+        marker(&app, LENA).as_deref(),
+        Some("loading"),
+        "a spinner at once, while Google hasn't answered"
+    );
+    app.settle();
+    let lena = marker(&app, LENA).expect("Lena's listed");
+    assert!(
+        !lena.starts_with("loading") && !lena.starts_with("refreshing"),
+        "her colour once it's read: {lena}"
+    );
+    // A cached colleague shows at once, her colour after a spinner while the latest loads.
+    app.type_text("priya");
+    app.wait(0.3);
+    pick(&mut app);
+    assert!(
+        marker(&app, PRIYA).is_some_and(|marker| marker.starts_with("refreshing:")),
+        "{:?}",
+        marker(&app, PRIYA)
+    );
+    app.settle();
+    assert!(
+        marker(&app, PRIYA).is_some_and(|marker| !marker.starts_with("refreshing")),
+        "{:?}",
+        marker(&app, PRIYA)
     );
 }
 

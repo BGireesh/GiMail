@@ -93,6 +93,11 @@ pub struct Data {
     pub series: BTreeMap<String, Vec<String>>,
     /// Guests' calendars as last read, by address.
     pub guests: BTreeMap<String, GuestCalendar>,
+    /// When each listed colleague's calendar was last cached, for those cached (Calendar
+    /// Settings shows it).
+    pub cache_synced: BTreeMap<String, Timestamp>,
+    /// Listed colleagues whose calendars a refresh of the cache is reading now.
+    pub cache_syncing: BTreeSet<String>,
 }
 
 /// A guest's calendar as last read.
@@ -223,6 +228,8 @@ enum Request {
     GuestLoaded(String, (Timestamp, Timestamp), Option<Option<Vec<Event>>>),
     /// From a refresh of the cache of colleagues' calendars: one person's answer.
     CacheLoaded(Box<CacheAnswer>),
+    /// Refresh this listed colleague's cached calendar now, whatever the schedule says.
+    ResyncCache(String),
     /// From the task fetching it: a thread's invite, if it has one.
     InviteLoaded(String, Option<Vec<u8>>),
     /// Panics the task, as a bug would.
@@ -511,6 +518,13 @@ impl CalendarSync {
         self.nudge_cache(|current| *current = Some(cache));
     }
 
+    /// Refreshes `email`'s cached calendar now, outside the schedule too (Calendar Settings'
+    /// re-sync). Nothing happens while they aren't listed, are being read already, or Calendar
+    /// can't be reached.
+    pub fn resync_cache(&self, email: &str) {
+        self.post(Request::ResyncCache(email.to_lowercase()));
+    }
+
     /// Has the cache of colleagues' calendars look at the clock now, for when the minute changed,
     /// maybe by more than the task slept (a Mac asleep).
     pub fn check_cache(&self) {
@@ -696,6 +710,7 @@ impl Task {
         if let Err(error) = self.store.forget_cached_guests(keep).await {
             log::error!("forgetting colleagues' cached calendars: {error}");
         }
+        self.note_listed(keep).await;
         if !settings.enabled || settings.people.is_empty() {
             // Switched on again, it starts from what's cached then.
             self.cache_last = None;
@@ -740,6 +755,58 @@ impl Task {
         }
     }
 
+    /// Keeps [`Data::cache_synced`] to `keep`, the people listed: whoever isn't any more is
+    /// dropped, and whoever is but isn't there yet is looked up in the store.
+    async fn note_listed(&self, keep: &[String]) {
+        let (known, stale): (Vec<String>, bool) = {
+            let data = self.shared.data.borrow();
+            let known = keep
+                .iter()
+                .filter(|email| data.cache_synced.contains_key(*email))
+                .cloned()
+                .collect();
+            let stale = data.cache_synced.keys().any(|email| !keep.contains(email))
+                || data.cache_syncing.iter().any(|email| !keep.contains(email));
+            (known, stale)
+        };
+        let mut found = Vec::new();
+        for email in keep.iter().filter(|email| !known.contains(email)) {
+            match self.store.cached_guest(email).await {
+                Ok(Some(cached)) => found.push((email.clone(), cached.fetched_at)),
+                Ok(None) => {}
+                Err(error) => log::error!("reading a colleague's cached calendar: {error}"),
+            }
+        }
+        if !stale && found.is_empty() {
+            return;
+        }
+        self.edit(|data| {
+            data.cache_synced.retain(|email, _| keep.contains(email));
+            data.cache_syncing.retain(|email| keep.contains(email));
+            data.cache_synced.extend(found);
+        });
+    }
+
+    /// Notes that `email`'s calendar was cached at `at`, or is no longer cached (`None`).
+    fn note_cached(&self, email: &str, at: Option<Timestamp>) {
+        self.edit(|data| match at {
+            Some(at) => {
+                data.cache_synced.insert(email.to_owned(), at);
+            }
+            None => {
+                data.cache_synced.remove(email);
+            }
+        });
+    }
+
+    /// Changes the data the UI reads, and asks for a frame.
+    fn edit(&self, change: impl FnOnce(&mut Data)) {
+        self.shared
+            .data
+            .send_modify(|data| change(Arc::make_mut(data)));
+        self.repaint.request();
+    }
+
     /// When the least recently cached of `people` was cached, or `None` when one of them isn't.
     async fn oldest_cached(&self, people: &[String]) -> Option<Timestamp> {
         let mut oldest: Option<Timestamp> = None;
@@ -766,6 +833,7 @@ impl Task {
         let (from, to) = cache::window_range(today, &tz);
         self.cache_reading += people.len();
         self.shared.busy.fetch_add(people.len(), Ordering::SeqCst);
+        self.edit(|data| data.cache_syncing.extend(people.iter().cloned()));
         let (store, requests, shared) = (
             self.store.clone(),
             self.requests.clone(),
@@ -811,6 +879,9 @@ impl Task {
             range: (from, to),
             found,
         } = answer;
+        self.edit(|data| {
+            data.cache_syncing.remove(&email);
+        });
         let listed = self
             .cache
             .borrow()
@@ -827,7 +898,11 @@ impl Task {
                     to,
                     events: cache::keep_window(events, today, &tz),
                 };
-                self.store.cache_guest(&email, &cached).await
+                let outcome = self.store.cache_guest(&email, &cached).await;
+                if outcome.is_ok() {
+                    self.note_cached(&email, Some(cached.fetched_at));
+                }
+                outcome
             }
             Ok(None) => self.forget_cached(&email).await,
             Err(error) => {
@@ -842,6 +917,7 @@ impl Task {
 
     /// Forgets `email`'s cached calendar, keeping everyone else's.
     async fn forget_cached(&self, email: &str) -> exo_store::Result<()> {
+        self.note_cached(email, None);
         let keep: Vec<String> = self
             .cache
             .borrow()
@@ -906,7 +982,11 @@ impl Task {
                     to,
                     events: cache::keep_window(events.clone(), today, &tz),
                 };
-                self.store.cache_guest(email, &cached).await
+                let outcome = self.store.cache_guest(email, &cached).await;
+                if outcome.is_ok() {
+                    self.note_cached(email, Some(cached.fetched_at));
+                }
+                outcome
             }
             Some(None) => self.forget_cached(email).await,
             None => Ok(()),
@@ -1053,6 +1133,13 @@ impl Task {
                     self.check_cache().await;
                 }
             }
+            Request::ResyncCache(email) => {
+                let syncing = self.shared.data.borrow().cache_syncing.contains(&email);
+                if self.caches(&email) && !syncing && !self.down() {
+                    let now = self.clock.now();
+                    self.refresh_cache(vec![email], &now);
+                }
+            }
             Request::InviteLoaded(thread, ics) => {
                 let mut data = Data::clone(&self.shared.data.borrow());
                 data.invite = ics.map(|ics| (thread, ics));
@@ -1144,6 +1231,25 @@ impl Task {
                 .cloned()
                 .collect::<Vec<_>>()
         };
+        if !down {
+            // Loading shows at once (Meet's spinner), not after the cache is looked at.
+            self.edit(|data| {
+                for email in &guests {
+                    let events = data
+                        .guests
+                        .remove(email)
+                        .map_or(GuestEvents::Pending, |calendar| calendar.events);
+                    data.guests.insert(
+                        email.clone(),
+                        GuestCalendar {
+                            range,
+                            loading: true,
+                            events,
+                        },
+                    );
+                }
+            });
+        }
         for email in wanted {
             if let Some(events) = self.cached_events(&email).await {
                 cached.insert(email, events);

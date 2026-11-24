@@ -1328,6 +1328,10 @@ impl crate::Mail {
 
     /// Applies a change in Calendar Settings' cache section.
     pub(super) fn calendar_cache_change(&mut self, change: super::options::CacheChange) {
+        if let super::options::CacheChange::Resync(email) = &change {
+            self.account.calendar().resync_cache(email);
+            return;
+        }
         self.account
             .update_settings(|settings| change.clone().apply(&mut settings.calendar.cache));
     }
@@ -1339,6 +1343,7 @@ impl crate::Mail {
             self.calendar.options_cache.close_menu();
         }
         let book = self.calendar_book();
+        let data = self.account.calendar().data();
         let settings = self.account.settings();
         let link = settings.meeting_links.default_meeting_link.clone();
         let calendar = &settings.calendar;
@@ -1385,6 +1390,12 @@ impl crate::Mail {
             accounts: &accounts,
             cache: &calendar.cache,
             book: book.as_deref(),
+            status: super::options_cache::CacheStatus {
+                synced: &data.cache_synced,
+                syncing: &data.cache_syncing,
+                now: self.now.clone(),
+                online: self.snapshot.connection.is_online(),
+            },
         };
         for action in super::options::show(
             ctx,

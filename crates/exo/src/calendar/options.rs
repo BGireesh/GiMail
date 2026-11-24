@@ -132,6 +132,8 @@ pub struct Shown<'a> {
     /// The calendar cache's settings, and the address book its people are picked from.
     pub cache: &'a exo_store::CalendarCache,
     pub book: Option<&'a crate::compose::contacts::Index>,
+    /// Where the cache stands: when each person was last cached and who's being read.
+    pub status: options_cache::CacheStatus<'a>,
 }
 
 impl Shown<'_> {
@@ -299,6 +301,7 @@ fn body_ui(
             cache,
             shown.book,
             rows,
+            &shown.status,
         )
         .into_iter()
         .map(OptionsAction::Cache),

@@ -107,6 +107,25 @@ pub fn start_with_cached_guests(
     )
 }
 
+/// [`start_with_settings`], with each of Google's answers `latency` late.
+pub fn start_with_latency(
+    name: &str,
+    change: &dyn Fn(&mut exo_store::Settings),
+    latency: std::time::Duration,
+) -> Fixture {
+    start_with(
+        name,
+        gmail_mock::Config {
+            latency,
+            ..gmail_mock::Config::default()
+        },
+        false,
+        true,
+        change,
+        &[],
+    )
+}
+
 /// [`start`], with Google's People API (contacts) taking requests and never answering.
 pub fn start_with_silent_people(name: &str) -> Fixture {
     start_with(

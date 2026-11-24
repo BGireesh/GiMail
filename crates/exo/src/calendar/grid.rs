@@ -1326,12 +1326,7 @@ fn paint_heads(
             ))
         };
         if refreshing {
-            exo_ui::paint_spinner(
-                painter,
-                at(start),
-                painter.ctx().input(|input| input.time),
-                palette.ink(0.25, 0.25),
-            );
+            super::guests::paint_loading(painter, at(start), palette);
         }
         if matches!(sign, Marker::Empty) {
             painter.rect_stroke(

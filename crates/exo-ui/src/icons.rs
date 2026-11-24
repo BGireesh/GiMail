@@ -303,6 +303,28 @@ pub fn paint_spinner(painter: &egui::Painter, rect: Rect, now: f64, color: Color
     painter.ctx().request_repaint();
 }
 
+/// A ring of 8 dots in `rect`, one bright and the rest fading behind it as it turns once a
+/// second, as macOS' activity indicator: for small spaces, where [`paint_spinner`]'s hairline
+/// arc can't be seen.
+pub fn paint_dots_spinner(painter: &egui::Painter, rect: Rect, now: f64, color: Color32) {
+    const DOTS: usize = 8;
+    let dot = rect.width() * 0.11;
+    let radius = rect.width() / 2.0 - dot;
+    let lead = ((now % 1.0) * DOTS as f64) as usize;
+    for index in 0..DOTS {
+        let behind = (lead + DOTS - index) % DOTS;
+        let alpha = 1.0 - behind as f32 / DOTS as f32 * 0.8;
+        let angle =
+            index as f32 / DOTS as f32 * std::f32::consts::TAU - std::f32::consts::FRAC_PI_2;
+        painter.circle_filled(
+            rect.center() + radius * Vec2::angled(angle),
+            dot,
+            color.gamma_multiply(alpha),
+        );
+    }
+    painter.ctx().request_repaint();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

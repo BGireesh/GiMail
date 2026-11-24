@@ -163,7 +163,7 @@ impl Marker {
 }
 
 /// A guest's marker in `rect`: a swatch in their calendar's colour, an empty swatch's 1px
-/// outline at `.3`, or Classic's spinner at `.25`. A refreshing one's spinner takes `rect` and its
+/// outline at `.3`, or a dotted spinner at `.7` ([`paint_loading`]). A refreshing one's spinner takes `rect` and its
 /// swatch the same size again after [`REFRESHING_GAP`] ([`Marker::extra`]).
 pub fn paint_marker(ui: &egui::Ui, rect: egui::Rect, marker: Marker) {
     let palette = exo_ui::palette(ui.ctx());
@@ -190,13 +190,19 @@ pub fn paint_marker(ui: &egui::Ui, rect: egui::Rect, marker: Marker) {
                 Marker::Swatch(color),
             );
         }
-        Marker::Spinner => exo_ui::paint_spinner(
-            ui.painter(),
-            rect,
-            ui.input(|input| input.time),
-            palette.ink(0.25, 0.25),
-        ),
+        Marker::Spinner => paint_loading(ui.painter(), rect, palette),
     }
+}
+
+/// The dotted spinner a guest's marker shows while their calendar loads, a little larger than
+/// the swatch it stands for, in `rect`.
+pub fn paint_loading(painter: &egui::Painter, rect: egui::Rect, palette: &exo_ui::Palette) {
+    exo_ui::paint_dots_spinner(
+        painter,
+        rect.expand(rect.width() * 0.2),
+        painter.ctx().input(|input| input.time),
+        palette.ink(0.7, 0.7),
+    );
 }
 
 /// `(busy)` when one of `email`'s events overlaps `start`–`end` on the start's day, else `(OOO)`

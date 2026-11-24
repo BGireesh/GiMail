@@ -1,10 +1,14 @@
 //! Calendar Settings' Calendar Cache section: whether colleagues' calendars are kept up to date
 //! in the store, whose they are (a contact picker over a list with a × each), the weekdays to
-//! refresh them on, the hours between which, and how often.
+//! refresh them on, the hours between which, and how often. Each person shows when their
+//! calendar was last cached, with a button to re-sync it now.
+
+use std::collections::{BTreeMap, BTreeSet};
 
 use egui::{Color32, CornerRadius, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 use exo_store::CalendarCache;
 use exo_ui::{DialogInput, Family, Font, Menu, TextStyle};
+use jiff::{Timestamp, Zoned};
 
 use crate::{compose::contacts, contact_picker::ContactPicker};
 
@@ -47,6 +51,11 @@ const STEP: u16 = 30;
 /// Most people shown at once (fewer when the window is short); the wheel scrolls the rest, so the
 /// dialog never outgrows its card.
 const PEOPLE_MAX: usize = 8;
+/// A person row's buttons (re-sync, ×), each this wide at the row's end; the gap between the
+/// name and when it was synced, and the room a spinner takes before `Syncing…`.
+const BUTTON: f32 = 20.0;
+const STATUS_GAP: f32 = 8.0;
+const STATUS_SPINNER: f32 = 14.0;
 
 /// What the section changed in [`CalendarCache`].
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -62,6 +71,43 @@ pub enum CacheChange {
     /// The minute of the day the window ends at.
     To(u16),
     Every(u16),
+    /// Re-sync this person's cached calendar now (not a setting).
+    Resync(String),
+}
+
+/// Where the cache stands, for its people's rows.
+pub(crate) struct CacheStatus<'a> {
+    /// When each person's calendar was last cached, for those cached.
+    pub synced: &'a BTreeMap<String, Timestamp>,
+    /// Whose calendars are being read now.
+    pub syncing: &'a BTreeSet<String>,
+    /// The time now, in the zone to say times in.
+    pub now: Zoned,
+    /// Whether Calendar can be reached, which re-syncing needs.
+    pub online: bool,
+}
+
+impl CacheStatus<'_> {
+    /// What a person's row says after their name: `Syncing…` while their calendar is read,
+    /// else when it was last cached (`Synced just now`, `Synced 4:12 PM` today, `Synced Nov 20,
+    /// 4:12 PM` before), or `Not synced yet`.
+    pub fn label(&self, email: &str) -> String {
+        if self.syncing.contains(email) {
+            return "Syncing…".to_owned();
+        }
+        let Some(at) = self.synced.get(email) else {
+            return "Not synced yet".to_owned();
+        };
+        if self.now.timestamp().duration_since(*at).as_secs() < 60 {
+            return "Synced just now".to_owned();
+        }
+        let at = at.to_zoned(self.now.time_zone().clone());
+        if at.date() == self.now.date() {
+            format!("Synced {}", at.strftime("%-I:%M %p"))
+        } else {
+            format!("Synced {}", at.strftime("%b %-d, %-I:%M %p"))
+        }
+    }
 }
 
 impl CacheChange {
@@ -96,6 +142,7 @@ impl CacheChange {
                     cache.every_minutes = minutes;
                 }
             }
+            Self::Resync(_) => {}
         }
     }
 }
@@ -200,6 +247,7 @@ pub(crate) fn show(
     input: &mut CacheInput,
     book: Option<&contacts::Index>,
     fit: usize,
+    status: &CacheStatus<'_>,
 ) -> Vec<CacheChange> {
     let palette = exo_ui::palette(ui.ctx());
     let text = palette.ink(0.8, 0.8);
@@ -286,13 +334,65 @@ pub(crate) fn show(
             .and_then(|book| book.name_for(person))
             .filter(|name| !name.is_empty())
             .unwrap_or_else(|| person.clone());
-        TEXT.paint_line(
+        // The name, then when their calendar was last cached (a spinner first while it's read),
+        // then re-sync and ×.
+        let syncing = status.syncing.contains(person);
+        let said = status.label(person);
+        let said_width = TEXT.width(ui.ctx(), &said) + if syncing { STATUS_SPINNER } else { 0.0 };
+        let room = width - VALUE_LEFT - 2.0 * BUTTON - 8.0;
+        let name_width = TEXT.paint_line(
             ui.painter(),
             pos2(value_left, y + 2.0),
             &name,
             text,
-            Some(width - VALUE_LEFT - 24.0),
+            Some((room - STATUS_GAP - said_width).max(room / 2.0)),
         );
+        let mut at = value_left + name_width + STATUS_GAP;
+        let quiet = palette.ink(0.45, 0.45);
+        if syncing {
+            super::guests::paint_loading(
+                ui.painter(),
+                Rect::from_center_size(
+                    pos2(at + 4.0, y + 2.0 + TEXT.line_height / 2.0),
+                    vec2(8.0, 8.0),
+                ),
+                palette,
+            );
+            at += STATUS_SPINNER;
+        }
+        TEXT.paint_line(
+            ui.painter(),
+            pos2(at, y + 2.0),
+            &said,
+            quiet,
+            Some((value_left + room - at).max(0.0)),
+        );
+        let resync = Rect::from_min_size(
+            pos2(left + width - 2.0 * BUTTON, y),
+            vec2(BUTTON, PERSON_ROW),
+        );
+        let can = status.online && !syncing;
+        let hit = ui.interact(
+            resync,
+            exo_ui::id(ui.ctx(), ("calendar-cache-resync", person.as_str())),
+            if can { Sense::click() } else { Sense::hover() },
+        );
+        let hit = if can {
+            hit.on_hover_cursor(egui::CursorIcon::PointingHand)
+        } else {
+            hit
+        };
+        let ink = if !can {
+            palette.ink(0.2, 0.2)
+        } else if hit.hovered() {
+            palette.ink(0.8, 0.8)
+        } else {
+            palette.ink(0.4, 0.8)
+        };
+        paint_resync(ui, resync.center(), ink);
+        if can && hit.clicked() {
+            changes.push(CacheChange::Resync(person.clone()));
+        }
         let cross = Rect::from_min_size(pos2(left + width - 20.0, y), vec2(20.0, PERSON_ROW));
         let hit = ui
             .interact(
@@ -498,6 +598,30 @@ pub(crate) fn show(
     changes
 }
 
+/// A re-sync button's arrow around `center`: most of a circle, its head at the end, turning
+/// clockwise.
+fn paint_resync(ui: &Ui, center: Pos2, ink: Color32) {
+    const RADIUS: f32 = 4.5;
+    const STEPS: usize = 24;
+    let start = -std::f32::consts::FRAC_PI_2 + 0.6;
+    let sweep = std::f32::consts::TAU - 1.2;
+    let point = |t: f32| center + RADIUS * egui::Vec2::angled(start + sweep * t);
+    let points: Vec<Pos2> = (0..=STEPS)
+        .map(|step| point(step as f32 / STEPS as f32))
+        .collect();
+    let stroke = Stroke::new(1.2, ink);
+    ui.painter().add(egui::Shape::line(points, stroke));
+    // The head: two strokes back from the end, along and across the arc.
+    let end = point(1.0);
+    let angle = start + sweep;
+    let along = egui::Vec2::angled(angle + std::f32::consts::FRAC_PI_2);
+    let out = egui::Vec2::angled(angle);
+    for side in [out, -out] {
+        ui.painter()
+            .line_segment([end, end - along * 2.5 + side * 2.5], stroke);
+    }
+}
+
 /// Where a menu of `rows` opens from `button`: under it, or over it when the window ends before
 /// the list does.
 fn menu_at(ui: &Ui, button: Rect, rows: usize) -> Pos2 {
@@ -571,4 +695,39 @@ fn wheel(ui: &Ui) -> f32 {
             })
             .sum()
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn at(time: &str) -> Zoned {
+        format!("{time}[America/New_York]").parse().expect("a time")
+    }
+
+    #[test]
+    fn a_person_says_when_they_were_synced() {
+        let synced: BTreeMap<String, Timestamp> = [
+            ("now@x.co".to_owned(), at("2026-11-17T16:11:30").timestamp()),
+            ("today@x.co".to_owned(), at("2026-11-17T09:05").timestamp()),
+            ("before@x.co".to_owned(), at("2026-11-13T14:40").timestamp()),
+            (
+                "reading@x.co".to_owned(),
+                at("2026-11-17T09:05").timestamp(),
+            ),
+        ]
+        .into();
+        let syncing: BTreeSet<String> = ["reading@x.co".to_owned()].into();
+        let status = CacheStatus {
+            synced: &synced,
+            syncing: &syncing,
+            now: at("2026-11-17T16:12"),
+            online: true,
+        };
+        assert_eq!(status.label("now@x.co"), "Synced just now");
+        assert_eq!(status.label("today@x.co"), "Synced 9:05 AM");
+        assert_eq!(status.label("before@x.co"), "Synced Nov 13, 2:40 PM");
+        assert_eq!(status.label("reading@x.co"), "Syncing…");
+        assert_eq!(status.label("never@x.co"), "Not synced yet");
+    }
 }
