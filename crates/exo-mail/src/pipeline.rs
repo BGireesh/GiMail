@@ -8,7 +8,7 @@ use crate::{
     dom::{self, NodeRef, Style},
     linkify, links, pixels, plain,
     quotes::{MessageBody, Previous, Quoted, Sender},
-    remote, sanitize, senders, tables,
+    remote, sanitize, senders, tables, whitespace,
 };
 
 /// What the pipeline needs to know about a message.
@@ -74,6 +74,8 @@ pub fn render_with(
     let (document, found) = sanitize::clean(&message.html);
     let root = document_element(&document);
     tables::grow_to_fit(&root);
+    whitespace::drop_pasted_collapse(&root);
+    whitespace::expand_tabs(&root);
     linkify::linkify(&root);
     linkify::add_word_breaks(&root);
     content::trim(&root);

@@ -144,6 +144,32 @@ fn renders_plain_text() {
     assert!(rendered.unquoted_html.contains("<blockquote"));
 }
 
+/// Blitz draws a tab as a missing-glyph box, so a Jamf template's indenting tabs, kept by
+/// `white-space-collapse: preserve`, showed as rows of boxes. Tabs reach Blitz as spaces to the
+/// next stop, in HTML and in plain-text mail.
+#[test]
+fn tabs_become_spaces_to_the_next_stop() {
+    let html = "<p>Before your sessions:</p><ul style=\"display: flow-root; \
+                white-space-collapse: preserve\">\n\t\t\t<li>\n\t\t\t<p><font face=\"Arial\">\
+                Complete the modules</font></p>\n\t\t</li>\n\t</ul><p>Thank you,</p>";
+    let rendered = render(&message(html.into(), "Erika", "erika@jamf.com"), None, &[]);
+    assert!(!rendered.html.contains('\t'), "{}", rendered.html);
+    assert!(
+        !rendered.html.contains("white-space-collapse"),
+        "pasted editor styles don't keep the indenting, as in Gmail: {}",
+        rendered.html
+    );
+    assert!(
+        rendered.html.contains("display: flow-root"),
+        "{}",
+        rendered.html
+    );
+
+    let plain = text_to_html("Name\tTeam\nAna\tDesign");
+    let rendered = render(&message(plain, "Ann", "ann@x.co"), None, &[]);
+    assert!(!rendered.html.contains('\t'), "{}", rendered.html);
+}
+
 #[test]
 fn picks_the_html_alternative() {
     use gmail::{MessagePart, MessagePartBody};

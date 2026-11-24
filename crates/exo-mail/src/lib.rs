@@ -64,6 +64,7 @@ mod sanitize;
 mod senders;
 mod tables;
 mod view;
+mod whitespace;
 
 pub use actions::{Action, ActionSource, CalendarData, EventStatus, RsvpLinks};
 pub use animation::{Player, may_animate};
