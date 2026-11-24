@@ -10,10 +10,6 @@ use jiff::{
 };
 
 /// The days the cache covers: today and the six after it, without Saturdays and Sundays.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "used by the calendar cache's refresh (next task)")
-)]
 pub fn window(today: Date) -> Vec<Date> {
     (0..7)
         .filter_map(|n| today.checked_add(jiff::Span::new().days(n)).ok())
@@ -23,10 +19,6 @@ pub fn window(today: Date) -> Vec<Date> {
 
 /// The span of time to ask Google for: the start of today to the start of the day a week on, in
 /// `tz`.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "used by the calendar cache's refresh (next task)")
-)]
 pub fn window_range(today: Date, tz: &TimeZone) -> (Timestamp, Timestamp) {
     let start = today
         .to_zoned(tz.clone())
@@ -42,10 +34,6 @@ pub fn window_range(today: Date, tz: &TimeZone) -> (Timestamp, Timestamp) {
 }
 
 /// The events that start on a day of the window, in `tz`.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "used by the calendar cache's refresh (next task)")
-)]
 pub fn keep_window(events: Vec<Event>, today: Date, tz: &TimeZone) -> Vec<Event> {
     let days = window(today);
     events
@@ -61,10 +49,6 @@ pub fn keep_window(events: Vec<Event>, today: Date, tz: &TimeZone) -> Vec<Event>
 }
 
 /// The day an event starts on in `tz`: its all-day date, or the date of its start time.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "used by the calendar cache's refresh (next task)")
-)]
 fn start_day(start: &EventDateTime, tz: &TimeZone) -> Option<Date> {
     if let Some(date) = &start.date {
         return date.parse().ok();
@@ -74,10 +58,6 @@ fn start_day(start: &EventDateTime, tz: &TimeZone) -> Option<Date> {
 }
 
 /// Whether the cache should refresh at `now`, the last refresh having been at `last`.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "used by the calendar cache's refresh (next task)")
-)]
 pub fn due(cache: &CalendarCache, now: &Zoned, last: Option<Timestamp>) -> bool {
     if !cache.enabled || cache.people.is_empty() {
         return false;

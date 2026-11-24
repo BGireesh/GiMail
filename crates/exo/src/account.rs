@@ -993,6 +993,15 @@ impl Account {
             presence_receiver,
             repaint.clone(),
             &restarts,
+            crate::Clock::new({
+                let clock = clock.clone();
+                move || {
+                    clock
+                        .read()
+                        .expect("the clock lock is never poisoned")
+                        .now()
+                }
+            }),
         );
         // Before the first frame, so Bulk Actions lists them.
         let logged = runtime.block_on(store.bulk_log()).unwrap_or_else(|error| {
@@ -1382,13 +1391,17 @@ impl Account {
         self.shared.reminders.wake();
     }
 
-    /// Dates reminders by `clock`, the app's (fixed in screenshots and tests).
+    /// Dates reminders by `clock`, the app's (fixed in screenshots and tests). The cache of
+    /// colleagues' calendars, whose schedule goes by it, starts from here.
     pub fn set_clock(&self, clock: crate::Clock) {
         *self
             .shared
             .clock
             .write()
             .expect("the clock lock is never poisoned") = clock;
+        self.shared
+            .calendar
+            .set_cache(self.settings().calendar.cache.clone());
     }
 
     /// The account's address.
@@ -1622,6 +1635,17 @@ impl Account {
         &self.shared.calendar
     }
 
+    /// `email`'s calendar as the store's cache of colleagues' calendars holds it, if it does (for
+    /// tests).
+    pub fn calendar_cached(&self, email: &str) -> Option<exo_store::CachedGuest> {
+        let loader = &self.shared.loader;
+        loader
+            .runtime
+            .block_on(loader.store.cached_guest(email))
+            .ok()
+            .flatten()
+    }
+
     /// The account's settings.
     pub fn settings(&self) -> &Settings {
         &self.settings.settings
@@ -1637,6 +1661,11 @@ impl Account {
             self.shared
                 .requests
                 .post(Request::SaveSettings(Box::new(settings.clone())));
+            if settings.calendar.cache != self.settings.settings.calendar.cache {
+                self.shared
+                    .calendar
+                    .set_cache(settings.calendar.cache.clone());
+            }
             self.settings.settings = Arc::new(settings);
             self.share_settings();
         }

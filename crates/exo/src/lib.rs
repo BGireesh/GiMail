@@ -592,6 +592,7 @@ impl Mail {
     fn set_now(&mut self, now: Zoned) {
         if now.timestamp().as_second() / 60 != self.now.timestamp().as_second() / 60 {
             self.account.check_reminders();
+            self.account.calendar().check_cache();
         }
         self.inbox.set_now(now.clone());
         if let Some(thread) = &mut self.thread {

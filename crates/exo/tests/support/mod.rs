@@ -68,22 +68,67 @@ const PREVIEWS: &str = "previews";
 /// Starts the app on an account with one Inbox and no splits, which most tests are about.
 /// `name` keeps concurrent tests' stores apart.
 pub fn start(name: &str) -> Fixture {
-    start_with(name, gmail_mock::Config::default(), false, true, &|_| {})
+    start_with(
+        name,
+        gmail_mock::Config::default(),
+        false,
+        true,
+        &|_| {},
+        &[],
+    )
 }
 
 /// [`start`], with the account's settings changed by `change` first.
 pub fn start_with_settings(name: &str, change: &dyn Fn(&mut exo_store::Settings)) -> Fixture {
-    start_with(name, gmail_mock::Config::default(), false, true, change)
+    start_with(
+        name,
+        gmail_mock::Config::default(),
+        false,
+        true,
+        change,
+        &[],
+    )
+}
+
+/// [`start_with_settings`], with `cached` already in the store's cache of guests' calendars, as a
+/// session before this one left them.
+pub fn start_with_cached_guests(
+    name: &str,
+    change: &dyn Fn(&mut exo_store::Settings),
+    cached: &[(&str, exo_store::CachedGuest)],
+) -> Fixture {
+    start_with(
+        name,
+        gmail_mock::Config::default(),
+        false,
+        true,
+        change,
+        cached,
+    )
 }
 
 /// [`start`], with Google's People API (contacts) taking requests and never answering.
 pub fn start_with_silent_people(name: &str) -> Fixture {
-    start_with(name, gmail_mock::Config::default(), true, true, &|_| {})
+    start_with(
+        name,
+        gmail_mock::Config::default(),
+        true,
+        true,
+        &|_| {},
+        &[],
+    )
 }
 
 /// [`start`] on a new account as Exo sets it up: Important and Other, and the default splits.
 pub fn start_new_account(name: &str) -> Fixture {
-    start_with(name, gmail_mock::Config::default(), false, false, &|_| {})
+    start_with(
+        name,
+        gmail_mock::Config::default(),
+        false,
+        false,
+        &|_| {},
+        &[],
+    )
 }
 
 /// [`start`], with the saved contacts and colleagues having photos of their own.
@@ -92,7 +137,7 @@ pub fn start_with_contact_photos(name: &str) -> Fixture {
         contact_photos: true,
         ..gmail_mock::Config::default()
     };
-    start_with(name, config, false, true, &|_| {})
+    start_with(name, config, false, true, &|_| {}, &[])
 }
 
 fn start_with(
@@ -101,6 +146,7 @@ fn start_with(
     silent_people: bool,
     one_inbox: bool,
     change: &dyn Fn(&mut exo_store::Settings),
+    cached: &[(&str, exo_store::CachedGuest)],
 ) -> Fixture {
     let now = Arc::new(Mutex::new(config.now.clone()));
     let runtime = tokio::runtime::Runtime::new().expect("runtime");
@@ -130,6 +176,12 @@ fn start_with(
             settings.toggle_important_other();
             change(&mut settings);
             store.save_settings(&settings).await.expect("settings save");
+            for (email, guest) in cached {
+                store
+                    .cache_guest(email, guest)
+                    .await
+                    .expect("the cache saves");
+            }
         });
     }
     let mut harness = launch(&dir, &endpoints, &now);

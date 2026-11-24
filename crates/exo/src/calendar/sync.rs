@@ -12,6 +12,11 @@
 //! events, edits and deletions are held ten seconds first, so Undo can take one back before anyone
 //! hears of it. Undo also takes back a change still waiting for the connection. After a panic the
 //! task runs again (`recovery`), and finds its queue as it was.
+//!
+//! The task also keeps the cache of colleagues' calendars (`settings.calendar.cache`): on the
+//! schedule's days and hours, at its frequency, it reads each listed person's events over the
+//! next week's weekdays into the store, and it forgets whomever the list drops. It looks at the
+//! clock at least every minute, so a Mac that wakes past a refresh refreshes then.
 
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet},
@@ -24,14 +29,17 @@ use std::{
 };
 
 use exo_store::{
-    AccountCalendar, CalendarChange, CalendarOutcome, Connection, InviteLinks, Outage, Refusal,
-    Store, StoredEvent,
+    AccountCalendar, CachedGuest, CalendarCache, CalendarChange, CalendarOutcome, Connection,
+    InviteLinks, Outage, Refusal, Store, StoredEvent,
 };
+use futures::StreamExt;
 use gmail::calendar::Event;
 use jiff::{SignedDuration, Timestamp, civil::Date, tz::TimeZone};
 use tokio::sync::{mpsc, oneshot, watch};
 
+use crate::Clock;
 use crate::account::{Loader, Presence, Repaint};
+use crate::calendar::cache;
 use crate::recovery::{self, Restarts};
 
 /// How long fetched days stay fresh before they're fetched again.
@@ -43,6 +51,10 @@ const LIST_FRESH: Duration = Duration::from_secs(600);
 const RETRY: Duration = Duration::from_secs(15);
 /// How long a change waits for Undo before it's sent.
 const HOLD: SignedDuration = SignedDuration::from_secs(10);
+/// How often the cache of colleagues' calendars looks at the clock, at most.
+const CACHE_CHECK: Duration = Duration::from_secs(60);
+/// How many colleagues' calendars a refresh of the cache reads at a time.
+const CACHE_READS: usize = 4;
 
 /// Days of events, from some calendars, in a time zone.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -223,6 +235,12 @@ struct Shared {
     series_asked: Mutex<HashSet<String>>,
     /// The time each guest's calendar was last asked for.
     guests_asked: Mutex<BTreeMap<String, (Timestamp, Timestamp)>>,
+    /// The cache's settings, `None` until the app says them, and each nudge to look at them and
+    /// the clock again.
+    cache: watch::Sender<Option<CalendarCache>>,
+    /// A nudge of `cache` is counted busy and not taken up by the task yet. While it's set, the
+    /// busy count holds one for it, which the task takes over.
+    cache_nudged: std::sync::atomic::AtomicBool,
 }
 
 impl Shared {
@@ -242,16 +260,19 @@ pub struct CalendarSync {
 
 impl CalendarSync {
     /// Starts the task on the current runtime, and again after a panic as `restarts` says,
-    /// fetching invites with `loader`. `repaint` asks for a frame when data arrives.
+    /// fetching invites with `loader`. `repaint` asks for a frame when data arrives. The cache of
+    /// colleagues' calendars goes by `clock`, once [`CalendarSync::set_cache`] says its settings.
     pub(crate) fn start(
         store: Store,
         loader: Loader,
         presence: watch::Receiver<Presence>,
         repaint: Repaint,
         restarts: &Arc<Restarts>,
+        clock: Clock,
     ) -> Self {
         let (requests, receiver) = mpsc::unbounded_channel();
         let (sender, data) = watch::channel(Arc::new(Data::default()));
+        let (cache, cache_receiver) = watch::channel(None);
         // The first run's opening counts as busy from now.
         let shared = Arc::new(Shared {
             data: sender,
@@ -261,6 +282,8 @@ impl CalendarSync {
             window: Mutex::default(),
             series_asked: Mutex::default(),
             guests_asked: Mutex::default(),
+            cache,
+            cache_nudged: std::sync::atomic::AtomicBool::new(false),
         });
         let receiver = Arc::new(tokio::sync::Mutex::new(receiver));
         let mut resumed = false;
@@ -283,6 +306,10 @@ impl CalendarSync {
                     fetched: Vec::new(),
                     listed: None,
                     retry_at: None,
+                    clock: clock.clone(),
+                    cache: cache_receiver.clone(),
+                    cache_last: None,
+                    cache_check_at: tokio::time::Instant::now() + CACHE_CHECK,
                 };
                 task.run(receiver.clone(), resumed)
             }
@@ -449,6 +476,28 @@ impl CalendarSync {
         });
     }
 
+    /// Keeps the cache of colleagues' calendars by `cache` from now on: the app's settings, once
+    /// at start and whenever they change. Whomever it no longer lists is forgotten at once.
+    pub fn set_cache(&self, cache: CalendarCache) {
+        self.nudge_cache(|current| *current = Some(cache));
+    }
+
+    /// Has the cache of colleagues' calendars look at the clock now, for when the minute changed,
+    /// maybe by more than the task slept (a Mac asleep).
+    pub fn check_cache(&self) {
+        self.nudge_cache(|_| {});
+    }
+
+    /// Changes the cache's settings by `change` and wakes the task to look at them, counted busy
+    /// until it has.
+    fn nudge_cache(&self, change: impl FnOnce(&mut Option<CalendarCache>)) {
+        // Counted before the task can see the nudge, so it always finds the count to take over.
+        if !self.shared.cache_nudged.swap(true, Ordering::SeqCst) {
+            self.shared.busy.fetch_add(1, Ordering::SeqCst);
+        }
+        self.shared.cache.send_modify(change);
+    }
+
     fn post(&self, request: Request) {
         self.shared.busy.fetch_add(1, Ordering::SeqCst);
         if self.requests.send(request).is_err() {
@@ -487,6 +536,16 @@ struct Task {
     listed: Option<Instant>,
     /// When the next queued change is due, once its hold or its backoff is over.
     retry_at: Option<Timestamp>,
+    /// The app's clock, which the cache's schedule goes by.
+    clock: Clock,
+    /// The cache's settings, once the app has said them.
+    cache: watch::Receiver<Option<CalendarCache>>,
+    /// When the cache was last refreshed, once known: at first, the oldest of the listed people's
+    /// cached copies (`None` while someone listed has none).
+    cache_last: Option<Option<Timestamp>>,
+    /// When the cache next looks at the clock unprompted. A deadline, so that the task's other
+    /// wakes don't put it off.
+    cache_check_at: tokio::time::Instant,
 }
 
 /// Counts as busy until dropped.
@@ -530,6 +589,7 @@ impl Task {
             self.flush(false).await;
         }
         let mut watching = true;
+        let mut cache_watching = true;
         loop {
             let wait = self.next_poll();
             let retry = self.retry_at.map(|at| {
@@ -553,6 +613,22 @@ impl Task {
                     }
                     Err(_) => watching = false,
                 },
+                changed = self.cache.changed(), if cache_watching => {
+                    if changed.is_err() {
+                        cache_watching = false;
+                        continue;
+                    }
+                    let _busy = if self.shared.cache_nudged.swap(false, Ordering::SeqCst) {
+                        Busy(self.shared.clone())
+                    } else {
+                        self.busy()
+                    };
+                    self.check_cache().await;
+                }
+                () = tokio::time::sleep_until(self.cache_check_at), if self.cache.borrow().is_some() => {
+                    let _busy = self.busy();
+                    self.check_cache().await;
+                }
                 () = tokio::time::sleep(wait) => {
                     let _busy = self.busy();
                     if self.listed.is_none_or(|at| at.elapsed() >= LIST_FRESH) {
@@ -564,6 +640,117 @@ impl Task {
                 }
             }
         }
+    }
+
+    /// Forgets the cached calendars of people the cache doesn't list (everyone's, with the
+    /// cache off), then refreshes the rest if it's time to and Calendar can be reached.
+    async fn check_cache(&mut self) {
+        self.cache_check_at = tokio::time::Instant::now() + CACHE_CHECK;
+        let Some(settings) = self.cache.borrow_and_update().clone() else {
+            return;
+        };
+        let keep = if settings.enabled {
+            settings.people.as_slice()
+        } else {
+            &[]
+        };
+        if let Err(error) = self.store.forget_cached_guests(keep).await {
+            log::error!("forgetting colleagues' cached calendars: {error}");
+        }
+        if !settings.enabled || settings.people.is_empty() {
+            // Switched on again, it starts from what's cached then.
+            self.cache_last = None;
+            return;
+        }
+        let last = match self.cache_last {
+            Some(last) => last,
+            None => {
+                let last = self.oldest_cached(&settings.people).await;
+                self.cache_last = Some(last);
+                last
+            }
+        };
+        if cache::due(&settings, &self.clock.now(), last) && !self.down() {
+            self.refresh_cache(&settings.people).await;
+        }
+    }
+
+    /// When the least recently cached of `people` was cached, or `None` when one of them isn't.
+    async fn oldest_cached(&self, people: &[String]) -> Option<Timestamp> {
+        let mut oldest: Option<Timestamp> = None;
+        for email in people {
+            match self.store.cached_guest(email).await {
+                Ok(Some(cached)) => {
+                    oldest = Some(oldest.map_or(cached.fetched_at, |at| at.min(cached.fetched_at)));
+                }
+                Ok(None) => return None,
+                Err(error) => {
+                    log::error!("reading a colleague's cached calendar: {error}");
+                    return None;
+                }
+            }
+        }
+        oldest
+    }
+
+    /// Reads `people`'s calendars over the cache's window, a few at a time, into the cache. Google's
+    /// answer replaces what's cached, and a calendar Google no longer shows is forgotten. One
+    /// that couldn't be read stays as it was until the next refresh. Someone taken off the list,
+    /// or the cache switched off, meanwhile isn't written back.
+    async fn refresh_cache(&mut self, people: &[String]) {
+        let now = self.clock.now();
+        let (today, tz) = (now.date(), now.time_zone().clone());
+        let (from, to) = cache::window_range(today, &tz);
+        let store = self.store.clone();
+        let mut answers = futures::stream::iter(people.to_vec())
+            .map(|email| {
+                let store = store.clone();
+                async move {
+                    let found = store.attendee_events(&email, from, to).await;
+                    (email, found)
+                }
+            })
+            .buffer_unordered(CACHE_READS);
+        while let Some((email, found)) = answers.next().await {
+            let listed = self
+                .cache
+                .borrow()
+                .as_ref()
+                .is_some_and(|cache| cache.enabled && cache.people.contains(&email));
+            if !listed {
+                continue;
+            }
+            let outcome = match found {
+                Ok(Some(events)) => {
+                    let cached = CachedGuest {
+                        fetched_at: self.clock.now().timestamp(),
+                        from,
+                        to,
+                        events: cache::keep_window(events, today, &tz),
+                    };
+                    self.store.cache_guest(&email, &cached).await
+                }
+                Ok(None) => {
+                    let keep: Vec<String> = self
+                        .cache
+                        .borrow()
+                        .iter()
+                        .flat_map(|cache| cache.people.iter())
+                        .filter(|person| **person != email)
+                        .cloned()
+                        .collect();
+                    self.store.forget_cached_guests(&keep).await
+                }
+                Err(error) => {
+                    log::warn!("refreshing a colleague's cached calendar: {error}");
+                    Ok(())
+                }
+            };
+            if let Err(error) = outcome {
+                log::error!("caching a colleague's calendar: {error}");
+            }
+        }
+        self.cache_last = Some(Some(now.timestamp()));
     }
 
     /// Counts the task as busy until the guard drops.

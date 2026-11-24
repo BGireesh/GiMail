@@ -2116,3 +2116,228 @@ fn a_long_people_list_scrolls_and_leaves_the_rest_of_calendar_settings_reachable
         .rect;
     assert_eq!(again.bottom(), sign_in.bottom());
 }
+
+const PRIYA: &str = "priya@brightmoor.co";
+const LENA: &str = "lena@brightmoor.co";
+
+/// The cache switched on for `people`, refreshing on its defaults (weekdays, 8 AM to 6 PM, every
+/// hour).
+fn cache_on(people: &'static [&'static str]) -> impl Fn(&mut exo_store::Settings) {
+    move |settings| {
+        settings.calendar.cache.enabled = true;
+        settings.calendar.cache.people = people.iter().map(|&email| email.to_owned()).collect();
+    }
+}
+
+/// A time in New York, the mock's zone.
+fn new_york(time: &str) -> jiff::Zoned {
+    format!("{time}[America/New_York]").parse().expect("a time")
+}
+
+/// Changes the cache's settings, as Calendar Settings does, and lets the task take them up.
+fn change_cache(app: &mut Fixture, change: impl FnOnce(&mut exo_store::CalendarCache)) {
+    app.mail_mut()
+        .account_mut()
+        .update_settings(|settings| change(&mut settings.calendar.cache));
+    app.settle();
+}
+
+/// The titles of `email`'s cached events.
+fn cached_titles(app: &Fixture, email: &str) -> Vec<String> {
+    app.mail()
+        .calendar_cached(email)
+        .map(|cached| {
+            cached
+                .events
+                .iter()
+                .filter_map(|event| event.summary.clone())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+#[test]
+fn listed_colleagues_are_cached_on_launch() {
+    let app = support::start_with_settings("calendar-cached-launch", &cache_on(&[PRIYA, LENA]));
+    let ny = jiff::tz::TimeZone::get("America/New_York").expect("zone");
+    for email in [PRIYA, LENA] {
+        let cached = app
+            .mail()
+            .calendar_cached(email)
+            .unwrap_or_else(|| panic!("{email} is cached"));
+        assert_eq!(cached.fetched_at, new_york("2026-11-17T09:00").timestamp());
+        assert!(!cached.events.is_empty(), "{email} has events");
+        // The window from Tuesday the 17th: today and the six days after, weekdays only.
+        let window = [
+            date(2026, 11, 17),
+            date(2026, 11, 18),
+            date(2026, 11, 19),
+            date(2026, 11, 20),
+            date(2026, 11, 23),
+        ];
+        for event in &cached.events {
+            let start = event.start.as_ref().expect("a start");
+            let day = match (&start.date, &start.date_time) {
+                (Some(day), _) => day.parse().expect("a date"),
+                (None, Some(at)) => at
+                    .parse::<jiff::Timestamp>()
+                    .expect("a time")
+                    .to_zoned(ny.clone())
+                    .date(),
+                (None, None) => panic!("{event:?} has no start"),
+            };
+            assert!(window.contains(&day), "{event:?} is in the window");
+        }
+    }
+    let titles = cached_titles(&app, PRIYA);
+    assert!(
+        titles.iter().any(|title| title == "Priya / Maya 1:1"),
+        "{titles:?}"
+    );
+    assert!(
+        titles.iter().any(|title| title == "Design crit"),
+        "{titles:?}"
+    );
+    assert!(
+        cached_titles(&app, LENA)
+            .iter()
+            .any(|title| title == "Design crit")
+    );
+}
+
+#[test]
+fn nothing_is_cached_outside_the_schedule_or_with_nobody_listed() {
+    let mut app = start("calendar-cached-schedule");
+    // Saturday.
+    app.set_now(new_york("2026-11-21T10:00"));
+    change_cache(&mut app, |cache| {
+        cache.enabled = true;
+        cache.people = vec![PRIYA.into()];
+    });
+    app.wait(0.1);
+    assert!(
+        app.mail().calendar_cached(PRIYA).is_none(),
+        "not on a Saturday"
+    );
+    // Tuesday evening, after the 6 PM end.
+    app.set_now(new_york("2026-11-24T19:00"));
+    app.wait(0.1);
+    assert!(
+        app.mail().calendar_cached(PRIYA).is_none(),
+        "not after hours"
+    );
+    // Inside the schedule, with nobody listed.
+    change_cache(&mut app, |cache| cache.people.clear());
+    app.set_now(new_york("2026-11-24T10:00"));
+    app.wait(0.1);
+    assert!(
+        app.mail().calendar_cached(PRIYA).is_none(),
+        "nobody is listed"
+    );
+    assert!(
+        app.mail().calendar_cached(LENA).is_none(),
+        "nobody is listed"
+    );
+}
+
+#[test]
+fn the_cache_refreshes_at_its_frequency_and_forgets_whom_it_drops() {
+    let mut app =
+        support::start_with_settings("calendar-cached-refresh", &cache_on(&[PRIYA, LENA]));
+    let fetched = |app: &Fixture, email: &str| {
+        app.mail()
+            .calendar_cached(email)
+            .map(|cached| cached.fetched_at)
+    };
+    let nine = new_york("2026-11-17T09:00").timestamp();
+    assert_eq!(fetched(&app, PRIYA), Some(nine));
+    // Every hour: not again at 9:30.
+    app.set_now(new_york("2026-11-17T09:30"));
+    app.wait(0.1);
+    assert_eq!(fetched(&app, PRIYA), Some(nine), "not due yet");
+    let ten = new_york("2026-11-17T10:01");
+    app.set_now(ten.clone());
+    app.wait(0.1);
+    assert_eq!(fetched(&app, PRIYA), Some(ten.timestamp()), "refreshed");
+    assert_eq!(fetched(&app, LENA), Some(ten.timestamp()), "refreshed");
+    change_cache(&mut app, |cache| {
+        cache.people.retain(|email| email != PRIYA)
+    });
+    assert_eq!(fetched(&app, PRIYA), None, "Priya is forgotten");
+    assert_eq!(fetched(&app, LENA), Some(ten.timestamp()), "Lena stays");
+    change_cache(&mut app, |cache| cache.enabled = false);
+    assert_eq!(fetched(&app, LENA), None, "the cache is gone when it's off");
+}
+
+#[test]
+fn a_colleague_who_stops_sharing_is_forgotten_and_an_offline_refresh_keeps_the_cache() {
+    // Sam, outside the workspace, shared their calendar once and shares nothing now.
+    const SAM: &str = "sam@elsewhere.example";
+    let nine = new_york("2026-11-17T09:00").timestamp();
+    let old = |summary: &str| exo_store::CachedGuest {
+        fetched_at: nine,
+        from: nine,
+        to: nine,
+        events: vec![gmail::calendar::Event {
+            summary: Some(summary.into()),
+            ..gmail::calendar::Event::default()
+        }],
+    };
+    let mut app = support::start_with_cached_guests(
+        "calendar-cached-hidden",
+        &cache_on(&[SAM, LENA]),
+        &[(SAM, old("Sam's planning")), (LENA, old("Lena's planning"))],
+    );
+    assert_eq!(
+        cached_titles(&app, SAM),
+        ["Sam's planning"],
+        "fresh at launch"
+    );
+    let ten = new_york("2026-11-17T10:01");
+    app.set_now(ten.clone());
+    app.wait(0.1);
+    assert!(
+        app.mail().calendar_cached(SAM).is_none(),
+        "hidden, so forgotten"
+    );
+    let lena = app.mail().calendar_cached(LENA).expect("Lena is cached");
+    assert_eq!(lena.fetched_at, ten.timestamp());
+    assert!(
+        cached_titles(&app, LENA)
+            .iter()
+            .any(|title| title == "Design crit")
+    );
+    // Due again, offline.
+    app.disconnect();
+    app.set_now(new_york("2026-11-17T11:02"));
+    app.wait(0.1);
+    assert_eq!(
+        app.mail().calendar_cached(LENA),
+        Some(lena),
+        "kept as it was"
+    );
+}
+
+#[test]
+fn a_colleague_removed_during_a_refresh_isn_t_written_back() {
+    let mut app = start("calendar-cached-removed");
+    // Priya's calendar answers after a retry, a second or two from now.
+    app.fault(Some(serde_json::json!({
+        "method": "GET",
+        "path": "/calendar/v3/calendars/priya@brightmoor.co/events",
+        "status": 503,
+        "times": 1,
+    })));
+    app.mail_mut().account_mut().update_settings(|settings| {
+        settings.calendar.cache.enabled = true;
+        settings.calendar.cache.people = vec![PRIYA.into()];
+    });
+    app.harness.run_steps(1);
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    change_cache(&mut app, |cache| cache.people.clear());
+    app.wait(0.1);
+    assert!(
+        app.mail().calendar_cached(PRIYA).is_none(),
+        "not written back"
+    );
+}

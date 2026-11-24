@@ -374,6 +374,11 @@ impl crate::Mail {
             .map(Response::status)
     }
 
+    /// `email`'s calendar as the cache of colleagues' calendars holds it, if it does (for tests).
+    pub fn calendar_cached(&self, email: &str) -> Option<exo_store::CachedGuest> {
+        self.account.calendar_cached(email)
+    }
+
     /// Calendar Settings is up (for tests).
     pub fn calendar_settings_open(&self) -> bool {
         self.calendar.options_open
