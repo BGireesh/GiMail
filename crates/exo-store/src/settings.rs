@@ -553,7 +553,8 @@ pub struct CalendarSettings {
     /// refreshes them.
     #[serde(
         rename = "exoCalendarCache",
-        skip_serializing_if = "CalendarCache::is_default"
+        skip_serializing_if = "CalendarCache::is_default",
+        deserialize_with = "CalendarCache::deserialize_normalized"
     )]
     pub cache: CalendarCache,
 }
@@ -578,8 +579,37 @@ pub struct CalendarCache {
 }
 
 impl CalendarCache {
+    /// The frequencies the settings offer, in minutes.
+    const FREQUENCIES: [u16; 3] = [15, 30, 60];
+    /// The last minute the refreshing can start at, half an hour before the day's end.
+    const LAST_FROM: u16 = 24 * 60 - 30;
+    const DAY_END: u16 = 24 * 60;
+
     fn is_default(&self) -> bool {
         *self == Self::default()
+    }
+
+    /// The settings with what the dialog can't say made sayable: a frequency it doesn't offer
+    /// becomes an hour, the start is no later than 11:30 PM, and the end falls after the start
+    /// and no later than midnight (half an hour after the start when it didn't).
+    #[must_use]
+    pub fn normalized(mut self) -> Self {
+        if !Self::FREQUENCIES.contains(&self.every_minutes) {
+            self.every_minutes = 60;
+        }
+        self.from_minute = self.from_minute.min(Self::LAST_FROM);
+        if self.to_minute <= self.from_minute {
+            self.to_minute = self.from_minute + 30;
+        }
+        self.to_minute = self.to_minute.min(Self::DAY_END);
+        self
+    }
+
+    /// Reads the settings as stored, [normalized](Self::normalized).
+    fn deserialize_normalized<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
+        Self::deserialize(deserializer).map(Self::normalized)
     }
 }
 
@@ -1141,6 +1171,48 @@ mod tests {
         })
         .expect("serializes");
         assert!(json.get("exoCalendarCache").is_none());
+    }
+
+    #[test]
+    fn calendar_cache_settings_are_normalized_when_read() {
+        let read = |cache: &str| -> CalendarCache {
+            serde_json::from_str::<Settings>(&format!(
+                r#"{{"calendar":{{"exoCalendarCache":{cache}}}}}"#
+            ))
+            .expect("parses")
+            .calendar
+            .cache
+        };
+        for every in [0, 1, 45, 90, 65535] {
+            assert_eq!(
+                read(&format!(r#"{{"everyMinutes":{every}}}"#)).every_minutes,
+                60,
+                "{every}"
+            );
+        }
+        for every in [15, 30, 60] {
+            assert_eq!(
+                read(&format!(r#"{{"everyMinutes":{every}}}"#)).every_minutes,
+                every
+            );
+        }
+        let late = read(r#"{"fromMinute":2000,"toMinute":3000}"#);
+        assert_eq!((late.from_minute, late.to_minute), (1410, 1440));
+        let backwards = read(r#"{"fromMinute":1080,"toMinute":480}"#);
+        assert_eq!((backwards.from_minute, backwards.to_minute), (1080, 1110));
+        let same = read(r#"{"fromMinute":1410,"toMinute":1410}"#);
+        assert_eq!((same.from_minute, same.to_minute), (1410, 1440));
+        let past_midnight = read(r#"{"fromMinute":480,"toMinute":1500}"#);
+        assert_eq!(
+            (past_midnight.from_minute, past_midnight.to_minute),
+            (480, 1440)
+        );
+        let fine = read(r#"{"fromMinute":540,"toMinute":1020,"everyMinutes":15}"#);
+        assert_eq!(
+            (fine.from_minute, fine.to_minute, fine.every_minutes),
+            (540, 1020, 15)
+        );
+        assert_eq!(read("{}"), CalendarCache::default());
     }
 
     #[test]
