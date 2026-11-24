@@ -104,7 +104,7 @@ pub use query::{LastToken, SearchQuery, TokenKind};
 pub use quota::Quota;
 pub use search::{GmailPage, Highlighted, NoteHit, Search, SearchPage, SearchResult};
 pub use settings::{
-    AdditionalTimezone, AutoAdvance, CalendarAccount, CalendarEventNotifications,
+    AdditionalTimezone, AutoAdvance, CalendarAccount, CalendarCache, CalendarEventNotifications,
     CalendarNotifications, CalendarSetting, CalendarSettings, DeviceSettings, Document,
     EmojiSkinTone, MeetingLinks, NotesPlacement, Notifications, Nudge, PreviousDropdown,
     PreviousReminder, PreviousSchedule, PreviousSuggestion, QuickTips, ReminderSettings,

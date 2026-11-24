@@ -549,6 +549,51 @@ pub struct CalendarSettings {
     /// `hasDismissedFindTimeEnterShortcutTooltip`: Meet's `Hit enter to instantly find times!`
     /// tooltip was closed.
     pub has_dismissed_find_time_enter_shortcut_tooltip: bool,
+    /// `exoCalendarCache`: which colleagues' calendars Exo keeps a local copy of, and when it
+    /// refreshes them.
+    #[serde(
+        rename = "exoCalendarCache",
+        skip_serializing_if = "CalendarCache::is_default"
+    )]
+    pub cache: CalendarCache,
+}
+
+/// The local cache of colleagues' calendars: whom to keep, and the days, hours and frequency of
+/// the refresh.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct CalendarCache {
+    /// `enabled`: the cache is kept up to date.
+    pub enabled: bool,
+    /// `people`: the addresses to cache, lower-cased and without duplicates.
+    pub people: Vec<String>,
+    /// `days`: whether to refresh on Monday through Friday.
+    pub days: [bool; 5],
+    /// `fromMinute`: the minute of the day the refreshing starts, 480 for 8:00 AM.
+    pub from_minute: u16,
+    /// `toMinute`: the minute of the day it stops, 1080 for 6:00 PM.
+    pub to_minute: u16,
+    /// `everyMinutes`: how often to refresh, 15, 30 or 60.
+    pub every_minutes: u16,
+}
+
+impl CalendarCache {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+impl Default for CalendarCache {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            people: Vec::new(),
+            days: [true; 5],
+            from_minute: 480,
+            to_minute: 1080,
+            every_minutes: 60,
+        }
+    }
 }
 
 impl CalendarSettings {
@@ -566,6 +611,7 @@ impl Default for CalendarSettings {
             show_additional_timezones: false,
             additional_timezones: Vec::new(),
             has_dismissed_find_time_enter_shortcut_tooltip: false,
+            cache: CalendarCache::default(),
         }
     }
 }
@@ -1069,6 +1115,33 @@ pub(crate) async fn read<T: Document>(exec: &mut dyn Executor) -> Result<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn calendar_cache_defaults_and_its_key() {
+        let cache = CalendarCache::default();
+        assert!(!cache.enabled && cache.people.is_empty());
+        assert_eq!(cache.days, [true; 5]);
+        assert_eq!(
+            (cache.from_minute, cache.to_minute, cache.every_minutes),
+            (480, 1080, 60)
+        );
+        let settings: Settings = serde_json::from_str(
+            r#"{"calendar":{"exoCalendarCache":{"enabled":true,"people":["priya@brightmoor.co"],"everyMinutes":30}}}"#,
+        )
+        .expect("parses");
+        let cache = settings.calendar.cache;
+        assert!(cache.enabled);
+        assert_eq!(cache.people, ["priya@brightmoor.co"]);
+        assert_eq!(cache.every_minutes, 30);
+        assert_eq!(cache.days, [true; 5]);
+        assert_eq!((cache.from_minute, cache.to_minute), (480, 1080));
+        let json = serde_json::to_value(CalendarSettings {
+            show_weekends: false,
+            ..CalendarSettings::default()
+        })
+        .expect("serializes");
+        assert!(json.get("exoCalendarCache").is_none());
+    }
 
     #[test]
     fn documents_use_their_key_names() {

@@ -4,6 +4,7 @@
 mod accounts;
 mod availability;
 mod block;
+mod cache;
 mod day;
 pub(crate) mod description;
 mod details;
