@@ -34,6 +34,8 @@ const DAY_TEXT_TOP: f32 = 3.0 + 3.0;
 pub const HEIGHT: f32 = WEEKDAYS_TOP + WEEKDAY_HEIGHT + 6.0 * WEEK - 8.0;
 /// `opacity: .4` on the other months' days.
 const OUTSIDE_OPACITY: f32 = 0.4;
+/// How far the band of shown days stays inside its first and last columns.
+const BAND_INSET: f32 = 4.0;
 
 /// What a click in the mini month asked for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -46,6 +48,8 @@ pub enum MonthAction {
 
 /// Paints the month holding `month` with its top left at `origin`, `selected` on the accent and
 /// `today` on its fill (today's fill wins). Weeks start on Sunday, or with `monday` on Monday.
+/// `band` is the first and last day the calendar shows (the week, in Week), which sit on a light
+/// band, as in Google Calendar.
 pub fn show(
     ui: &Ui,
     origin: Pos2,
@@ -53,6 +57,7 @@ pub fn show(
     selected: Date,
     today: Date,
     monday: bool,
+    band: Option<(Date, Date)>,
 ) -> Option<MonthAction> {
     let palette = exo_ui::palette(ui.ctx());
     // `color: rgba(0,0,0,.9)`, Carbon's `hsla(0,0%,100%,.75)`.
@@ -109,6 +114,17 @@ pub fn show(
         first.weekday().to_sunday_zero_offset()
     };
     let start = first - i64::from(offset).days();
+    for (row, from, to) in band.map(|band| band_cells(start, band)).unwrap_or_default() {
+        let top = origin.y + WEEKDAYS_TOP + WEEKDAY_HEIGHT + row as f32 * WEEK + 2.0;
+        let rect = Rect::from_min_max(
+            pos2(origin.x + from as f32 * COLUMN + BAND_INSET, top),
+            pos2(
+                origin.x + (to + 1) as f32 * COLUMN - BAND_INSET,
+                top + DAY_BUTTON,
+            ),
+        );
+        painter.rect_filled(rect, DAY_BUTTON / 2.0, palette.ink(0.06, 0.1));
+    }
     for index in 0..42 {
         let day = start + i64::from(index).days();
         let (row, column) = (index / 7, index % 7);
@@ -179,10 +195,60 @@ pub fn show(
     action
 }
 
+/// The cells `band` (first and last day, inclusive) covers in the six weeks from `start`: one
+/// `(row, first column, last column)` for each week it reaches.
+fn band_cells(start: Date, (first, last): (Date, Date)) -> Vec<(usize, usize, usize)> {
+    let mut cells: Vec<(usize, usize, usize)> = Vec::new();
+    for index in 0..42usize {
+        let day = start + i64::try_from(index).unwrap_or_default().days();
+        if day < first || day > last {
+            continue;
+        }
+        let (row, column) = (index / 7, index % 7);
+        match cells.last_mut() {
+            Some(cell) if cell.0 == row => cell.2 = column,
+            _ => cells.push((row, column, column)),
+        }
+    }
+    cells
+}
+
 /// The first of the month `step` months from `month`'s.
 pub fn shift(month: Date, step: i8) -> Date {
     month
         .first_of_month()
         .checked_add(i64::from(step).months())
         .unwrap_or(month)
+}
+
+#[cfg(test)]
+mod band_tests {
+    use super::*;
+    use jiff::civil::date;
+
+    #[test]
+    fn the_band_covers_the_shown_days_in_each_row() {
+        // November 2026's grid starts on Sunday, November 1.
+        let start = date(2026, 11, 1);
+        assert_eq!(
+            band_cells(start, (date(2026, 11, 15), date(2026, 11, 21))),
+            [(2, 0, 6)],
+            "a Sunday week is the third row"
+        );
+        assert_eq!(
+            band_cells(start, (date(2026, 11, 16), date(2026, 11, 20))),
+            [(2, 1, 5)],
+            "without weekends, Monday to Friday"
+        );
+        assert_eq!(
+            band_cells(start, (date(2026, 11, 28), date(2026, 12, 4))),
+            [(3, 6, 6), (4, 0, 5)],
+            "a range across rows is a piece in each"
+        );
+        assert_eq!(
+            band_cells(start, (date(2027, 1, 3), date(2027, 1, 9))),
+            [],
+            "a week off the grid has no band"
+        );
+    }
 }

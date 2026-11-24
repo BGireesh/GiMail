@@ -696,6 +696,15 @@ impl Week {
             self.active,
             page.grid.now.date(),
             page.monday,
+            match page.view {
+                View::Week => page
+                    .grid
+                    .days
+                    .first()
+                    .zip(page.grid.days.last())
+                    .map(|(a, b)| (*a, *b)),
+                View::Day => None,
+            },
         ) {
             Some(MonthAction::Month(step)) => self.month = month::shift(self.month, step),
             Some(MonthAction::Select(day)) => actions.push(WeekAction::Select(day)),
