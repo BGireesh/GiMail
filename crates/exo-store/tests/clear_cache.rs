@@ -411,6 +411,7 @@ async fn every_table_is_kept_or_refilled() {
         "bodies",
         "calendars",
         "events",
+        "guest_cache",
         "labels",
         "list_ids",
         "lists",

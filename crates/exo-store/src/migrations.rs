@@ -116,6 +116,11 @@ static FILES: &[MigrationFile] = &[
         "0009_note_threads_gone.sql",
         include_str!("../migrations/0009_note_threads_gone.sql"),
     ),
+    MigrationFile::new(
+        0x2284_9f14_8fa9_1fa7,
+        "0010_guest_cache.sql",
+        include_str!("../migrations/0010_guest_cache.sql"),
+    ),
 ];
 
 /// Brings `db`, the file at `path`, to this build's schema.
@@ -897,6 +902,7 @@ mod tests {
                 "0007_bulk_actions.sql",
                 "0008_notes.sql",
                 "0009_note_threads_gone.sql",
+                "0010_guest_cache.sql",
                 "9002_extra.sql"
             ]
         );
@@ -934,6 +940,7 @@ mod tests {
                 "0007_bulk_actions.sql",
                 "0008_notes.sql",
                 "0009_note_threads_gone.sql",
+                "0010_guest_cache.sql",
                 "9002_extra.sql",
                 "9003_remind_at.sql"
             ]

@@ -5,7 +5,7 @@
 
 mod support;
 
-use exo_store::{CalendarChange, CalendarOutcome, InviteLinks, Refusal, StoredEvent};
+use exo_store::{CachedGuest, CalendarChange, CalendarOutcome, InviteLinks, Refusal, StoredEvent};
 use gmail::calendar::{CalendarListEntry, Event, EventDateTime};
 use jiff::{SignedDuration, Timestamp, ToSpan, civil::date, tz::TimeZone};
 use support::{ACCOUNT, Harness};
@@ -1218,4 +1218,103 @@ async fn a_calendar_account_lists_beside_the_mail_account_and_its_calendars_go_t
         .await
         .expect("reads");
     assert!(friday.is_empty(), "and its calendar's events");
+}
+
+/// A cached guest calendar with one event per title, fetched "now".
+fn cached(titles: &[&str]) -> CachedGuest {
+    let from = Timestamp::from_second(1_800_000_000).expect("time");
+    CachedGuest {
+        fetched_at: from + SignedDuration::from_secs(60),
+        from,
+        to: from + SignedDuration::from_hours(24 * 28),
+        events: titles
+            .iter()
+            .map(|title| Event {
+                id: Some((*title).to_owned()),
+                summary: Some((*title).to_owned()),
+                ..Event::default()
+            })
+            .collect(),
+    }
+}
+
+#[tokio::test]
+async fn a_guest_s_cached_calendar_is_kept_across_a_restart() {
+    let mut harness = Harness::start().await;
+    let first = cached(&["Standup", "Review"]);
+    harness
+        .store
+        .cache_guest("Priya@Brightmoor.co", &first)
+        .await
+        .expect("caches");
+    harness.reopen().await;
+    assert_eq!(
+        harness
+            .store
+            .cached_guest("priya@brightmoor.co")
+            .await
+            .expect("reads"),
+        Some(first)
+    );
+    let second = cached(&["Lunch"]);
+    harness
+        .store
+        .cache_guest("priya@brightmoor.co", &second)
+        .await
+        .expect("replaces");
+    assert_eq!(
+        harness
+            .store
+            .cached_guest("PRIYA@brightmoor.co")
+            .await
+            .expect("reads"),
+        Some(second),
+        "replaced, not added to"
+    );
+}
+
+#[tokio::test]
+async fn forgetting_keeps_only_the_listed_guests() {
+    let harness = Harness::start().await;
+    for who in ["priya@brightmoor.co", "lena@brightmoor.co"] {
+        harness
+            .store
+            .cache_guest(who, &cached(&["Standup"]))
+            .await
+            .expect("caches");
+    }
+    harness
+        .store
+        .forget_cached_guests(&["lena@brightmoor.co".into()])
+        .await
+        .expect("forgets");
+    assert_eq!(
+        harness
+            .store
+            .cached_guest("priya@brightmoor.co")
+            .await
+            .expect("reads"),
+        None
+    );
+    assert!(
+        harness
+            .store
+            .cached_guest("lena@brightmoor.co")
+            .await
+            .expect("reads")
+            .is_some()
+    );
+    harness
+        .store
+        .forget_cached_guests(&[])
+        .await
+        .expect("forgets");
+    assert_eq!(
+        harness
+            .store
+            .cached_guest("lena@brightmoor.co")
+            .await
+            .expect("reads"),
+        None
+    );
 }

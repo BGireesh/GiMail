@@ -74,7 +74,7 @@ pub use calendar::outbox::{
     CalendarChange, CalendarOutcome, Cut, InviteLinks, QueuedCalendarChange, Refusal,
 };
 pub use calendar::recurrence::{End as RecurrenceEnd, Frequency, Nth, Recurrence};
-pub use calendar::{AccountCalendar, StoredEvent};
+pub use calendar::{AccountCalendar, CachedGuest, StoredEvent};
 pub use connection::{Connection, Debounce, Outage};
 pub use drafts::{
     Address, AttachmentSource, Draft, DraftAction, DraftAttachment, DraftFailure, DraftRecord,

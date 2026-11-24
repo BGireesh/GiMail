@@ -40,7 +40,7 @@ use jiff::tz::TimeZone;
 use toasty::{Executor, Json};
 
 use crate::api::Failure;
-use crate::db::{CalendarRow, EventRow};
+use crate::db::{CalendarRow, EventRow, GuestCacheRow};
 use crate::error::Result;
 use crate::store::Store;
 
@@ -77,7 +77,95 @@ pub struct AccountCalendar {
     pub entry: CalendarListEntry,
 }
 
+/// A colleague's calendar as Exo last fetched it, for showing their day beside the user's own.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CachedGuest {
+    /// When it was fetched.
+    pub fetched_at: Timestamp,
+    /// The window `events` cover.
+    pub from: Timestamp,
+    pub to: Timestamp,
+    /// Their events in the window, as Calendar listed them.
+    pub events: Vec<Event>,
+}
+
 impl Store {
+    /// What Exo last fetched of `email`'s calendar, if anything. The address is matched without
+    /// regard to case.
+    ///
+    /// # Errors
+    /// On database failures.
+    pub async fn cached_guest(&self, email: &str) -> Result<Option<CachedGuest>> {
+        let mut db = self.inner.db.clone();
+        let Some(row) = GuestCacheRow::filter_by_person(email.to_lowercase())
+            .first()
+            .exec(&mut db)
+            .await?
+        else {
+            return Ok(None);
+        };
+        // A time out of range can't be one Exo wrote, so the row counts as not there.
+        let time = |ms| Timestamp::from_millisecond(ms).ok();
+        Ok((|| {
+            Some(CachedGuest {
+                fetched_at: time(row.fetched_at)?,
+                from: time(row.from_ms)?,
+                to: time(row.to_ms)?,
+                events: row.events.0,
+            })
+        })())
+    }
+
+    /// Keeps `cached` as `email`'s calendar, replacing what was there.
+    ///
+    /// # Errors
+    /// On database failures.
+    pub async fn cache_guest(&self, email: &str, cached: &CachedGuest) -> Result<()> {
+        let person = email.to_lowercase();
+        let mut db = self.inner.db.clone();
+        let mut write = self.inner.begin(&mut db).await?;
+        GuestCacheRow::filter_by_person(&person)
+            .delete()
+            .exec(write.exec())
+            .await?;
+        GuestCacheRow::create()
+            .person(person)
+            .fetched_at(cached.fetched_at.as_millisecond())
+            .from_ms(cached.from.as_millisecond())
+            .to_ms(cached.to.as_millisecond())
+            .events(Json(cached.events.clone()))
+            .exec(write.exec())
+            .await?;
+        write.publish().await
+    }
+
+    /// Forgets every cached calendar but those of `keep` (lower-case addresses). An empty `keep`
+    /// forgets them all.
+    ///
+    /// # Errors
+    /// On database failures.
+    pub async fn forget_cached_guests(&self, keep: &[String]) -> Result<()> {
+        let mut db = self.inner.db.clone();
+        let gone: Vec<String> = GuestCacheRow::all()
+            .exec(&mut db)
+            .await?
+            .into_iter()
+            .map(|row| row.person)
+            .filter(|person| !keep.iter().any(|kept| kept.to_lowercase() == *person))
+            .collect();
+        if gone.is_empty() {
+            return Ok(());
+        }
+        let mut write = self.inner.begin(&mut db).await?;
+        for people in gone.chunks(500) {
+            GuestCacheRow::filter(GuestCacheRow::fields().person().in_list(people))
+                .delete()
+                .exec(write.exec())
+                .await?;
+        }
+        write.publish().await
+    }
+
     /// The calendars on the lists of the account and of its signed-in calendar accounts, as last
     /// synced. Each shows once, from the account it's read through: the one whose primary
     /// calendar it is, else the one with the most access to it (owner, writer, reader), else the

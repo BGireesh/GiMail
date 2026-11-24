@@ -315,6 +315,22 @@ pub(crate) struct EventRow {
     pub event: Json<gmail::calendar::Event>,
 }
 
+/// A colleague's calendar as Exo last fetched it: the events of `from` to `to`, fetched at
+/// `fetched_at`. One row per person, keyed by their lower-cased address.
+#[derive(Debug, toasty::Model)]
+#[table = "guest_cache"]
+pub(crate) struct GuestCacheRow {
+    #[key]
+    pub person: String,
+    /// When it was fetched, in epoch milliseconds.
+    pub fetched_at: i64,
+    /// The window the events cover, in epoch milliseconds.
+    pub from_ms: i64,
+    pub to_ms: i64,
+    #[column(type = text)]
+    pub events: Json<Vec<gmail::calendar::Event>>,
+}
+
 /// A change to the calendar that Calendar doesn't have yet. Not provider truth, like the outbox.
 #[derive(Debug, toasty::Model)]
 #[table = "calendar_changes"]
