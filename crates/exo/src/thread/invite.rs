@@ -110,6 +110,8 @@ pub enum CardAction {
     Open(String),
     /// An answer other than the current one. `NeedsAction` adds the event to the calendar.
     Respond(Response),
+    /// The current answer again, which with RSVP + Mark Done marks the conversation done.
+    Again,
     /// `Show more` / `Show Less`.
     ToggleAbout,
 }
@@ -1351,9 +1353,13 @@ pub(super) fn show(
                         selected,
                         focused == Some(index),
                     );
-                    // Answering again with the current answer does nothing.
-                    if clicked && !selected {
-                        shown.clicked = Some(CardAction::Respond(response));
+                    // The current answer again sends nothing; it can still mark done.
+                    if clicked {
+                        shown.clicked = Some(if selected {
+                            CardAction::Again
+                        } else {
+                            CardAction::Respond(response)
+                        });
                     }
                     x = button.right() + BUTTON_GAP;
                 }
@@ -1368,8 +1374,12 @@ pub(super) fn show(
                     *selected,
                     focused == Some(0),
                 );
-                if clicked && !selected {
-                    shown.clicked = Some(CardAction::Respond(Response::NeedsAction));
+                if clicked {
+                    shown.clicked = Some(if *selected {
+                        CardAction::Again
+                    } else {
+                        CardAction::Respond(Response::NeedsAction)
+                    });
                 }
             }
             Value::Files(files) => {

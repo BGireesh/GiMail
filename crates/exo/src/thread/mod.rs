@@ -61,6 +61,15 @@ const SLACK: f32 = 16.0;
 /// The keyboard's scroll animation, an estimate.
 const SCROLL_DURATION: f32 = 0.2;
 
+/// What Enter in an invite card did.
+#[derive(Clone, Debug)]
+pub enum Submitted {
+    /// Answered: the invite, my answer recorded unless its account signs in first, and the answer.
+    Answer(invite::Invite, invite::Response),
+    /// The current answer again.
+    Again,
+}
+
 /// What the app should do in response to the user.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Action {
@@ -121,6 +130,8 @@ pub(crate) enum Action {
     PopOutHint,
     /// An invite card's RSVP: the invite, my answer recorded, and the answer.
     RespondToInvite(invite::Invite, invite::Response),
+    /// An invite card's current answer again.
+    InviteAnsweredAgain,
     /// The pointer settled on an invite's When or a detected date, to show that day in the right
     /// pane.
     ShowDay(jiff::civil::Date),
@@ -672,10 +683,10 @@ impl ThreadView {
         self.invite_focus = None;
     }
 
-    /// Enter or space in the card: answers with the focused button, unless that's the current
-    /// answer. Returns the invite and the answer. The invite has the answer recorded, unless its
-    /// calendar account has to sign in first.
-    pub fn submit_invite(&mut self) -> Option<(invite::Invite, invite::Response)> {
+    /// Enter or space in the card: answers with the focused button. Returns the invite and the
+    /// answer, the invite with the answer recorded unless its calendar account has to sign in
+    /// first, or [`Submitted::Again`] when the focused button is the current answer.
+    pub fn submit_invite(&mut self) -> Option<Submitted> {
         let focus = self.invite_focus?;
         let id = self.focus.clone()?;
         let parsed = self.focusable_invite()?;
@@ -686,15 +697,15 @@ impl ThreadView {
             invite::Response::NeedsAction
         };
         if parsed.answer_of(&me) == Some(response) {
-            return None;
+            return Some(Submitted::Again);
         }
         if self.needs_sign_in(parsed) {
-            return Some((parsed.clone(), response));
+            return Some(Submitted::Answer(parsed.clone(), response));
         }
         let mut answered = parsed.clone();
         answered.answer(&me, response);
         self.invites.insert(id, answered.clone());
-        Some((answered, response))
+        Some(Submitted::Answer(answered, response))
     }
 
     /// Shows the calendar's answer to the invite with UID `uid` on its cards, rather than the
@@ -2309,6 +2320,9 @@ impl ThreadView {
                             );
                             actions.push(Action::RespondToInvite(answered.clone(), response));
                             self.invites.insert(item.id.clone(), answered);
+                        }
+                        Some(invite::CardAction::Again) => {
+                            actions.push(Action::InviteAnsweredAgain)
                         }
                         Some(invite::CardAction::ToggleAbout) => {
                             if !self.about_open.remove(&item.id) {

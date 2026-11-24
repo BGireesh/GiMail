@@ -2464,6 +2464,7 @@ impl Mail {
                 thread::Action::RespondToInvite(invite, response) => {
                     self.calendar_respond_to_invite(invite, response, true)
                 }
+                thread::Action::InviteAnsweredAgain => self.rsvp_again(),
                 thread::Action::ShowDay(date) => self.calendar_show_day(date),
                 // Only digits follow `tel:`, so it can go to the app that places calls.
                 thread::Action::Dial(number) => ui.ctx().open_url(egui::OpenUrl::new_tab(number)),

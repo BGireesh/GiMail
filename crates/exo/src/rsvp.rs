@@ -127,6 +127,26 @@ impl Mail {
         }
     }
 
+    /// The current answer again: nothing is sent, and with RSVP + Mark Done the actionable
+    /// conversations are marked done, as an answer would have.
+    pub(crate) fn rsvp_again(&mut self) {
+        if !self.rsvp_marks_done() {
+            return;
+        }
+        let ids: Vec<String> = actionable(self.thread.as_ref(), &self.inbox)
+            .iter()
+            .map(|thread| thread.id.clone())
+            .collect();
+        let now = self.ctx.input(|input| input.time);
+        self.triage_threads(
+            &ids,
+            Mutation::MarkDone,
+            Some("Marked Done.".to_owned()),
+            0,
+            now,
+        );
+    }
+
     /// RSVP + Mark Done's second half. The actionable conversations are marked done, with Undo and
     /// a toast that says the answer, and leave the list the way Auto Advance says.
     pub(crate) fn rsvp_mark_done(&mut self, response: Response) {

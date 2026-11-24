@@ -246,3 +246,57 @@ fn show_sender_full_names_toggles_from_the_palette() {
     palette(&mut app, "hide sender full names");
     assert!(!app.mail().account().settings().show_sender_full_names);
 }
+
+/// An invitation already answered (an updated invitation keeps the answer): with RSVP + Mark Done
+/// on, its current answer again only marks it done, and another answer changes the RSVP and marks
+/// it done. With the setting off, the current answer again still does nothing.
+#[test]
+fn answering_an_answered_invitation_again_marks_it_done() {
+    let mut app = start("rsvp-again-and-done");
+    // Answered Yes first, without marking done.
+    app.key(Key::J);
+    app.key(Key::Enter);
+    app.settle();
+    app.key(Key::Tab);
+    app.key(Key::Enter);
+    app.settle();
+    assert_eq!(calendar_answer(&app).as_deref(), Some("accepted"));
+    assert!(listed(&app, INVITATION), "the setting is off: still listed");
+    // Off, Yes again does nothing. (Escape leaves the card, so Tab comes back to Yes.)
+    app.key(Key::Escape);
+    app.key(Key::Tab);
+    app.key(Key::Enter);
+    app.settle();
+    assert!(
+        listed(&app, INVITATION),
+        "off, the same answer does nothing"
+    );
+    assert_eq!(calendar_answer(&app).as_deref(), Some("accepted"));
+    app.key(Key::Escape);
+
+    palette(&mut app, "enable rsvp + mark done");
+    assert!(open_subject(&app).starts_with(INVITATION));
+    app.key(Key::Tab);
+    app.key(Key::Enter);
+    app.settle();
+    assert_eq!(app.mail().toast(), Some("Marked Done."));
+    assert_eq!(
+        calendar_answer(&app).as_deref(),
+        Some("accepted"),
+        "the RSVP stands"
+    );
+    assert!(!listed(&app, INVITATION), "Yes again marked it done");
+    app.key(Key::Z);
+    assert!(listed(&app, INVITATION), "undone");
+    assert!(open_subject(&app).starts_with(INVITATION));
+
+    // Another answer changes the RSVP and marks done.
+    app.key(Key::Tab);
+    app.key(Key::ArrowRight);
+    app.key(Key::ArrowRight);
+    app.key(Key::Enter);
+    app.settle();
+    assert_eq!(app.mail().toast(), Some("Responded No and Marked Done."));
+    assert_eq!(calendar_answer(&app).as_deref(), Some("declined"));
+    assert!(!listed(&app, INVITATION));
+}

@@ -863,15 +863,17 @@ impl crate::Mail {
                     thread.blur_invite();
                 }
             }
-            Action::InviteSubmit => {
-                if let Some((invite, response)) = self
-                    .thread
-                    .as_mut()
-                    .and_then(crate::thread::ThreadView::submit_invite)
-                {
+            Action::InviteSubmit => match self
+                .thread
+                .as_mut()
+                .and_then(crate::thread::ThreadView::submit_invite)
+            {
+                Some(crate::thread::Submitted::Answer(invite, response)) => {
                     self.calendar_respond_to_invite(invite, response, false);
                 }
-            }
+                Some(crate::thread::Submitted::Again) => self.rsvp_again(),
+                None => {}
+            },
             Action::MeetFocus => {
                 if let Some(week) = &mut self.calendar.week {
                     week.meet.focus();
