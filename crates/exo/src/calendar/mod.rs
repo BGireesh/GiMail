@@ -379,6 +379,17 @@ impl crate::Mail {
         self.account.calendar_cached(email)
     }
 
+    /// Whether `email`'s calendar, as last asked for as a guest's, has come with their events
+    /// (for tests).
+    pub fn calendar_guest_shown(&self, email: &str) -> bool {
+        self.account
+            .calendar()
+            .data()
+            .guests
+            .get(email)
+            .is_some_and(|guest| matches!(guest.events, sync::GuestEvents::Shown(_)))
+    }
+
     /// Calendar Settings is up (for tests).
     pub fn calendar_settings_open(&self) -> bool {
         self.calendar.options_open

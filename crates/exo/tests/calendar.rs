@@ -2341,3 +2341,91 @@ fn a_colleague_removed_during_a_refresh_isn_t_written_back() {
         "not written back"
     );
 }
+
+#[test]
+fn a_colleague_added_to_the_list_is_cached_at_once() {
+    let mut app = support::start_with_settings("calendar-cached-added", &cache_on(&[PRIYA]));
+    let fetched = |app: &Fixture, email: &str| {
+        app.mail()
+            .calendar_cached(email)
+            .map(|cached| cached.fetched_at)
+    };
+    let nine = new_york("2026-11-17T09:00").timestamp();
+    assert_eq!(fetched(&app, PRIYA), Some(nine));
+    // Well before the next hourly refresh.
+    let ten_past = new_york("2026-11-17T09:10");
+    app.set_now(ten_past.clone());
+    app.settle();
+    change_cache(&mut app, |cache| cache.people.push(LENA.into()));
+    assert_eq!(
+        fetched(&app, LENA),
+        Some(ten_past.timestamp()),
+        "Lena at once"
+    );
+    assert_eq!(fetched(&app, PRIYA), Some(nine), "Priya waits for her hour");
+}
+
+#[test]
+fn nudges_that_land_together_leave_the_calendar_idle() {
+    let mut app = support::start_with_settings("calendar-cached-nudges", &cache_on(&[PRIYA]));
+    for minute in 1..=5 {
+        // A settings change, a clock nudge and a minute changing, all before the task looks.
+        app.mail_mut().account_mut().update_settings(|settings| {
+            settings.calendar.cache.every_minutes = if minute % 2 == 0 { 30 } else { 60 };
+        });
+        app.mail().account().calendar().check_cache();
+        app.set_now(new_york(&format!("2026-11-17T09:0{minute}")));
+        app.settle();
+        assert!(
+            app.mail().account().calendar().is_idle(),
+            "every nudge's busy count is given back ({minute})"
+        );
+    }
+}
+
+#[test]
+fn the_calendar_answers_other_requests_while_the_cache_is_read() {
+    let mut app = start("calendar-cached-meanwhile");
+    // Priya's calendar answers after a retry, a second or two from now.
+    app.fault(Some(serde_json::json!({
+        "method": "GET",
+        "path": "/calendar/v3/calendars/priya@brightmoor.co/events",
+        "status": 503,
+        "times": 1,
+    })));
+    app.mail_mut().account_mut().update_settings(|settings| {
+        settings.calendar.cache.enabled = true;
+        settings.calendar.cache.people = vec![PRIYA.into()];
+    });
+    app.harness.run_steps(1);
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    // Meanwhile, a guest's calendar is asked for, as Meet does.
+    let (from, to) = (
+        new_york("2026-11-17T00:00").timestamp(),
+        new_york("2026-11-18T00:00").timestamp(),
+    );
+    app.mail()
+        .account()
+        .calendar()
+        .load_guests(&[LENA.to_owned()], from, to);
+    let started = std::time::Instant::now();
+    while !app.mail().calendar_guest_shown(LENA)
+        && started.elapsed() < std::time::Duration::from_millis(800)
+    {
+        app.harness.run_steps(1);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(
+        app.mail().calendar_guest_shown(LENA),
+        "Lena's calendar came"
+    );
+    assert!(
+        app.mail().calendar_cached(PRIYA).is_none(),
+        "while Priya's was still being read"
+    );
+    app.settle();
+    assert!(
+        app.mail().calendar_cached(PRIYA).is_some(),
+        "then Priya's came"
+    );
+}

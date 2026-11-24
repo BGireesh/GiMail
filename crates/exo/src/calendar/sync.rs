@@ -207,11 +207,24 @@ enum Request {
     /// From the task fetching it: a guest's calendar over a time, `None` when it couldn't be
     /// reached.
     GuestLoaded(String, (Timestamp, Timestamp), Option<Option<Vec<Event>>>),
+    /// From a refresh of the cache of colleagues' calendars: one person's answer.
+    CacheLoaded(Box<CacheAnswer>),
     /// From the task fetching it: a thread's invite, if it has one.
     InviteLoaded(String, Option<Vec<u8>>),
     /// Panics the task, as a bug would.
     #[cfg(test)]
     Panic,
+}
+
+/// What Calendar said about one person in a refresh of the cache, and the window it was asked
+/// about.
+struct CacheAnswer {
+    email: String,
+    today: Date,
+    tz: TimeZone,
+    range: (Timestamp, Timestamp),
+    /// Their events, `None` when Calendar won't show them, or why they couldn't be read.
+    found: Result<Option<Vec<Event>>, String>,
 }
 
 /// The changes of this session Undo can take back.
@@ -309,6 +322,8 @@ impl CalendarSync {
                     clock: clock.clone(),
                     cache: cache_receiver.clone(),
                     cache_last: None,
+                    cache_covered: BTreeSet::new(),
+                    cache_reading: 0,
                     cache_check_at: tokio::time::Instant::now() + CACHE_CHECK,
                 };
                 task.run(receiver.clone(), resumed)
@@ -543,6 +558,12 @@ struct Task {
     /// When the cache was last refreshed, once known: at first, the oldest of the listed people's
     /// cached copies (`None` while someone listed has none).
     cache_last: Option<Option<Timestamp>>,
+    /// The people `cache_last` covers. Anyone listed since is read at the next look inside the
+    /// schedule.
+    cache_covered: BTreeSet<String>,
+    /// How many answers of the refresh under way haven't been handled yet. No refresh starts
+    /// until they have.
+    cache_reading: usize,
     /// When the cache next looks at the clock unprompted. A deadline, so that the task's other
     /// wakes don't put it off.
     cache_check_at: tokio::time::Instant,
@@ -618,11 +639,7 @@ impl Task {
                         cache_watching = false;
                         continue;
                     }
-                    let _busy = if self.shared.cache_nudged.swap(false, Ordering::SeqCst) {
-                        Busy(self.shared.clone())
-                    } else {
-                        self.busy()
-                    };
+                    let _busy = self.busy();
                     self.check_cache().await;
                 }
                 () = tokio::time::sleep_until(self.cache_check_at), if self.cache.borrow().is_some() => {
@@ -643,12 +660,20 @@ impl Task {
     }
 
     /// Forgets the cached calendars of people the cache doesn't list (everyone's, with the
-    /// cache off), then refreshes the rest if it's time to and Calendar can be reached.
+    /// cache off), then, unless a refresh is still being read or Calendar can't be reached,
+    /// refreshes everyone listed if it's time to, or, inside the schedule, whoever was listed
+    /// since the last refresh.
     async fn check_cache(&mut self) {
         self.cache_check_at = tokio::time::Instant::now() + CACHE_CHECK;
-        let Some(settings) = self.cache.borrow_and_update().clone() else {
-            return;
-        };
+        let settings = self.cache.borrow_and_update().clone();
+        // The settings are taken up here, whichever wake brought them, so a nudge's busy count is
+        // taken over here too. A nudge after this wakes the task again.
+        let _nudge = self
+            .shared
+            .cache_nudged
+            .swap(false, Ordering::SeqCst)
+            .then(|| Busy(self.shared.clone()));
+        let Some(settings) = settings else { return };
         let keep = if settings.enabled {
             settings.people.as_slice()
         } else {
@@ -660,6 +685,11 @@ impl Task {
         if !settings.enabled || settings.people.is_empty() {
             // Switched on again, it starts from what's cached then.
             self.cache_last = None;
+            self.cache_covered.clear();
+            return;
+        }
+        // The last answer of the refresh being read looks again.
+        if self.cache_reading > 0 {
             return;
         }
         let last = match self.cache_last {
@@ -667,11 +697,29 @@ impl Task {
             None => {
                 let last = self.oldest_cached(&settings.people).await;
                 self.cache_last = Some(last);
+                self.cache_covered = settings.people.iter().cloned().collect();
                 last
             }
         };
-        if cache::due(&settings, &self.clock.now(), last) && !self.down() {
-            self.refresh_cache(&settings.people).await;
+        if self.down() {
+            return;
+        }
+        let now = self.clock.now();
+        if cache::due(&settings, &now, last) {
+            self.cache_last = Some(Some(now.timestamp()));
+            self.cache_covered = settings.people.iter().cloned().collect();
+            self.refresh_cache(settings.people.clone(), &now);
+            return;
+        }
+        let added: Vec<String> = settings
+            .people
+            .iter()
+            .filter(|email| !self.cache_covered.contains(*email))
+            .cloned()
+            .collect();
+        if !added.is_empty() && cache::due(&settings, &now, None) {
+            self.cache_covered.extend(added.iter().cloned());
+            self.refresh_cache(added, &now);
         }
     }
 
@@ -693,64 +741,96 @@ impl Task {
         oldest
     }
 
-    /// Reads `people`'s calendars over the cache's window, a few at a time, into the cache. Google's
-    /// answer replaces what's cached, and a calendar Google no longer shows is forgotten. One
-    /// that couldn't be read stays as it was until the next refresh. Someone taken off the list,
-    /// or the cache switched off, meanwhile isn't written back.
-    async fn refresh_cache(&mut self, people: &[String]) {
-        let now = self.clock.now();
+    /// Reads `people`'s calendars over the cache's window from `now` off the task, a few at a
+    /// time. Each answer comes back as a request ([`Task::cache_answer`]), counted busy until it's
+    /// handled, so the task answers others meanwhile.
+    fn refresh_cache(&mut self, people: Vec<String>, now: &jiff::Zoned) {
         let (today, tz) = (now.date(), now.time_zone().clone());
         let (from, to) = cache::window_range(today, &tz);
-        let store = self.store.clone();
-        let mut answers = futures::stream::iter(people.to_vec())
-            .map(|email| {
-                let store = store.clone();
-                async move {
-                    let found = store.attendee_events(&email, from, to).await;
-                    (email, found)
+        self.cache_reading += people.len();
+        self.shared.busy.fetch_add(people.len(), Ordering::SeqCst);
+        let (store, requests, shared) = (
+            self.store.clone(),
+            self.requests.clone(),
+            self.shared.clone(),
+        );
+        tokio::spawn(async move {
+            let mut answers = futures::stream::iter(people)
+                .map(|email| {
+                    let store = store.clone();
+                    async move {
+                        let found = store.attendee_events(&email, from, to).await;
+                        (email, found)
+                    }
+                })
+                .buffer_unordered(CACHE_READS);
+            while let Some((email, found)) = answers.next().await {
+                let answer = CacheAnswer {
+                    email,
+                    today,
+                    tz: tz.clone(),
+                    range: (from, to),
+                    found: found.map_err(|error| error.to_string()),
+                };
+                if requests
+                    .send(Request::CacheLoaded(Box::new(answer)))
+                    .is_err()
+                {
+                    shared.busy.fetch_sub(1, Ordering::SeqCst);
                 }
-            })
-            .buffer_unordered(CACHE_READS);
-        while let Some((email, found)) = answers.next().await {
-            let listed = self
-                .cache
-                .borrow()
-                .as_ref()
-                .is_some_and(|cache| cache.enabled && cache.people.contains(&email));
-            if !listed {
-                continue;
             }
-            let outcome = match found {
-                Ok(Some(events)) => {
-                    let cached = CachedGuest {
-                        fetched_at: self.clock.now().timestamp(),
-                        from,
-                        to,
-                        events: cache::keep_window(events, today, &tz),
-                    };
-                    self.store.cache_guest(&email, &cached).await
-                }
-                Ok(None) => {
-                    let keep: Vec<String> = self
-                        .cache
-                        .borrow()
-                        .iter()
-                        .flat_map(|cache| cache.people.iter())
-                        .filter(|person| **person != email)
-                        .cloned()
-                        .collect();
-                    self.store.forget_cached_guests(&keep).await
-                }
-                Err(error) => {
-                    log::warn!("refreshing a colleague's cached calendar: {error}");
-                    Ok(())
-                }
-            };
-            if let Err(error) = outcome {
-                log::error!("caching a colleague's calendar: {error}");
-            }
+        });
+    }
+
+    /// Puts a refresh's answer for one person in the cache, unless they were taken off the list
+    /// or the cache switched off meanwhile. Google's answer replaces what's cached, and a
+    /// calendar Google no longer shows is forgotten. One that couldn't be read stays as it was
+    /// until the next refresh.
+    async fn cache_answer(&mut self, answer: CacheAnswer) {
+        let CacheAnswer {
+            email,
+            today,
+            tz,
+            range: (from, to),
+            found,
+        } = answer;
+        let listed = self
+            .cache
+            .borrow()
+            .as_ref()
+            .is_some_and(|cache| cache.enabled && cache.people.contains(&email));
+        if !listed {
+            return;
         }
-        self.cache_last = Some(Some(now.timestamp()));
+        let outcome = match found {
+            Ok(Some(events)) => {
+                let cached = CachedGuest {
+                    fetched_at: self.clock.now().timestamp(),
+                    from,
+                    to,
+                    events: cache::keep_window(events, today, &tz),
+                };
+                self.store.cache_guest(&email, &cached).await
+            }
+            Ok(None) => {
+                let keep: Vec<String> = self
+                    .cache
+                    .borrow()
+                    .iter()
+                    .flat_map(|cache| cache.people.iter())
+                    .filter(|person| **person != email)
+                    .cloned()
+                    .collect();
+                self.store.forget_cached_guests(&keep).await
+            }
+            Err(error) => {
+                log::warn!("refreshing a colleague's cached calendar: {error}");
+                Ok(())
+            }
+        };
+        if let Err(error) = outcome {
+            log::error!("caching a colleague's calendar: {error}");
+        }
     }
 
     /// Counts the task as busy until the guard drops.
@@ -874,6 +954,14 @@ impl Task {
                     );
                     self.shared.data.send_replace(Arc::new(data));
                     self.repaint.request();
+                }
+            }
+            Request::CacheLoaded(answer) => {
+                self.cache_reading = self.cache_reading.saturating_sub(1);
+                self.cache_answer(*answer).await;
+                if self.cache_reading == 0 {
+                    // Whoever was listed, or the time that passed, while it was read.
+                    self.check_cache().await;
                 }
             }
             Request::InviteLoaded(thread, ics) => {
