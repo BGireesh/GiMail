@@ -33,7 +33,8 @@ pub fn window_range(today: Date, tz: &TimeZone) -> (Timestamp, Timestamp) {
     (start, end)
 }
 
-/// The events that start on a day of the window, in `tz`.
+/// The events under way on a day of the window, in `tz`: an event begun before it (a week out of
+/// office) is kept for the days of it the window has.
 pub fn keep_window(events: Vec<Event>, today: Date, tz: &TimeZone) -> Vec<Event> {
     let days = window(today);
     events
@@ -42,19 +43,50 @@ pub fn keep_window(events: Vec<Event>, today: Date, tz: &TimeZone) -> Vec<Event>
             event
                 .start
                 .as_ref()
-                .and_then(|start| start_day(start, tz))
-                .is_some_and(|day| days.contains(&day))
+                .and_then(|start| span(start, event.end.as_ref(), tz))
+                .is_some_and(|(start, end)| {
+                    days.iter()
+                        .filter_map(|day| day_span(*day, tz))
+                        .any(|(from, to)| start < to && end > from)
+                })
         })
         .collect()
 }
 
-/// The day an event starts on in `tz`: its all-day date, or the date of its start time.
-fn start_day(start: &EventDateTime, tz: &TimeZone) -> Option<Date> {
-    if let Some(date) = &start.date {
-        return date.parse().ok();
+/// When an event starting at `start` and ending at `end` (exclusive) is under way, in `tz`: an
+/// all-day event from the start of its first day to the start of its end date (the next day
+/// without one), a timed one from its start to its end (a moment, without one).
+fn span(
+    start: &EventDateTime,
+    end: Option<&EventDateTime>,
+    tz: &TimeZone,
+) -> Option<(Timestamp, Timestamp)> {
+    if let Some(first) = &start.date {
+        let first: Date = first.parse().ok()?;
+        let last = end
+            .and_then(|end| end.date.as_deref())
+            .and_then(|end| end.parse::<Date>().ok())
+            .filter(|end| *end > first)
+            .or_else(|| first.tomorrow().ok())?;
+        let (from, _) = day_span(first, tz)?;
+        let (to, _) = day_span(last, tz)?;
+        return Some((from, to));
     }
-    let timestamp: Timestamp = start.date_time.as_deref()?.parse().ok()?;
-    Some(timestamp.to_zoned(tz.clone()).date())
+    let from: Timestamp = start.date_time.as_deref()?.parse().ok()?;
+    let to = end
+        .and_then(|end| end.date_time.as_deref())
+        .and_then(|end| end.parse::<Timestamp>().ok())
+        .filter(|to| *to > from)
+        // A moment still falls on its day.
+        .unwrap_or_else(|| from + jiff::SignedDuration::from_nanos(1));
+    Some((from, to))
+}
+
+/// The start of `day` and of the day after, in `tz`.
+fn day_span(day: Date, tz: &TimeZone) -> Option<(Timestamp, Timestamp)> {
+    let from = day.to_zoned(tz.clone()).ok()?.timestamp();
+    let to = day.tomorrow().ok()?.to_zoned(tz.clone()).ok()?.timestamp();
+    Some((from, to))
 }
 
 /// Whether the cache should refresh at `now`, the last refresh having been at `last`.
@@ -143,6 +175,61 @@ mod tests {
         let (start, end) = window_range(date(2026, 11, 20), &tz);
         assert_eq!(start.to_string(), "2026-11-20T05:00:00Z");
         assert_eq!(end.to_string(), "2026-11-27T05:00:00Z");
+    }
+
+    fn timed_until(start: &str, end: &str) -> Event {
+        Event {
+            end: Some(EventDateTime {
+                date_time: Some(end.into()),
+                ..EventDateTime::default()
+            }),
+            ..timed(start)
+        }
+    }
+
+    fn all_days(first: &str, end: &str) -> Event {
+        Event {
+            end: Some(EventDateTime {
+                date: Some(end.into()),
+                ..EventDateTime::default()
+            }),
+            ..all_day(first)
+        }
+    }
+
+    #[test]
+    fn events_under_way_on_a_window_day_are_kept() {
+        let tz = TimeZone::get("America/New_York").expect("zone");
+        let monday = date(2026, 11, 23);
+        let events = vec![
+            // Out of office from the Friday before to the Wednesday after (end exclusive).
+            all_days("2026-11-20", "2026-11-26"),
+            // Sunday night into Monday.
+            timed_until("2026-11-22T22:00:00-05:00", "2026-11-23T01:00:00-05:00"),
+            // Ends just as the window starts.
+            timed_until("2026-11-22T23:00:00-05:00", "2026-11-23T00:00:00-05:00"),
+            // All day Sunday.
+            all_days("2026-11-22", "2026-11-23"),
+        ];
+        assert_eq!(
+            keep_window(events.clone(), monday, &tz),
+            [events[0].clone(), events[1].clone()]
+        );
+
+        let friday = date(2026, 11, 20);
+        let events = vec![
+            // Saturday, between the window's Friday and Monday.
+            timed_until("2026-11-21T10:00:00-05:00", "2026-11-21T12:00:00-05:00"),
+            all_days("2026-11-21", "2026-11-22"),
+            // Saturday through Monday.
+            all_days("2026-11-21", "2026-11-24"),
+            // Friday 10 PM in New York, Saturday in UTC.
+            timed_until("2026-11-21T03:00:00Z", "2026-11-21T03:30:00Z"),
+        ];
+        assert_eq!(
+            keep_window(events.clone(), friday, &tz),
+            [events[2].clone(), events[3].clone()]
+        );
     }
 
     #[test]
