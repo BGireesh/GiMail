@@ -1318,3 +1318,41 @@ async fn forgetting_keeps_only_the_listed_guests() {
         None
     );
 }
+
+#[tokio::test]
+async fn caching_and_forgetting_guests_do_not_wake_the_ui() {
+    let harness = Harness::start().await;
+    let mut changes = harness.store.changes();
+    changes.mark_unchanged();
+    for who in ["priya@brightmoor.co", "lena@brightmoor.co"] {
+        harness
+            .store
+            .cache_guest(who, &cached(&["Standup"]))
+            .await
+            .expect("caches");
+    }
+    assert!(
+        !changes.has_changed().expect("open"),
+        "caching isn't a change the account's views show"
+    );
+    harness
+        .store
+        .forget_cached_guests(&["lena@brightmoor.co".into()])
+        .await
+        .expect("forgets");
+    harness
+        .store
+        .forget_cached_guests(&[])
+        .await
+        .expect("forgets");
+    assert!(!changes.has_changed().expect("open"), "nor is forgetting");
+    assert_eq!(
+        harness
+            .store
+            .cached_guest("lena@brightmoor.co")
+            .await
+            .expect("reads"),
+        None,
+        "it did forget"
+    );
+}

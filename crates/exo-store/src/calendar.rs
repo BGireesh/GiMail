@@ -136,7 +136,8 @@ impl Store {
             .events(Json(cached.events.clone()))
             .exec(write.exec())
             .await?;
-        write.publish().await
+        // The account's views don't show the cache, so this wakes none of them.
+        write.commit().await
     }
 
     /// Forgets every cached calendar but those of `keep` (lower-case addresses). An empty `keep`
@@ -146,11 +147,12 @@ impl Store {
     /// On database failures.
     pub async fn forget_cached_guests(&self, keep: &[String]) -> Result<()> {
         let mut db = self.inner.db.clone();
+        // Only the addresses: the events can be many, and this runs every minute.
         let gone: Vec<String> = GuestCacheRow::all()
+            .select(GuestCacheRow::fields().person())
             .exec(&mut db)
             .await?
             .into_iter()
-            .map(|row| row.person)
             .filter(|person| !keep.iter().any(|kept| kept.to_lowercase() == *person))
             .collect();
         if gone.is_empty() {
@@ -163,7 +165,7 @@ impl Store {
                 .exec(write.exec())
                 .await?;
         }
-        write.publish().await
+        write.commit().await
     }
 
     /// The calendars on the lists of the account and of its signed-in calendar accounts, as last
@@ -285,7 +287,7 @@ impl Store {
                 .exec(write.exec())
                 .await?;
         }
-        write.publish().await
+        write.commit().await
     }
 
     /// Whether `account`'s calendars are read now, which they are for the mail account and for
