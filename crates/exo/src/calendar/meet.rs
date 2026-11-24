@@ -224,8 +224,10 @@ impl Meet {
             keys: &["M"],
         }
         .show_below(ui, &response, 8.0);
+        // With the most guests, nothing more is suggested.
+        let full = self.guests.len() >= MAX_GUESTS;
         let suggestions: Vec<Address> = match contacts {
-            Some(book) if !self.input.trim().is_empty() => book
+            Some(book) if !full && !self.input.trim().is_empty() => book
                 .top(self.input.trim(), 3 + self.guests.len())
                 .into_iter()
                 .filter(|contact| {
@@ -321,19 +323,25 @@ impl Meet {
                             palette.text_base_subdued,
                             Some(row.width() - 20.0),
                         );
-                        if hit.clicked() {
+                        // Picked on the press, while the input still has the keyboard, which
+                        // it keeps through the release.
+                        if hit.contains_pointer()
+                            && area.input(|input| input.pointer.primary_pressed())
+                        {
                             add = Some((contact.email.clone(), contact.name.clone()));
+                            exo_ui::hold_field_focus(area.ctx(), id);
                         }
                     }
                 });
         }
-        if let Some((email, name)) = add
-            && self.guests.len() < MAX_GUESTS
-        {
-            self.guests.push(Guest { email, name });
+        // A pick past the most guests only empties the input, as one would that's taken.
+        if let Some((email, name)) = add {
+            if !full {
+                self.guests.push(Guest { email, name });
+                actions.push(MeetAction::Guests);
+            }
             self.input.clear();
             self.focus = true;
-            actions.push(MeetAction::Guests);
         }
 
         // The guests, each in their calendar's colour, with × on hover.

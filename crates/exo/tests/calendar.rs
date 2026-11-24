@@ -1616,3 +1616,96 @@ fn a_calendar_s_menu_picks_its_colour() {
             .clone();
     assert_eq!(color.as_deref(), Some("red"));
 }
+
+/// Presses and lets go on the first row of the suggestions in the area `list`, as a mouse picks.
+fn pick_first_suggestion(app: &mut Fixture, list: &str) {
+    let ctx = app.harness.ctx.clone();
+    let id = exo_ui::id(&ctx, list);
+    let shown = ctx.memory(|memory| {
+        memory
+            .areas()
+            .visible_last_frame(&egui::LayerId::new(egui::Order::Tooltip, id))
+    });
+    assert!(shown, "{list} is up");
+    let rect = ctx
+        .memory(|memory| memory.area_rect(id))
+        .expect("the suggestions' area");
+    app.click(rect.left_top() + egui::vec2(40.0, 25.0));
+}
+
+/// Whether the widget `source` names (through `exo_ui::id`) has the keyboard.
+fn has_keyboard(app: &Fixture, source: &str) -> bool {
+    let ctx = app.harness.ctx.clone();
+    ctx.memory(|memory| memory.focused()) == Some(exo_ui::id(&ctx, source))
+}
+
+#[test]
+fn meet_takes_a_suggestion_clicked_and_keeps_the_keyboard_for_the_next() {
+    let mut app = start("calendar-meet-click");
+    app.key(Key::Num2);
+    app.settle();
+    app.key(Key::M);
+    app.type_text("priya");
+    app.wait(0.3);
+    pick_first_suggestion(&mut app, "calendar-meet-suggestions");
+    assert_eq!(app.mail().calendar_meet_guests(), ["priya@brightmoor.co"]);
+    assert!(
+        has_keyboard(&app, "calendar-meet-input"),
+        "the input keeps the keyboard"
+    );
+    // What's typed next goes in the emptied input, and a second click takes Lena.
+    app.type_text("lena");
+    app.wait(0.3);
+    pick_first_suggestion(&mut app, "calendar-meet-suggestions");
+    assert_eq!(
+        app.mail().calendar_meet_guests(),
+        ["priya@brightmoor.co", "lena@brightmoor.co"]
+    );
+    assert!(has_keyboard(&app, "calendar-meet-input"));
+    app.wait(1.0);
+    let columns = app.mail_mut().calendar_guest_columns(date(2026, 11, 17));
+    assert!(
+        columns
+            .iter()
+            .any(|(email, _)| email == "priya@brightmoor.co"),
+        "Priya's calendar shows: {columns:?}"
+    );
+}
+
+#[test]
+fn the_form_s_who_takes_two_suggestions_clicked_in_a_row() {
+    let mut app = start("calendar-form-who-click");
+    app.key(Key::Num2);
+    app.settle();
+    app.key(Key::B);
+    app.key(Key::Tab);
+    for guest in ["priya", "lena"] {
+        app.type_text(guest);
+        app.wait(0.3);
+        pick_first_suggestion(&mut app, "calendar-form-suggestions");
+    }
+    let (_, guests) = app.mail().calendar_form_values().expect("the form");
+    assert_eq!(guests, ["priya@brightmoor.co", "lena@brightmoor.co"]);
+}
+
+#[test]
+fn share_availability_s_who_takes_two_suggestions_clicked_in_a_row() {
+    let mut app = start("calendar-share-who-click");
+    app.key(Key::Num2);
+    app.settle();
+    app.press(Key::A, CMD.plus(Modifiers::SHIFT));
+    let before = app.mail().calendar_share_attendees();
+    for guest in ["priya", "lena"] {
+        app.type_text(guest);
+        app.wait(0.3);
+        pick_first_suggestion(&mut app, "share-who-suggestions");
+    }
+    let added: Vec<String> = app
+        .mail()
+        .calendar_share_attendees()
+        .into_iter()
+        .filter(|email| !before.contains(email))
+        .collect();
+    assert_eq!(added, ["priya@brightmoor.co", "lena@brightmoor.co"]);
+    assert!(has_keyboard(&app, "share-who"), "Who keeps the keyboard");
+}

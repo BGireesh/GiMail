@@ -389,6 +389,16 @@ impl crate::Mail {
         }
     }
 
+    /// Meet's guests' addresses, in the order they were added (for tests).
+    pub fn calendar_meet_guests(&self) -> Vec<String> {
+        self.calendar
+            .week
+            .iter()
+            .flat_map(|week| &week.meet.guests)
+            .map(|guest| guest.email.clone())
+            .collect()
+    }
+
     /// The form's About, as the HTML it saves, and its Where.
     pub fn calendar_form_about(&self) -> Option<(String, String)> {
         let values = &self.calendar.form.as_ref()?.values;

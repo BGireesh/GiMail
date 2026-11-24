@@ -82,7 +82,9 @@ pub use date_picker::{
     DATE_PICKER_OFFSET, DATE_PICKER_SIZE, DateInput, DatePick, DatePicker, format_date, parse_date,
 };
 pub use dialog::{DIALOG_WIDTH, Dialog, DialogResponse, paint_close};
-pub use field::{FieldMenu, field_index, field_x, focus_field, take_field_menu, text_field};
+pub use field::{
+    FieldMenu, field_index, field_x, focus_field, hold_field_focus, take_field_menu, text_field,
+};
 pub use focus_order::{hold_arrows, list_keys, tab_order, tab_within};
 pub use fonts::{Face, Family, Font};
 pub use form::{ActionKind, DIALOG_ACTION_HEIGHT, DialogAction, DialogInput};

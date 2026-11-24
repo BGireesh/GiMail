@@ -541,8 +541,11 @@ impl Share {
             let (hovered, picked) =
                 suggestion_list(ui, who_box, &suggestions, &self.who, self.who_pick);
             self.who_pick = hovered.unwrap_or(self.who_pick);
+            // Picked on the press, while Who still has the keyboard, which it keeps through the
+            // release.
             if let Some(index) = picked {
                 add = Some(suggestions[index].clone());
+                exo_ui::hold_field_focus(&ctx, who_id);
             }
         }
         if let Some(address) = add {
@@ -591,7 +594,8 @@ impl Share {
             );
             // A row takes the keyboard on a click, as on Tab, and shows as hovered while it has
             // it. Enter then removes it.
-            let row = ui.interact(pill, attendee_ids[listed], Sense::click());
+            // Its own id, as one added this frame isn't in `attendee_ids` yet.
+            let row = ui.interact(pill, attendee_id(&ctx, attendee), Sense::click());
             if row.clicked() {
                 row.request_focus();
             }
@@ -1279,6 +1283,17 @@ impl crate::Mail {
             .as_ref()
             .and_then(|week| week.share.as_ref())
             .map(|share| share.minutes)
+    }
+
+    /// Share Availability's attendees' addresses, me first, while it's up (for tests).
+    pub fn calendar_share_attendees(&self) -> Vec<String> {
+        self.calendar
+            .week
+            .iter()
+            .flat_map(|week| &week.share)
+            .flat_map(|share| &share.attendees)
+            .map(|attendee| attendee.address.email.clone())
+            .collect()
     }
 
     pub(super) fn calendar_share_target(&self) -> Target {

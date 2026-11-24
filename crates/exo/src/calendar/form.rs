@@ -2233,12 +2233,14 @@ impl EventForm {
                                     );
                                 }
                             }
-                            // Picked on the press, while the input still has the keyboard.
-                            if hit.hovered() && area.input(|input| input.pointer.primary_pressed())
+                            // Picked on the press, while the input still has the keyboard, which
+                            // it keeps through the release.
+                            if hit.contains_pointer()
+                                && area.input(|input| input.pointer.primary_pressed())
                             {
                                 self.values.guests.extend(item.guests());
                                 self.guest_input.clear();
-                                self.focus = Some(Field::Guests);
+                                exo_ui::hold_field_focus(area.ctx(), Field::Guests.id(area.ctx()));
                             }
                         }
                     });

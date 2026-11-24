@@ -93,6 +93,7 @@ pub fn text_field(
             ui.put(rect, edit)
         })
         .inner;
+    keep_held_focus(&ctx, id);
     if let Some(galley) = laid_out {
         let highlights = crate::find::field(ui.painter(), rect.min, &galley, style);
         ui.painter().set(found, Shape::Vec(highlights));
@@ -143,6 +144,36 @@ pub fn text_field(
         );
     }
     response
+}
+
+/// Keeps the keyboard in field `id` through the click that a pick from its suggestions started:
+/// a list takes a pick on the press, while the field has the keyboard, but egui hands the keyboard
+/// away when a click ends off the focused widget, which the release over the list (or where it
+/// was) is. [`text_field`] takes the keyboard back until the button is up.
+pub fn hold_field_focus(ctx: &Context, id: Id) {
+    ctx.data_mut(|data| data.insert_temp(held_id(id), true));
+    if !ctx.memory(|memory| memory.has_focus(id)) {
+        ctx.memory_mut(|memory| memory.request_focus(id));
+    }
+}
+
+fn held_id(id: Id) -> Id {
+    id.with("exo_ui::field_held")
+}
+
+/// After the field: while a pick holds its keyboard, takes it back from the click, and lets go of
+/// the hold once no button is down.
+fn keep_held_focus(ctx: &Context, id: Id) {
+    let key = held_id(id);
+    if !ctx.data(|data| data.get_temp::<bool>(key)).unwrap_or(false) {
+        return;
+    }
+    if !ctx.memory(|memory| memory.has_focus(id)) {
+        ctx.memory_mut(|memory| memory.request_focus(id));
+    }
+    if !ctx.input(|input| input.pointer.any_down()) {
+        ctx.data_mut(|data| data.remove::<bool>(key));
+    }
 }
 
 /// Where character `index` of `text` starts on screen in a field [`text_field`] lays out on
