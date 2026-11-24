@@ -203,3 +203,63 @@ async fn a_split_list_backfills_with_its_gmail_search() {
         .collect();
     assert_eq!(ids, from_domain(&harness, &domain).await);
 }
+
+/// Threads are routed when they change, so a fix to how splits match leaves stale entries in
+/// threads stored before it (a thread kept in Calendar by an old invite). Opening a store routed
+/// by an older version routes its inbox and split threads again, once.
+#[tokio::test]
+async fn opening_a_store_routed_by_an_older_version_routes_it_again() {
+    let mut harness = Harness::synced().await;
+    let labels = harness.store.labels().await.unwrap();
+    let me = [ACCOUNT.to_owned()];
+    let definitions = Definitions {
+        labels: &labels,
+        me: &me,
+    };
+    let domain = busiest_domain(&harness).await;
+    let split = SplitInbox::new("Busy", &format!("from:{domain}"), None, None, definitions);
+    let list = ListId::Split(split.id.clone());
+    save(&harness, vec![split.clone()]).await;
+    let taken = harness.ids(&list).await;
+    let stray = harness
+        .ids(&ListId::Inbox)
+        .await
+        .into_iter()
+        .find(|id| !taken.contains(id))
+        .expect("an inbox thread the split doesn't take");
+
+    // As an older version would have left it: the stray thread in the split, and no version.
+    let file = harness.dir.path().join(format!("{ACCOUNT}.sqlite3"));
+    let stale = || {
+        let db = rusqlite::Connection::open(&file).unwrap();
+        db.execute(
+            "INSERT OR REPLACE INTO list_ids (list_id, thread_id, sort) VALUES (?1, ?2, 1)",
+            (split.id.as_str(), stray.as_str()),
+        )
+        .unwrap();
+        db.execute("DELETE FROM kv WHERE key = 'routing_version'", ())
+            .unwrap();
+    };
+    stale();
+    harness.reopen().await;
+    assert_eq!(
+        harness.ids(&list).await,
+        taken,
+        "the stray thread was routed again, out of the split"
+    );
+    assert!(harness.ids(&ListId::Inbox).await.contains(&stray));
+
+    // Once routed, the next open leaves the lists alone.
+    let db = rusqlite::Connection::open(&file).unwrap();
+    db.execute(
+        "INSERT OR REPLACE INTO list_ids (list_id, thread_id, sort) VALUES (?1, ?2, 1)",
+        (split.id.as_str(), stray.as_str()),
+    )
+    .unwrap();
+    drop(db);
+    harness.reopen().await;
+    assert!(
+        harness.ids(&list).await.contains(&stray),
+        "a store at the current version isn't routed again at open"
+    );
+}

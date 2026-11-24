@@ -26,6 +26,12 @@ use crate::settings::{self, Settings};
 use crate::split::Splits;
 use crate::view::{Identity, Router, ThreadView};
 
+/// Where `kv` keeps the [`ROUTING_VERSION`] the stored lists were routed by.
+const ROUTING_VERSION_KEY: &str = "routing_version";
+/// Bumped whenever a change to routing should reach threads already stored, which are otherwise
+/// routed only when they change. 1: a split's `filename:ics` looks at the latest message only.
+const ROUTING_VERSION: u32 = 1;
+
 /// An account's local mail store: a SQLite cache of Gmail, the sync engine that fills it, and
 /// the outbox that sends the user's changes. Cheap to clone; clones share everything.
 ///
@@ -260,6 +266,7 @@ impl Store {
                 draft_files_pace: options.draft_files_pace,
             }),
         };
+        store.inner.route_if_stale().await?;
         // A backup the last session couldn't write (or quit before writing) is written now.
         if noted {
             store.notes_changed();
@@ -858,6 +865,31 @@ impl Inner {
         }
     }
 
+    /// Routes the inbox and split threads again when the store was last routed by an older
+    /// [`ROUTING_VERSION`]. Threads are routed only when they change, so without this a thread
+    /// stored before a routing fix keeps the lists the old rules gave it.
+    async fn route_if_stale(&self) -> Result<()> {
+        let mut db = self.db.clone();
+        let routed: u32 = db::kv_get(&mut db, ROUTING_VERSION_KEY).await?.unwrap_or(0);
+        if routed >= ROUTING_VERSION {
+            return Ok(());
+        }
+        let rows = toasty::sql::query(
+            "SELECT DISTINCT thread_id FROM list_ids \
+             WHERE list_id = 'INBOX' OR list_id LIKE 'SH\\_SPLIT\\_INBOX\\_%' ESCAPE '\\'",
+        )
+        .exec(&mut db)
+        .await?;
+        let threads: Vec<String> = db::strings(rows).collect();
+        let mut write = self.begin(&mut db).await?;
+        let router = self.router();
+        for thread in &threads {
+            reindex(write.exec(), thread, &router).await?;
+        }
+        db::kv_set(write.exec(), ROUTING_VERSION_KEY, &ROUTING_VERSION).await?;
+        write.publish().await
+    }
+
     /// Reads the splits again (after settings or labels change). When `reroute` is set and the
     /// enabled splits changed, every inbox thread is routed again.
     pub async fn reload_splits(&self, reroute: bool) -> Result<()> {
@@ -873,12 +905,12 @@ impl Inner {
         }
         // Swapped first, so whatever routes next already sees the new splits.
         *self.splits.write().expect("splits lock is never poisoned") = splits;
-        let router = self.router();
         let threads: Vec<String> = ListEntry::filter_by_list_id(INBOX)
             .select(ListEntry::fields().thread_id())
             .exec(&mut db)
             .await?;
         let mut write = self.begin(&mut db).await?;
+        let router = self.router();
         for thread in &threads {
             reindex(write.exec(), thread, &router).await?;
         }
