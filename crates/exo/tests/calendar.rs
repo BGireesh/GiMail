@@ -1398,7 +1398,7 @@ fn tab_goes_through_share_availabilitys_sidebar() {
 
 #[test]
 fn the_day_view_s_today_and_plus_and_t() {
-    let mut app = start("calendar-today-button");
+    let mut app = start("calendar-day-today-plus");
     app.key(Key::Num0);
     app.key(Key::Equals);
     assert_eq!(app.mail().calendar_day(), Some(date(2026, 11, 18)));
