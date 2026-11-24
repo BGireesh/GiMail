@@ -1301,14 +1301,19 @@ fn paint_heads(painter: &Painter, frame: &Frame, heads: &[(String, exo_ui::Calen
         let text = DAY_TITLE.width(painter.ctx(), name).min(fit);
         let start = left + (room - SWATCH - SWATCH_GAP - text) / 2.0;
         let top = frame.headers.top() + DAY_TITLE_TOP;
-        let ink = color.guest_swatch(theme);
+        let swatch = color.guest_swatch(theme);
+        // The name in the person's colour, darkened (or on Carbon lightened) until it reads.
+        let ink = readable(
+            swatch,
+            exo_ui::palette(painter.ctx()).background_base_default,
+        );
         painter.rect_filled(
             exo_ui::pixel_snap(Rect::from_min_size(
                 pos2(start, top + (DAY_TITLE.line_height - SWATCH) / 2.0),
                 Vec2::splat(SWATCH),
             )),
             2.0,
-            ink,
+            swatch,
         );
         DAY_TITLE.paint_line(
             painter,
@@ -1318,6 +1323,59 @@ fn paint_heads(painter: &Painter, frame: &Frame, heads: &[(String, exo_ui::Calen
             Some(fit),
         );
     }
+}
+
+/// `color`, mixed toward black on a light `background` or white on a dark one, by the least that
+/// gives text WCAG's 4.5:1 contrast against it. A colour that already reads is kept.
+fn readable(color: egui::Color32, background: egui::Color32) -> egui::Color32 {
+    const TEXT_CONTRAST: f32 = 4.5;
+    if contrast(color, background) >= TEXT_CONTRAST {
+        return color;
+    }
+    let toward = if luminance(background) > 0.5 {
+        egui::Color32::BLACK
+    } else {
+        egui::Color32::WHITE
+    };
+    let mix = |t: f32| {
+        let channel =
+            |a: u8, b: u8| (f32::from(a) + (f32::from(b) - f32::from(a)) * t).round() as u8;
+        egui::Color32::from_rgb(
+            channel(color.r(), toward.r()),
+            channel(color.g(), toward.g()),
+            channel(color.b(), toward.b()),
+        )
+    };
+    // The contrast only grows with the mix, so the least mix is found by halving.
+    let (mut low, mut high) = (0.0_f32, 1.0_f32);
+    for _ in 0..16 {
+        let mid = (low + high) / 2.0;
+        if contrast(mix(mid), background) >= TEXT_CONTRAST {
+            high = mid;
+        } else {
+            low = mid;
+        }
+    }
+    mix(high)
+}
+
+/// WCAG's relative luminance of `color`.
+fn luminance(color: egui::Color32) -> f32 {
+    let linear = |c: u8| {
+        let c = f32::from(c) / 255.0;
+        if c <= 0.039_28 {
+            c / 12.92
+        } else {
+            ((c + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    0.2126 * linear(color.r()) + 0.7152 * linear(color.g()) + 0.0722 * linear(color.b())
+}
+
+/// WCAG's contrast ratio between `a` and `b`, from 1 to 21.
+fn contrast(a: egui::Color32, b: egui::Color32) -> f32 {
+    let (a, b) = (luminance(a), luminance(b));
+    (a.max(b) + 0.05) / (a.min(b) + 0.05)
 }
 
 impl GridView {
@@ -2211,5 +2269,33 @@ mod tests {
         assert_eq!(hour_label(12, 0), "12 pm");
         assert_eq!(hour_label(13, 15), "1:15 pm");
         assert_eq!(hour_label(0, 45), "12:45 am");
+    }
+}
+
+#[cfg(test)]
+mod readable_tests {
+    use super::*;
+    use egui::Color32;
+
+    #[test]
+    fn a_head_s_name_reads_at_text_contrast_on_its_background() {
+        let white = Color32::WHITE;
+        let carbon = Color32::from_rgb(0x27, 0x29, 0x2d);
+        let yellow = Color32::from_rgb(0xf6, 0xc0, 0x26);
+        assert!(contrast(yellow, white) < 4.5, "yellow on white reads badly");
+        let ink = readable(yellow, white);
+        assert!(contrast(ink, white) >= 4.5, "{ink:?}");
+        assert!(ink.r() > ink.b(), "still a yellow, only darker: {ink:?}");
+        let ink = readable(Color32::from_rgb(0x1a, 0x23, 0x7e), carbon);
+        assert!(
+            contrast(ink, carbon) >= 4.5,
+            "a dark blue lightens on Carbon: {ink:?}"
+        );
+        let blue = Color32::from_rgb(0x03, 0x4a, 0x90);
+        assert_eq!(
+            readable(blue, white),
+            blue,
+            "a colour that reads stays as it is"
+        );
     }
 }
