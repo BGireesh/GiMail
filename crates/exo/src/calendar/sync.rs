@@ -116,6 +116,20 @@ pub enum GuestEvents {
     Hidden,
     /// Calendar couldn't be reached. It's asked again once the connection is back.
     Failed,
+    /// A cached colleague's events (the cache's window only), shown until Calendar answers: while
+    /// the latest loads, or when it couldn't be reached, which counts as [`GuestEvents::Failed`]
+    /// otherwise (asked again once the connection is back).
+    Stale(Vec<Event>),
+}
+
+impl GuestEvents {
+    /// The events to draw: Calendar's, or a cached copy's.
+    pub fn events(&self) -> Option<&[Event]> {
+        match self {
+            GuestEvents::Shown(events) | GuestEvents::Stale(events) => Some(events),
+            GuestEvents::Pending | GuestEvents::Hidden | GuestEvents::Failed => None,
+        }
+    }
 }
 
 /// A change Calendar refused, so the calendar went back to how it was.
@@ -1002,7 +1016,7 @@ impl Task {
             Request::Guests(guests, from, to) => self.load_guests(guests, (from, to)).await,
             Request::GuestLoaded(email, range, found) => {
                 self.cache_live(&email, range, &found).await;
-                // Google out of reach, a cached colleague's copy stands in.
+                // Google out of reach, a cached colleague's copy stands in, marked stale.
                 let cached = match found {
                     None => self.cached_events(&email).await,
                     Some(_) => None,
@@ -1017,7 +1031,7 @@ impl Task {
                     let events = match found {
                         Some(Some(events)) => GuestEvents::Shown(events),
                         Some(None) => GuestEvents::Hidden,
-                        None => cached.map_or(GuestEvents::Failed, GuestEvents::Shown),
+                        None => cached.map_or(GuestEvents::Failed, GuestEvents::Stale),
                     };
                     data.guests.insert(
                         email,
@@ -1112,28 +1126,27 @@ impl Task {
     }
 
     /// Marks `guests`' calendars as loading over `range` and reads each off the task, at once and
-    /// side by side. Meanwhile a cached colleague's copy shows, if nothing of theirs is shown
-    /// yet. With the connection down, they fail.
+    /// side by side. Meanwhile a cached colleague's copy shows (stale), if nothing of theirs is
+    /// shown yet. With the connection down, they fail, or show their cached copy (stale).
     async fn load_guests(&self, guests: Vec<String>, range: (Timestamp, Timestamp)) {
         let down = self.down();
         let mut cached = BTreeMap::new();
-        if !down {
-            let pending = {
-                let data = self.shared.data.borrow();
-                guests
-                    .iter()
-                    .filter(|email| {
-                        data.guests
-                            .get(*email)
-                            .is_none_or(|calendar| matches!(calendar.events, GuestEvents::Pending))
-                    })
-                    .cloned()
-                    .collect::<Vec<_>>()
-            };
-            for email in pending {
-                if let Some(events) = self.cached_events(&email).await {
-                    cached.insert(email, events);
-                }
+        let wanted = {
+            let data = self.shared.data.borrow();
+            guests
+                .iter()
+                .filter(|email| {
+                    down || data
+                        .guests
+                        .get(*email)
+                        .is_none_or(|calendar| matches!(calendar.events, GuestEvents::Pending))
+                })
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        for email in wanted {
+            if let Some(events) = self.cached_events(&email).await {
+                cached.insert(email, events);
             }
         }
         let mut data = Data::clone(&self.shared.data.borrow());
@@ -1143,8 +1156,8 @@ impl Task {
                 .remove(email)
                 .map_or(GuestEvents::Pending, |calendar| calendar.events);
             let events = match (events, cached.remove(email)) {
-                (_, _) if down => GuestEvents::Failed,
-                (GuestEvents::Pending, Some(cached)) => GuestEvents::Shown(cached),
+                (_, cached) if down => cached.map_or(GuestEvents::Failed, GuestEvents::Stale),
+                (GuestEvents::Pending, Some(cached)) => GuestEvents::Stale(cached),
                 (events, _) => events,
             };
             data.guests.insert(
@@ -1192,10 +1205,9 @@ impl Task {
             return;
         }
         let data = self.shared.data.borrow();
-        let failed = data
-            .guests
-            .iter()
-            .filter(|(_, calendar)| matches!(calendar.events, GuestEvents::Failed));
+        let failed = data.guests.iter().filter(|(_, calendar)| {
+            matches!(calendar.events, GuestEvents::Failed | GuestEvents::Stale(_))
+        });
         let mut asked = self
             .shared
             .guests_asked

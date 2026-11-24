@@ -390,6 +390,22 @@ impl crate::Mail {
             .is_some_and(|guest| matches!(guest.events, sync::GuestEvents::Shown(_)))
     }
 
+    /// What `email`'s calendar, as last asked for as a guest's, holds: `pending`, `shown`,
+    /// `hidden`, `failed` or `stale` (a cached copy Calendar hasn't confirmed), and whether it's
+    /// loading (for tests).
+    pub fn calendar_guest_state_for_test(&self, email: &str) -> Option<(&'static str, bool)> {
+        let data = self.account.calendar().data();
+        let calendar = data.guests.get(email)?;
+        let state = match calendar.events {
+            sync::GuestEvents::Pending => "pending",
+            sync::GuestEvents::Shown(_) => "shown",
+            sync::GuestEvents::Hidden => "hidden",
+            sync::GuestEvents::Failed => "failed",
+            sync::GuestEvents::Stale(_) => "stale",
+        };
+        Some((state, calendar.loading))
+    }
+
     /// Calendar Settings is up (for tests).
     pub fn calendar_settings_open(&self) -> bool {
         self.calendar.options_open

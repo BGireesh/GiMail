@@ -49,7 +49,7 @@ impl Colors {
             let loaded = data
                 .guests
                 .get(email)
-                .is_some_and(|calendar| matches!(calendar.events, GuestEvents::Shown(_)));
+                .is_some_and(|calendar| calendar.events.events().is_some());
             if !loaded || self.of(email).is_some() {
                 continue;
             }
@@ -106,7 +106,7 @@ impl Colors {
             .filter(|email| {
                 data.guests
                     .get(*email)
-                    .is_some_and(|calendar| matches!(calendar.events, GuestEvents::Shown(_)))
+                    .is_some_and(|calendar| calendar.events.events().is_some())
             })
             .filter_map(|email| Some((email.clone(), self.of(email)?)))
             .take(MAX)
@@ -129,18 +129,18 @@ pub enum Marker {
 }
 
 /// The marker for `email`: their colour while their calendar is overlaid (after a spinner while
-/// the latest loads), a spinner while it loads, else an empty swatch.
+/// the latest loads), a spinner while it loads, else an empty swatch, as for a cached copy that
+/// Calendar couldn't confirm.
 pub fn marker(email: &str, shown: &[(String, CalendarColor)], data: &Data, online: bool) -> Marker {
-    let loading = online
-        && data
-            .guests
-            .get(email)
-            .is_some_and(|calendar| calendar.loading);
+    let calendar = data.guests.get(email);
+    let loading = online && calendar.is_some_and(|calendar| calendar.loading);
+    let stale = calendar.is_some_and(|calendar| matches!(calendar.events, GuestEvents::Stale(_)));
     match shown
         .iter()
         .find(|(shown, _)| shown.eq_ignore_ascii_case(email))
     {
         Some((_, color)) if loading => Marker::Refreshing(*color),
+        Some(_) if stale => Marker::Empty,
         Some((_, color)) => Marker::Swatch(*color),
         None if loading => Marker::Spinner,
         None => Marker::Empty,
@@ -267,9 +267,7 @@ fn status(
 
 /// A guest's events as listed, without those they declined or that leave them free.
 fn events_of<'a>(data: &'a Data, email: &str) -> Option<Vec<&'a ApiEvent>> {
-    let GuestEvents::Shown(events) = &data.guests.get(email)?.events else {
-        return None;
-    };
+    let events = data.guests.get(email)?.events.events()?;
     Some(
         events
             .iter()
@@ -974,6 +972,14 @@ mod tests {
         assert_eq!(marker(priya, &shown, &settled, true), Marker::Swatch(pink));
         let pending = with(true, GuestEvents::Pending);
         assert_eq!(marker(priya, &[], &pending, true), Marker::Spinner);
+        // A cached copy Calendar couldn't confirm isn't current, as a failed read isn't.
+        let stale = with(false, GuestEvents::Stale(Vec::new()));
+        assert_eq!(marker(priya, &shown, &stale, true), Marker::Empty);
+        let rereading = with(true, GuestEvents::Stale(Vec::new()));
+        assert_eq!(
+            marker(priya, &shown, &rereading, true),
+            Marker::Refreshing(pink)
+        );
     }
 
     #[test]

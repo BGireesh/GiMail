@@ -2467,6 +2467,31 @@ fn meet_typing(app: &mut Fixture, view: Key, who: &str) {
     app.wait(0.3);
 }
 
+/// Priya's events that `day`, as overlaid on the calendar.
+fn priya_on(app: &mut Fixture, day: jiff::civil::Date) -> Vec<String> {
+    app.mail_mut()
+        .calendar_guest_columns(day)
+        .into_iter()
+        .filter(|(email, _)| email == PRIYA)
+        .flat_map(|(_, titles)| titles)
+        .collect()
+}
+
+/// Brings the mock back and has the app check it, as it does every few seconds while offline,
+/// until the connection is back.
+fn back_online(app: &mut Fixture) {
+    app.reconnect();
+    let started = std::time::Instant::now();
+    while app.mail().status_bar().is_some()
+        && started.elapsed() < std::time::Duration::from_secs(15)
+    {
+        app.mail().account().network_changed();
+        app.wait(0.2);
+    }
+    assert_eq!(app.mail().status_bar().map(|bar| bar.title), None, "online");
+    app.settle();
+}
+
 #[test]
 fn a_cached_colleague_shows_at_once_and_stays_when_the_live_read_fails() {
     let mut app = support::start_with_settings("calendar-cached-meet", &cache_on(&[PRIYA]));
@@ -2486,20 +2511,59 @@ fn a_cached_colleague_shows_at_once_and_stays_when_the_live_read_fails() {
     app.wait(1.0);
     app.settle();
     app.fault(None);
-    let tuesday = date(2026, 11, 17);
-    let columns = app.mail_mut().calendar_guest_columns(tuesday);
-    assert!(
-        columns
-            .iter()
-            .any(|(email, titles)| email == PRIYA && titles.contains(&"Design crit".to_owned())),
-        "her column, from the cache: {columns:?}"
-    );
-    let markers = app.mail().calendar_meet_markers_for_test();
     assert_eq!(
-        markers.get(PRIYA).map(String::as_str),
-        Some("pink"),
-        "her colour, not an empty swatch"
+        app.mail().calendar_guest_state_for_test(PRIYA),
+        Some(("stale", false))
     );
+    let (tuesday, next_tuesday) = (date(2026, 11, 17), date(2026, 11, 24));
+    assert!(
+        priya_on(&mut app, tuesday).contains(&"Design crit".to_owned()),
+        "her column, from the cache"
+    );
+    assert_eq!(
+        priya_on(&mut app, next_tuesday),
+        Vec::<String>::new(),
+        "past the cache's window, nothing's known"
+    );
+    let marker = |app: &Fixture| app.mail().calendar_meet_markers_for_test()[PRIYA].clone();
+    assert_eq!(marker(&app), "empty", "not current, as a failed read isn't");
+    // Once the connection comes back, she's read again.
+    app.disconnect();
+    app.mail().account().network_changed();
+    app.settle();
+    back_online(&mut app);
+    assert_eq!(
+        app.mail().calendar_guest_state_for_test(PRIYA),
+        Some(("shown", false))
+    );
+    assert_eq!(marker(&app), "pink");
+    assert!(
+        priya_on(&mut app, next_tuesday).contains(&"Design crit".to_owned()),
+        "live past the window"
+    );
+}
+
+#[test]
+fn a_cached_colleague_added_offline_shows_stale_and_is_read_once_online() {
+    let mut app = support::start_with_settings("calendar-cached-offline", &cache_on(&[PRIYA]));
+    meet_typing(&mut app, Key::W, "priya");
+    app.disconnect();
+    app.mail().account().network_changed();
+    app.settle();
+    app.key(Key::Enter);
+    app.wait(0.5);
+    assert_eq!(
+        app.mail().calendar_guest_state_for_test(PRIYA),
+        Some(("stale", false)),
+        "her cached copy, not a failure"
+    );
+    back_online(&mut app);
+    assert_eq!(
+        app.mail().calendar_guest_state_for_test(PRIYA),
+        Some(("shown", false))
+    );
+    assert_eq!(app.mail().calendar_meet_markers_for_test()[PRIYA], "pink");
+    assert!(priya_on(&mut app, date(2026, 11, 24)).contains(&"Design crit".to_owned()));
 }
 
 #[test]
