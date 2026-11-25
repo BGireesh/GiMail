@@ -323,8 +323,6 @@ pub(crate) struct EventRow {
 
 /// A colleague's calendar as Exo last fetched it: the events of `from` to `to`, fetched at
 /// `fetched_at`. One row per person, keyed by their lower-cased address.
-// toasty generates a `from_ms` accessor for the column below, which clippy reads as a conversion.
-#[allow(clippy::wrong_self_convention)]
 #[derive(Debug, toasty::Model)]
 #[table = "guest_cache"]
 pub(crate) struct GuestCacheRow {
@@ -333,7 +331,10 @@ pub(crate) struct GuestCacheRow {
     /// When it was fetched, in epoch milliseconds.
     pub fetched_at: i64,
     /// The window the events cover, in epoch milliseconds.
-    pub from_ms: i64,
+    // Named `start_ms` in Rust: toasty would make a `from_ms(self)` builder, which clippy reads as
+    // a conversion. The column keeps its name.
+    #[column("from_ms")]
+    pub start_ms: i64,
     pub to_ms: i64,
     #[column(type = text)]
     pub events: Json<Vec<gmail::calendar::Event>>,

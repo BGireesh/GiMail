@@ -109,7 +109,7 @@ impl Store {
         Ok((|| {
             Some(CachedGuest {
                 fetched_at: time(row.fetched_at)?,
-                from: time(row.from_ms)?,
+                from: time(row.start_ms)?,
                 to: time(row.to_ms)?,
                 events: row.events.0,
             })
@@ -131,7 +131,7 @@ impl Store {
         GuestCacheRow::create()
             .person(person)
             .fetched_at(cached.fetched_at.as_millisecond())
-            .from_ms(cached.from.as_millisecond())
+            .start_ms(cached.from.as_millisecond())
             .to_ms(cached.to.as_millisecond())
             .events(Json(cached.events.clone()))
             .exec(write.exec())
