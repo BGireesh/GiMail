@@ -4,7 +4,7 @@
 # they stop (two hours at most), so run this once at the start of every session, from Terminal on
 # the Mac's desktop:
 #
-#   zsh -c "$(curl -fsSL https://raw.githubusercontent.com/BGireesh/Exo/gireesh/revyl-dev-mac/scripts/revyl-dev-mac.sh)"
+#   zsh -c "$(curl -fsSL https://raw.githubusercontent.com/BGireesh/GiMail/gireesh/revyl-dev-mac/scripts/revyl-dev-mac.sh)"
 #
 # Optional, to skip the interactive sign-ins: export GH_TOKEN and/or CLAUDE_CODE_OAUTH_TOKEN in the
 # same Terminal first. Nothing here stores a token beyond the Mac itself, which Revyl deletes.
@@ -13,7 +13,7 @@
 set -e
 setopt pipefail 2>/dev/null || true
 
-REPO=BGireesh/Exo
+REPO=BGireesh/GiMail
 UPSTREAM=https://github.com/m1guelpf/Exo.git
 DIR="$HOME/Exo"
 RC="$HOME/.zshrc"
@@ -95,7 +95,7 @@ cat > "$HOME/.claude/CLAUDE.md" <<'EOF'
 - Work on branches named `gireesh/<topic>`. Never commit to `main`, and merge or push to `main`
   only with Gireesh's explicit approval.
 - This is a Revyl cloud Mac: it is deleted when it stops, two hours after it started. Push work to
-  `origin` (BGireesh/Exo) before then, and say plainly when something is not pushed yet.
+  `origin` (BGireesh/GiMail) before then, and say plainly when something is not pushed yet.
 - Exo is a macOS app. Raise the open-file limit before tests (`ulimit -n 65536`); `exo-test` does.
 - To see the app with fake mail, run `exo-mock` (a local gmail-mock), never a real Google account.
 EOF
