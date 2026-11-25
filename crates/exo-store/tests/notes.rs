@@ -1010,7 +1010,7 @@ async fn note_changes_are_backed_up_on_their_own_a_burst_in_one_write() {
         dir,
         ACCOUNT,
         harness.server.endpoints(),
-        gmail::StaticToken(gmail_mock::DEV_ACCESS_TOKEN.into()),
+        gmail::StaticToken(mock_servers::DEV_ACCESS_TOKEN.into()),
         Options {
             notes_backup_pace: std::time::Duration::from_millis(300),
             ..support::options()
