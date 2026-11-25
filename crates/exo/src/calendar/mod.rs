@@ -433,6 +433,12 @@ impl crate::Mail {
         self.calendar.options_cache.menu_rows()
     }
 
+    /// What each person's row in Calendar Settings' cache list said when last drawn, by address
+    /// (for tests).
+    pub fn calendar_cache_statuses(&self) -> Vec<(String, String)> {
+        self.calendar.options_cache.statuses()
+    }
+
     /// The signed-out calendar account whose `Add Calendar` takes the day view's place, if it
     /// does (for tests).
     pub fn calendar_add_calendar(&self) -> Option<String> {

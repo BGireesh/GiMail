@@ -2316,12 +2316,53 @@ fn calendar_settings_say_when_each_colleague_was_synced_and_resync_one_on_demand
     );
     assert_eq!(synced(&app, LENA), Some(nine), "Lena wasn't asked for");
 
-    // Offline, re-sync can't be clicked.
+    // Syncing shows from the moment it's asked for, before the task gets to it.
+    app.mail().account().calendar().resync_cache(LENA);
+    assert!(
+        app.mail()
+            .account()
+            .calendar()
+            .data()
+            .cache_syncing
+            .contains(LENA),
+        "syncing at once"
+    );
+    app.settle();
+    assert!(
+        app.mail()
+            .account()
+            .calendar()
+            .data()
+            .cache_syncing
+            .is_empty()
+    );
+    assert_eq!(
+        synced(&app, LENA),
+        Some(eight.timestamp()),
+        "Lena re-synced"
+    );
+
+    // Offline, re-sync can't be clicked, and one asked for anyway ends without a spinner left.
     app.disconnect();
     app.set_now(new_york("2026-11-17T20:30"));
     click_widget(&mut app, ("calendar-cache-resync", LENA));
     app.settle();
-    assert_eq!(synced(&app, LENA), Some(nine), "nothing read offline");
+    assert_eq!(
+        synced(&app, LENA),
+        Some(eight.timestamp()),
+        "nothing read offline"
+    );
+    app.mail().account().calendar().resync_cache(LENA);
+    app.settle();
+    assert!(
+        app.mail()
+            .account()
+            .calendar()
+            .data()
+            .cache_syncing
+            .is_empty(),
+        "nothing left syncing"
+    );
     app.reconnect();
     app.settle();
 
@@ -2329,7 +2370,40 @@ fn calendar_settings_say_when_each_colleague_was_synced_and_resync_one_on_demand
     click_widget(&mut app, ("calendar-cache-remove", PRIYA));
     app.settle();
     assert_eq!(synced(&app, PRIYA), None);
-    assert_eq!(synced(&app, LENA), Some(nine));
+    assert_eq!(synced(&app, LENA), Some(eight.timestamp()));
+}
+
+#[test]
+fn a_resync_in_calendar_settings_shows_its_new_time_without_another_touch() {
+    let mut app =
+        support::start_with_settings("calendar-cached-resync-label", &cache_on(&[PRIYA, LENA]));
+    app.key(Key::Num2);
+    app.settle();
+    palette(&mut app, "Calendar Settings");
+    let said = |app: &Fixture, email: &str| {
+        app.mail()
+            .calendar_cache_statuses()
+            .into_iter()
+            .find(|(each, _)| each == email)
+            .map(|(_, said)| said)
+    };
+    app.set_now(new_york("2026-11-17T20:00"));
+    app.wait(0.1);
+    assert_eq!(said(&app, PRIYA).as_deref(), Some("Synced 9:00 AM"));
+    // A click, then only frames: no pointer moves, no keys.
+    click_widget(&mut app, ("calendar-cache-resync", PRIYA));
+    // As the window does: a frame only when one is asked for.
+    let ctx = app.harness.ctx.clone();
+    let started = std::time::Instant::now();
+    while started.elapsed() < std::time::Duration::from_secs(5) {
+        if ctx.has_requested_repaint() {
+            app.harness.step();
+        } else {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+    assert_eq!(said(&app, PRIYA).as_deref(), Some("Synced just now"));
+    assert_eq!(said(&app, LENA).as_deref(), Some("Synced 9:00 AM"));
 }
 
 #[test]

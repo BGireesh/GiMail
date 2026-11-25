@@ -345,6 +345,7 @@ impl CalendarSync {
                     cache_last: None,
                     cache_covered: BTreeSet::new(),
                     cache_reading: 0,
+                    cache_in_flight: BTreeSet::new(),
                     cache_check_at: tokio::time::Instant::now() + CACHE_CHECK,
                 };
                 task.run(receiver.clone(), resumed)
@@ -519,10 +520,15 @@ impl CalendarSync {
     }
 
     /// Refreshes `email`'s cached calendar now, outside the schedule too (Calendar Settings'
-    /// re-sync). Nothing happens while they aren't listed, are being read already, or Calendar
-    /// can't be reached.
+    /// re-sync). They show as syncing at once, however long the task takes to get to it, until
+    /// their answer lands, or the task finds nothing to do (they aren't listed, or Calendar
+    /// can't be reached).
     pub fn resync_cache(&self, email: &str) {
-        self.post(Request::ResyncCache(email.to_lowercase()));
+        let email = email.to_lowercase();
+        self.shared.data.send_modify(|data| {
+            Arc::make_mut(data).cache_syncing.insert(email.clone());
+        });
+        self.post(Request::ResyncCache(email));
     }
 
     /// Has the cache of colleagues' calendars look at the clock now, for when the minute changed,
@@ -592,6 +598,8 @@ struct Task {
     /// How many answers of the refresh under way haven't been handled yet. No refresh starts
     /// until they have.
     cache_reading: usize,
+    /// Whose calendars the cache is reading now.
+    cache_in_flight: BTreeSet<String>,
     /// When the cache next looks at the clock unprompted. A deadline, so that the task's other
     /// wakes don't put it off.
     cache_check_at: tokio::time::Instant,
@@ -833,6 +841,7 @@ impl Task {
         let (from, to) = cache::window_range(today, &tz);
         self.cache_reading += people.len();
         self.shared.busy.fetch_add(people.len(), Ordering::SeqCst);
+        self.cache_in_flight.extend(people.iter().cloned());
         self.edit(|data| data.cache_syncing.extend(people.iter().cloned()));
         let (store, requests, shared) = (
             self.store.clone(),
@@ -879,6 +888,7 @@ impl Task {
             range: (from, to),
             found,
         } = answer;
+        self.cache_in_flight.remove(&email);
         self.edit(|data| {
             data.cache_syncing.remove(&email);
         });
@@ -1134,10 +1144,15 @@ impl Task {
                 }
             }
             Request::ResyncCache(email) => {
-                let syncing = self.shared.data.borrow().cache_syncing.contains(&email);
-                if self.caches(&email) && !syncing && !self.down() {
+                if self.cache_in_flight.contains(&email) {
+                    // Already being read; its answer ends the syncing.
+                } else if self.caches(&email) && !self.down() {
                     let now = self.clock.now();
                     self.refresh_cache(vec![email], &now);
+                } else {
+                    self.edit(|data| {
+                        data.cache_syncing.remove(&email);
+                    });
                 }
             }
             Request::InviteLoaded(thread, ics) => {

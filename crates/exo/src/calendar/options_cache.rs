@@ -202,12 +202,19 @@ pub(crate) struct CacheInput {
     /// When each person's re-sync was last clicked (the UI's clock), so `Syncing…` shows for a
     /// moment at least, however fast the read.
     resynced: std::collections::HashMap<String, f64>,
+    /// What each shown person's row said when last drawn.
+    said: Vec<(String, String)>,
 }
 
 impl CacheInput {
     /// Closes the open menu.
     pub fn close_menu(&mut self) {
         self.open = None;
+    }
+
+    /// What each shown person's row said when last drawn, by address.
+    pub fn statuses(&self) -> Vec<(String, String)> {
+        self.said.clone()
     }
 
     /// The rows the open menu shows.
@@ -335,6 +342,7 @@ pub(crate) fn show(
     input.first_person = input
         .first_person
         .min(cache.people.len().saturating_sub(fit));
+    input.said.clear();
     for person in cache.people.iter().skip(input.first_person).take(shown) {
         let name = book
             .and_then(|book| book.name_for(person))
@@ -352,6 +360,7 @@ pub(crate) fn show(
         }
         let syncing = status.syncing.contains(person) || clicked;
         let said = status.label(person, syncing);
+        input.said.push((person.clone(), said.clone()));
         let said_width = TEXT.width(ui.ctx(), &said) + if syncing { STATUS_SPINNER } else { 0.0 };
         let room = width - VALUE_LEFT - 2.0 * BUTTON - 8.0;
         let name_width = TEXT.paint_line(
