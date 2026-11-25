@@ -21,7 +21,6 @@ use toasty::{Db, Executor, Json};
 
 use crate::db::{
     MessageRow, NoteDraftRow, NoteFileRow, NoteRow, NoteThreadRow, NoteVersionRow, query_i64,
-    strings,
 };
 use crate::error::{Error, Result};
 use crate::ids::ThreadId;
@@ -1669,4 +1668,15 @@ fn note(row: NoteRow, files: &HashMap<String, NoteFile>) -> Note {
         deleted_at: row.deleted_at,
         version: row.version,
     }
+}
+
+/// Each row's first column, when it is text. (Upstream removed this helper from `db`.)
+fn strings(rows: Vec<Value>) -> impl Iterator<Item = String> {
+    rows.into_iter().filter_map(|row| match row {
+        Value::Record(row) => row.fields.into_iter().next().and_then(|value| match value {
+            Value::String(text) => Some(text),
+            _ => None,
+        }),
+        _ => None,
+    })
 }

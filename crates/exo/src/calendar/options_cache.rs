@@ -697,9 +697,20 @@ fn rows(which: Which, cache: &CalendarCache) -> (Vec<(u16, String)>, usize) {
     (named, at)
 }
 
-/// A dropdown's button showing `value`, its text's top left at `at`.
+/// A dropdown's button showing `value`, its text's top left at `at`: the value black at `.7`,
+/// and the caret 10px after it at `.5`.
 fn dropdown(ui: &Ui, at: Pos2, value: &str) -> Rect {
-    exo_ui::paint_dialog_dropdown(ui, at, value)
+    let palette = exo_ui::palette(ui.ctx());
+    exo_ui::paint_dialog_dropdown_with(
+        ui,
+        at,
+        value,
+        exo_ui::DialogDropdown {
+            value: palette.ink(0.7, 0.7),
+            caret: palette.ink(0.5, 0.5),
+            gap: 10.0,
+        },
+    )
 }
 
 fn trigger(ui: &Ui, button: Rect, id: &str) -> egui::Response {
