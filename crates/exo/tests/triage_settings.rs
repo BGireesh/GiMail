@@ -285,7 +285,7 @@ fn answering_an_answered_invitation_again_marks_it_done() {
     app.key(Key::Tab);
     app.key(Key::Enter);
     app.settle();
-    assert_eq!(app.mail().toast(), Some("Marked Done."));
+    assert_eq!(app.mail().toast_text(), Some("Marked Done."));
     assert_eq!(
         calendar_answer(&app).as_deref(),
         Some("accepted"),
@@ -302,7 +302,7 @@ fn answering_an_answered_invitation_again_marks_it_done() {
     app.key(Key::ArrowRight);
     app.key(Key::Enter);
     app.settle();
-    assert_eq!(app.mail().toast(), Some("Responded No and Marked Done."));
+    assert_eq!(app.mail().toast_text(), Some("Responded No and Marked Done."));
     assert_eq!(calendar_answer(&app).as_deref(), Some("declined"));
     assert!(!listed(&app, INVITATION));
 }
