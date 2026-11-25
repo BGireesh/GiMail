@@ -323,6 +323,8 @@ pub(crate) struct EventRow {
 
 /// A colleague's calendar as Exo last fetched it: the events of `from` to `to`, fetched at
 /// `fetched_at`. One row per person, keyed by their lower-cased address.
+// toasty generates a `from_ms` accessor for the column below, which clippy reads as a conversion.
+#[allow(clippy::wrong_self_convention)]
 #[derive(Debug, toasty::Model)]
 #[table = "guest_cache"]
 pub(crate) struct GuestCacheRow {

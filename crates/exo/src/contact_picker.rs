@@ -259,6 +259,8 @@ impl ContactPicker {
         if let Some(row) = self.list(&ctx, id.with("list"), at, width) {
             picked = row;
             self.focus = true;
+            // The list picks on the press; keep the keyboard in the field through the release.
+            exo_ui::hold_field_focus(&ctx, field.id);
         }
         picked
     }
