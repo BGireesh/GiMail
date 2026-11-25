@@ -1516,6 +1516,8 @@ mod tests {
                 to: "Label_new".into(),
             }],
             messages: 1,
+            notes: 0,
+            trashed: false,
             search: None,
             failure: None,
             sending: false,

@@ -521,7 +521,11 @@ mod tests {
                 scheduled: None,
                 removed_by: Vec::new(),
                 reminder: None,
+                notes: 0,
+                trashed: false,
             },
+            notes: Vec::new(),
+            deleted: false,
             subject: Some(exo_store::Highlighted {
                 text: raw.to_owned(),
                 bold: std::iter::once(match_start..match_end).collect(),

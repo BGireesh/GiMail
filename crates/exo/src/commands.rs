@@ -1821,6 +1821,8 @@ mod tests {
             contact: None,
             removed_by: Vec::new(),
             messages: 1,
+            notes: 0,
+            trashed: false,
             search: None,
             failure: None,
             sending: false,
