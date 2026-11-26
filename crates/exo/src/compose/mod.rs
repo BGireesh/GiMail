@@ -1207,6 +1207,11 @@ impl crate::Mail {
     /// share the same index without duplicating it.
     pub(crate) fn shared_book(&mut self) -> Option<Arc<contacts::Index>> {
         self.index_address_book();
+        self.indexed_book()
+    }
+
+    /// The address book's index if it's already built, without asking for it.
+    pub(crate) fn indexed_book(&self) -> Option<Arc<contacts::Index>> {
         self.compose
             .book
             .as_ref()

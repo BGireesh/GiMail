@@ -271,7 +271,13 @@ impl crate::Mail {
         if !self.calendar.options_open {
             self.calendar.options_cache.close_menu();
         }
-        let book = self.shared_book();
+        // This runs every frame, open or not: only an open dialog may ask for the address book, so
+        // that loading it still waits for its first real use (as compose's suggestions expect).
+        let book = if self.calendar.options_open {
+            self.shared_book()
+        } else {
+            self.indexed_book()
+        };
         let data = self.account.calendar().data();
         let settings = self.account.settings();
         let link = settings.meeting_links.default_meeting_link.clone();
