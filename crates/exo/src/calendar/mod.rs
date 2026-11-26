@@ -1183,6 +1183,17 @@ pub(crate) fn week_title(first: Date) -> String {
     }
 }
 
+/// A guest's marker as the tests name it: their colour, `loading`, `empty`, or
+/// `refreshing:<colour>`.
+fn marker_for_test(marker: guests::Marker) -> String {
+    match marker {
+        guests::Marker::Swatch(color) => color.name().to_owned(),
+        guests::Marker::Refreshing(color) => format!("refreshing:{}", color.name()),
+        guests::Marker::Spinner => "loading".to_owned(),
+        guests::Marker::Empty => "empty".to_owned(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1217,16 +1228,5 @@ mod tests {
             "Dec 27–Jan 2",
             "and two years"
         );
-    }
-}
-
-/// A guest's marker as the tests name it: their colour, `loading`, `empty`, or
-/// `refreshing:<colour>`.
-fn marker_for_test(marker: guests::Marker) -> String {
-    match marker {
-        guests::Marker::Swatch(color) => color.name().to_owned(),
-        guests::Marker::Refreshing(color) => format!("refreshing:{}", color.name()),
-        guests::Marker::Spinner => "loading".to_owned(),
-        guests::Marker::Empty => "empty".to_owned(),
     }
 }

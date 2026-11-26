@@ -76,7 +76,9 @@ const NOTE_GAP: f32 = 8.0;
 /// How far a message's notes are indented under it.
 const NOTE_INDENT: f32 = 28.0;
 
-/// What Enter in an invite card did.
+/// What Enter in an invite card did. Short-lived (returned and matched at once), so the
+/// `Answer` variant's size doesn't matter.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug)]
 pub enum Submitted {
     /// Answered: the invite, my answer recorded unless its account signs in first, and the answer.
