@@ -13,6 +13,7 @@ mod compose;
 mod error;
 mod event_input;
 mod events;
+mod extensions;
 mod filter;
 mod folders;
 mod http;
@@ -20,12 +21,14 @@ mod ics;
 mod ids;
 mod kql;
 mod login;
+mod meetings;
 mod messages;
 mod model;
 mod odata;
 mod people;
 mod project;
 mod recurrence;
+mod schedule;
 mod settings;
 mod state;
 
@@ -187,6 +190,24 @@ fn api() -> Router<Arc<App>> {
             post(messages::translate_ids),
         )
         .route("/v1.0/me/calendars", get(calendar::list_calendars))
+        .route(
+            "/v1.0/me/calendar/getSchedule",
+            post(schedule::get_schedule),
+        )
+        .route(
+            "/v1.0/me/findMeetingTimes",
+            post(schedule::find_meeting_times),
+        )
+        .route("/v1.0/places/microsoft.graph.room", get(schedule::rooms))
+        .route(
+            "/v1.0/places/microsoft.graph.roomList",
+            get(schedule::room_lists),
+        )
+        .route(
+            "/v1.0/places/{place}/microsoft.graph.roomList/rooms",
+            get(schedule::rooms_in),
+        )
+        .route("/v1.0/places/{place}", get(schedule::place))
         .route("/v1.0/me/calendar", get(calendar::get_calendar))
         .route("/v1.0/me/calendars/{calendar}", get(calendar::get_calendar));
     // A calendar's routes, for the default calendar and by ID; `/me/events` and
@@ -209,6 +230,13 @@ fn api() -> Router<Arc<App>> {
                     .delete(calendar::delete),
             )
             .route(&format!("{event}/instances"), get(calendar::instances))
+            .route(&format!("{event}/accept"), post(meetings::accept))
+            .route(
+                &format!("{event}/tentativelyAccept"),
+                post(meetings::tentatively_accept),
+            )
+            .route(&format!("{event}/decline"), post(meetings::decline))
+            .route(&format!("{event}/cancel"), post(meetings::cancel))
             .route(
                 &format!("{calendar}/calendarView"),
                 get(calendar::calendar_view),
@@ -229,6 +257,16 @@ fn api() -> Router<Arc<App>> {
             )
             .route(&format!("{base}/$value"), get(messages::mime))
             .route(&format!("{base}/move"), post(messages::move_to))
+            .route(
+                &format!("{base}/extensions"),
+                get(extensions::list).post(extensions::create),
+            )
+            .route(
+                &format!("{base}/extensions/{{extension}}"),
+                get(extensions::get)
+                    .patch(extensions::update)
+                    .delete(extensions::delete),
+            )
             .route(&format!("{base}/copy"), post(messages::copy_to))
             .route(&format!("{base}/reply"), post(compose::reply))
             .route(&format!("{base}/replyAll"), post(compose::reply_all))
@@ -306,6 +344,7 @@ const MAILBOX: &[&str] = &[
     "calendars",
     "calendarView",
     "events",
+    "findMeetingTimes",
 ];
 
 /// `/users/{id or userPrincipalName}/…` for the signed-in user's own mailbox, as `/me/…`.
@@ -365,6 +404,17 @@ const SEGMENTS: &[&str] = &[
     "calendarView",
     "events",
     "instances",
+    "extensions",
+    "accept",
+    "tentativelyAccept",
+    "decline",
+    "cancel",
+    "getSchedule",
+    "findMeetingTimes",
+    "places",
+    "microsoft.graph.room",
+    "microsoft.graph.roomList",
+    "rooms",
     "contacts",
     "contactFolders",
     "delta",

@@ -1,10 +1,10 @@
 //! The sign-in screen: the photo, a wordmark, a white card, and the round back button when there's
-//! an account to go back to. The card has the tagline, "Sign in with Google", a spinner while the
-//! browser is out, and the footer's errors. For an account Google signed out, the button says
-//! "Sign in as {email}", with "Use another account→" under it.
+//! an account to go back to. The card has the tagline, "Sign in with Google" and "Sign in with
+//! Microsoft", a spinner while the browser is out, and the footer's errors. For an account whose
+//! provider signed it out, the button says "Sign in as {email}", with "Use another account→"
+//! under it.
 //!
-//! Google is the only provider, so the card's fixed heights leave out a Microsoft button. The
-//! wordmark says "EXO".
+//! The wordmark says "EXO".
 
 use std::path::Path;
 
@@ -53,6 +53,7 @@ const PROMPT_NUDGE: f32 = 2.0;
 const BUTTON: TextStyle = TextStyle::new(Font::new(Family::Sans, 700), 14.0, 50.0);
 const BUTTON_FILL: Color32 = Color32::from_rgb(0x87, 0x97, 0xcd);
 const BUTTON_SIZE: egui::Vec2 = egui::Vec2::new(315.0, 52.0);
+const BUTTON_GAP: f32 = 12.0;
 const BUTTON_TEXT_TOP: f32 = 2.0;
 const BUTTON_NUDGE: f32 = 4.0;
 const BUTTON_RADIUS: u8 = 4;
@@ -126,9 +127,10 @@ mod copy {
     pub const PROMPT: &str = "The most productive email app ever made.";
     /// The wordmark: Exo's name.
     pub const WORDMARK: &str = "EXO";
-    /// The button.
-    pub const BUTTON: &str = "Sign in with Google";
-    /// The button for an account Google signed out.
+    /// The provider buttons.
+    pub const GOOGLE_BUTTON: &str = "Sign in with Google";
+    pub const MICROSOFT_BUTTON: &str = "Sign in with Microsoft";
+    /// The button for an account whose provider signed it out.
     pub fn sign_in_as(email: &str) -> String {
         format!("Sign in as {email}")
     }
@@ -142,12 +144,23 @@ mod copy {
     /// Any other failure.
     pub const FAILED: &str = "Sorry, something went wrong! Please try again later.";
     /// Consent given without every permission Exo asks for.
-    pub const MISSING_SCOPES: &str = "Please select all permissions when signing in with Google.\nExo requires these to manage your email.";
-    /// The account has no Gmail mailbox.
-    pub const NO_MAILBOX: &str = "This Google Account does not appear to have a Gmail mailbox.";
-    /// Exo ships no OAuth client, so the user saves their own at `path`.
+    pub const MISSING_SCOPES_GOOGLE: &str = "Please select all permissions when signing in with Google.\nExo requires these to manage your email.";
+    pub const MISSING_SCOPES_MICROSOFT: &str = "Please select all permissions when signing in with Microsoft.\nExo requires these to manage your email.";
+    /// The account has no mailbox on the chosen provider.
+    pub const NO_MAILBOX_GOOGLE: &str =
+        "This Google Account does not appear to have a Gmail mailbox.";
+    pub const NO_MAILBOX_MICROSOFT: &str =
+        "This Microsoft account does not appear to have an Outlook mailbox.";
+    /// Microsoft tenant requires admin approval for Exo's registration.
+    pub const ADMIN_CONSENT: &str =
+        "Your organization requires an administrator to approve Exo before you can sign in.";
+    /// Exo ships no Google OAuth client, so the user saves their own at `path`.
     pub fn no_client(path: &str) -> String {
         format!("Please save your Google OAuth client (Desktop app) as {path}.")
+    }
+    /// A broken Microsoft client override file at `path`.
+    pub fn invalid_microsoft_client(path: &str) -> String {
+        format!("Your Microsoft OAuth client at {path} could not be read.")
     }
 }
 
@@ -189,14 +202,19 @@ pub enum Outcome {
 /// The sign-in screen.
 pub struct LogIn {
     photo: Photo,
-    /// When the spinner replaced the button.
+    /// When the spinner replaced the buttons.
     loading_since: Option<f64>,
     footer: Option<String>,
-    /// The account Google signed out, which the button signs in; Google is asked to offer it
-    /// even after "Use another account".
+    /// The account whose provider signed it out, which the button signs in; offered as
+    /// `login_hint` while `show_hint` is true (or on a re-attempt for the same provider).
     hint: Option<String>,
+    /// The provider of the signed-out account when `show_hint` is true; cleared by "Use another
+    /// account".
+    hint_provider: Option<exo_auth::Provider>,
     /// "Use another account" hasn't been clicked.
     show_hint: bool,
+    /// Which provider the in-flight or most recent sign-in used, for provider-specific error copy.
+    last_provider: exo_auth::Provider,
     back: Option<Back>,
 }
 
@@ -209,15 +227,19 @@ impl LogIn {
             loading_since: None,
             footer,
             hint: None,
+            hint_provider: None,
             show_hint: false,
+            last_provider: exo_auth::Provider::Google,
             back: None,
         }
     }
 
-    /// The screen for signing `email` in again: `Sign in as {email}`.
-    pub(crate) fn with_hint(mut self, email: String) -> Self {
+    /// The screen for signing `email` in again on `provider`: `Sign in as {email}`.
+    pub(crate) fn with_hint(mut self, email: String, provider: exo_auth::Provider) -> Self {
         self.hint = Some(email);
+        self.hint_provider = Some(provider);
         self.show_hint = true;
+        self.last_provider = provider;
         self
     }
 
@@ -269,10 +291,10 @@ impl LogIn {
         if let Some(outcome) = sign_in.poll() {
             self.loading_since = None;
             match outcome {
-                Ok(account) => return Some(Outcome::SignedIn(account.email)),
+                Ok(account) => return Some(Outcome::SignedIn(account.key())),
                 Err(error) => {
                     log::warn!("signing in: {error}");
-                    self.footer = footer(&error);
+                    self.footer = footer_for(&error, self.last_provider);
                 }
             }
         }
@@ -310,13 +332,14 @@ impl LogIn {
             .map(|text| FOOTER.wrap(&ctx, text, WIDTH - 2.0 * PADDING_X))
             .unwrap_or_default();
         // The footer shows an error, else the link back to the default buttons.
-        let link = footer_lines.is_empty() && self.hint().is_some();
-        let card = match (self.hint().is_some(), !footer_lines.is_empty() || link) {
+        let single = self.hint().is_some();
+        let link = footer_lines.is_empty() && single;
+        let card = match (single, !footer_lines.is_empty() || link) {
             (true, _) => Card::SINGLE,
             (false, false) => Card::DEFAULT,
             (false, true) => Card::DEFAULT_WITH_FOOTER,
         };
-        let layout = Layout::new(page, &card, self.is_loading());
+        let layout = Layout::new(page, &card, self.is_loading(), !single);
         let center = layout.card.center().x;
 
         let width = WORDMARK.width(&ctx, copy::WORDMARK) - WORDMARK.letter_spacing;
@@ -346,7 +369,7 @@ impl LogIn {
             None,
         );
 
-        let mut clicked = false;
+        let mut clicked: Option<exo_auth::Provider> = None;
         if let Some(since) = self.loading_since {
             let spinner = Rect::from_min_size(
                 pos2(center - SPINNER / 2.0, layout.actions),
@@ -358,70 +381,32 @@ impl LogIn {
                 SPINNER_INK,
             ));
             ctx.request_repaint();
-        } else {
-            // `transform: perspective(1px)` gives the button a layer, which Chromium puts on
-            // whole pixels.
-            let button = exo_ui::pixel_snap(Rect::from_min_size(
-                pos2(center - BUTTON_SIZE.x / 2.0, layout.actions + BUTTON_NUDGE),
-                BUTTON_SIZE,
-            ));
-            let response = ui
-                .interact(button, ui.id().with("log-in-button"), Sense::click())
-                .on_hover_cursor(egui::CursorIcon::PointingHand);
-            let hover = motion::transition(
-                &ctx,
-                response.id.with("hover"),
-                response.hovered(),
-                0.5,
-                motion::CubicBezier::EASE,
-            );
-            let press = motion::transition(
-                &ctx,
-                response.id.with("press"),
-                response.is_pointer_button_down_on(),
-                0.5,
-                motion::CubicBezier::EASE,
-            );
-            // `scale(1.01)` hovered, `scale(.95)` pressed (`:active` wins over `:hover`).
-            let lerp = |from: f32, to: f32, t: f32| from + (to - from) * t;
-            let scale = lerp(lerp(1.0, 1.01, hover), 0.95, press);
-            let scaled = Rect::from_center_size(button.center(), button.size() * scale);
-            // `0 14px 34px -10px rgba(0,0,0,.15)` twice. Hovered, both are `40px … .25`. Pressed,
-            // the first is `20px … .35`.
-            let lift = hover.max(press);
-            let shadows = [
-                (
-                    lerp(lerp(34.0, 40.0, hover), 20.0, press),
-                    lerp(lerp(0.15, 0.25, hover), 0.35, press),
-                ),
-                (lerp(34.0, 40.0, lift), lerp(0.15, 0.25, lift)),
-            ];
-            for (blur, alpha) in shadows {
-                BoxShadow::new(
-                    [0.0, 14.0],
-                    blur,
-                    -10.0,
-                    Color32::from_black_alpha((alpha * 255.0).round() as u8),
-                )
-                .paint(ui.painter(), scaled, CornerRadius::same(BUTTON_RADIUS));
+        } else if let Some(email) = self.hint() {
+            let label = copy::sign_in_as(email);
+            let provider = self.hint_provider.unwrap_or(exo_auth::Provider::Google);
+            if paint_button(ui, "log-in-button", center, layout.actions, &label) {
+                clicked = Some(provider);
             }
-            ui.painter()
-                .rect_filled(scaled, CornerRadius::same(BUTTON_RADIUS), BUTTON_FILL);
-            let label = self
-                .hint()
-                .map_or_else(|| copy::BUTTON.to_owned(), copy::sign_in_as);
-            let width = BUTTON.width(&ctx, &label);
-            BUTTON.paint_line(
-                ui.painter(),
-                pos2(
-                    button.center().x - width / 2.0,
-                    button.top() + BUTTON_TEXT_TOP,
-                ),
-                &label,
-                Color32::WHITE,
-                None,
-            );
-            clicked = response.clicked();
+        } else {
+            if paint_button(
+                ui,
+                "log-in-google",
+                center,
+                layout.actions,
+                copy::GOOGLE_BUTTON,
+            ) {
+                clicked = Some(exo_auth::Provider::Google);
+            }
+            let second_top = layout.actions + BUTTON_SIZE.y + BUTTON_GAP;
+            if paint_button(
+                ui,
+                "log-in-microsoft",
+                center,
+                second_top,
+                copy::MICROSOFT_BUTTON,
+            ) {
+                clicked = Some(exo_auth::Provider::Microsoft);
+            }
         }
         for (i, line) in footer_lines.iter().enumerate() {
             let width = FOOTER.width(&ctx, line);
@@ -439,6 +424,7 @@ impl LogIn {
         if link && another_account_link(ui, center, layout.footer + FOOTER_NUDGE) {
             // "Use another account" brings back the default buttons, with no footer.
             self.show_hint = false;
+            self.hint_provider = None;
         }
         let back = self
             .back
@@ -464,25 +450,106 @@ impl LogIn {
         }) {
             return Some(Outcome::Back(email));
         }
-        // Enter works while the spinner shows too, starting over.
-        if clicked || enter {
-            self.start(&ctx, sign_in, now);
+        // Enter works while the spinner shows too, starting over with the same provider.
+        if let Some(provider) = clicked.or_else(|| {
+            enter.then(|| {
+                if self.is_loading() {
+                    self.last_provider
+                } else {
+                    self.hint_provider.unwrap_or(exo_auth::Provider::Google)
+                }
+            })
+        }) {
+            self.start(provider, &ctx, sign_in, now);
         }
         None
     }
 
-    fn start(&mut self, ctx: &egui::Context, sign_in: &mut SignIn, now: f64) {
-        match sign_in.start(ctx, self.hint.as_deref()) {
+    fn start(
+        &mut self,
+        provider: exo_auth::Provider,
+        ctx: &egui::Context,
+        sign_in: &mut SignIn,
+        now: f64,
+    ) {
+        self.last_provider = provider;
+        let hint = self.hint();
+        match sign_in.start_provider(provider, ctx, hint) {
             Ok(()) => {
                 self.footer = None;
                 self.loading_since = Some(now);
             }
             Err(error) => {
                 log::warn!("signing in: {error}");
-                self.footer = footer(&error);
+                self.footer = footer_for(&error, provider);
             }
         }
     }
+}
+
+/// Paints one provider or `Sign in as` button centered on `center` at layout box `top` (painted
+/// shifted down by [`BUTTON_NUDGE`]). Returns whether it was clicked.
+fn paint_button(ui: &mut Ui, id_salt: &str, center: f32, top: f32, label: &str) -> bool {
+    let ctx = ui.ctx().clone();
+    // `transform: perspective(1px)` gives the button a layer, which Chromium puts on whole pixels.
+    let button = exo_ui::pixel_snap(Rect::from_min_size(
+        pos2(center - BUTTON_SIZE.x / 2.0, top + BUTTON_NUDGE),
+        BUTTON_SIZE,
+    ));
+    let response = ui
+        .interact(button, ui.id().with(id_salt), Sense::click())
+        .on_hover_cursor(egui::CursorIcon::PointingHand);
+    let hover = motion::transition(
+        &ctx,
+        response.id.with("hover"),
+        response.hovered(),
+        0.5,
+        motion::CubicBezier::EASE,
+    );
+    let press = motion::transition(
+        &ctx,
+        response.id.with("press"),
+        response.is_pointer_button_down_on(),
+        0.5,
+        motion::CubicBezier::EASE,
+    );
+    // `scale(1.01)` hovered, `scale(.95)` pressed (`:active` wins over `:hover`).
+    let lerp = |from: f32, to: f32, t: f32| from + (to - from) * t;
+    let scale = lerp(lerp(1.0, 1.01, hover), 0.95, press);
+    let scaled = Rect::from_center_size(button.center(), button.size() * scale);
+    // `0 14px 34px -10px rgba(0,0,0,.15)` twice. Hovered, both are `40px … .25`. Pressed, the
+    // first is `20px … .35`.
+    let lift = hover.max(press);
+    let shadows = [
+        (
+            lerp(lerp(34.0, 40.0, hover), 20.0, press),
+            lerp(lerp(0.15, 0.25, hover), 0.35, press),
+        ),
+        (lerp(34.0, 40.0, lift), lerp(0.15, 0.25, lift)),
+    ];
+    for (blur, alpha) in shadows {
+        BoxShadow::new(
+            [0.0, 14.0],
+            blur,
+            -10.0,
+            Color32::from_black_alpha((alpha * 255.0).round() as u8),
+        )
+        .paint(ui.painter(), scaled, CornerRadius::same(BUTTON_RADIUS));
+    }
+    ui.painter()
+        .rect_filled(scaled, CornerRadius::same(BUTTON_RADIUS), BUTTON_FILL);
+    let width = BUTTON.width(&ctx, label);
+    BUTTON.paint_line(
+        ui.painter(),
+        pos2(
+            button.center().x - width / 2.0,
+            button.top() + BUTTON_TEXT_TOP,
+        ),
+        label,
+        Color32::WHITE,
+        None,
+    );
+    response.clicked()
 }
 
 /// The card in one of its states: its height, and the prompt's, the button's, the spinner's and
@@ -534,7 +601,7 @@ struct Layout {
 
 impl Layout {
     /// The column for `page`, centered in it, with its card in state `card`.
-    fn new(page: Rect, card: &Card, loading: bool) -> Self {
+    fn new(page: Rect, card: &Card, loading: bool, two_buttons: bool) -> Self {
         let height = WORDMARK_HEIGHT + WORDMARK_GAP + card.height + CARD_MARGIN_BOTTOM;
         let top = page.center().y - height / 2.0;
         // The card (`position: relative; z-index: 1`) paints in a layer of its own, which
@@ -549,12 +616,17 @@ impl Layout {
         let prompt = rect.top() + card.prompt;
         let below_prompt = prompt + PROMPT.line_height;
         let actions = below_prompt + if loading { card.spinner } else { card.button };
+        let buttons_height = if two_buttons {
+            2.0 * BUTTON_SIZE.y + BUTTON_GAP
+        } else {
+            BUTTON_SIZE.y
+        };
         // The button's `top: 4px` moves only the button.
         let footer = actions
             + if loading {
                 SPINNER
             } else {
-                BUTTON_SIZE.y + card.footer
+                buttons_height + card.footer
             };
         Self {
             wordmark: top,
@@ -566,18 +638,34 @@ impl Layout {
     }
 }
 
-/// What the footer says after `error`. It says nothing when the user declined, or when the
-/// browser never came back (the spinner had given up long before).
+/// What the footer says after `error` on startup (where no provider attempt has started yet).
 pub(crate) fn footer(error: &exo_auth::Error) -> Option<String> {
-    use exo_auth::Error;
+    footer_for(error, exo_auth::Provider::Google)
+}
+
+/// What the footer says after `error` during a `provider` sign-in. It says nothing when the user
+/// declined (including Microsoft's AADSTS65004), or when the browser never came back.
+pub(crate) fn footer_for(error: &exo_auth::Error, provider: exo_auth::Provider) -> Option<String> {
+    use exo_auth::{Error, Provider};
     Some(match error {
-        // Declined consent shows no error.
-        Error::AccessDenied | Error::TimedOut => return None,
-        Error::MissingScopes(_) => copy::MISSING_SCOPES.to_owned(),
-        Error::NoMailbox => copy::NO_MAILBOX.to_owned(),
-        Error::MissingClient { path, .. } | Error::InvalidClient { path, .. } => {
-            copy::no_client(&tilde(path))
+        // Declined consent shows no error (including Microsoft's AADSTS65004 user cancellation).
+        Error::AccessDenied | Error::TimedOut | Error::ConsentRequired { code: 65004 } => {
+            return None;
         }
+        Error::ConsentRequired { .. } => copy::ADMIN_CONSENT.to_owned(),
+        Error::MissingScopes(_) => match provider {
+            Provider::Google => copy::MISSING_SCOPES_GOOGLE.to_owned(),
+            Provider::Microsoft => copy::MISSING_SCOPES_MICROSOFT.to_owned(),
+        },
+        Error::NoMailbox => match provider {
+            Provider::Google => copy::NO_MAILBOX_GOOGLE.to_owned(),
+            Provider::Microsoft => copy::NO_MAILBOX_MICROSOFT.to_owned(),
+        },
+        Error::MissingClient { path, .. } => copy::no_client(&tilde(path)),
+        Error::InvalidClient { provider, path, .. } => match provider {
+            Provider::Microsoft => copy::invalid_microsoft_client(&tilde(path)),
+            Provider::Google => copy::no_client(&tilde(path)),
+        },
         _ => copy::FAILED.to_owned(),
     })
 }
@@ -737,4 +825,51 @@ fn spinner_ring(rect: Rect, turn: f32, color: Color32) -> Shape {
         })
         .collect();
     Shape::line(points, Stroke::new(SPINNER_BORDER, color))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use exo_auth::{Error, Provider};
+
+    use super::{copy, footer_for};
+
+    #[test]
+    fn invalid_client_footer_uses_provider_not_filename() {
+        let custom = PathBuf::from("/tmp/my-custom-ms.json");
+        let ms_error = Error::InvalidClient {
+            provider: Provider::Microsoft,
+            path: custom.clone(),
+            reason: "bad json".into(),
+        };
+        assert_eq!(
+            footer_for(&ms_error, Provider::Google),
+            Some(copy::invalid_microsoft_client("/tmp/my-custom-ms.json")),
+        );
+
+        let google_error = Error::InvalidClient {
+            provider: Provider::Google,
+            path: custom,
+            reason: "bad json".into(),
+        };
+        assert_eq!(
+            footer_for(&google_error, Provider::Google),
+            Some(copy::no_client("/tmp/my-custom-ms.json")),
+        );
+    }
+
+    #[test]
+    fn consent_required_footer_matches_admin_and_silent_cancel_codes() {
+        assert_eq!(
+            footer_for(&Error::ConsentRequired { code: 65004 }, Provider::Microsoft),
+            None
+        );
+        for code in [65001, 90093, 90094] {
+            assert_eq!(
+                footer_for(&Error::ConsentRequired { code }, Provider::Microsoft),
+                Some(copy::ADMIN_CONSENT.to_owned())
+            );
+        }
+    }
 }

@@ -88,6 +88,7 @@ impl crate::Mail {
             self.account.unstick();
         }
         let settings = self.account.settings();
+        let outlook = self.account.is_outlook();
         let initial = match run {
             Some(query) => format!("{query} "),
             None => initial_query(
@@ -95,11 +96,12 @@ impl crate::Mail {
                 &self.snapshot.labels,
                 settings.splits(),
                 self.filter_search_suffix(),
+                outlook,
             ),
         };
         self.inbox.clear();
         self.search_rows_from = None;
-        let mut search = Search::new(&initial, &self.snapshot.labels);
+        let mut search = Search::new(&initial, &self.snapshot.labels, outlook);
         if run.is_none() {
             search.contact = Some(None);
         }

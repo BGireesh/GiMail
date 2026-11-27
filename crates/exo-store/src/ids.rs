@@ -1,20 +1,20 @@
-//! Identifiers: Gmail thread ids and Exo's list ids.
+//! Identifiers: the provider's thread ids, Exo's label keys and Exo's list ids.
 
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-/// A Gmail thread id.
+/// A thread id, as the provider spells it (Gmail's thread id).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct ThreadId(String);
 
 impl ThreadId {
-    /// Wraps a Gmail thread id.
+    /// Wraps a thread id.
     pub fn new(id: impl Into<String>) -> Self {
         Self(id.into())
     }
 
-    /// The id as Gmail spells it.
+    /// The id as the provider spells it.
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
@@ -69,14 +69,16 @@ pub enum ListId {
     Reminders,
     /// Every thread (`SH_ALL`).
     All,
-    /// Any other Gmail label by id, usually a user label (`Label_12`).
+    /// Any other label by key, usually a user label (Gmail's `Label_12`).
     Label(String),
     /// A split inbox, by its id (`SH_SPLIT_INBOX_…`, [`SplitInbox::id`](crate::SplitInbox::id)).
     Split(String),
 }
 
 pub mod labels {
-    //! Gmail system label ids and Exo's virtual list ids.
+    //! Exo's label keys: the roles a message has (spelled as Gmail spells its system labels, so
+    //! Gmail's ids are Exo's keys as they are) and Exo's virtual list ids. Every other key is the
+    //! provider's own, for one of the account's labels.
 
     pub const INBOX: &str = "INBOX";
     pub const UNREAD: &str = "UNREAD";
@@ -104,7 +106,8 @@ pub mod labels {
     pub const SH_KNOWLEDGE_BASE: &str = "SH_KNOWLEDGE_BASE";
     pub const SH_SIGNATURES: &str = "SH_SIGNATURES";
 
-    /// Exo's hidden labels in Gmail: their parent, and those under it.
+    /// The names of Exo's hidden labels in Gmail, its markers: their parent, and those under
+    /// it. The markers' keys are the ids Gmail gives them.
     pub const EXO_PARENT: &str = "[Exo]";
     pub const EXO_MUTED: &str = "[Exo]/Muted";
     /// A reminder is set.

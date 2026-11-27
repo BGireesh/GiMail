@@ -91,20 +91,10 @@ impl Mail {
             Some(query) => exo_store::SearchQuery::parse(query).shows_label("spam"),
             None => self.list == ListId::Spam,
         };
-        let email = self.account.email();
         let settings = self.account.settings();
-        let calendar_accounts = settings
-            .calendar_accounts
-            .keys()
-            .filter(|address| *address != email)
-            .cloned()
-            .collect();
-        let signed_out = settings
-            .calendar_accounts
-            .iter()
-            .filter(|(_, account)| !account.authed)
-            .map(|(address, _)| address.clone())
-            .collect();
+        let calendar_accounts = self.calendar_others();
+        let signed_out = self.calendar_signed_out();
+        let outlook_calendars = self.calendar_outlook_emails();
         let popped = self.compose.popped();
         ViewContext {
             now: self.now.clone(),
@@ -114,6 +104,7 @@ impl Mail {
             own_domains: self.own_domains(),
             calendar_accounts,
             signed_out,
+            outlook_calendars,
             pending: self.pending_rows(&self.account.bulk_actions()),
             folders_open: self.folders.is_open(),
             popped_out: popped.is_some(),
@@ -122,6 +113,7 @@ impl Mail {
             covered: self.popout_card(),
             trash_shown: self.list == ListId::Trash || self.search.is_some(),
             spam_view,
+            outlook: self.account.is_outlook(),
         }
     }
 
@@ -277,11 +269,15 @@ impl Mail {
     /// The status bar at the bottom of the window, if one shows: the offline bar, else Out of
     /// Office Reply's.
     pub fn status_bar(&self) -> Option<status_bar::StatusBar> {
-        status_bar::StatusBar::offline(&self.snapshot.connection, self.calendar_week().is_some())
-            .or_else(|| {
-                self.out_of_office()
-                    .then(status_bar::StatusBar::out_of_office)
-            })
+        status_bar::StatusBar::offline(
+            &self.snapshot.connection,
+            self.calendar_week().is_some(),
+            self.account.is_outlook(),
+        )
+        .or_else(|| {
+            self.out_of_office()
+                .then(status_bar::StatusBar::out_of_office)
+        })
     }
 
     /// What the footer's sync line says, as last drawn.

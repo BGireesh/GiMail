@@ -1,36 +1,32 @@
-//! Triage beyond single threads, done against Gmail directly: bulk actions on every conversation
-//! a select-all reaches, loaded or not, bulk relabels of every thread a search finds (blocks,
-//! moving a sender to Important or Other), and the sender filters that carry those choices to
-//! future mail.
+//! Triage beyond single threads, done against the provider directly: bulk actions on every
+//! conversation a select-all reaches, loaded or not, bulk relabels of every thread a search finds
+//! (blocks, moving a sender to Important or Other), and the sender rules that carry those choices
+//! to future mail (Gmail filters or Outlook Inbox rules and Focused Inbox overrides).
 //!
-//! A relabel goes straight to Gmail rather than through the outbox, since most of the threads
-//! it touches aren't stored. Syncs along the way and afterwards bring the stored ones up to date.
-//! Taking labels off stored threads is done on the messages that carry them, a thousand at a
-//! time (`messages.batchModify`, 50 quota units), as for a single thread. Everything else is one
-//! `threads.modify` (10 units) per thread.
+//! A relabel goes straight to the provider rather than through the outbox, since most of the
+//! threads it touches aren't stored. Syncs along the way and afterwards bring the stored ones up
+//! to date. Taking labels off stored threads is done on the messages that carry them, a thousand
+//! at a time (Gmail's `messages.batchModify`, 50 quota units), as for a single thread.
+//! Everything else is one change per thread (`threads.modify`, 10 units).
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
-use gmail::{
-    BatchModifyMessagesRequest, FilterAction, FilterCriteria, ListQuery, ModifyThreadRequest,
-};
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
 use crate::db::ListEntry;
 use crate::error::{Error, Result};
-use crate::ids::labels::{SPAM, STARRED, TRASH, UNREAD};
+use crate::ids::labels::{STARRED, UNREAD};
 use crate::ids::{Filter, ListId, ThreadId};
 use crate::mutation::Mutation;
-use crate::quota::Lane;
-use crate::split::{Me, important_definition};
+use crate::provider::{Dated, Find};
 use crate::store::{Store, read_views};
 
-/// Gmail calls a relabel runs at once.
-const CONCURRENCY: usize = 8;
+/// Provider calls a relabel runs at once.
+pub(crate) const CONCURRENCY: usize = 8;
 /// Retries per call.
-const ATTEMPTS: u32 = 3;
+pub(crate) const ATTEMPTS: u32 = 3;
 /// A long relabel syncs after every this many threads, so the stored ones leave their lists as
 /// it goes.
 const SYNC_EVERY: usize = 200;
@@ -39,9 +35,47 @@ const CHUNK: usize = 500;
 /// Most message ids `messages.batchModify` takes.
 const BATCH_IDS: usize = 1000;
 
-/// The categories a sender filter can send mail to. A new filter for one replaces a filter on the
-/// same sender for the other.
-const CATEGORIES: [&str; 2] = ["CATEGORY_PERSONAL", "CATEGORY_SOCIAL"];
+/// A provider-neutral rule that routes a sender's or domain's future mail.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SenderRule {
+    /// Send future mail from the sender or domain straight to Trash / Deleted Items.
+    Block,
+    /// Route future mail from the sender to Important / Focused.
+    Important,
+    /// Route future mail from the sender to Other.
+    Other,
+}
+
+/// What [`Store::set_sender_rule`] created or replaced, so [`Store::undo_sender_rule`] can
+/// reverse it cleanly on either provider.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "provider", rename_all = "snake_case")]
+pub enum SenderRuleUndo {
+    /// The rule was already present, so undo does nothing.
+    #[default]
+    None,
+    /// Gmail filter created (if any) and opposite category filter replaced (if any).
+    Gmail {
+        /// Newly created filter id to delete on undo.
+        created: Option<String>,
+        /// Opposite category filter deleted and recreated on undo.
+        replaced: Option<Box<gmail::Filter>>,
+    },
+    /// Outlook Inbox message rule created to block a sender or domain.
+    OutlookRule {
+        /// Rule id to delete on undo.
+        id: String,
+    },
+    /// Outlook Focused Inbox override created or updated for a sender.
+    OutlookOverride {
+        /// Override id.
+        id: String,
+        /// Previous classification if an existing override was updated, or `None` if a new
+        /// override was created and must be deleted on undo.
+        previous: Option<outlook::InferenceClassificationType>,
+    },
+}
 
 /// The threads a bulk action is for.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -208,9 +242,9 @@ impl Relabelled {
     }
 }
 
-/// The Gmail label carried by the threads that a filter passes. Only Unread's and Starred's are
+/// The label carried by the threads that a filter passes. Only Unread's and Starred's are
 /// labels.
-fn label_of(filter: Filter) -> Result<&'static str> {
+pub(crate) fn label_of(filter: Filter) -> Result<&'static str> {
     match filter {
         Filter::Unread => Ok(UNREAD),
         Filter::Starred => Ok(STARRED),
@@ -219,189 +253,29 @@ fn label_of(filter: Filter) -> Result<&'static str> {
     }
 }
 
-/// `{query} before:{t}` and the filter's operator, with the list's own query in parentheses. An
-/// `OR` in it (a split's query is the user's) then groups inside them and can't reach past the
-/// cutoff. `before:` takes seconds and excludes the second it names, so using the second after
-/// the cutoff's keeps threads dated within the cutoff's second.
-fn before_query(query: Option<&str>, filter: Option<Filter>, before: Timestamp) -> Result<String> {
-    let filter = match filter.map(label_of).transpose()? {
-        None => None,
-        Some(UNREAD) => Some("is:unread"),
-        Some(_) => Some("is:starred"),
-    };
-    let seconds = before.as_second() + 1;
-    let mut parts: Vec<String> = query
-        .filter(|query| !query.trim().is_empty())
-        .map(|query| format!("({query})"))
-        .into_iter()
-        .collect();
-    parts.extend(filter.map(str::to_owned));
-    parts.push(format!("before:{seconds}"));
-    Ok(parts.join(" "))
-}
-
-/// `{query} after:{t}`, which finds what the list has dated at or after the cutoff's second,
-/// whatever the filter.
-fn after_query(query: Option<&str>, before: Timestamp) -> String {
-    let seconds = before.as_second();
-    match query.filter(|query| !query.trim().is_empty()) {
-        Some(query) => format!("({query}) after:{seconds}"),
-        None => format!("after:{seconds}"),
-    }
-}
-
 impl Store {
-    /// Every thread Gmail finds for `query`, newest first.
+    /// Every thread the provider finds for `query`, newest first.
     ///
     /// # Errors
-    /// When Gmail can't be reached or refuses the query.
+    /// When the provider can't be reached or refuses the query.
     pub async fn find_threads(&self, query: &str) -> Result<Vec<ThreadId>> {
-        self.find(ListQuery {
-            q: Some(query.to_owned()),
-            ..ListQuery::default()
-        })
-        .await
-    }
-
-    /// Every thread Gmail lists for `query`, through every page.
-    async fn find(&self, mut query: ListQuery) -> Result<Vec<ThreadId>> {
-        let mut found = Vec::new();
-        query.max_results = Some(500);
-        loop {
-            let page = self
-                .inner
-                .api
-                .call(Lane::Sync, ATTEMPTS, |gmail| gmail.threads(&query))
-                .await?;
-            found.extend(
-                page.threads
-                    .into_iter()
-                    .filter_map(|thread| thread.id)
-                    .map(ThreadId::new),
-            );
-            match page.next_page_token {
-                Some(token) => query.page_token = Some(token),
-                None => return Ok(found),
-            }
-        }
-    }
-
-    /// Every thread of `cutoff`'s list that Gmail finds at or before the cutoff's date, carrying
-    /// `label` if one is given.
-    async fn find_before(&self, cutoff: &ListCutoff, label: Option<&str>) -> Result<Vec<ThreadId>> {
-        let mut query = self.scope_query(&cutoff.scope).await?;
-        query.q = Some(before_query(
-            query.q.as_deref(),
-            cutoff.filter,
-            cutoff.before,
-        )?);
-        if let Some(label) = label {
-            query.label_ids.push(label.to_owned());
-            query.include_spam_trash |= [SPAM, TRASH].contains(&label);
-        }
-        self.find(query).await
-    }
-
-    /// Every thread of `cutoff`'s list that Gmail finds with mail since the cutoff's date.
-    /// Gmail's `after:` has 1-second resolution, so threads whose newest mail falls in the
-    /// cutoff's own second are checked by millisecond `internalDate`.
-    async fn find_after(&self, cutoff: &ListCutoff) -> Result<Vec<ThreadId>> {
-        let base = self.scope_query(&cutoff.scope).await?;
-        let sec = cutoff.before.as_second();
-        let next_sec = Timestamp::from_second(sec.saturating_add(1)).unwrap_or(Timestamp::MAX);
-        let mut strictly_after = base.clone();
-        strictly_after.q = Some(after_query(base.q.as_deref(), next_sec));
-        let mut newer: HashSet<ThreadId> = self.find(strictly_after).await?.into_iter().collect();
-
-        let before_ms = cutoff.before.as_millisecond();
-        let next_ms = next_sec.as_millisecond();
-        let required_labels = base.label_ids.clone();
-        let include_spam_trash = base.include_spam_trash;
-        let mut boundary = base;
-        boundary.q = Some(format!(
-            "{} before:{}",
-            after_query(boundary.q.as_deref(), cutoff.before),
-            sec.saturating_add(1)
-        ));
-        let candidates: Vec<ThreadId> = self
-            .find(boundary)
-            .await?
-            .into_iter()
-            .filter(|thread| !newer.contains(thread))
-            .collect();
-        let drafts_count = matches!(cutoff.scope, Scope::List(ListId::Drafts));
-        let sent_scope = matches!(cutoff.scope, Scope::List(ListId::Sent));
-        for round in candidates.chunks(CONCURRENCY) {
-            let fetched = futures::future::join_all(round.iter().map(|thread| {
-                let id = thread.as_str().to_owned();
-                async move {
-                    let result = self
-                        .inner
-                        .api
-                        .call(Lane::Sync, ATTEMPTS, |gmail| {
-                            gmail.thread(&id, gmail::Format::Minimal, &[])
-                        })
-                        .await;
-                    (thread.clone(), result)
-                }
-            }))
-            .await;
-            for (thread, result) in fetched {
-                match result {
-                    Ok(full) => {
-                        let has_newer = full.messages.iter().any(|message| {
-                            let date = message.internal_date.unwrap_or_default();
-                            if date <= before_ms || date >= next_ms {
-                                return false;
-                            }
-                            let has = |label: &str| message.label_ids.iter().any(|l| l == label);
-                            let draft = !drafts_count && has(crate::ids::labels::DRAFT);
-                            let chat = has(crate::ids::labels::CHAT);
-                            let spam_or_trash = !include_spam_trash
-                                && (has(crate::ids::labels::SPAM)
-                                    || has(crate::ids::labels::TRASH));
-                            let own_reply = !sent_scope
-                                && has(crate::ids::labels::SENT)
-                                && !has(crate::ids::labels::INBOX);
-                            !draft
-                                && !chat
-                                && !spam_or_trash
-                                && !own_reply
-                                && required_labels.iter().all(|label| has(label))
-                        });
-                        if has_newer {
-                            newer.insert(thread);
-                        }
-                    }
-                    Err(failure) if failure.is_not_found() => {}
-                    Err(failure) => return Err(failure.into()),
-                }
-            }
-        }
-        Ok(newer.into_iter().collect())
-    }
-
-    /// How Gmail is asked for `scope`'s threads: the list's own query (the one backfill uses),
-    /// or the search's Gmail form.
-    async fn scope_query(&self, scope: &Scope) -> Result<ListQuery> {
+        let labels = crate::search::label_index(&mut self.inner.db.clone()).await?;
         let router = self.inner.router();
-        Ok(match scope {
-            Scope::List(list) => crate::sync::selection(list, &router)?,
-            Scope::Search(raw) => {
-                let labels = crate::search::label_index(&mut self.inner.db.clone()).await?;
-                let me = Me {
-                    addresses: &router.me.addresses,
-                    name: router.me.name.as_deref(),
-                };
-                let parsed = crate::query::SearchQuery::parse(raw);
-                let q = parsed.to_gmail(&labels, &router.me.addresses, &important_definition(&me));
-                ListQuery {
-                    q: Some(q),
-                    include_spam_trash: parsed.includes_spam_trash(),
-                    ..ListQuery::default()
-                }
-            }
-        })
+        self.inner.mail.find_threads(query, &labels, &router).await
+    }
+
+    /// The threads of `cutoff`'s list that the provider finds `dated` so.
+    async fn find(&self, cutoff: &ListCutoff, dated: Dated<'_>) -> Result<Vec<ThreadId>> {
+        let labels = crate::search::label_index(&mut self.inner.db.clone()).await?;
+        self.inner
+            .mail
+            .find(Find {
+                cutoff,
+                dated,
+                router: &self.inner.router(),
+                labels: &labels,
+            })
+            .await
     }
 
     /// Adds `add` and removes `remove` on every message of `threads`, then syncs so stored
@@ -556,8 +430,9 @@ impl Store {
             Some(cutoff) => {
                 // `before:` finds a thread by any message before the cutoff. One with mail since
                 // is dated after it, above the select-all, whatever the store has of it.
-                let newer: HashSet<ThreadId> = self.find_after(cutoff).await?.into_iter().collect();
-                self.find_before(cutoff, None)
+                let newer: HashSet<ThreadId> =
+                    self.find(cutoff, Dated::After).await?.into_iter().collect();
+                self.find(cutoff, Dated::AtOrBefore { label: None })
                     .await?
                     .into_iter()
                     .filter(|thread| {
@@ -598,7 +473,10 @@ impl Store {
             if !unstored.is_empty() {
                 let unstored: HashSet<&ThreadId> = unstored.iter().collect();
                 for label in labels {
-                    for thread in self.find_before(cutoff, Some(label)).await? {
+                    for thread in self
+                        .find(cutoff, Dated::AtOrBefore { label: Some(label) })
+                        .await?
+                    {
                         if unstored.contains(&thread) {
                             carried
                                 .entry(thread.as_str().to_owned())
@@ -746,25 +624,13 @@ impl Store {
                 .max(1);
             let (batch, after) = rest.split_at(taken);
             rest = after;
-            let request = BatchModifyMessagesRequest {
-                ids: batch
-                    .iter()
-                    .flat_map(|(_, messages)| messages.iter().cloned())
-                    .collect(),
-                add_label_ids: add.to_vec(),
-                remove_label_ids: remove.to_vec(),
-                ..BatchModifyMessagesRequest::default()
-            };
-            let sent = match request.ids.len() {
+            let ids: Vec<String> = batch
+                .iter()
+                .flat_map(|(_, messages)| messages.iter().cloned())
+                .collect();
+            let sent = match ids.len() {
                 0 => Ok(()),
-                1..=BATCH_IDS => {
-                    self.inner
-                        .api
-                        .call(Lane::Sync, ATTEMPTS, |gmail| {
-                            gmail.batch_modify_messages(&request)
-                        })
-                        .await
-                }
+                1..=BATCH_IDS => self.inner.mail.relabel_messages(&ids, add, remove).await,
                 _ => {
                     refused.push(batch[0].0.clone());
                     continue;
@@ -775,7 +641,7 @@ impl Store {
                 Err(failure) if failure.is_permanent() => {
                     log::info!(
                         "Gmail refused a batch of {} messages ({}); changing their threads whole",
-                        request.ids.len(),
+                        ids.len(),
                         failure.message()
                     );
                     refused.extend(batch.iter().map(|(thread, _)| thread.clone()));
@@ -798,10 +664,6 @@ impl Store {
         progress: &Progress,
         changed: &mut Relabelled,
     ) -> Result<()> {
-        let request = ModifyThreadRequest {
-            add_label_ids: add.to_vec(),
-            remove_label_ids: remove.to_vec(),
-        };
         // In rounds rather than a stream, because a stream's closure makes the future unsendable
         // (rust-lang/rust#100013), and tasks spawn this.
         for round in threads.chunks(CONCURRENCY) {
@@ -811,7 +673,7 @@ impl Store {
             for (thread, result) in futures::future::join_all(
                 round
                     .iter()
-                    .map(|thread| self.modify_thread(thread, &request)),
+                    .map(|thread| self.modify_thread(thread, add, remove)),
             )
             .await
             {
@@ -845,250 +707,60 @@ impl Store {
         Ok(())
     }
 
-    /// `threads.modify` on `thread`, paired with it.
+    /// `add` and `remove` on every message of `thread`, paired with it.
     async fn modify_thread(
         &self,
         thread: &ThreadId,
-        request: &ModifyThreadRequest,
+        add: &[String],
+        remove: &[String],
     ) -> (ThreadId, Result<(), crate::api::Failure>) {
         let result = self
             .inner
-            .api
-            .call(Lane::Sync, ATTEMPTS, |gmail| {
-                gmail.modify_thread(thread.as_str(), request)
-            })
+            .mail
+            .relabel_thread(thread.as_str(), add, remove)
             .await;
-        (thread.clone(), result.map(drop))
+        (thread.clone(), result)
     }
 
-    /// Creates the filter that gives mail from `from` the label `label`, shaped as Exo's own
-    /// filters are (`from` alone, one label added). `TRASH` blocks a sender or domain, and a
-    /// category sends them to Important or Other. A category filter replaces the sender's filter
-    /// for the other category. Returns the new filter's id, or none when Gmail already had the
-    /// filter (made in Gmail on the web, say, in which case undo leaves it), and the replaced
-    /// filter.
+    /// Creates or updates the provider's rule for `from`:
+    /// - On Gmail: a filter adding `TRASH` (block), `CATEGORY_PERSONAL` (Important), or
+    ///   `CATEGORY_SOCIAL` (Other), replacing any opposite category filter.
+    /// - On Outlook: an Inbox message rule moving mail from the sender or domain to Deleted Items
+    ///   for [`SenderRule::Block`], or a Focused Inbox override (`focused` / `other`) for
+    ///   [`SenderRule::Important`] and [`SenderRule::Other`] (addresses only).
+    ///
+    /// Returns a [`SenderRuleUndo`] token for [`Self::undo_sender_rule`].
     ///
     /// # Errors
-    /// When Gmail can't be reached or refuses the filter.
-    pub async fn create_sender_filter(
-        &self,
-        from: &str,
-        label: &str,
-    ) -> Result<(Option<String>, Option<gmail::Filter>)> {
-        let criteria = FilterCriteria {
-            from: Some(from.to_owned()),
-            ..FilterCriteria::default()
-        };
-        let action = FilterAction {
-            add_label_ids: vec![label.to_owned()],
-            ..FilterAction::default()
-        };
-        let same = |filter: &gmail::Filter| {
-            filter.criteria.as_ref() == Some(&criteria) && filter.action.as_ref() == Some(&action)
-        };
-        let filters = self
-            .inner
-            .api
-            .call(Lane::Act, ATTEMPTS, |gmail| gmail.filters())
-            .await?
-            .filter;
-        let replaced = filters
-            .iter()
-            .find(|filter| {
-                let adds = filter
-                    .action
-                    .as_ref()
-                    .map(|action| action.add_label_ids.clone())
-                    .unwrap_or_default();
-                CATEGORIES.contains(&label)
-                    && filter.criteria.as_ref() == Some(&criteria)
-                    && adds
-                        .iter()
-                        .any(|added| CATEGORIES.contains(&added.as_str()) && added != label)
-            })
-            .cloned();
-        let filter = gmail::Filter {
-            id: None,
-            criteria: Some(criteria.clone()),
-            action: Some(action.clone()),
-        };
-        // The new filter first: if Gmail won't make it, the old one stays. If the old one then
-        // can't go, the new one goes again, since a failed job leaves undo nothing to undo.
-        let id = if filters.iter().any(same) {
-            None
-        } else {
-            Some(
-                match self
-                    .inner
-                    .api
-                    .call(Lane::Act, ATTEMPTS, |gmail| gmail.create_filter(&filter))
-                    .await
-                {
-                    Ok(created) => created.id.unwrap_or_default(),
-                    // An attempt whose answer was lost made it, so the retry was refused as a
-                    // duplicate. The filter there now is this one, since it wasn't there before.
-                    Err(failure) => {
-                        let made = self
-                            .inner
-                            .api
-                            .call(Lane::Act, ATTEMPTS, |gmail| gmail.filters())
-                            .await
-                            .ok()
-                            .and_then(|list| {
-                                list.filter
-                                    .into_iter()
-                                    .find(|filter| same(filter))
-                                    .and_then(|filter| filter.id)
-                            });
-                        made.ok_or(failure)?
-                    }
-                },
-            )
-        };
-        if let Some(old) = replaced.as_ref().and_then(|old| old.id.clone())
-            && let Err(failure) = self
-                .inner
-                .api
-                .call(Lane::Act, ATTEMPTS, |gmail| gmail.delete_filter(&old))
-                .await
-        {
-            if let Some(id) = &id
-                && let Err(error) = self
-                    .inner
-                    .api
-                    .call(Lane::Act, ATTEMPTS, |gmail| gmail.delete_filter(id))
-                    .await
-            {
-                log::warn!("taking back filter {id}: {}", error.message());
-            }
-            return Err(failure.into());
-        }
-        Ok((id, replaced))
+    /// When the provider can't be reached, refuses the rule, or does not support the rule shape
+    /// (such as Focused Inbox overrides for bare domains on Outlook).
+    pub async fn set_sender_rule(&self, from: &str, rule: SenderRule) -> Result<SenderRuleUndo> {
+        self.inner.mail.set_sender_rule(from, rule).await
     }
 
-    /// Deletes filter `id`, if it was made, and puts back `replaced` (undoing
-    /// [`Self::create_sender_filter`]).
+    /// Reverses a previous [`Self::set_sender_rule`].
     ///
     /// # Errors
-    /// When Gmail can't be reached.
-    pub async fn delete_sender_filter(
-        &self,
-        id: Option<&str>,
-        replaced: Option<&gmail::Filter>,
-    ) -> Result<()> {
-        if let Some(id) = id {
-            match self
-                .inner
-                .api
-                .call(Lane::Act, ATTEMPTS, |gmail| gmail.delete_filter(id))
-                .await
-            {
-                Err(failure) if failure.is_not_found() => {}
-                result => result?,
-            }
-        }
-        if let Some(filter) = replaced {
-            let filter = gmail::Filter {
-                id: None,
-                ..filter.clone()
-            };
-            self.inner
-                .api
-                .call(Lane::Act, ATTEMPTS, |gmail| gmail.create_filter(&filter))
-                .await?;
-        }
-        Ok(())
+    /// When the provider can't be reached or refuses the change.
+    pub async fn undo_sender_rule(&self, undo: &SenderRuleUndo) -> Result<()> {
+        self.inner.mail.undo_sender_rule(undo).await
     }
 
-    /// Unblocks `from`, an address or domain. It deletes the filters that block it, which are
-    /// those shaped exactly as a block makes them (`from` alone, Trash added and nothing else),
-    /// and leaves what they trashed in Trash. Returns how many it deleted.
+    /// Unblocks `from`, an address or domain, on either Gmail or Outlook. Deletes every provider
+    /// rule shaped as a block for `from` (Gmail filters adding Trash alone, or Outlook Inbox rules
+    /// deleting / moving mail from `from` to Deleted Items alone), leaving already-trashed mail
+    /// where it is. Returns how many rules were deleted.
     ///
     /// # Errors
-    /// When Gmail can't be reached.
+    /// When the provider can't be reached.
     pub async fn delete_block_filters(&self, from: &str) -> Result<usize> {
-        let block = (
-            FilterCriteria {
-                from: Some(from.to_owned()),
-                ..FilterCriteria::default()
-            },
-            FilterAction {
-                add_label_ids: vec![TRASH.to_owned()],
-                ..FilterAction::default()
-            },
-        );
-        let filters = self
-            .inner
-            .api
-            .call(Lane::Act, ATTEMPTS, |gmail| gmail.filters())
-            .await?
-            .filter;
-        let mut deleted = 0;
-        for filter in filters {
-            let shape = (
-                filter.criteria.clone().unwrap_or_default(),
-                filter.action.clone().unwrap_or_default(),
-            );
-            let Some(id) = filter.id.filter(|_| shape == block) else {
-                continue;
-            };
-            match self
-                .inner
-                .api
-                .call(Lane::Act, ATTEMPTS, |gmail| gmail.delete_filter(&id))
-                .await
-            {
-                Err(failure) if failure.is_not_found() => {}
-                result => result?,
-            }
-            deleted += 1;
-        }
-        Ok(deleted)
+        self.inner.mail.delete_block_rules(from).await
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn the_cutoff_and_filter_go_outside_the_lists_query() {
-        let at: Timestamp = "2026-11-10T14:00:00.250Z".parse().unwrap();
-        let seconds = at.as_second() + 1;
-        // A split's own `OR` stays inside its parentheses, so it can't reach past the cutoff.
-        assert_eq!(
-            before_query(
-                Some("-in:DRAFT in:inbox {from:\"a.com\"} OR subject:x"),
-                None,
-                at
-            )
-            .unwrap(),
-            format!("(-in:DRAFT in:inbox {{from:\"a.com\"}} OR subject:x) before:{seconds}")
-        );
-        assert_eq!(
-            before_query(Some("-in:INBOX"), Some(Filter::Unread), at).unwrap(),
-            format!("(-in:INBOX) is:unread before:{seconds}")
-        );
-        // A label list is asked for by id, with nothing in `q`.
-        assert_eq!(
-            before_query(None, Some(Filter::Starred), at).unwrap(),
-            format!("is:starred before:{seconds}")
-        );
-        assert!(matches!(
-            before_query(Some("in:inbox"), Some(Filter::Important), at),
-            Err(Error::Unsearchable(_))
-        ));
-        assert!(matches!(
-            before_query(Some("in:inbox"), Some(Filter::NoReply), at),
-            Err(Error::Unsearchable(_))
-        ));
-        let after_sec = at.as_second();
-        assert_eq!(
-            after_query(Some("-in:INBOX OR x"), at),
-            format!("(-in:INBOX OR x) after:{after_sec}")
-        );
-        assert_eq!(after_query(None, at), format!("after:{after_sec}"));
-    }
 
     #[tokio::test]
     async fn search_listed_by_filters_out_stored_threads_newer_than_cutoff() {
@@ -1098,8 +770,10 @@ mod tests {
         let store = Store::open(
             &dir,
             "maya@brightmoor.co",
-            gmail::Endpoints::google(),
-            gmail::StaticToken("unused".into()),
+            crate::Remote::gmail(
+                gmail::Endpoints::google(),
+                gmail::StaticToken("unused".into()),
+            ),
         )
         .await
         .expect("opens");
@@ -1125,8 +799,9 @@ mod tests {
                 ("m1", "t_before", 1_794_319_200_250),
                 ("m2", "t_subsec_after", 1_794_319_200_750),
             ] {
-                let parsed = crate::parse::parse(&insert(m, t, ms), false).expect("parses");
-                crate::provider::save_message(write.exec(), parsed)
+                let parsed =
+                    crate::provider::gmail::parse::parse(&insert(m, t, ms), false).expect("parses");
+                crate::truth::save_message(write.exec(), parsed)
                     .await
                     .expect("saves");
                 crate::store::reindex(write.exec(), t, &store.inner.router())

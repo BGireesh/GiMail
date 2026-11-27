@@ -59,14 +59,16 @@ impl crate::Mail {
             self.pop_out(&id);
         }
         self.search_enter(None, now);
+        let outlook = self.account.is_outlook();
         let initial = crate::search::initial_query(
             &exo_store::ListId::Inbox,
             &[],
             [],
             self.filter_search_suffix(),
+            outlook,
         );
         if let Some(search) = &mut self.search {
-            *search = crate::search::Search::new(&initial, &self.snapshot.labels);
+            *search = crate::search::Search::new(&initial, &self.snapshot.labels, outlook);
             search.contact = Some(None);
         }
         self.compose.focus = None;

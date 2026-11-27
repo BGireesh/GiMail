@@ -417,7 +417,7 @@ mod tests {
             gmail::Endpoints::mock(&"http://127.0.0.1:9/".parse().expect("mock origin"));
         let account = Account::open(
             &dir,
-            Credentials {
+            Credentials::Gmail {
                 email: "maya@brightmoor.co".into(),
                 endpoints,
                 tokens: Arc::new(gmail::StaticToken("dev".into())),

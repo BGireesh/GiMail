@@ -6,7 +6,7 @@ use exo_ui::{
     StackedContactStyle, paint_matched,
 };
 
-use super::{CalendarOption, EventForm, Field, Meeting, SMALL, Shown, guests::Suggestion};
+use super::{CalendarOption, EventForm, Field, SMALL, Shown, guests::Suggestion};
 use crate::calendar::{
     places::Place,
     repeat::{self, Custom},
@@ -313,7 +313,13 @@ impl EventForm {
                 if let Some(picked) = picked {
                     self.dropdown = None;
                     match which {
-                        Dropdown::Meeting => self.values.meeting = Meeting::NewMeet,
+                        Dropdown::Meeting => {
+                            if let Some((meeting, _)) =
+                                self.available_meetings(shown.calendars).get(picked)
+                            {
+                                self.values.meeting = meeting.clone();
+                            }
+                        }
                         Dropdown::Repeat => {
                             let anchor = self.anchor(shown.now);
                             match repeat::presets(anchor)
@@ -440,7 +446,7 @@ impl EventForm {
         }
         if let Some(CalendarRow::Calendar(calendar)) = out.pressed.and_then(|index| rows.get(index))
         {
-            self.pick_calendar(calendar.id.clone());
+            self.pick_calendar(calendar.id.clone(), calendars);
         }
     }
 }
@@ -468,22 +474,22 @@ pub(super) fn calendar_rows<'a>(
         .filter(|(score, _)| *score > 0.0)
         .collect();
     matching.sort_by(|(a, _), (b, _)| b.total_cmp(a));
-    let mut accounts: Vec<(&str, Vec<&CalendarOption>)> = Vec::new();
+    let mut accounts: Vec<(&str, &str, Vec<&CalendarOption>)> = Vec::new();
     for (_, calendar) in matching {
         match accounts
             .iter_mut()
-            .find(|(account, _)| *account == calendar.account)
+            .find(|(account, ..)| *account == calendar.account)
         {
-            Some((_, listed)) => listed.push(calendar),
-            None => accounts.push((&calendar.account, vec![calendar])),
+            Some((_, _, listed)) => listed.push(calendar),
+            None => accounts.push((&calendar.account, &calendar.email, vec![calendar])),
         }
     }
     let headed = accounts.len() > 1;
     accounts
         .into_iter()
-        .flat_map(|(account, listed)| {
+        .flat_map(|(_, email, listed)| {
             headed
-                .then_some(CalendarRow::Header(account))
+                .then_some(CalendarRow::Header(email))
                 .into_iter()
                 .chain(listed.into_iter().map(CalendarRow::Calendar))
         })
@@ -525,8 +531,8 @@ pub(super) fn calendar_label(calendars: &[CalendarOption], id: &str) -> String {
         .iter()
         .any(|calendar| calendar.account != calendars[0].account);
     match calendars.iter().find(|calendar| calendar.id == id) {
-        Some(calendar) if grouped && calendar.name != calendar.account => {
-            format!("{} · {}", calendar.name, calendar.account)
+        Some(calendar) if grouped && calendar.name != calendar.email => {
+            format!("{} · {}", calendar.name, calendar.email)
         }
         Some(calendar) => calendar.name.clone(),
         None => id.to_owned(),

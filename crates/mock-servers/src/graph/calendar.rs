@@ -20,6 +20,7 @@ use super::event_input::{self, Target};
 use super::events::{self, EVENT_PROPERTIES};
 use super::filter::Expr;
 use super::ids::{self, Id};
+use super::meetings::{self, Notice};
 use super::messages::{compare_values, entity, lookup, parse_orderby};
 use super::odata;
 use super::project::View;
@@ -66,7 +67,7 @@ impl View<'_> {
     }
 
     /// Whether the signed-in user can write to `calendar`.
-    fn can_edit(&self, calendar: &str) -> bool {
+    pub(super) fn can_edit(&self, calendar: &str) -> bool {
         self.calendars
             .calendar(calendar)
             .ok()
@@ -142,7 +143,7 @@ impl View<'_> {
 
     /// The event a request names, in the calendar it names (when it names one), and that event's
     /// calendar.
-    fn event_of(&self, params: &HashMap<String, String>) -> Result<(String, Event)> {
+    pub(super) fn event_of(&self, params: &HashMap<String, String>) -> Result<(String, Event)> {
         let Some(Id::Event { calendar, event }) = ids::decode(&params["id"]) else {
             return Err(GraphError::malformed_id());
         };
@@ -169,7 +170,12 @@ impl View<'_> {
     }
 
     /// `calendar`'s events in `[start, end)`: single events, occurrences and exceptions.
-    fn occurrences(&self, calendar: &str, start: Timestamp, end: Timestamp) -> Vec<Event> {
+    pub(super) fn occurrences(
+        &self,
+        calendar: &str,
+        start: Timestamp,
+        end: Timestamp,
+    ) -> Vec<Event> {
         self.calendars
             .occurrences(calendar, start, end)
             .into_iter()
@@ -541,6 +547,16 @@ pub async fn create(
         );
     }
     world.calendar.put(&calendar, event.clone());
+    if meetings::is_meeting(&world.calendar.primary, &event) {
+        meetings::notify(
+            &mut world,
+            &call.who,
+            &event,
+            &stored,
+            Notice::Request,
+            None,
+        )?;
+    }
     if !stored.is_empty() {
         world.graph.events.insert((calendar.clone(), id), stored);
     }
@@ -582,8 +598,26 @@ pub async fn update(
             events::teams_meeting(&origin, &calendar, &id),
         );
     }
+    // An organizer's change to what invitees see goes out to them as an update.
+    let update = meetings::is_meeting(&world.calendar.primary, &event)
+        && MEETING_CHANGES
+            .iter()
+            .any(|name| request.contains_key(*name));
+    if update {
+        event.sequence = Some(event.sequence.unwrap_or_default() + 1);
+    }
     let event = crate::calendar::routes::touch(&world, event);
     world.calendar.put(&calendar, event.clone());
+    if update {
+        meetings::notify(
+            &mut world,
+            &call.who,
+            &event,
+            &stored,
+            Notice::Request,
+            None,
+        )?;
+    }
     if stored.is_empty() {
         world.graph.events.remove(&key);
     } else {
@@ -606,9 +640,28 @@ pub async fn delete(call: Call, Path(params): super::Params) -> Result<Response>
         }
         (calendar, event)
     };
-    crate::calendar::routes::cancel_event(&mut world, &calendar, event);
+    // An organizer's delete cancels the meeting for its invitees.
+    let meeting = meetings::is_meeting(&world.calendar.primary, &event);
+    let stored = events::stored(&world.graph, &calendar, &event);
+    crate::calendar::routes::cancel_event(&mut world, &calendar, event.clone());
+    if meeting {
+        meetings::notify(&mut world, &call.who, &event, &stored, Notice::Cancel, None)?;
+    }
     Ok(StatusCode::NO_CONTENT.into_response())
 }
+
+/// What an update changes for a meeting's invitees, which Outlook sends them.
+const MEETING_CHANGES: &[&str] = &[
+    "subject",
+    "body",
+    "start",
+    "end",
+    "isAllDay",
+    "location",
+    "locations",
+    "attendees",
+    "recurrence",
+];
 
 /// What the parameters a calendar view's delta refuses are, as Graph lists them.
 const DELTA_UNSUPPORTED: &str = "The following parameters are not supported with change tracking over the 'CalendarView' resource: '$orderby, $filter, $select, $expand, $search, $top'.";

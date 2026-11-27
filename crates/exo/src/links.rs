@@ -358,8 +358,10 @@ impl crate::Mail {
                 let filter = filter.or_else(|| {
                     crate::filter::for_list(&self.list, &list, self.filter, &self.last_filters)
                 });
+                let (email, key) = (self.account.email(), self.account.key());
                 let route = Route {
-                    email: self.account.email().to_owned(),
+                    email: email.to_owned(),
+                    account: (key != email).then(|| key.to_owned()),
                     list: Some(list),
                     thread: thread.clone(),
                     view,
@@ -626,6 +628,7 @@ mod tests {
     fn route(list: ListId, thread: Option<&str>, view: View, filter: Option<Filter>) -> Route {
         Route {
             email: "maya@brightmoor.co".into(),
+            account: None,
             list: Some(list),
             thread: thread.map(str::to_owned),
             view,

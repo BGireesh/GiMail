@@ -1,8 +1,8 @@
 # Exo
 
-A fast, local and native Gmail client for macOS, (heavily) inspired by Superhuman.
+A fast, local and native Gmail and Outlook client for macOS, (heavily) inspired by Superhuman.
 
-It talks to Gmail directly (no third-party servers!) and uses native technologies for maximum performance (written in Rust, no Electron or webview overhead).
+It talks to Gmail/Outlook directly (no third-party servers!) and uses native technologies for maximum performance (written in Rust, no Electron or webview overhead).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset=".github/screenshot-dark.png">
@@ -14,7 +14,7 @@ It talks to Gmail directly (no third-party servers!) and uses native technologie
 1. Download the `.dmg` from the [latest release](https://github.com/m1guelpf/Exo/releases/latest).
 2. Open it and drag Exo into Applications.
 
-You'll need to create your own Google sign-in client to use Exo. See below on how to do that (it's free and takes only a few minutes).
+You'll need to create your own Google sign-in client to use Exo. See below on how to do that (it's free and takes only a minute). Outlook works out of the box.
 
 ### Setting up your Google client
 
@@ -53,7 +53,7 @@ open target/release/Exo.app
 A local build is signed ad hoc, so macOS might ask you for Keychain access after each rebuild.
 You can optionally set a signing identity with `EXO_SIGN_IDENTITY` to avoid that.
 
-Run `cargo test --workspace` to run the tests. They use mock Google and Microsoft servers (`crates/mock-servers`), so they never hit Google's servers.
+Run `cargo test --workspace` to run the tests. They use mock Google and Microsoft servers (`crates/mock-servers`), so they never hit Google's or Microsoft's servers.
 
 ## Use of AI
 

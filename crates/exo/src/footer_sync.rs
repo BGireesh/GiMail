@@ -39,6 +39,7 @@ impl FooterSync {
         online: bool,
         bulk: Option<String>,
         progress: SyncProgress,
+        outlook: bool,
         now: f64,
     ) -> Option<String> {
         // A round shows once it has run a second, or at once the first time.
@@ -61,11 +62,15 @@ impl FooterSync {
             return Some(bulk);
         }
         if let Some((total, done)) = updating {
-            return Some(format!(
-                "Updating: {} of {}",
-                crate::format::thousands(done + 1),
-                crate::format::thousands(total)
-            ));
+            return Some(if outlook {
+                "Updating…".to_owned()
+            } else {
+                format!(
+                    "Updating: {} of {}",
+                    crate::format::thousands(done + 1),
+                    crate::format::thousands(total)
+                )
+            });
         }
         (!progress.caught_up && online).then(|| CONNECTING.to_owned())
     }
@@ -161,58 +166,58 @@ mod tests {
     fn offline_it_counts_what_waits_and_back_online_counts_it_going() {
         let mut footer = FooterSync::default();
         assert_eq!(
-            footer.line(waiting(0, 0), ONLINE, None, caught_up(), 0.0),
+            footer.line(waiting(0, 0), ONLINE, None, caught_up(), false, 0.0),
             None
         );
         assert_eq!(
-            footer.line(waiting(0, 1), ONLINE, None, caught_up(), 0.0),
+            footer.line(waiting(0, 1), ONLINE, None, caught_up(), false, 0.0),
             None,
             "online changes go without a word"
         );
         assert_eq!(
             footer
-                .line(waiting(0, 1), OFFLINE, None, caught_up(), 0.0)
+                .line(waiting(0, 1), OFFLINE, None, caught_up(), false, 0.0)
                 .as_deref(),
             Some("1 change to upload")
         );
         assert_eq!(
             footer
-                .line(waiting(0, 3), OFFLINE, None, caught_up(), 0.0)
+                .line(waiting(0, 3), OFFLINE, None, caught_up(), false, 0.0)
                 .as_deref(),
             Some("3 changes to upload")
         );
         assert_eq!(
             footer
-                .line(waiting(2, 3), OFFLINE, None, caught_up(), 0.0)
+                .line(waiting(2, 3), OFFLINE, None, caught_up(), false, 0.0)
                 .as_deref(),
             Some("2 emails to send"),
             "sends first"
         );
         assert_eq!(
             footer
-                .line(waiting(1, 3), ONLINE, None, caught_up(), 0.0)
+                .line(waiting(1, 3), ONLINE, None, caught_up(), false, 0.0)
                 .as_deref(),
             Some("Sending: 2 of 2")
         );
         assert_eq!(
             footer
-                .line(waiting(0, 3), ONLINE, None, caught_up(), 0.0)
+                .line(waiting(0, 3), ONLINE, None, caught_up(), false, 0.0)
                 .as_deref(),
             Some("Uploading: 3 of 5")
         );
         assert_eq!(
             footer
-                .line(waiting(0, 1), ONLINE, None, caught_up(), 0.0)
+                .line(waiting(0, 1), ONLINE, None, caught_up(), false, 0.0)
                 .as_deref(),
             Some("Uploading: 5 of 5")
         );
         assert_eq!(
-            footer.line(waiting(0, 0), ONLINE, None, caught_up(), 0.0),
+            footer.line(waiting(0, 0), ONLINE, None, caught_up(), false, 0.0),
             None,
             "done"
         );
         assert_eq!(
-            footer.line(waiting(0, 2), ONLINE, None, caught_up(), 0.0),
+            footer.line(waiting(0, 2), ONLINE, None, caught_up(), false, 0.0),
             None,
             "counting starts over"
         );
@@ -222,24 +227,24 @@ mod tests {
     fn what_waits_at_launch_is_counted_going() {
         let mut footer = FooterSync::default();
         assert_eq!(
-            footer.line(None, ONLINE, None, caught_up(), 0.0),
+            footer.line(None, ONLINE, None, caught_up(), false, 0.0),
             None,
             "not read yet"
         );
         assert_eq!(
             footer
-                .line(waiting(1, 1), ONLINE, None, caught_up(), 0.0)
+                .line(waiting(1, 1), ONLINE, None, caught_up(), false, 0.0)
                 .as_deref(),
             Some("Sending: 1 of 1")
         );
         assert_eq!(
             footer
-                .line(waiting(0, 1), ONLINE, None, caught_up(), 0.0)
+                .line(waiting(0, 1), ONLINE, None, caught_up(), false, 0.0)
                 .as_deref(),
             Some("Uploading: 2 of 2")
         );
         assert_eq!(
-            footer.line(waiting(0, 3), ONLINE, None, caught_up(), 0.0),
+            footer.line(waiting(0, 3), ONLINE, None, caught_up(), false, 0.0),
             None,
             "more than it counted from"
         );
@@ -254,12 +259,12 @@ mod tests {
         };
         assert_eq!(
             footer
-                .line(waiting(0, 0), ONLINE, None, first, 0.0)
+                .line(waiting(0, 0), ONLINE, None, first, false, 0.0)
                 .as_deref(),
             Some("Connecting…")
         );
         assert_eq!(
-            footer.line(waiting(0, 0), OFFLINE, None, first, 0.0),
+            footer.line(waiting(0, 0), OFFLINE, None, first, false, 0.0),
             None,
             "offline, nothing connects"
         );
@@ -269,12 +274,18 @@ mod tests {
         };
         assert_eq!(
             footer
-                .line(waiting(0, 0), ONLINE, None, running(0), 0.0)
+                .line(waiting(0, 0), ONLINE, None, running(0), false, 0.0)
                 .as_deref(),
             Some("Updating: 1 of 1,200")
         );
         assert_eq!(
-            footer.line(waiting(0, 0), ONLINE, None, caught_up(), 0.5),
+            footer
+                .line(waiting(0, 0), ONLINE, None, running(0), true, 0.0)
+                .as_deref(),
+            Some("Updating…")
+        );
+        assert_eq!(
+            footer.line(waiting(0, 0), ONLINE, None, caught_up(), false, 0.5),
             None
         );
         let again = |done| SyncProgress {
@@ -282,13 +293,13 @@ mod tests {
             changes: Some((40, done)),
         };
         assert_eq!(
-            footer.line(waiting(0, 0), ONLINE, None, again(0), 1.0),
+            footer.line(waiting(0, 0), ONLINE, None, again(0), false, 1.0),
             None,
             "not yet a second"
         );
         assert_eq!(
             footer
-                .line(waiting(0, 0), ONLINE, None, again(11), 2.5)
+                .line(waiting(0, 0), ONLINE, None, again(11), false, 2.5)
                 .as_deref(),
             Some("Updating: 12 of 40")
         );
@@ -304,19 +315,19 @@ mod tests {
         };
         assert_eq!(
             footer
-                .line(waiting(0, 2), OFFLINE, bulk(), running, 0.0)
+                .line(waiting(0, 2), OFFLINE, bulk(), running, false, 0.0)
                 .as_deref(),
             Some("2 changes to upload")
         );
         assert_eq!(
             footer
-                .line(waiting(0, 0), OFFLINE, bulk(), running, 0.0)
+                .line(waiting(0, 0), OFFLINE, bulk(), running, false, 0.0)
                 .as_deref(),
             Some("Updating: 1 of 5"),
             "a bulk action only shows online"
         );
         assert_eq!(
-            footer.line(waiting(0, 0), ONLINE, bulk(), running, 0.0),
+            footer.line(waiting(0, 0), ONLINE, bulk(), running, false, 0.0),
             bulk()
         );
     }

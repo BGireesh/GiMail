@@ -16,14 +16,17 @@ const TRIAGE_TOOLTIP_PLACEMENT: Placement = Placement::Below {
 };
 
 /// The name of a label or folder id: a built-in one's own name, else the user's label's.
-pub(crate) fn label_name<'a>(id: &str, labels: &'a [Label]) -> &'a str {
+pub(crate) fn label_name<'a>(id: &str, labels: &'a [Label], outlook: bool) -> &'a str {
     match id {
         "INBOX" => "Inbox",
         "SH_IMPORTANT" => "Important",
         "SH_OTHER" => "Other",
         "SH_ARCHIVED" => "Done",
+        "STARRED" if outlook => "Flagged",
         "STARRED" => "Starred",
+        "SPAM" if outlook => "Junk Email",
         "SPAM" => "Spam",
+        "TRASH" if outlook => "Deleted Items",
         "TRASH" => "Trash",
         id => labels
             .iter()
@@ -71,12 +74,18 @@ pub(crate) fn removable_label(list: &ListId) -> Option<String> {
 }
 
 /// The toast after a move.
-pub(crate) fn move_toast(from: Option<&str>, to: &str, labels: &[Label]) -> String {
-    move_text(from, to, labels, false)
+pub(crate) fn move_toast(from: Option<&str>, to: &str, labels: &[Label], outlook: bool) -> String {
+    move_text(from, to, labels, false, outlook)
 }
 
 /// [`move_toast`], or in the present tense for a bulk move (`present`).
-pub(crate) fn move_text(from: Option<&str>, to: &str, labels: &[Label], present: bool) -> String {
+pub(crate) fn move_text(
+    from: Option<&str>,
+    to: &str,
+    labels: &[Label],
+    present: bool,
+    outlook: bool,
+) -> String {
     // The inbox, its views and its splits.
     let inbox_like = |id: &str| {
         matches!(id, "INBOX" | "SH_INBOX" | "SH_IMPORTANT" | "SH_OTHER")
@@ -90,28 +99,54 @@ pub(crate) fn move_text(from: Option<&str>, to: &str, labels: &[Label], present:
     } else {
         ("Moved", "Moving")
     };
-    match (to == "SPAM", marking_done && !moving_to_inbox, present) {
-        (true, _, false) => "Marked as Spam.".into(),
-        (true, _, true) => "Marking as Spam.".into(),
-        (false, true, false) => "Moved and Marked Done.".into(),
-        (false, true, true) => "Moving and Marking Done.".into(),
-        (false, false, false) => format!("{moved} to {}.", label_name(to, labels)),
-        (false, false, true) => format!("{moving} to {}.", label_name(to, labels)),
+    match (
+        to == "SPAM",
+        marking_done && !moving_to_inbox,
+        present,
+        outlook,
+    ) {
+        (true, _, false, true) => "Marked as Junk.".into(),
+        (true, _, true, true) => "Marking as Junk.".into(),
+        (true, _, false, false) => "Marked as Spam.".into(),
+        (true, _, true, false) => "Marking as Spam.".into(),
+        (false, true, false, true) => "Moved.".into(),
+        (false, true, true, true) => "Moving.".into(),
+        (false, true, false, false) => "Moved and Marked Done.".into(),
+        (false, true, true, false) => "Moving and Marking Done.".into(),
+        (false, false, false, _) => format!("{moved} to {}.", label_name(to, labels, outlook)),
+        (false, false, true, _) => format!("{moving} to {}.", label_name(to, labels, outlook)),
     }
 }
 
 /// Past- and present-tense copy for simple triage mutations, paired with the bulk action's name.
-fn fixed_copy(mutation: &Mutation) -> Option<(&'static str, &'static str, &'static str)> {
+fn fixed_copy(
+    mutation: &Mutation,
+    outlook: bool,
+) -> Option<(&'static str, &'static str, &'static str)> {
     Some(match mutation {
         Mutation::MarkDone => ("Marked as Done.", "Marking as Done.", "Mark Done"),
         Mutation::MarkNotDone => ("Marked not Done.", "Marking not Done.", "Mark not Done"),
+        Mutation::Star if outlook => ("Flagged.", "Flagging.", "Flag"),
         Mutation::Star => ("Starred.", "Starring.", "Star"),
+        Mutation::Unstar if outlook => ("Unflagged.", "Unflagging.", "Unflag"),
         Mutation::Unstar => ("Unstarred.", "Unstarring.", "Unstar"),
         Mutation::MarkRead => ("Marked as Read.", "Marking as Read.", "Mark Read"),
         Mutation::MarkUnread => ("Marked as Unread.", "Marking as Unread.", "Mark Unread"),
+        Mutation::Trash if outlook => ("Moved to Trash.", "Moving to Trash.", "Delete"),
         Mutation::Trash => ("Moved to Trash.", "Moving to Trash.", "Trash"),
+        Mutation::Untrash if outlook => (
+            "Moved to Inbox.",
+            "Moving to Inbox.",
+            "Remove from Deleted Items",
+        ),
         Mutation::Untrash => ("Moved to Inbox.", "Moving to Inbox.", "Remove from Trash"),
+        Mutation::Spam if outlook => ("Marked as Junk.", "Marking as Junk.", "Mark Junk"),
         Mutation::Spam => ("Marked as Spam.", "Marking as Spam.", "Mark Spam"),
+        Mutation::NotSpam if outlook => (
+            "Marked as Not Junk.",
+            "Marking as Not Junk.",
+            "Mark not Junk",
+        ),
         Mutation::NotSpam => (
             "Marked as Not Spam.",
             "Marking as Not Spam.",
@@ -125,11 +160,12 @@ fn fixed_copy(mutation: &Mutation) -> Option<(&'static str, &'static str, &'stat
 
 /// What a bulk action of `mutation` is called, or `None` for mutations that only run on loaded
 /// conversations.
-pub(crate) fn bulk_name(mutation: &Mutation) -> Option<&'static str> {
-    if let Some((_, _, name)) = fixed_copy(mutation) {
+pub(crate) fn bulk_name(mutation: &Mutation, outlook: bool) -> Option<&'static str> {
+    if let Some((_, _, name)) = fixed_copy(mutation, outlook) {
         return Some(name);
     }
     match mutation {
+        Mutation::Move { .. } if outlook => Some("Move to Folder"),
         Mutation::Move { .. } => Some("Move to Label"),
         Mutation::AddLabel(_) => Some("Add Label"),
         Mutation::RemoveLabel(_) => Some("Remove Label"),
@@ -142,15 +178,17 @@ pub(crate) fn bulk_name(mutation: &Mutation) -> Option<&'static str> {
 }
 
 /// What the toast says after `mutation` on loaded conversations.
-pub(crate) fn toast(mutation: &Mutation, labels: &[Label]) -> String {
-    if let Some((past, _, _)) = fixed_copy(mutation) {
+pub(crate) fn toast(mutation: &Mutation, labels: &[Label], outlook: bool) -> String {
+    if let Some((past, _, _)) = fixed_copy(mutation, outlook) {
         return past.into();
     }
     match mutation {
-        Mutation::AddLabel(id) => format!("Added to label {}.", label_name(id, labels)),
-        Mutation::RemoveLabel(id) => format!("Removed from label {}.", label_name(id, labels)),
+        Mutation::AddLabel(id) => format!("Added to label {}.", label_name(id, labels, outlook)),
+        Mutation::RemoveLabel(id) => {
+            format!("Removed from label {}.", label_name(id, labels, outlook))
+        }
         Mutation::RemoveLabels(_) => "Removed all labels.".into(),
-        Mutation::Move { from, to } => move_toast(from.as_deref(), to, labels),
+        Mutation::Move { from, to } => move_toast(from.as_deref(), to, labels, outlook),
         // Remind me's toasts say when, which only the picker knows (`remind::toast`).
         Mutation::CancelReminder { .. } => "Reminder removed.".into(),
         Mutation::Remind { .. } | Mutation::ReturnFromReminder => String::new(),
@@ -164,18 +202,19 @@ pub(crate) fn bulk_toast<'a>(
     list: &ListId,
     labels: &'a [Label],
     splits: impl IntoIterator<Item = &'a SplitInbox>,
+    outlook: bool,
 ) -> String {
-    if let Some((_, present, _)) = fixed_copy(mutation) {
+    if let Some((_, present, _)) = fixed_copy(mutation, outlook) {
         return present.into();
     }
     match mutation {
-        Mutation::AddLabel(id) => format!("Adding to label {}.", label_name(id, labels)),
+        Mutation::AddLabel(id) => format!("Adding to label {}.", label_name(id, labels, outlook)),
         // `Y` names the list it takes threads out of.
         Mutation::RemoveLabel(id) => {
             let name = if removable_label(list).as_ref() == Some(id) {
-                crate::lists::name(list, labels, splits)
+                crate::lists::name_for(list, labels, splits, outlook)
             } else {
-                label_name(id, labels)
+                label_name(id, labels, outlook)
             };
             if name.is_empty() {
                 "Removing from label.".into()
@@ -183,7 +222,7 @@ pub(crate) fn bulk_toast<'a>(
                 format!("Removing from label {name}.")
             }
         }
-        Mutation::Move { from, to } => move_text(from.as_deref(), to, labels, true),
+        Mutation::Move { from, to } => move_text(from.as_deref(), to, labels, true, outlook),
         // Never bulk, because these need loaded conversations.
         Mutation::RemoveLabels(_)
         | Mutation::Remind { .. }
@@ -195,20 +234,26 @@ pub(crate) fn bulk_toast<'a>(
 
 /// What the error toast says when `mutation` (or its undo) failed, for those with copy of their
 /// own.
-pub(crate) fn failure(mutation: &Mutation, undo: bool) -> Option<&'static str> {
+pub(crate) fn failure(mutation: &Mutation, undo: bool, outlook: bool) -> Option<&'static str> {
     Some(match (mutation, undo) {
         (Mutation::MarkDone, false) => "Sorry! Failed to mark as Done.",
         (Mutation::MarkNotDone, false) => "Sorry! Failed to mark not Done.",
         (Mutation::Trash, false) => "Sorry! Failed to move to Trash.",
         (Mutation::Untrash, false) => "Sorry! Failed to move to Inbox.",
+        (Mutation::Star, false) if outlook => "Sorry! Failed to flag.",
         (Mutation::Star, false) => "Sorry! Failed to star.",
+        (Mutation::Unstar, false) if outlook => "Sorry! Failed to unflag.",
         (Mutation::Unstar, false) => "Sorry! Failed to unstar.",
+        (Mutation::Star, true) if outlook => "Sorry! Failed to undo flag.",
         (Mutation::Star, true) => "Sorry! Failed to undo star.",
+        (Mutation::Unstar, true) if outlook => "Sorry! Failed to undo unflag.",
         (Mutation::Unstar, true) => "Sorry! Failed to undo unstar.",
         (Mutation::Mute, false) => "Sorry! Failed to mute the conversation.",
         (Mutation::Unmute, false) => "Sorry! Failed to Unmute the conversation.",
+        (Mutation::Spam | Mutation::NotSpam, false) if outlook => "Sorry! Failed to mark as Junk.",
         (Mutation::Spam | Mutation::NotSpam, false) => "Sorry! Failed to mark as Spam.",
         (Mutation::AddLabel(_), false) => "Sorry! Failed to add label.",
+        (Mutation::RemoveLabel(_), false) if outlook => "Sorry! Failed to move to Archive.",
         (Mutation::RemoveLabel(_), false) => "Sorry! Failed to remove from label.",
         (Mutation::AddLabel(_), true) => "Sorry! Failed to undo add label.",
         (Mutation::RemoveLabel(_), true) => "Sorry! Failed to undo remove from label.",
@@ -406,13 +451,16 @@ mod tests {
     #[test]
     fn single_and_bulk_triage_copy_stay_aligned() {
         let labels = [user_label("Label_1", "Projects")];
-        assert_eq!(toast(&Mutation::MarkDone, &labels), "Marked as Done.");
         assert_eq!(
-            bulk_toast(&Mutation::MarkDone, &ListId::Inbox, &labels, []),
+            toast(&Mutation::MarkDone, &labels, false),
+            "Marked as Done."
+        );
+        assert_eq!(
+            bulk_toast(&Mutation::MarkDone, &ListId::Inbox, &labels, [], false),
             "Marking as Done."
         );
         assert_eq!(
-            toast(&Mutation::AddLabel("Label_1".into()), &labels),
+            toast(&Mutation::AddLabel("Label_1".into()), &labels, false),
             "Added to label Projects."
         );
         assert_eq!(
@@ -420,7 +468,8 @@ mod tests {
                 &Mutation::AddLabel("Label_1".into()),
                 &ListId::Inbox,
                 &labels,
-                []
+                [],
+                false
             ),
             "Adding to label Projects."
         );
@@ -429,15 +478,71 @@ mod tests {
                 &Mutation::RemoveLabel("INBOX".into()),
                 &ListId::Done,
                 &labels,
-                []
+                [],
+                false
             ),
             "Removing from label Done."
         );
-        assert_eq!(bulk_name(&Mutation::Untrash), Some("Remove from Trash"));
-        assert_eq!(bulk_name(&Mutation::ReturnFromReminder), None);
         assert_eq!(
-            failure(&Mutation::Unmute, false),
+            bulk_name(&Mutation::Untrash, false),
+            Some("Remove from Trash")
+        );
+        assert_eq!(bulk_name(&Mutation::ReturnFromReminder, false), None);
+        assert_eq!(
+            failure(&Mutation::Unmute, false, false),
             Some("Sorry! Failed to Unmute the conversation.")
+        );
+    }
+
+    #[test]
+    fn outlook_triage_copy_uses_flag_junk_delete_and_folder_terms() {
+        let labels = [user_label("Label_1", "Projects")];
+        assert_eq!(toast(&Mutation::Star, &labels, true), "Flagged.");
+        assert_eq!(toast(&Mutation::Unstar, &labels, true), "Unflagged.");
+        assert_eq!(toast(&Mutation::Spam, &labels, true), "Marked as Junk.");
+        assert_eq!(
+            toast(&Mutation::NotSpam, &labels, true),
+            "Marked as Not Junk."
+        );
+        assert_eq!(
+            move_toast(Some("INBOX"), "Label_1", &labels, true),
+            "Moved."
+        );
+        assert_eq!(
+            move_toast(Some("Label_1"), "SPAM", &labels, true),
+            "Marked as Junk."
+        );
+        assert_eq!(
+            move_toast(Some("SH_ARCHIVED"), "TRASH", &labels, true),
+            "Moved to Deleted Items."
+        );
+        assert_eq!(bulk_name(&Mutation::Star, true), Some("Flag"));
+        assert_eq!(bulk_name(&Mutation::Trash, true), Some("Delete"));
+        assert_eq!(
+            bulk_name(&Mutation::Untrash, true),
+            Some("Remove from Deleted Items")
+        );
+        assert_eq!(
+            bulk_name(
+                &Mutation::Move {
+                    from: None,
+                    to: "Label_1".into()
+                },
+                true
+            ),
+            Some("Move to Folder")
+        );
+        assert_eq!(
+            failure(&Mutation::Star, false, true),
+            Some("Sorry! Failed to flag.")
+        );
+        assert_eq!(
+            failure(&Mutation::Spam, false, true),
+            Some("Sorry! Failed to mark as Junk.")
+        );
+        assert_eq!(
+            failure(&Mutation::RemoveLabel("Label_1".into()), false, true),
+            Some("Sorry! Failed to move to Archive.")
         );
     }
 }

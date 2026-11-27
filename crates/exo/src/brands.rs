@@ -19,6 +19,7 @@ mod records;
 
 use std::{io::Read as _, path::PathBuf, time::Duration};
 
+use exo_auth::Provider;
 use exo_store::{BrandCheck, BrandRecord, Header, RemoteContentBlocking, Settings, Store};
 use exo_ui::AvatarPhoto;
 use jiff::Timestamp;
@@ -87,12 +88,13 @@ pub(crate) fn forget(ctx: &egui::Context, account: &str) {
     });
 }
 
-/// Whether `headers` pass DMARC under an enforcing policy aligned with `email`'s domain.
-pub(crate) fn passed_for(headers: &[Header], email: &str) -> bool {
+/// Whether `headers` pass DMARC under `provider` aligned with `email`'s domain.
+pub(crate) fn passed_for(headers: &[Header], email: &str, provider: Provider) -> bool {
     let Some((_, domain)) = email.rsplit_once('@') else {
         return false;
     };
-    records::passed(headers).is_some_and(|passed| passed.domain.eq_ignore_ascii_case(domain.trim()))
+    records::passed(headers, provider)
+        .is_some_and(|passed| passed.domain.eq_ignore_ascii_case(domain.trim()))
 }
 
 /// Whether `detail`'s message on screen for `email` (`focused` first, else their newest received
@@ -103,6 +105,7 @@ pub(crate) fn allowed_in_thread(
     detail: &exo_store::ThreadDetail,
     focused: Option<&str>,
     email: &str,
+    provider: Provider,
 ) -> Option<bool> {
     let from_sender = |message: &&exo_store::MessageDetail| {
         !message.is_draft()
@@ -115,7 +118,7 @@ pub(crate) fn allowed_in_thread(
         .and_then(|id| detail.messages.iter().find(|message| message.id == id))
         .filter(from_sender)
         .or_else(|| detail.messages.iter().rev().find(from_sender))?;
-    Some(passed_for(&message.headers, email))
+    Some(passed_for(&message.headers, email, provider))
 }
 
 /// An account's lookups: its store, which keeps them, its photo cache, which keeps the logos, and
@@ -124,6 +127,7 @@ pub(crate) fn allowed_in_thread(
 pub(crate) struct Brands {
     ctx: egui::Context,
     account: String,
+    provider: Provider,
     store: Store,
     dir: PathBuf,
     /// For logos and certificates, over HTTPS only.
@@ -139,6 +143,7 @@ impl Brands {
     pub(crate) fn new(
         ctx: &egui::Context,
         account: &str,
+        provider: Provider,
         store: Store,
         dir: PathBuf,
         lookups: bool,
@@ -146,12 +151,23 @@ impl Brands {
         Self {
             ctx: ctx.clone(),
             account: account.to_lowercase(),
+            provider,
             store,
             dir,
             http: crate::remote_content::Client::https_only(FETCH_TIMEOUT),
             lists: crate::remote_content::Client::new(FETCH_TIMEOUT, false),
             lookups,
         }
+    }
+
+    /// The account key this brand lookup belongs to (lower-cased).
+    pub(crate) fn account(&self) -> &str {
+        &self.account
+    }
+
+    /// Which mail provider's `Authentication-Results` headers this account trusts.
+    pub(crate) fn provider(&self) -> Provider {
+        self.provider
     }
 
     /// The context whose avatars show the logos.
@@ -166,7 +182,7 @@ impl Brands {
 
     /// [`Self::logo_for`] when `headers` pass DMARC aligned with `email`'s domain.
     pub(crate) async fn logo_for_sender(&self, email: &str, headers: &[Header]) -> Option<Vec<u8>> {
-        if !passed_for(headers, email) {
+        if !passed_for(headers, email, self.provider) {
             return None;
         }
         self.logo_for(headers).await
@@ -183,7 +199,7 @@ impl Brands {
     where
         F: AsyncFnOnce(&str, Timestamp) -> Option<BrandRecord>,
     {
-        let domain = records::passed(headers)?.domain;
+        let domain = records::passed(headers, self.provider)?.domain;
         let now = Timestamp::now();
         let kept = match self.store.brands().await {
             Ok(mut brands) => brands.remove(&domain),
@@ -476,21 +492,20 @@ fn carried(kept: Option<BrandRecord>, mut fresh: BrandRecord, now: Timestamp) ->
 async fn look_up(domain: &str, now: Timestamp) -> Option<BrandRecord> {
     // A domain without records of its own takes its organizational domain's.
     let organization = psl::domain_str(domain).unwrap_or(domain).to_owned();
-    let lookup = async |prefix: &str| -> Result<Option<dns::Txt>, ()> {
+    let lookup = async |prefix: &str| -> Result<(Option<dns::Txt>, bool), ()> {
         match dns::txt(&format!("{prefix}.{domain}")).await? {
-            None if organization != domain => dns::txt(&format!("{prefix}.{organization}")).await,
-            found => Ok(found),
+            None if organization != domain => {
+                Ok((dns::txt(&format!("{prefix}.{organization}")).await?, true))
+            }
+            found => Ok((found, false)),
         }
     };
-    let dmarc = lookup("_dmarc").await.ok()?;
-    let applies = dmarc.as_ref().is_some_and(|dmarc| {
-        dmarc
-            .records
-            .iter()
-            .any(|record| records::dmarc_applies_to_all(record))
-    });
+    let (dmarc, org_fallback) = lookup("_dmarc").await.ok()?;
+    let applies = dmarc
+        .as_ref()
+        .is_some_and(|dmarc| records::dmarc_records_enforce(&dmarc.records, org_fallback));
     let bimi = if applies {
-        lookup("default._bimi").await.ok()?
+        lookup("default._bimi").await.ok()?.0
     } else {
         None
     };
@@ -744,22 +759,35 @@ mod tests {
             reminder: None,
         };
         assert_eq!(
-            allowed_in_thread(&detail, Some("m1"), "service@paypal.com"),
+            allowed_in_thread(&detail, Some("m1"), "service@paypal.com", Provider::Google),
             Some(true)
         );
         assert_eq!(
-            allowed_in_thread(&detail, Some("m2"), "security@paypal.com"),
+            allowed_in_thread(
+                &detail,
+                Some("m1"),
+                "service@paypal.com",
+                Provider::Microsoft
+            ),
+            Some(false),
+            "Exchange accounts reject Gmail's Authentication-Results header"
+        );
+        assert_eq!(
+            allowed_in_thread(&detail, Some("m2"), "security@paypal.com", Provider::Google),
             Some(false)
         );
         assert_eq!(
-            allowed_in_thread(&detail, Some("m3"), "security@paypal.com"),
+            allowed_in_thread(&detail, Some("m3"), "security@paypal.com", Provider::Google),
             Some(false)
         );
         assert_eq!(
-            allowed_in_thread(&detail, None, "security@paypal.com"),
+            allowed_in_thread(&detail, None, "security@paypal.com", Provider::Google),
             Some(false)
         );
-        assert_eq!(allowed_in_thread(&detail, None, "other@stripe.com"), None);
+        assert_eq!(
+            allowed_in_thread(&detail, None, "other@stripe.com", Provider::Google),
+            None
+        );
     }
 
     #[tokio::test]
@@ -780,8 +808,10 @@ mod tests {
         let store = Store::open(
             &root,
             "maya@brightmoor.co",
-            gmail::Endpoints::google(),
-            gmail::StaticToken("unused".into()),
+            exo_store::Remote::gmail(
+                gmail::Endpoints::google(),
+                gmail::StaticToken("unused".into()),
+            ),
         )
         .await
         .expect("opens store");
@@ -795,6 +825,7 @@ mod tests {
         let brands = Brands::new(
             &egui::Context::default(),
             "maya@brightmoor.co",
+            Provider::Google,
             store.clone(),
             photos,
             true,

@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use exo_commands::{Hint, Toast};
+use exo_store::{CalendarEvent, EventAttendee, EventPerson, EventTime};
 use jiff::Zoned;
 
 use super::{Context, Rsvp, Source, provider, save::Prompt};
@@ -103,17 +104,23 @@ impl crate::Mail {
         let Some((event, source, _)) = self.calendar_detailed(&key, &now) else {
             return;
         };
-        let status = match answer {
-            Rsvp::Accepted => "accepted",
-            Rsvp::Tentative => "tentative",
-            Rsvp::Declined => "declined",
-            Rsvp::NeedsAction => return,
-        };
+        if answer == Rsvp::NeedsAction {
+            return;
+        }
+        let status = answer.to_store();
         if event.id.is_none() {
-            let calendar = self.calendar.invite.as_ref().map_or_else(
-                || self.account.email().to_owned(),
-                |invite| self.calendar_invite_account(invite),
-            );
+            let (calendar, account, invite_email) = match self.calendar.invite.as_ref() {
+                Some(invite) => {
+                    let email = self.calendar_invite_account(invite);
+                    let (cal, acct) = self.calendar_invite_target(invite);
+                    (cal, acct, email)
+                }
+                None => (
+                    self.calendar_primary_id(),
+                    Some(self.account.key().to_owned()),
+                    self.account.email().to_owned(),
+                ),
+            };
             let thread = self.thread.as_ref().map(|thread| thread.id().to_owned());
             let links = source
                 .ical_uid
@@ -122,14 +129,15 @@ impl crate::Mail {
             self.account
                 .calendar()
                 .queue(exo_store::CalendarChange::RespondToInvite {
-                    calendar: calendar.clone(),
+                    calendar,
+                    account,
                     invite: source,
-                    status: status.to_owned(),
+                    status,
                     thread,
                     links,
                 });
             if let Some(invite) = &mut self.calendar.invite {
-                invite.answer(&calendar, answer);
+                invite.answer(&invite_email, answer);
             }
             self.commands.toast(Toast::new(self.rsvp_toast(answer)));
             return;
@@ -139,7 +147,7 @@ impl crate::Mail {
             .queue(exo_store::CalendarChange::Respond {
                 calendar: event.calendar_id.clone(),
                 event: source,
-                status: status.to_owned(),
+                status,
                 all,
             });
         let text = if self.snapshot.connection.is_online() {
@@ -204,15 +212,16 @@ impl crate::Mail {
         let mark_done = self.rsvp_marks_done();
         // The card shows this answer now, not the calendar's from before it.
         self.calendar.answers.1.insert(invite.uid.clone(), response);
-        // To the calendar of the account it invites.
-        let calendar = self.calendar_invite_account(&invite);
+        // To the primary calendar of the account it invites.
+        let (calendar, account) = self.calendar_invite_target(&invite);
         let thread = self.thread.as_ref().map(|thread| thread.id().to_owned());
         self.account
             .calendar()
             .queue(exo_store::CalendarChange::RespondToInvite {
                 calendar,
+                account,
                 invite: invite_event(&invite),
-                status: response.status().to_owned(),
+                status: response.to_store(),
                 thread,
                 links: self.calendar_invite_links(&invite.uid),
             });
@@ -256,21 +265,14 @@ impl crate::Mail {
             return;
         }
         let data = self.account.calendar().data();
-        let me = self.account.email().to_owned();
         for uid in uids {
             let calendar = || {
                 let stored = data
                     .events
                     .iter()
                     .find(|stored| stored.event.ical_uid.as_deref() == Some(uid.as_str()))?;
-                let mine = stored.event.attendees.iter().find(|attendee| {
-                    attendee.is_self == Some(true)
-                        || attendee
-                            .email
-                            .as_deref()
-                            .is_some_and(|email| email.eq_ignore_ascii_case(&me))
-                })?;
-                Response::parse(mine.response_status.as_deref()?)
+                let me = self.calendar_account(&stored.calendar_id);
+                stored.event.my_rsvp(&me).map(Response::from_store)
             };
             let Some(answer) = self.calendar.answers.1.get(&uid).copied().or_else(calendar) else {
                 continue;
@@ -284,34 +286,23 @@ impl crate::Mail {
 
 /// An invite's event as Calendar would have it: what the event details show of an invite the
 /// calendar doesn't have, and what's imported to answer it.
-pub(crate) fn invite_event(invite: &Invite) -> gmail::calendar::Event {
-    use gmail::calendar::{Event as ApiEvent, EventAttendee, EventDateTime, EventPerson};
+pub(crate) fn invite_event(invite: &Invite) -> CalendarEvent {
     let (start, end) = if invite.all_day
         && let Some((first, last)) = invite.dates
     {
-        (
-            EventDateTime {
-                date: Some(first.to_string()),
-                ..EventDateTime::default()
-            },
-            EventDateTime {
-                date: Some(last.to_string()),
-                ..EventDateTime::default()
-            },
-        )
+        (EventTime::all_day(first), EventTime::all_day(last))
     } else {
-        let at = |time: jiff::Timestamp| EventDateTime {
-            date_time: Some(time.to_string()),
-            ..EventDateTime::default()
-        };
-        (at(invite.start), at(invite.end))
+        (
+            EventTime::timed(invite.start, None),
+            EventTime::timed(invite.end, None),
+        )
     };
     let organizer = invite.organizer.as_ref().map(|(name, email)| EventPerson {
         email: Some(email.clone()),
         display_name: (!name.is_empty()).then(|| name.clone()),
-        ..EventPerson::default()
+        is_self: false,
     });
-    ApiEvent {
+    CalendarEvent {
         ical_uid: Some(invite.uid.clone()),
         summary: (!invite.summary.is_empty()).then(|| invite.summary.clone()),
         description: (!invite.description.is_empty()).then(|| invite.description.clone()),
@@ -327,14 +318,13 @@ pub(crate) fn invite_event(invite: &Invite) -> gmail::calendar::Event {
                 organizer: invite
                     .organizer
                     .as_ref()
-                    .is_some_and(|(_, organizer)| organizer.eq_ignore_ascii_case(email))
-                    .then_some(true),
-                response_status: Some(response.status().to_owned()),
+                    .is_some_and(|(_, organizer)| organizer.eq_ignore_ascii_case(email)),
+                response_status: response.to_store(),
                 ..EventAttendee::default()
             })
             .collect(),
         organizer,
-        ..ApiEvent::default()
+        ..CalendarEvent::default()
     }
 }
 
@@ -362,18 +352,13 @@ mod tests {
         let parsed = crate::thread::invite::parse(all_day_ics).expect("parses");
         let api = invite_event(&parsed);
         assert_eq!(
-            api.start.as_ref().and_then(|s| s.date.as_deref()),
-            Some("2026-12-07")
+            api.start,
+            Some(EventTime::all_day(Date::constant(2026, 12, 7)))
         );
         assert_eq!(
-            api.start.as_ref().and_then(|s| s.date_time.as_deref()),
-            None
+            api.end,
+            Some(EventTime::all_day(Date::constant(2026, 12, 9)))
         );
-        assert_eq!(
-            api.end.as_ref().and_then(|e| e.date.as_deref()),
-            Some("2026-12-09")
-        );
-        assert_eq!(api.end.as_ref().and_then(|e| e.date_time.as_deref()), None);
 
         let tz = jiff::tz::TimeZone::get("America/Los_Angeles").expect("zone");
         let from_inv = Event::from_invite(&parsed, CalendarColor::BLUE, "me", &tz);

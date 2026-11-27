@@ -1,15 +1,15 @@
-//! Exo's offline-first data layer: one SQLite file per account caching Gmail, the sync engine
-//! that keeps it current, and the outbox that sends the user's triage actions.
+//! Exo's offline-first data layer: one SQLite file per account caching its mail (Gmail's, or
+//! Outlook's through Microsoft Graph), the sync engine that keeps it current, and the outbox that
+//! sends the user's triage actions.
 //!
 //! ```no_run
 //! # async fn demo(dir: &std::path::Path) -> exo_store::Result<()> {
-//! use exo_store::{ListId, Mutation, Store};
+//! use exo_store::{ListId, Mutation, Remote, Store};
 //!
 //! let store = Store::open(
 //!     dir,
 //!     "maya@brightmoor.co",
-//!     gmail::Endpoints::google(),
-//!     gmail::StaticToken("ya29...".into()),
+//!     Remote::gmail(gmail::Endpoints::google(), gmail::StaticToken("ya29...".into())),
 //! )
 //! .await?;
 //! while store.sync().await?.backfilling {}
@@ -30,11 +30,12 @@ mod bulk;
 mod bulk_log;
 mod calendar;
 mod connection;
+mod contacts;
 mod db;
 mod drafts;
+mod entities;
 mod error;
 mod evict;
-mod google_contacts;
 mod ids;
 mod migrations;
 mod model;
@@ -43,7 +44,6 @@ mod notes;
 mod onboarding;
 mod out_of_office;
 mod outbox;
-mod parse;
 mod parts;
 mod provider;
 mod query;
@@ -58,26 +58,34 @@ mod statistics;
 mod store;
 mod sync;
 mod text;
+mod truth;
 mod unsubscribes;
 mod view;
 
 pub use address_book::ScoredContact;
 pub use brands::{BrandCheck, BrandRecord};
-pub use bulk::{BulkTarget, ListCutoff, Progress, Relabelled, Scope};
+pub use bulk::{BulkTarget, ListCutoff, Progress, Relabelled, Scope, SenderRule, SenderRuleUndo};
 pub use bulk_log::{BulkRecord, BulkState, LoggedBulk};
+pub use calendar::model::{
+    AccessRole, AccountCalendar, Calendar, CalendarEvent, CalendarProviderKind, Conference,
+    ConferenceKind, ConferencePatch, EventAttachment, EventAttendee, EventCategory, EventPatch,
+    EventPerson, EventReminders, EventStatus, EventTime, EventType, FreeBusySlot,
+    OnlineMeetingKind, RsvpStatus, ShowAs, StoredEvent, Visibility,
+};
 pub use calendar::outbox::{
     CalendarChange, CalendarOutcome, Cut, InviteLinks, QueuedCalendarChange, Refusal,
 };
+pub use calendar::provider::CalendarRemote;
 pub use calendar::recurrence::{End as RecurrenceEnd, Frequency, Nth, Recurrence};
-pub use calendar::{AccountCalendar, CachedGuest, StoredEvent};
+pub use calendar::CachedGuest;
 pub use connection::{Connection, Debounce, Outage};
+pub use contacts::{ContactList, PhotoMetadata, ProviderContact, ProviderContacts};
 pub use drafts::{
     Address, AttachmentSource, Draft, DraftAction, DraftAttachment, DraftFailure, DraftRecord,
     DraftReminder, DraftReport, SendFailure, SendLater, SentDraft, StoredDraft, Upload, Uploads,
 };
-pub use error::{Error, Failing, Result, Unusable};
+pub use error::{Error, Failing, ProviderError, Result, Unusable};
 pub use evict::{Evicted, Eviction};
-pub use google_contacts::{GoogleContact, GoogleContacts, GoogleList};
 pub use ids::{Filter, ListId, ThreadId, labels};
 pub use model::{
     Alias, Attachment, Attachments, Body, Contact, Cursor, Header, Label, LabelKind, ListCount,
@@ -90,8 +98,9 @@ pub use notes::{
 };
 pub use onboarding::{PreviewEmail, PreviewList, SplitPreview};
 pub use out_of_office::{
-    DetectedEvent, EventTime, GoogleResponder, OUT_OF_OFFICE_LOOKAHEAD, OutOfOfficeDays,
-    OutOfOfficeEventDetection, OutOfOfficeResponder,
+    AutoReply, AutoReplyStatus, DetectedEvent, DetectedEventTime, ExternalAudience,
+    GoogleResponder, OUT_OF_OFFICE_LOOKAHEAD, OutOfOfficeDays, OutOfOfficeEventDetection,
+    OutOfOfficeResponder, OutlookAutoReply, OutlookResponder,
 };
 pub use outbox::{FailedMutation, FlushReport, Undo, Unsent};
 pub use parts::PartsCache;
@@ -114,7 +123,7 @@ pub use split::{
     query_too_long, slugify_name,
 };
 pub use statistics::{Achievements, Statistics};
-pub use store::{Options, Store};
+pub use store::{Options, Remote, Store};
 pub use sync::{Arrival, RECENT_THREADS, SyncProgress, SyncReport};
 pub use text::{IndexText, TextSource};
 pub use unsubscribes::PendingUnsubscribe;

@@ -14,7 +14,7 @@ pub(crate) fn html(open: &Open, aliases: &[Alias]) -> String {
 
 /// [`html`], with no signature at all when `skip_signature`.
 fn body_html(open: &Open, aliases: &[Alias], skip_signature: bool) -> String {
-    let signature_html = signature::of(open.record.from.as_ref(), aliases);
+    let signature_html = signature::of_open(open, aliases);
     let parts = exo_editor::outgoing::Parts {
         signature: signature_html.as_deref(),
         include_signature_content: signature::includes_content(open),
@@ -221,5 +221,27 @@ mod tests {
             html(&new, &aliases).contains(">Maya<"),
             "new mail always carries it"
         );
+    }
+
+    #[test]
+    fn outlook_compose_appends_local_signature_and_omits_it_on_replies_when_off() {
+        let mut new = open(DraftAction::Compose);
+        new.body.outlook = true;
+        new.body.local_signature = Some("<div>Best, Maya</div>".into());
+        new.body.signature_on_replies = false;
+        let sent = html(&new, &[]);
+        assert!(
+            sent.contains("gmail_signature") && sent.contains("Best, Maya"),
+            "{sent}"
+        );
+
+        let mut reply = open(DraftAction::Reply);
+        reply.body.outlook = true;
+        reply.body.local_signature = Some("<div>Best, Maya</div>".into());
+        reply.body.signature_on_replies = true;
+        assert!(html(&reply, &[]).contains("Best, Maya"));
+
+        reply.body.signature_on_replies = false;
+        assert!(!html(&reply, &[]).contains("Best, Maya"));
     }
 }

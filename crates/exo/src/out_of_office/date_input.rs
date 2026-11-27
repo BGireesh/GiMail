@@ -47,6 +47,9 @@ pub struct Field<'a> {
     pub focused: bool,
     /// The form is off (`disabled`).
     pub disabled: bool,
+    /// Additional invalid state (for example, an Outlook range whose end is not after its start)
+    /// drawn with the error underline without mutating `input.error`.
+    pub error: bool,
     /// `Select date`, for the last day.
     pub placeholder: &'a str,
     /// Days before this can't be picked.
@@ -86,6 +89,10 @@ impl Field<'_> {
             error_color: RULE_ERROR,
             popup_anchor_below: RULE_GAP + 1.0,
         };
+        let saved_error = self.input.error;
+        if self.error {
+            self.input.error = true;
+        }
         let out = DateField {
             id: self.id,
             input: self.input,
@@ -100,6 +107,7 @@ impl Field<'_> {
             week_start: Weekday::Sunday,
         }
         .show_with(ui, at, crate::spelling::text_field);
+        self.input.error = saved_error;
 
         let mut event = None;
         if !self.disabled {

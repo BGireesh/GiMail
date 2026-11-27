@@ -146,7 +146,8 @@ impl Mail {
     /// list can't be acted on in bulk, says why it can't be done. Where the list can't but every
     /// row is loaded, the triage is left to act row by row. Returns whether it took the triage.
     pub(crate) fn bulk_instead(&mut self, ids: &[String], mutation: &Mutation) -> bool {
-        let Some(name) = crate::triage_copy::bulk_name(mutation) else {
+        let outlook = self.account.is_outlook();
+        let Some(name) = crate::triage_copy::bulk_name(mutation, outlook) else {
             return false;
         };
         if self.thread.is_some() || !self.inbox.is_selecting() || self.inbox.selection() != ids {
@@ -193,6 +194,7 @@ impl Mail {
             &self.list,
             &self.snapshot.labels,
             self.account.settings().splits(),
+            outlook,
         );
         let request = Request {
             name,
@@ -405,7 +407,8 @@ impl Mail {
             })
             .map(|thread| thread.id.clone())
             .collect();
-        let query = state.display_query(&before.to_zoned(self.now.time_zone().clone()));
+        let outlook = self.account.is_outlook();
+        let query = state.display_query(&before.to_zoned(self.now.time_zone().clone()), outlook);
         let request = Request {
             name: GET_ME_TO_ZERO,
             query: Some(query),
@@ -434,6 +437,7 @@ impl Mail {
                     &self.list,
                     &self.snapshot.labels,
                     self.account.settings().splits(),
+                    outlook,
                 ),
             },
         );
@@ -456,7 +460,8 @@ impl Mail {
         let (inner, close) = match &self.bulk_dialogs.shown {
             None => return,
             Some(Shown::GetMeToZero(state)) => {
-                let response = get_me_to_zero::show(ctx, area, open, state);
+                let response =
+                    get_me_to_zero::show(ctx, area, open, state, self.account.is_outlook());
                 (
                     response.inner.map(|event| event.map(Action::GetMeToZero)),
                     response.close,

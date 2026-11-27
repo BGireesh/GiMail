@@ -12,6 +12,10 @@
 //! (because of another client of the same project, or a limit it doesn't document), nothing
 //! goes out until the time it asked for. The minute's limit and the refill then halve, and
 //! recover over two minutes.
+//!
+//! A provider that serves a mailbox only so many calls at once (Outlook's four) gets that many
+//! slots, which calls take in the same order and hold until they end, so the provider's own limit
+//! never queues a click behind sync.
 
 use std::collections::{BTreeSet, VecDeque};
 use std::sync::{Mutex, MutexGuard};
@@ -41,7 +45,7 @@ const RECOVERY: Duration = Duration::from_secs(120);
 /// Throttling is over once a call succeeds a whole quota window after Gmail last pushed back.
 const QUIET: Duration = WINDOW;
 
-/// Gmail's per-user quota, which the store paces its calls under.
+/// A provider's quota for the account, which the store paces its calls under.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Quota {
     /// Units the account may spend per minute.
@@ -53,6 +57,11 @@ impl Quota {
     pub const GMAIL: Self = Self {
         per_minute: gmail::quota::PER_USER_PER_MINUTE,
     };
+
+    /// Outlook's limit through Graph, a unit per request (and per request of a batch): 10,000
+    /// requests per app and mailbox in 10 minutes (learn.microsoft.com/graph/throttling-limits,
+    /// "Outlook service limits"), as a minute's share.
+    pub const GRAPH: Self = Self { per_minute: 1_000 };
 }
 
 /// Whom a Gmail call is for, most urgent first.
@@ -70,10 +79,14 @@ pub(crate) enum Lane {
 
 /// The account's quota and who is waiting for it. Shared by every call the store makes.
 pub(crate) struct Budget {
+    /// The provider, as the log names it.
+    service: &'static str,
     pace: Option<Pace>,
+    /// How many calls may be in flight at once, when the provider limits it.
+    slots: Option<usize>,
     state: Mutex<State>,
-    /// Ticks whenever a waiting call may now go, because another one went or gave up, or Gmail
-    /// paused.
+    /// Ticks whenever a waiting call may now go, because another one went or gave up, or the
+    /// provider paused.
     changed: Notify,
 }
 
@@ -125,6 +138,8 @@ struct State {
     /// Gmail asked for no calls before then.
     pause: Option<(Instant, Timestamp)>,
     episode: Option<Episode>,
+    /// Calls holding a slot.
+    in_flight: usize,
 }
 
 /// Gmail rate limiting the account, from its first pushback until calls flow again. The log's
@@ -152,10 +167,12 @@ enum Turn {
 }
 
 impl Budget {
-    /// A budget for `quota`. `None` paces nothing but still waits out Gmail's pauses.
-    pub fn new(quota: Option<Quota>) -> Self {
+    /// A budget for `service` under `quota`. `None` paces nothing but still waits out pauses.
+    pub fn new(service: &'static str, quota: Option<Quota>) -> Self {
         Self {
+            service,
             pace: quota.map(Pace::new),
+            slots: None,
             state: Mutex::new(State {
                 tokens: quota.map_or(0.0, |quota| Pace::new(quota).burst()),
                 at: Instant::now(),
@@ -165,14 +182,22 @@ impl Budget {
                 next: 0,
                 pause: None,
                 episode: None,
+                in_flight: 0,
             }),
             changed: Notify::new(),
         }
     }
 
-    /// Waits until a call of `units` may go out for `lane`, and spends them. If Gmail has paused
-    /// calls for longer than [`MAX_WAIT`], fails with the time it will take calls again.
-    pub async fn spend(&self, lane: Lane, units: u32) -> Result<(), Timestamp> {
+    /// This budget with at most `slots` calls in flight at once.
+    pub fn with_slots(mut self, slots: usize) -> Self {
+        self.slots = Some(slots);
+        self
+    }
+
+    /// Waits until a call of `units` may go out for `lane`, and spends them. The call holds its
+    /// slot, if the budget has slots, until it drops what this returns. If the provider has
+    /// paused calls for longer than [`MAX_WAIT`], fails with the time it will take calls again.
+    pub async fn spend(&self, lane: Lane, units: u32) -> Result<Slot<'_>, Timestamp> {
         let key = {
             let mut state = self.lock();
             state.next += 1;
@@ -186,11 +211,16 @@ impl Budget {
             let changed = self.changed.notified();
             tokio::pin!(changed);
             changed.as_mut().enable();
-            let turn = self
-                .lock()
-                .turn(self.pace, key, units, Instant::now(), &mut counted);
+            let turn = self.lock().turn(
+                self.pace,
+                self.slots,
+                key,
+                units,
+                Instant::now(),
+                &mut counted,
+            );
             match turn {
-                Turn::Go => return Ok(()),
+                Turn::Go => return Ok(Slot(self.slots.map(|_| self))),
                 Turn::GiveUp(until) => return Err(until),
                 Turn::Wait(Some(wait)) => tokio::select! {
                     () = tokio::time::sleep(wait) => {}
@@ -201,20 +231,23 @@ impl Budget {
         }
     }
 
-    /// Gmail rate limited a call and asked for `wait`. Nothing goes out until then, and the
+    /// The provider rate limited a call and asked for `wait`. Nothing goes out until then, and the
     /// refill slows. Returns when calls resume.
     pub fn pushback(&self, wait: Duration) -> Timestamp {
-        let until = self.lock().pushback(Instant::now(), Timestamp::now(), wait);
+        let until = self
+            .lock()
+            .pushback(self.service, Instant::now(), Timestamp::now(), wait);
         self.changed.notify_waiters();
         until
     }
 
-    /// A call succeeded. Once Gmail has been quiet for a while, the throttling is over.
+    /// A call succeeded. Once the provider has been quiet for a while, the throttling is over.
     pub fn settled(&self) {
         if let Some(episode) = self.lock().settle(Instant::now()) {
             let lasted = episode.resumes.1.duration_since(episode.started);
             log::info!(
-                "Gmail stopped rate limiting after {:.1} s: it pushed back {} times, {} calls waited and {} gave up",
+                "{} stopped rate limiting after {:.1} s: it pushed back {} times, {} calls waited and {} gave up",
+                self.service,
                 lasted.as_secs_f64(),
                 episode.pushbacks,
                 episode.waited,
@@ -225,6 +258,18 @@ impl Budget {
 
     fn lock(&self) -> MutexGuard<'_, State> {
         self.state.lock().expect("budget lock is never poisoned")
+    }
+}
+
+/// A call's slot, given back when it's dropped, which lets the next call waiting for one go.
+pub(crate) struct Slot<'a>(Option<&'a Budget>);
+
+impl Drop for Slot<'_> {
+    fn drop(&mut self) {
+        if let Some(budget) = self.0 {
+            budget.lock().in_flight -= 1;
+            budget.changed.notify_waiters();
+        }
     }
 }
 
@@ -246,11 +291,12 @@ impl Drop for Leave<'_> {
 }
 
 impl State {
-    /// Whether the waiting call `key` may spend `units` at `now`. `counted` records that the
-    /// call was counted as waiting for a pause.
+    /// Whether the waiting call `key` may spend `units` at `now`, and take one of `slots` when
+    /// there are slots. `counted` records that the call was counted as waiting for a pause.
     fn turn(
         &mut self,
         pace: Option<Pace>,
+        slots: Option<usize>,
         key: Ticket,
         units: u32,
         now: Instant,
@@ -269,7 +315,16 @@ impl State {
                 Turn::Wait(Some(wait))
             };
         }
-        let Some(pace) = pace else { return Turn::Go };
+        // With slots, calls go in order, as one comes free.
+        if let Some(slots) = slots
+            && (self.in_flight >= slots || self.waiting.first() != Some(&key))
+        {
+            return Turn::Wait(None);
+        }
+        let Some(pace) = pace else {
+            self.in_flight += usize::from(slots.is_some());
+            return Turn::Go;
+        };
         self.refill(pace, now);
         while self
             .spent
@@ -290,6 +345,7 @@ impl State {
         if bucket <= 0.0 && minute.is_zero() {
             self.tokens -= units;
             self.spent.push_back((now, units));
+            self.in_flight += usize::from(slots.is_some());
             return Turn::Go;
         }
         Turn::Wait(Some(Duration::from_secs_f64(bucket).max(minute)))
@@ -323,7 +379,13 @@ impl State {
         self.at = now;
     }
 
-    fn pushback(&mut self, now: Instant, at: Timestamp, wait: Duration) -> Timestamp {
+    fn pushback(
+        &mut self,
+        service: &str,
+        now: Instant,
+        at: Timestamp,
+        wait: Duration,
+    ) -> Timestamp {
         let pause = (
             now + wait,
             at.checked_add(SignedDuration::try_from(wait).unwrap_or(SignedDuration::MAX))
@@ -349,7 +411,7 @@ impl State {
             }
             None => {
                 log::warn!(
-                    "Gmail is rate limiting this account; calls wait for it ({wait:.1?} first) and go slower until it stops"
+                    "{service} is rate limiting this account; calls wait for it ({wait:.1?} first) and go slower until it stops"
                 );
                 self.episode = Some(Episode {
                     started: at,
@@ -392,6 +454,7 @@ mod tests {
             next: 0,
             pause: None,
             episode: None,
+            in_flight: 0,
         }
     }
 
@@ -401,7 +464,7 @@ mod tests {
         state.waiting.insert(key);
         (
             key,
-            state.turn(Some(Pace::new(QUOTA)), key, units, now, &mut false),
+            state.turn(Some(Pace::new(QUOTA)), None, key, units, now, &mut false),
         )
     }
 
@@ -483,12 +546,12 @@ mod tests {
         let (show, turn) = wait(Lane::Show, &mut bucket, 1_200, now);
         assert!(matches!(turn, Turn::Wait(Some(_))), "{turn:?}");
         assert_eq!(
-            bucket.turn(Some(Pace::new(QUOTA)), sync, 120, now, &mut false),
+            bucket.turn(Some(Pace::new(QUOTA)), None, sync, 120, now, &mut false),
             Turn::Wait(None)
         );
         bucket.waiting.remove(&show);
         assert_eq!(
-            bucket.turn(Some(Pace::new(QUOTA)), sync, 120, now, &mut false),
+            bucket.turn(Some(Pace::new(QUOTA)), None, sync, 120, now, &mut false),
             Turn::Go
         );
     }
@@ -508,10 +571,10 @@ mod tests {
         let now = Instant::now();
         let at = Timestamp::now();
         let mut bucket = state(2_700.0, now);
-        let until = bucket.pushback(now, at, Duration::from_secs(2));
+        let until = bucket.pushback("Gmail", now, at, Duration::from_secs(2));
         // Calls sent together all come back refused, which counts as one slowdown.
         assert_eq!(
-            bucket.pushback(now, at, Duration::from_secs(1)),
+            bucket.pushback("Gmail", now, at, Duration::from_secs(1)),
             until,
             "the longer pause stands"
         );
@@ -531,7 +594,7 @@ mod tests {
         );
 
         // A pause longer than a call waits fails it.
-        bucket.pushback(later, at, Duration::from_secs(120));
+        bucket.pushback("Gmail", later, at, Duration::from_secs(120));
         let (_, turn) = wait(Lane::Sync, &mut bucket, 120, later);
         assert!(matches!(turn, Turn::GiveUp(_)));
         assert_eq!(
@@ -544,7 +607,7 @@ mod tests {
     fn throttling_ends_after_a_quiet_minute() {
         let now = Instant::now();
         let mut bucket = state(0.0, now);
-        bucket.pushback(now, Timestamp::now(), Duration::from_secs(2));
+        bucket.pushback("Gmail", now, Timestamp::now(), Duration::from_secs(2));
         assert_eq!(bucket.settle(now + Duration::from_secs(30)), None);
         assert!(bucket.settle(now + Duration::from_secs(63)).is_some());
         assert_eq!(bucket.episode, None);
@@ -552,7 +615,7 @@ mod tests {
 
     #[tokio::test]
     async fn unpaced_calls_go_at_once_but_wait_out_a_pause() {
-        let budget = Budget::new(None);
+        let budget = Budget::new("Gmail", None);
         budget.spend(Lane::Sync, 120).await.expect("goes");
         budget.pushback(Duration::from_millis(200));
         let started = Instant::now();
@@ -567,5 +630,32 @@ mod tests {
         );
         budget.pushback(Duration::from_secs(60));
         assert!(budget.spend(Lane::Act, 20).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn slots_go_to_the_most_urgent_call_waiting() {
+        let budget = std::sync::Arc::new(Budget::new("Outlook", None).with_slots(2));
+        let first = budget.spend(Lane::Sync, 1).await.expect("goes");
+        let second = budget.spend(Lane::Sync, 1).await.expect("goes");
+        let order = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let waiting = |lane: Lane, name: &'static str| {
+            let (budget, order) = (budget.clone(), order.clone());
+            tokio::spawn(async move {
+                let slot = budget.spend(lane, 1).await.expect("goes");
+                order.lock().unwrap().push(name);
+                drop(slot);
+            })
+        };
+        let sync = waiting(Lane::Sync, "sync");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let click = waiting(Lane::Act, "click");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(order.lock().unwrap().is_empty(), "both slots are taken");
+        // One slot frees, and the click takes it, though sync asked first.
+        drop(first);
+        click.await.unwrap();
+        sync.await.unwrap();
+        assert_eq!(*order.lock().unwrap(), ["click", "sync"]);
+        drop(second);
     }
 }

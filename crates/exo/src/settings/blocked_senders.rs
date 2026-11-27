@@ -154,8 +154,9 @@ pub fn show(
     open: bool,
     state: &State,
     senders: &[&str],
+    outlook: bool,
 ) -> exo_ui::DialogResponse<Option<Event>> {
-    let subheader = subheader(senders);
+    let subheader = subheader(senders, outlook);
     let lines = TEXT.wrap(ctx, subheader, exo_ui::DIALOG_WIDTH - 64.0).len();
     let list_top = SUBHEADER_TOP + lines as f32 * TEXT.line_height + LIST_GAP;
     // With no list, the footer sits 19px under the subheader.
@@ -166,7 +167,7 @@ pub fn show(
     };
     let mut response = Dialog::new("blocked-senders", "Blocked Senders", footer + FOOTER_BELOW)
         .show(ctx, area, open, |ui, body| {
-            draw(ui, body, state, senders, list_top, footer)
+            draw(ui, body, state, senders, subheader, list_top, footer)
         });
     if let (Some(event), Some((sender, selected))) = (&mut response.inner, &state.alert) {
         let text = format!("Remove the block on {sender}?");
@@ -187,9 +188,11 @@ pub fn show(
 }
 
 /// `There are no blocked senders.`, or what blocking does.
-fn subheader(senders: &[&str]) -> &'static str {
+fn subheader(senders: &[&str], outlook: bool) -> &'static str {
     if senders.is_empty() {
         "There are no blocked senders."
+    } else if outlook {
+        "All mail from the senders below will be moved to Deleted Items. Messages in Deleted Items for more than 30 days will usually be permanently deleted."
     } else {
         "All mail from the senders below will be moved to Trash. Messages in Trash for more than 30 days will be deleted automatically."
     }
@@ -200,13 +203,14 @@ fn draw(
     body: Rect,
     state: &State,
     senders: &[&str],
+    subheader: &str,
     list_top: f32,
     footer: f32,
 ) -> Option<Event> {
     let tokens = palette(ui.ctx());
     let painter = ui.painter().clone();
     for (i, line) in TEXT
-        .wrap(ui.ctx(), subheader(senders), body.width())
+        .wrap(ui.ctx(), subheader, body.width())
         .iter()
         .enumerate()
     {

@@ -846,20 +846,13 @@ impl crate::Mail {
                 organizer: false,
             })
             .collect();
-        let values = super::form::Values {
-            title,
-            when: Some((start, end)),
-            all_day: false,
-            guests,
-            location: String::new(),
-            about: String::new(),
-            meeting: super::form::Meeting::None,
-            calendar: self.account.email().to_owned(),
-            repeat: None,
-        };
+        let mut values = self.calendar_new_values(Some((start, end)), false);
+        values.title = title;
+        values.guests = guests;
         self.calendar.details = None;
         // The form takes Meet's guests' calendars as they are.
         let mut form = super::form::EventForm::create(values, true);
+        form.auto_meeting = self.calendar_auto_meeting();
         form.guest_colors = week.meet.colors.clone();
         self.calendar_open_form(form);
     }

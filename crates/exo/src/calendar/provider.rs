@@ -2,10 +2,11 @@
 //! invite card's `RSVP` alert and the day view's `Add Calendar` takeover both ask with.
 
 use egui::{Color32, Id, Pos2, Rect, Sense, Ui, Vec2, pos2, vec2};
+use exo_auth::Provider;
 use exo_ui::{BoxShadow, Family, Font, Menu, TextStyle, motion};
 
-/// `Choose a provider` and `Google Calendar`. There's no `Microsoft`, as Exo is Gmail-only.
-const ITEMS: [&str; 2] = ["Choose a provider", "Google Calendar"];
+/// `Choose a provider`, `Google Calendar`, and `Microsoft`.
+const ITEMS: [&str; 3] = ["Choose a provider", "Google Calendar", "Microsoft"];
 /// The dropdown's value is 14px/20px bold. The down caret sits 10px after it, 10px wide and 7.4px
 /// down the line.
 const VALUE: TextStyle = TextStyle::new(Font::new(Family::Sans, 700), 14.0, 20.0);
@@ -17,26 +18,29 @@ const MENU_LEFT: f32 = 18.0;
 const MENU_BELOW: f32 = 8.0;
 const MENU_WIDTH: f32 = 201.0;
 
-/// The provider dropdown's state: whether Google is chosen, and its list while it's open with
+/// The provider dropdown's state: the chosen provider, and its list while it's open with
 /// the row highlighted.
 #[derive(Clone, Debug, Default)]
 pub(super) struct ProviderPicker {
-    pub chosen: bool,
+    pub chosen: Option<Provider>,
     open: Option<usize>,
 }
 
 impl ProviderPicker {
+    fn index(&self) -> usize {
+        match self.chosen {
+            None => 0,
+            Some(Provider::Google) => 1,
+            Some(Provider::Microsoft) => 2,
+        }
+    }
+
     /// Paints the dropdown with its line's top left at `at`, its text in `value` and its caret in
     /// `caret`, and its list under it while open (above everything). Returns the dropdown's
     /// height.
     pub fn show(&mut self, ui: &Ui, id: Id, at: Pos2, value: Color32, caret: Color32) -> f32 {
-        let width = VALUE.paint_line(
-            ui.painter(),
-            at,
-            ITEMS[usize::from(self.chosen)],
-            value,
-            None,
-        );
+        let current = self.index();
+        let width = VALUE.paint_line(ui.painter(), at, ITEMS[current], value, None);
         exo_ui::paint_icon(
             ui,
             "legacy/DEPRECATED_downCaret",
@@ -51,7 +55,7 @@ impl ProviderPicker {
             self.open = if self.open.is_some() {
                 None
             } else {
-                Some(usize::from(self.chosen))
+                Some(current)
             };
         }
         if let Some(highlighted) = self.open {
@@ -66,7 +70,11 @@ impl ProviderPicker {
                 MENU_WIDTH,
             );
             if let Some(picked) = shown.clicked {
-                self.chosen = picked == 1;
+                self.chosen = match picked {
+                    1 => Some(Provider::Google),
+                    2 => Some(Provider::Microsoft),
+                    _ => None,
+                };
                 self.open = None;
             } else if let Some(hovered) = shown.hovered {
                 self.open = Some(hovered);
@@ -91,8 +99,8 @@ pub(super) fn ask(email: &str) -> String {
 /// What the takeover's buttons ask for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum TakeoverAction {
-    /// `Sign in`, with a provider chosen.
-    SignIn,
+    /// `Sign in`, with the chosen provider.
+    SignIn(Provider),
     /// `No thanks`.
     Dismiss,
 }
@@ -226,7 +234,10 @@ pub(super) fn show_takeover(
             exo_ui::DIALOG_ACTION_HEIGHT,
         ),
     );
-    let mut action = sign_in_button(ui, sign_in, picker.chosen).then_some(TakeoverAction::SignIn);
+    let mut action = sign_in_button(ui, sign_in, picker.chosen.is_some())
+        .then_some(picker.chosen)
+        .flatten()
+        .map(TakeoverAction::SignIn);
     let decline = Rect::from_min_size(
         pos2(sign_in.right() + rem, top + DECLINE_TOP),
         vec2(DECLINE.width(ui.ctx(), "No thanks"), DECLINE.line_height) + 2.0 * DECLINE_PADDING,

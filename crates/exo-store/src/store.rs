@@ -8,7 +8,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
-use gmail::{Client, Endpoints, TokenProvider};
+use gmail::Client;
 use toasty::{Db, Executor, Transaction};
 use tokio::sync::{Mutex, MutexGuard, watch};
 
@@ -16,12 +16,15 @@ use crate::api::{Api, Failure};
 use crate::connection::{Connection, Debounce, Outage};
 use crate::db::{
     self, AttachmentRow, BodyRow, IDENTITY, LabelRow, ListCursor, ListEntry, MessageRow, OutboxRow,
-    ParticipantEntry, ReminderRow,
+    PROVIDER, ParticipantEntry, ReminderRow,
 };
 use crate::error::{Error, Result};
 use crate::ids::labels::{INBOX, UNREAD};
 use crate::ids::{Filter, ListId, ThreadId};
 use crate::model::{Cursor, Label, LabelKind, ListCount, RecentThread, ThreadDetail, ThreadPage};
+use crate::provider::Provider;
+use crate::provider::gmail::Gmail;
+use crate::provider::outlook::Outlook;
 use crate::queue::FlushGate;
 use crate::quota::{Lane, Quota};
 use crate::settings::{self, Settings};
@@ -34,7 +37,72 @@ const ROUTING_VERSION_KEY: &str = "routing_version";
 /// routed only when they change. 1: a split's `filename:ics` looks at the latest message only.
 const ROUTING_VERSION: u32 = 1;
 
-/// An account's local mail store: a SQLite cache of Gmail, the sync engine that fills it, and
+/// Where an account's mail is, and the tokens that reach it.
+#[derive(Clone)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "one is made per store opened, so its size doesn't matter"
+)]
+pub enum Remote {
+    /// A Gmail account.
+    Gmail {
+        /// Where Google's APIs are.
+        endpoints: gmail::Endpoints,
+        /// Access tokens for them.
+        tokens: Arc<dyn gmail::TokenProvider>,
+    },
+    /// An Outlook account (Outlook.com, or Microsoft 365), through Microsoft Graph.
+    Outlook {
+        /// Where Graph is.
+        endpoints: outlook::Endpoints,
+        /// Access tokens for it.
+        tokens: Arc<dyn outlook::TokenProvider>,
+    },
+}
+
+impl Remote {
+    /// A Gmail account at `endpoints`, reached with `tokens`.
+    pub fn gmail(endpoints: gmail::Endpoints, tokens: impl gmail::TokenProvider + 'static) -> Self {
+        Self::Gmail {
+            endpoints,
+            tokens: Arc::new(tokens),
+        }
+    }
+
+    /// An Outlook account at `endpoints`, reached with `tokens`.
+    pub fn outlook(
+        endpoints: outlook::Endpoints,
+        tokens: impl outlook::TokenProvider + 'static,
+    ) -> Self {
+        Self::Outlook {
+            endpoints,
+            tokens: Arc::new(tokens),
+        }
+    }
+
+    /// The provider, as a store records the one it was made for.
+    fn provider(&self) -> &'static str {
+        match self {
+            Self::Gmail { .. } => "gmail",
+            Self::Outlook { .. } => "outlook",
+        }
+    }
+
+    /// The quota calls are paced under: the provider's at its own endpoints, and none anywhere
+    /// else (mock-servers enforces none unless asked to, and tests shouldn't wait one out).
+    fn quota(&self) -> Option<Quota> {
+        match self {
+            Self::Gmail { endpoints, .. } => {
+                (*endpoints == gmail::Endpoints::google()).then_some(Quota::GMAIL)
+            }
+            Self::Outlook { endpoints, .. } => {
+                (*endpoints == outlook::Endpoints::microsoft()).then_some(Quota::GRAPH)
+            }
+        }
+    }
+}
+
+/// An account's local mail store: a SQLite cache of its mail, the sync engine that fills it, and
 /// the outbox that sends the user's changes. Cheap to clone; clones share everything.
 ///
 /// Nothing runs in the background. The app drives it:
@@ -64,15 +132,25 @@ impl std::fmt::Debug for Store {
 
 pub(crate) struct Inner {
     pub db: Db,
-    pub api: Api,
-    /// The account's address.
+    /// The account's mail provider, which every mail call goes through.
+    pub mail: Arc<dyn Provider>,
+    /// The same provider as Gmail, for Gmail-only operations (`create_label` and Gmail-only
+    /// internal helpers). `None` for non-Gmail accounts.
+    gmail: Option<Arc<Gmail>>,
+    /// What the account's files are named by: its email for Gmail, `"microsoft {email}"` for
+    /// Outlook.
     pub account: String,
-    /// The clients of its other calendar accounts that are signed in, by address
-    /// ([`Store::add_calendar_account`]).
-    pub calendar_clients: RwLock<HashMap<String, Client>>,
+    /// Calendar providers by canonical account key (the primary mail account plus any secondary
+    /// calendar accounts added via [`Store::add_calendar_account`]).
+    pub calendar_accounts:
+        RwLock<HashMap<String, Arc<dyn crate::calendar::provider::CalendarProvider>>>,
     /// The calendar account each person's calendar was last read through
     /// ([`Store::attendee_events`]).
     pub attendee_accounts: RwLock<HashMap<String, String>>,
+    /// Store directory (for secondary calendar accounts' connection trackers).
+    pub dir: PathBuf,
+    /// Outage debounce settings (for secondary calendar accounts).
+    pub debounce: Debounce,
     /// Serializes write transactions. SQLite has one writer, and this lock keeps that writer from
     /// ever being contended or upgraded mid-transaction.
     write: Mutex<()>,
@@ -142,21 +220,23 @@ pub(crate) struct Inner {
     pub given: std::sync::Mutex<HashMap<String, crate::outbox::Undo>>,
     /// One held send's reminder given or taken back at a time, so none is given twice.
     pub giving: Mutex<()>,
+    /// [`Options::backoff`], the persistent queues' first retry delay.
+    pub backoff: Duration,
     /// [`Options::draft_pace`] and [`Options::draft_files_pace`].
     pub draft_pace: Duration,
     pub draft_files_pace: Duration,
 }
 
-/// Tuning knobs. The defaults are what the app runs with: the backoff, Gmail's quota, the offline
-/// debounce and the drafts' pace. Tests shorten the backoff and the debounce, and turn the drafts'
-/// pace off or shorten it.
+/// Tuning knobs. The defaults are what the app runs with on Gmail: the backoff, Gmail's quota, the
+/// offline debounce and the drafts' pace. Tests shorten the backoff and the debounce, and turn the
+/// drafts' pace off or shorten it.
 #[derive(Debug, Clone)]
 pub struct Options {
     /// First retry delay; later retries double it (capped at 32 s per call, 120 s in the
     /// outbox).
     pub backoff: Duration,
-    /// The quota that Gmail calls are paced under. `None` sends them as they come, for a server
-    /// that enforces none (like mock-servers unless asked to).
+    /// The quota that the provider's calls are paced under. `None` sends them as they come, for
+    /// a server that enforces none (like mock-servers unless asked to).
     pub quota: Option<Quota>,
     /// The shortest time an outage lasts before [`Store::connection`] says it's over.
     pub debounce: Debounce,
@@ -184,24 +264,22 @@ impl Default for Options {
 }
 
 impl Store {
-    /// Opens `account`'s store, one SQLite file in `dir`, talking to Gmail at `endpoints`.
-    /// Calls to Google are paced under Gmail's quota. Calls anywhere else (mock-servers) aren't,
-    /// since the mock enforces no quota unless asked to and tests shouldn't wait one out.
+    /// Opens `account`'s store, one SQLite file in `dir`, talking to the account's provider at
+    /// `remote`. `account` names the store's files: an account's address for Gmail, and one
+    /// that names Microsoft too for Outlook (`microsoft {address}`), so two accounts with one
+    /// address keep their mail apart. Calls to the provider's own servers are paced under its
+    /// quota. Calls anywhere else (mock-servers) aren't, since the mock enforces no quota unless
+    /// asked to and tests shouldn't wait one out.
     ///
     /// # Errors
-    /// When the directory or database can't be created or read.
-    pub async fn open(
-        dir: impl AsRef<Path>,
-        account: &str,
-        endpoints: Endpoints,
-        tokens: impl TokenProvider + 'static,
-    ) -> Result<Self> {
-        let quota = (endpoints == Endpoints::google()).then_some(Quota::GMAIL);
+    /// When the directory or database can't be created or read, and
+    /// [`Error::OtherProvider`] when the store was made for another provider's account.
+    pub async fn open(dir: impl AsRef<Path>, account: &str, remote: Remote) -> Result<Self> {
+        let quota = remote.quota();
         Self::open_with(
             dir,
             account,
-            endpoints,
-            tokens,
+            remote,
             Options {
                 quota,
                 ..Options::default()
@@ -213,34 +291,92 @@ impl Store {
     /// [`open`](Self::open) with non-default [`Options`].
     ///
     /// # Errors
-    /// When the directory or database can't be created or read.
+    /// As [`open`](Self::open).
     pub async fn open_with(
         dir: impl AsRef<Path>,
         account: &str,
-        endpoints: Endpoints,
-        tokens: impl TokenProvider + 'static,
+        remote: Remote,
         options: Options,
     ) -> Result<Self> {
         check_account(account)?;
-        let mut db = db::open(&dir.as_ref().join(format!("{account}.sqlite3"))).await?;
+        let path = dir.as_ref().join(format!("{account}.sqlite3"));
+        let mut db = db::open(&path).await?;
+        // A store holds one provider's account, so it's only ever opened as that one.
+        let provider = remote.provider();
+        match db::kv_get::<String>(&mut db, PROVIDER).await? {
+            None => db::kv_set(&mut db, PROVIDER, &provider).await?,
+            Some(found) if found == provider => {}
+            Some(found) => return Err(Error::OtherProvider { path, found }),
+        }
         let notes_backup = dir.as_ref().join(format!("{account}.notes-backup.json"));
         let recovered = crate::notes::recover(&mut db, &notes_backup).await?;
         let noted = db::query_i64(&mut db, "SELECT count(*) FROM notes").await? > 0;
         let identity = db::kv_get(&mut db, IDENTITY).await?.unwrap_or_default();
         let splits = load_splits(&mut db).await?;
-        let store = Self {
-            inner: Arc::new(Inner {
-                db,
-                api: Api::new(
-                    Client::new(endpoints, tokens),
+        let (_, primary_email) =
+            crate::calendar::model::CalendarProviderKind::parse_account_key(account);
+        let (mail, gmail, primary_calendar): (
+            Arc<dyn Provider>,
+            _,
+            Arc<dyn crate::calendar::provider::CalendarProvider>,
+        ) = match remote {
+            Remote::Gmail { endpoints, tokens } => {
+                let client = Client::new(endpoints, tokens);
+                let gmail = Arc::new(Gmail {
+                    api: Api::new(
+                        client.clone(),
+                        options.backoff,
+                        options.quota,
+                        options.debounce,
+                        dir.as_ref(),
+                    ),
+                });
+                let mail: Arc<dyn Provider> = gmail.clone();
+                let cal: Arc<dyn crate::calendar::provider::CalendarProvider> =
+                    Arc::new(crate::calendar::google::GoogleCalendar::new(
+                        primary_email.to_owned(),
+                        client,
+                        options.backoff,
+                        options.debounce,
+                        dir.as_ref(),
+                        Some(mail.clone()),
+                    ));
+                (mail, Some(gmail), cal)
+            }
+            Remote::Outlook { endpoints, tokens } => {
+                let client = outlook::Client::new(endpoints, tokens);
+                let mail: Arc<dyn Provider> = Arc::new(Outlook::new(
+                    client.clone(),
                     options.backoff,
                     options.quota,
                     options.debounce,
                     dir.as_ref(),
-                ),
+                ));
+                let cal: Arc<dyn crate::calendar::provider::CalendarProvider> =
+                    Arc::new(crate::calendar::outlook::OutlookCalendar::new(
+                        account.to_owned(),
+                        primary_email.to_owned(),
+                        client,
+                        options.backoff,
+                        options.debounce,
+                        dir.as_ref(),
+                        Some(mail.clone()),
+                    ));
+                (mail, None, cal)
+            }
+        };
+        let mut calendar_accounts = HashMap::new();
+        calendar_accounts.insert(account.to_owned(), primary_calendar);
+        let store = Self {
+            inner: Arc::new(Inner {
+                db,
+                mail,
+                gmail,
                 account: account.to_owned(),
-                calendar_clients: RwLock::default(),
+                calendar_accounts: RwLock::new(calendar_accounts),
                 attendee_accounts: RwLock::default(),
+                dir: dir.as_ref().to_path_buf(),
+                debounce: options.debounce,
                 write: Mutex::new(()),
                 sync: Mutex::new(()),
                 bootstrapped: AtomicBool::new(false),
@@ -274,6 +410,7 @@ impl Store {
                 uploads: watch::Sender::new(crate::drafts::Uploads::new()),
                 given: std::sync::Mutex::default(),
                 giving: Mutex::new(()),
+                backoff: options.backoff,
                 draft_pace: options.draft_pace,
                 draft_files_pace: options.draft_files_pace,
             }),
@@ -337,43 +474,30 @@ impl Store {
         db::clear(&dir.as_ref().join(format!("{account}.sqlite3"))).await
     }
 
-    /// The connection to Gmail as the offline bar shows it, which is what the last calls found
-    /// down. It changes as calls fail and get through, not with [`changes`](Self::changes).
+    /// The connection to the mail provider as the offline bar shows it, which is what the last
+    /// calls found down. It changes as calls fail and get through, not with
+    /// [`changes`](Self::changes).
     #[must_use]
     pub fn connection(&self) -> watch::Receiver<Connection> {
-        self.inner.api.connection()
+        self.inner.mail.connection()
     }
 
-    /// Checks whether Gmail answers a request for its profile. The app checks every 10 s while
+    /// Checks whether the mail provider answers a profile request. The app checks every 10 s while
     /// something is down (60 s while hidden). An answer brings back what has been down long
     /// enough.
     pub async fn check_connection(&self) {
-        if let Err(failure) = self.inner.api.ping().await {
-            log::debug!("checking Gmail: {}", failure.message());
+        if let Err(failure) = self.inner.mail.check().await {
+            log::debug!("checking mail provider: {}", failure.message());
         }
     }
 
-    /// Checks whether Gmail answers after the OS says the network changed. When nothing does,
-    /// the connection is [`Outage::Offline`] until something does.
+    /// Checks whether the mail provider answers after the OS says the network changed. When
+    /// nothing does, the connection is [`Outage::Offline`] until something does.
     pub async fn network_changed(&self) {
-        if let Err(Failure::Offline(error)) = self.inner.api.ping().await {
-            log::info!("the network changed and Gmail can't be reached: {error}");
-            self.inner.api.down(Outage::Offline);
+        if let Err(Failure::Offline(error)) = self.inner.mail.check().await {
+            log::info!("the network changed and mail provider can't be reached: {error}");
+            self.inner.mail.down(Outage::Offline);
         }
-    }
-
-    /// Calls a Google API other than Gmail and Calendar (People's contacts) through the store's
-    /// retry policy, `attempts` times at most. Like Calendar's calls, it tells the connection
-    /// how the call ended, and no answer means the network is down.
-    ///
-    /// # Errors
-    /// [`Error::Offline`] and the like, as for Gmail's calls.
-    pub async fn google<'a, T: serde::de::DeserializeOwned + 'a>(
-        &'a self,
-        attempts: u32,
-        make: impl FnMut(&'a Client) -> gmail::Call<'a, T>,
-    ) -> Result<T> {
-        Ok(self.inner.api.request(attempts, make).await?)
     }
 
     /// A revision counter that ticks after every change the UI can see (synced mail, applied
@@ -449,7 +573,7 @@ impl Store {
         // While Gmail can't be reached, the sends waiting for it are listed in Scheduled too,
         // held there like the threads in `held`.
         let waiting: Vec<ThreadId> =
-            if *list == ListId::Scheduled && !self.inner.api.connection().borrow().is_online() {
+            if *list == ListId::Scheduled && !self.inner.mail.connection().borrow().is_online() {
                 crate::drafts::marks(&mut db)
                     .await?
                     .sending
@@ -693,6 +817,7 @@ impl Store {
         };
         let created = self
             .inner
+            .gmail("Labels")?
             .api
             .call(Lane::Act, 3, |gmail| gmail.create_label(&request))
             .await?;
@@ -760,83 +885,24 @@ impl Store {
             return Ok(kept);
         }
         let data = self
-            .fetch_part(Lane::Act, message, attachment, part, progress)
+            .inner
+            .mail
+            .part(message, attachment, part, Lane::Act, progress)
             .await?;
         self.keep_part(message, part, &data);
         Ok(data)
     }
-
-    /// [`part_data`](Self::part_data) from Gmail, in `lane`. A part read by its attachment id
-    /// reports its transfer to `progress`.
-    pub(crate) async fn fetch_part(
-        &self,
-        lane: Lane,
-        message: &str,
-        attachment: Option<&str>,
-        part: &str,
-        progress: Option<gmail::Progress>,
-    ) -> Result<Vec<u8>> {
-        let api = &self.inner.api;
-        fn report<'a>(
-            call: gmail::Call<'a, gmail::MessagePartBody>,
-            progress: Option<&gmail::Progress>,
-        ) -> gmail::Call<'a, gmail::MessagePartBody> {
-            match progress {
-                Some(progress) => call.on_progress(progress.clone()),
-                None => call,
-            }
-        }
-        if let Some(attachment) = attachment {
-            match api
-                .call(lane, 3, |gmail| {
-                    report(gmail.attachment(message, attachment), progress.as_ref())
-                })
-                .await
-            {
-                Ok(body) => return Ok(body.data.unwrap_or_default()),
-                Err(failure) if failure.is_permanent() => {
-                    log::info!(
-                        "Gmail refused part {part} of {message} by its stored id ({}); fetching the message",
-                        failure.message()
-                    );
-                }
-                Err(failure) => return Err(failure.into()),
-            }
-        }
-        let missing = || Error::MissingPart {
-            message: message.to_owned(),
-            part: part.to_owned(),
-        };
-        let fetched = api
-            .call(lane, 3, |gmail| {
-                gmail.message(message, gmail::Format::Full, &[])
-            })
-            .await?;
-        let body = fetched
-            .payload
-            .as_ref()
-            .and_then(|payload| {
-                payload
-                    .walk()
-                    .find(|candidate| candidate.part_id.as_deref() == Some(part))
-            })
-            .and_then(|found| found.body.clone())
-            .ok_or_else(missing)?;
-        match (body.data, body.attachment_id) {
-            (Some(data), _) => Ok(data),
-            (None, Some(fresh)) => Ok(api
-                .call(lane, 3, |gmail| {
-                    report(gmail.attachment(message, &fresh), progress.as_ref())
-                })
-                .await?
-                .data
-                .unwrap_or_default()),
-            (None, None) => Err(missing()),
-        }
-    }
 }
 
 impl Inner {
+    /// The account as Gmail, for `feature`, which only Gmail has.
+    ///
+    /// # Errors
+    /// [`Error::Unsupported`] for another provider's account.
+    pub fn gmail(&self, feature: &'static str) -> Result<&Gmail> {
+        self.gmail.as_deref().ok_or(Error::Unsupported(feature))
+    }
+
     pub fn me(&self) -> Identity {
         self.identity
             .read()
@@ -1340,8 +1406,10 @@ mod tests {
         let store = Store::open(
             &dir,
             "maya@brightmoor.co",
-            gmail::Endpoints::google(),
-            gmail::StaticToken("unused".into()),
+            crate::Remote::gmail(
+                gmail::Endpoints::google(),
+                gmail::StaticToken("unused".into()),
+            ),
         )
         .await
         .expect("opens");
@@ -1411,8 +1479,10 @@ mod tests {
         let store = Store::open(
             &dir,
             "maya@brightmoor.co",
-            gmail::Endpoints::google(),
-            gmail::StaticToken("unused".into()),
+            crate::Remote::gmail(
+                gmail::Endpoints::google(),
+                gmail::StaticToken("unused".into()),
+            ),
         )
         .await
         .expect("opens");
@@ -1463,8 +1533,8 @@ mod tests {
                     }),
                     ..Default::default()
                 };
-                let parsed = crate::parse::parse(&msg, false).expect("parses");
-                crate::provider::save_message(write.exec(), parsed)
+                let parsed = crate::provider::gmail::parse::parse(&msg, false).expect("parses");
+                crate::truth::save_message(write.exec(), parsed)
                     .await
                     .expect("saves");
                 ids.push(tid);
@@ -1531,8 +1601,10 @@ mod tests {
         let store = Store::open(
             &dir,
             "maya@brightmoor.co",
-            gmail::Endpoints::google(),
-            gmail::StaticToken("unused".into()),
+            crate::Remote::gmail(
+                gmail::Endpoints::google(),
+                gmail::StaticToken("unused".into()),
+            ),
         )
         .await
         .expect("opens");
@@ -1563,8 +1635,8 @@ mod tests {
         let mut db = store.inner.db.clone();
         {
             let mut write = store.inner.begin(&mut db).await.expect("tx");
-            let parsed = crate::parse::parse(&msg, false).expect("parses");
-            crate::provider::save_message(write.exec(), parsed)
+            let parsed = crate::provider::gmail::parse::parse(&msg, false).expect("parses");
+            crate::truth::save_message(write.exec(), parsed)
                 .await
                 .expect("saves");
             write.commit().await.expect("commits");
@@ -1618,7 +1690,7 @@ mod tests {
                 .exec(write.exec())
                 .await
                 .expect("deletes outbox");
-            crate::provider::apply_step(write.exec(), "t1", &step)
+            crate::truth::apply_step(write.exec(), "t1", &step)
                 .await
                 .expect("applies truth INBOX");
             write.commit().await.expect("commits folded truth");

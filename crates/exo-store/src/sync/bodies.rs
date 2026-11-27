@@ -1,6 +1,6 @@
 //! Bodies. Backfill, history, search and the contact pane fetch threads for their rows
-//! ([`fetch_rows`](super::fetch_rows)), and a message's body, attachments and every header come
-//! after. The threads the app shows first (the first [`ON_SCREEN_AHEAD`] of the list on screen
+//! ([`rows`](crate::provider::Provider::rows)), and a message's body, attachments and every
+//! header come after. The threads the app shows first (the first [`ON_SCREEN_AHEAD`] of the list on screen
 //! and of every inbox list) get them in the background, a page each sync round
 //! ([`Lane::Sync`]). The thread the list's cursor rests on gets them before it's opened
 //! ([`Store::prefetch`], [`Lane::Show`]). The rest that eviction would keep get them a hundred
@@ -13,17 +13,17 @@ use std::collections::HashSet;
 use futures::{StreamExt, stream};
 use toasty::Executor;
 
+use super::ATTEMPTS;
 use super::backfill::ON_SCREEN_AHEAD;
-use super::{ATTEMPTS, Rows, fetch_message, fetch_thread};
-use crate::api::{Api, Failure};
+use crate::api::Failure;
 use crate::db::{self, BodyRow, EVICTED_BEFORE, MessageRow, query_col, query_i64};
 use crate::error::{Error, Result};
 use crate::evict::Eviction;
 use crate::ids::ThreadId;
 use crate::ids::labels::{INBOX, SH_IMPORTANT, SH_OTHER};
-use crate::provider;
 use crate::quota::Lane;
 use crate::store::{Inner, Store, reindex, reindex_many};
+use crate::truth;
 
 /// Threads a sync round fetches the bodies of.
 const PAGE: usize = 10;
@@ -74,10 +74,10 @@ impl Inner {
             let messages = bodiless(&mut db, &thread).await?;
             missing.push((thread, messages));
         }
-        let api = &self.api;
+        let mail = &self.mail;
         let results = stream::iter(missing)
             .map(|(thread, messages)| async move {
-                let fetched = fetch_bodies(api, Lane::Sync, ATTEMPTS, &thread, &messages).await;
+                let fetched = mail.bodies(&thread, &messages, Lane::Sync, ATTEMPTS).await;
                 (thread, fetched)
             })
             .buffer_unordered(CONCURRENCY)
@@ -91,7 +91,7 @@ impl Inner {
         for (thread, fetched) in results {
             match fetched {
                 Ok(messages) => {
-                    provider::save_bodies(write.exec(), &messages).await?;
+                    truth::save_bodies(write.exec(), messages).await?;
                     reindexed.push(thread.clone());
                 }
                 // Retrying soon won't fix this, so the thread waits to be opened.
@@ -218,23 +218,17 @@ impl Store {
     pub(crate) async fn load_thread_in(&self, thread: &ThreadId, lane: Lane) -> Result<bool> {
         let inner = &self.inner;
         inner.bootstrapped().await?;
-        let Some(fetched) = fetch_thread(&inner.api, lane, OPEN_ATTEMPTS, thread.as_str()).await?
+        let Some(fetched) = inner
+            .mail
+            .thread(thread.as_str(), lane, OPEN_ATTEMPTS)
+            .await?
         else {
             self.set_noted_thread_gone(thread.as_str(), true).await?;
             return Ok(false);
         };
-        let full = fetched
-            .messages
-            .iter()
-            .filter_map(|message| message.id.clone())
-            .collect();
-        let rows = Rows {
-            thread: fetched,
-            full,
-        };
         let mut db = inner.db.clone();
         let mut write = inner.begin(&mut db).await?;
-        if let Some(id) = provider::save_rows(write.exec(), &rows).await? {
+        if let Some(id) = truth::save_rows(write.exec(), fetched).await? {
             reindex(write.exec(), &id, &inner.router()).await?;
         }
         write.publish().await?;
@@ -343,9 +337,9 @@ impl Inner {
         } else {
             OPEN_ATTEMPTS
         };
-        let messages = fetch_bodies(&self.api, lane, attempts, thread, &missing).await?;
+        let messages = self.mail.bodies(thread, &missing, lane, attempts).await?;
         let mut write = self.begin(&mut db).await?;
-        provider::save_bodies(write.exec(), &messages).await?;
+        truth::save_bodies(write.exec(), messages).await?;
         reindex(write.exec(), thread, &self.router()).await?;
         if notify {
             write.publish().await
@@ -391,28 +385,6 @@ async fn bodiless(exec: &mut dyn Executor, thread: &str) -> Result<Vec<String>> 
         .collect())
 }
 
-/// Fetches the `missing` bodies of `thread` the cheapest way: the one message alone
-/// (`messages.get`, half a thread's units), or else the whole thread. Returns nothing when the
-/// thread is gone.
-async fn fetch_bodies(
-    api: &Api,
-    lane: Lane,
-    attempts: u32,
-    thread: &str,
-    missing: &[String],
-) -> Result<Vec<gmail::Message>, Failure> {
-    Ok(match missing {
-        [message] => fetch_message(api, lane, attempts, message)
-            .await?
-            .into_iter()
-            .collect(),
-        _ => fetch_thread(api, lane, attempts, thread)
-            .await?
-            .map(|thread| thread.messages)
-            .unwrap_or_default(),
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::Ordering;
@@ -445,8 +417,7 @@ mod tests {
         let store = Store::open_with(
             &dir,
             "maya@brightmoor.co",
-            gmail::Endpoints::google(),
-            FailingToken,
+            crate::Remote::gmail(gmail::Endpoints::google(), FailingToken),
             Options {
                 backoff: Duration::from_millis(1),
                 quota: None,
@@ -466,8 +437,8 @@ mod tests {
         };
         {
             let mut write = store.inner.begin(&mut db).await.expect("tx");
-            let parsed = crate::parse::parse(&msg, false).expect("parses");
-            provider::save_message(write.exec(), parsed)
+            let parsed = crate::provider::gmail::parse::parse(&msg, false).expect("parses");
+            truth::save_message(write.exec(), parsed)
                 .await
                 .expect("saves");
             write.commit().await.expect("commits");

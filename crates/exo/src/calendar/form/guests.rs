@@ -341,7 +341,7 @@ impl EventForm {
                 ui.painter(),
                 pos2(line.left(), line.top() + 2.0),
                 &guest.email,
-                Rsvp::parse_opt(guest.response.as_deref()),
+                guest.response.map(Rsvp::from_store),
                 palette,
             );
             let text = guest.name.clone().unwrap_or_else(|| guest.email.clone());

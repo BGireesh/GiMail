@@ -1,11 +1,13 @@
-//! Out of Office Reply: the dialog that edits Gmail's vacation responder, the green status bar
-//! while replies go out, and the nudge to set one for out-of-office days on the calendar.
+//! Out of Office Reply: the dialog that edits Gmail's vacation responder or Outlook's automatic
+//! replies, the green status bar while replies go out, and the nudge to set one for out-of-office
+//! days on the calendar.
 //!
-//! Exo reads and writes Gmail's `settings/vacation` itself, and keeps a copy of it in the account's
-//! settings, which the bar and the nudge go by. The copy is brought up to date when the mail opens,
-//! every hour, when the dialog opens and when it saves. Out-of-office events on the primary
-//! calendar in the next 35 days are looked for when the mail opens and every 15 minutes, and the
-//! nudge looks at them 2 s after the mail shows and whenever new ones turn up.
+//! Exo reads and writes the provider's responder ([`exo_store::Store::auto_reply`],
+//! [`exo_store::Store::update_auto_reply`]), and keeps a copy of it in the account's settings,
+//! which the bar and the nudge go by. The copy is brought up to date when the mail opens, every
+//! hour, when the dialog opens and when it saves. Out-of-office events on the primary calendar in
+//! the next 35 days are looked for when the mail opens and every 15 minutes, and the nudge looks
+//! at them 2 s after the mail shows and whenever new ones turn up.
 
 mod alerts;
 mod date_input;
@@ -15,9 +17,9 @@ mod spelling;
 use egui::{Context, Rect};
 use exo_commands::{Command, Commands, Region, Toast};
 use exo_editor::FormatCommand;
-use exo_store::{OUT_OF_OFFICE_LOOKAHEAD, OutOfOfficeDays, OutOfOfficeResponder};
-use gmail::VacationSettings;
-use gmail::calendar::Event as CalendarEvent;
+use exo_store::{
+    AutoReply, CalendarEvent, OUT_OF_OFFICE_LOOKAHEAD, OutOfOfficeDays, OutOfOfficeResponder,
+};
 
 pub use alerts::Alert;
 pub use dialog::{Control, Event as DialogEvent, Form};
@@ -61,16 +63,16 @@ pub enum AlertEvent {
     Cycle(isize),
 }
 
-/// What Gmail or Calendar answered, handed back to the UI thread.
+/// What the mail provider or Calendar answered, handed back to the UI thread.
 enum Outcome {
-    /// Gmail's responder, read for the dialog or on the hour, or `Err` when it couldn't be.
+    /// The provider's responder, read for the dialog or on the hour, or `Err` when it couldn't be.
     Read {
         generation: u64,
-        settings: Result<VacationSettings, ()>,
+        settings: Result<AutoReply, ()>,
         dialog: bool,
     },
-    /// What Gmail kept of a save.
-    Saved(Result<VacationSettings, ()>),
+    /// What the provider kept of a save.
+    Saved(Result<AutoReply, ()>),
     /// The primary calendar's events coming up.
     Events(Vec<CalendarEvent>),
 }
@@ -137,25 +139,28 @@ pub(crate) fn register(commands: &mut Commands<commands::Action>, state: &OutOfO
     if !dialog.editor_wants_escape() {
         commands.add(key("OOO_ESCAPE", DialogEvent::Close, &["esc"]));
     }
-    let in_list = focus == Some(Control::Message) && dialog.editor().in_list();
+    let focused_editor = dialog.focused_editor();
+    let in_list = focused_editor.is_some_and(exo_editor::Editor::in_list);
     if !in_list {
-        // Ghost text or a chosen suggestion takes Tab in the message.
-        if !(focus == Some(Control::Message) && dialog.editor().wants_tab()) {
+        // Ghost text or a chosen suggestion takes Tab in a message editor.
+        if !focused_editor.is_some_and(exo_editor::Editor::wants_tab) {
             commands.add(key("OOO_TAB", DialogEvent::Tab(1), &["tab"]));
         }
         commands.add(key("OOO_SHIFT_TAB", DialogEvent::Tab(-1), &["shift+tab"]));
     }
     match focus {
-        Some(Control::Message) => {
-            for command in FormatCommand::ALL
-                .into_iter()
-                .filter(|command| command.applies(dialog.editor()))
-            {
-                commands.add(
-                    Command::shortcut(command.id(), act(Action::Format(command)))
-                        .keys(command.keys().iter().copied())
-                        .regions(DIALOG),
-                );
+        Some(Control::Message | Control::ExternalMessage) => {
+            if let Some(editor) = focused_editor {
+                for command in FormatCommand::ALL
+                    .into_iter()
+                    .filter(|command| command.applies(editor))
+                {
+                    commands.add(
+                        Command::shortcut(command.id(), act(Action::Format(command)))
+                            .keys(command.keys().iter().copied())
+                            .regions(DIALOG),
+                    );
+                }
             }
             // The date tooltip's keys, so what it promises works here too.
             if dialog.on_date() {
@@ -175,6 +180,9 @@ pub(crate) fn register(commands: &mut Commands<commands::Action>, state: &OutOfO
         Some(Control::Start | Control::End) => {
             commands.add(key("OOO_DATE_ENTER", DialogEvent::Enter, &["enter"]));
             commands.add(key("OOO_DATE_DOWN", DialogEvent::Down, &["down"]));
+        }
+        Some(Control::StartTime | Control::EndTime) => {
+            commands.add(key("OOO_TIME_ENTER", DialogEvent::Enter, &["enter"]));
         }
         Some(_) => {
             commands.add(key("OOO_ENTER", DialogEvent::Enter, &["enter"]));
@@ -223,17 +231,17 @@ impl Mail {
         ctx.request_repaint_after_secs((next - time).max(0.0) as f32);
     }
 
-    /// Asks Gmail for its responder.
+    /// Asks the provider for its automatic reply responder.
     fn read_vacation(&mut self, for_dialog: bool) {
         self.out_of_office.read_generation += 1;
         let generation = self.out_of_office.read_generation;
         self.out_of_office.read_at = Some(self.ctx.input(|input| input.time));
         let ui = self.ui_sender();
         self.account.loader().run(
-            |store| async move { store.vacation().await },
+            |store| async move { store.auto_reply().await },
             move |result| {
                 if let Err(error) = &result {
-                    log::info!("reading the vacation responder: {error}");
+                    log::info!("reading the automatic reply responder: {error}");
                 }
                 ui.send(move |mail| {
                     mail.out_of_office_outcome(Outcome::Read {
@@ -277,7 +285,7 @@ impl Mail {
                     return;
                 }
                 if let Ok(settings) = &settings {
-                    let copy = OutOfOfficeResponder::synced(
+                    let copy = OutOfOfficeResponder::sync_auto_reply(
                         settings,
                         self.account.settings().out_of_office_responder.as_ref(),
                         now.timestamp(),
@@ -313,7 +321,7 @@ impl Mail {
                         if let Some(open) = self.out_of_office.dialog.as_mut() {
                             open.open = false;
                         }
-                        let copy = OutOfOfficeResponder::of(&kept, now.timestamp());
+                        let copy = OutOfOfficeResponder::from_auto_reply(&kept, now.timestamp());
                         self.account.update_settings(|account| {
                             account.out_of_office_responder = Some(copy)
                         });
@@ -387,11 +395,12 @@ impl Mail {
     /// calendar, starting within a week, is offered a reply at once.
     pub(crate) fn out_of_office_created(&mut self, calendar: &str, event: &CalendarEvent) {
         let data = self.account.calendar().data();
+        let own_key = self.account.key();
         let primary = data.calendars.as_ref().is_some_and(|calendars| {
             calendars.iter().any(|listed| {
-                listed.account == self.account.email()
-                    && listed.entry.id.as_deref() == Some(calendar)
-                    && listed.entry.primary == Some(true)
+                listed.account == own_key
+                    && listed.calendar.id == calendar
+                    && listed.calendar.primary
             })
         });
         let Some(days) =
@@ -430,7 +439,7 @@ impl Mail {
             Action::Open => self.open_out_of_office(None),
             Action::Format(command) => {
                 if let Some(open) = self.out_of_office.dialog.as_mut() {
-                    command.run(open.editor_mut());
+                    open.run_format(command);
                 }
             }
             Action::ShiftDate(days) => {
@@ -459,15 +468,20 @@ impl Mail {
         }
     }
 
-    /// Opens the dialog, which reads Gmail, or an alert while offline. `days` are the nudge's.
+    /// Opens the dialog, which reads the provider, or an alert while offline. `days` are the
+    /// nudge's.
     fn open_out_of_office(&mut self, days: Option<OutOfOfficeDays>) {
         self.commands.close_palette();
         if !self.snapshot.connection.is_online() {
             self.out_of_office.alert = Some((Alert::Offline, 0));
             return;
         }
-        self.out_of_office.dialog =
-            Some(dialog::Dialog::new(self.account.email(), days, &self.now));
+        self.out_of_office.dialog = Some(dialog::Dialog::new_for(
+            self.account.email(),
+            self.account.is_outlook(),
+            days,
+            &self.now,
+        ));
         self.read_vacation(true);
     }
 
@@ -503,14 +517,14 @@ impl Mail {
                     return;
                 }
                 open.submitting = true;
-                let settings = open.vacation();
+                let reply = open.auto_reply();
                 self.out_of_office.read_generation += 1;
                 let ui = self.ui_sender();
                 self.account.loader().run(
-                    |store| async move { store.update_vacation(&settings).await },
+                    move |store| async move { store.update_auto_reply(&reply).await },
                     move |result| {
                         if let Err(error) = &result {
-                            log::warn!("saving the vacation responder: {error}");
+                            log::warn!("saving the automatic reply responder: {error}");
                         }
                         ui.send(move |mail| {
                             mail.out_of_office_outcome(Outcome::Saved(result.map_err(drop)));
@@ -522,6 +536,7 @@ impl Mail {
                 self.out_of_office.alert = Some((
                     Alert::PastedFile {
                         email: self.account.email().to_owned(),
+                        outlook: self.account.is_outlook(),
                     },
                     0,
                 ))
@@ -654,7 +669,7 @@ mod tests {
             gmail::Endpoints::mock(&"http://127.0.0.1:9/".parse().expect("mock origin"));
         let account = Account::open(
             &dir,
-            Credentials {
+            Credentials::Gmail {
                 email: "maya@brightmoor.co".into(),
                 endpoints,
                 tokens: Arc::new(gmail::StaticToken("dev".into())),
@@ -671,12 +686,12 @@ mod tests {
         let (mut mail, dir) = test_mail("saved-closed");
         assert!(mail.out_of_office.dialog.is_none());
 
-        let kept = VacationSettings {
+        let kept = AutoReply::Gmail(gmail::VacationSettings {
             enable_auto_reply: Some(true),
             response_subject: Some("Away".into()),
             response_body_html: Some("<div>Back Monday</div>".into()),
-            ..VacationSettings::default()
-        };
+            ..gmail::VacationSettings::default()
+        });
         mail.out_of_office_outcome(Outcome::Saved(Ok(kept)));
 
         let saved = mail
@@ -697,12 +712,12 @@ mod tests {
         let (mut mail, dir) = test_mail("stale-gen");
         mail.out_of_office.read_generation = 2;
 
-        let fresh = VacationSettings {
+        let fresh = AutoReply::Gmail(gmail::VacationSettings {
             enable_auto_reply: Some(true),
             response_subject: Some("Fresh".into()),
             response_body_html: Some("<div>Fresh</div>".into()),
-            ..VacationSettings::default()
-        };
+            ..gmail::VacationSettings::default()
+        });
         mail.out_of_office_outcome(Outcome::Read {
             generation: 2,
             settings: Ok(fresh),
@@ -717,12 +732,12 @@ mod tests {
             Some("Fresh")
         );
 
-        let stale = VacationSettings {
+        let stale = AutoReply::Gmail(gmail::VacationSettings {
             enable_auto_reply: Some(false),
             response_subject: Some("Stale".into()),
             response_body_html: Some("<div>Stale</div>".into()),
-            ..VacationSettings::default()
-        };
+            ..gmail::VacationSettings::default()
+        });
         mail.out_of_office_outcome(Outcome::Read {
             generation: 1,
             settings: Ok(stale),
@@ -736,6 +751,37 @@ mod tests {
                 .map(|r| (r.is_enabled(), r.google.response_subject.as_str())),
             Some((true, "Fresh")),
             "out-of-order read with lower generation must be ignored"
+        );
+
+        mail.discard();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn outlook_saved_outcome_updates_responder_and_status_bar() {
+        let (mut mail, dir) = test_mail("outlook-saved");
+        let kept = AutoReply::Outlook(exo_store::OutlookAutoReply {
+            status: exo_store::AutoReplyStatus::AlwaysEnabled,
+            external_audience: exo_store::ExternalAudience::ContactsOnly,
+            internal_reply_html: "<div>Inside org</div>".into(),
+            external_reply_html: "<div>Outside org</div>".into(),
+            start_time: None,
+            end_time: None,
+        });
+        mail.out_of_office_outcome(Outcome::Saved(Ok(kept)));
+        assert!(mail.out_of_office());
+        let saved = mail
+            .account
+            .settings()
+            .out_of_office_responder
+            .as_ref()
+            .and_then(|r| r.outlook.as_ref())
+            .expect("outlook responder saved");
+        assert_eq!(saved.internal_reply_html, "<div>Inside org</div>");
+        assert_eq!(saved.external_reply_html, "<div>Outside org</div>");
+        assert_eq!(
+            saved.external_audience,
+            exo_store::ExternalAudience::ContactsOnly
         );
 
         mail.discard();

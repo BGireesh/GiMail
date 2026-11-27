@@ -20,8 +20,8 @@ pub struct StatusBar {
 
 impl StatusBar {
     /// The bar for `connection`, if something's down. `week` is whether the calendar's week view
-    /// is open.
-    pub fn offline(connection: &Connection, week: bool) -> Option<Self> {
+    /// is open, and `outlook` selects Outlook / Microsoft copy.
+    pub fn offline(connection: &Connection, week: bool, outlook: bool) -> Option<Self> {
         let text = MessageBarRun::Text;
         let link = MessageBarRun::Link;
         let offline = if week {
@@ -29,12 +29,24 @@ impl StatusBar {
         } else {
             "Messages will send and receive when next online."
         };
-        let catch_up = "Exo will work offline and catch up when Gmail responds.";
+        let catch_up = if outlook {
+            "Exo will work offline and catch up when Outlook responds."
+        } else {
+            "Exo will work offline and catch up when Gmail responds."
+        };
         let (title, description, next, color) = match connection.outage? {
             Outage::Offline => (
                 "Offline",
                 "Good news: Exo works offline!",
                 vec![text(offline)],
+                MessageBarColor::Blue,
+            ),
+            Outage::Auth if outlook => (
+                "Offline",
+                "Sorry! Microsoft OAuth is not responding right now.",
+                vec![text(
+                    "Exo will reconnect automatically when Microsoft responds.",
+                )],
                 MessageBarColor::Blue,
             ),
             Outage::Auth => (
@@ -45,6 +57,12 @@ impl StatusBar {
                 )],
                 MessageBarColor::Blue,
             ),
+            Outage::Gmail if outlook => (
+                "Offline",
+                "Outlook is not responding right now.",
+                vec![text(catch_up)],
+                MessageBarColor::Blue,
+            ),
             Outage::Gmail => (
                 "Offline",
                 "Gmail is not responding right now.",
@@ -53,11 +71,25 @@ impl StatusBar {
             ),
             Outage::Throttled => (
                 "Note",
-                "Gmail is temporarily throttling requests.",
+                if outlook {
+                    "Outlook is temporarily throttling requests."
+                } else {
+                    "Gmail is temporarily throttling requests."
+                },
                 vec![text(catch_up)],
                 MessageBarColor::Blue,
             ),
             // Fatal: red.
+            Outage::GmailDisabled if outlook => (
+                "Error",
+                "Your Outlook account has been disabled.",
+                vec![
+                    text("Please open "),
+                    link("outlook.office.com", "https://outlook.office.com"),
+                    text(" for more information."),
+                ],
+                MessageBarColor::Red,
+            ),
             Outage::GmailDisabled => (
                 "Error",
                 "Your Gmail account has been disabled.",
@@ -106,21 +138,25 @@ impl StatusBar {
 mod tests {
     use super::*;
 
-    fn bar(outage: Outage) -> StatusBar {
+    fn bar(outage: Outage, outlook: bool) -> StatusBar {
         StatusBar::offline(
             &Connection {
                 outage: Some(outage),
                 disk_low: false,
             },
             false,
+            outlook,
         )
         .expect("a bar")
     }
 
     #[test]
     fn each_outage_has_its_copy() {
-        assert_eq!(StatusBar::offline(&Connection::default(), false), None);
-        let offline = bar(Outage::Offline);
+        assert_eq!(
+            StatusBar::offline(&Connection::default(), false, false),
+            None
+        );
+        let offline = bar(Outage::Offline, false);
         assert_eq!(
             (offline.title, offline.text().as_str()),
             (
@@ -129,14 +165,22 @@ mod tests {
             )
         );
         assert_eq!(
-            bar(Outage::Auth).text(),
+            bar(Outage::Auth, false).text(),
             "Sorry! Google OAuth is not responding right now. Exo will reconnect automatically when Google responds."
         );
         assert_eq!(
-            bar(Outage::Gmail).text(),
+            bar(Outage::Auth, true).text(),
+            "Sorry! Microsoft OAuth is not responding right now. Exo will reconnect automatically when Microsoft responds."
+        );
+        assert_eq!(
+            bar(Outage::Gmail, false).text(),
             "Gmail is not responding right now. Exo will work offline and catch up when Gmail responds."
         );
-        let throttled = bar(Outage::Throttled);
+        assert_eq!(
+            bar(Outage::Gmail, true).text(),
+            "Outlook is not responding right now. Exo will work offline and catch up when Outlook responds."
+        );
+        let throttled = bar(Outage::Throttled, false);
         assert_eq!(
             (throttled.title, throttled.text().as_str()),
             (
@@ -144,7 +188,7 @@ mod tests {
                 "Gmail is temporarily throttling requests. Exo will work offline and catch up when Gmail responds."
             )
         );
-        let disabled = bar(Outage::GmailDisabled);
+        let disabled = bar(Outage::GmailDisabled, false);
         assert_eq!(
             (disabled.title, disabled.color),
             ("Error", MessageBarColor::Red)
@@ -161,7 +205,7 @@ mod tests {
             outage: Some(Outage::Offline),
             disk_low: false,
         };
-        let week = StatusBar::offline(&offline, true).expect("a bar");
+        let week = StatusBar::offline(&offline, true, false).expect("a bar");
         assert_eq!(
             week.text(),
             "Good news: Exo works offline! Events will sync when next online. Your updates may overwrite changes from others."
@@ -171,6 +215,7 @@ mod tests {
                 disk_low: true,
                 ..offline
             },
+            false,
             false,
         )
         .expect("a bar");
@@ -183,6 +228,7 @@ mod tests {
                 outage: Some(Outage::Throttled),
                 disk_low: true,
             },
+            false,
             false,
         )
         .expect("a bar");

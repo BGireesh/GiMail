@@ -1,11 +1,12 @@
-//! What Google says about people beyond their names: the photos, companies and job titles of the
-//! accounts' saved contacts and Workspace colleagues, which the contact pane, the calendar's
-//! guests and mail notifications show.
+//! What the mail provider says about people beyond their names: the photos, companies and job
+//! titles of the accounts' saved contacts and organization directory colleagues, which the contact
+//! pane, the calendar's guests and mail notifications show.
 //!
-//! Each account hands over its people whenever Google lists them ([`Photos::publish`]). A photo
-//! loads the first time something draws it ([`photo`]): from the account's photo cache on disk,
-//! else from Google, saving it there. Only Google's photo hosts are ever asked, so a contact
-//! can't make Exo load an image from anywhere else.
+//! Each account hands over its people whenever its provider syncs them ([`Photos::publish`]). A
+//! photo loads the first time something draws it ([`photo`]): from the account's photo cache on
+//! disk, else from Google's photo hosts or Microsoft Graph via [`exo_store::Store::contact_photo`],
+//! saving it there. Only allowlisted Google photo hosts or authenticated Outlook photo locators
+//! are ever asked, so a contact can't make Exo load an image from an arbitrary URL.
 
 use std::{
     collections::HashMap,
@@ -14,7 +15,7 @@ use std::{
     time::Duration,
 };
 
-use exo_store::GoogleContact;
+use exo_store::ProviderContact;
 use exo_ui::AvatarPhoto;
 use sha2::{Digest, Sha256};
 
@@ -22,8 +23,6 @@ use crate::{
     account::Loader,
     avatar_cache::{AvatarCache, Lookup},
 };
-
-pub(crate) mod listing;
 
 /// The size photos are asked for (Google's `=s{n}`), and brands' logos drawn at: the contact
 /// pane's 56px at 2×.
@@ -122,7 +121,7 @@ impl Photos {
 
     /// Shows `contacts`, the account's latest listing, from now on. An address takes the first
     /// photo, and the first company and title, its entries have.
-    pub(crate) fn publish<'a>(&self, contacts: impl IntoIterator<Item = &'a GoogleContact>) {
+    pub(crate) fn publish<'a>(&self, contacts: impl IntoIterator<Item = &'a ProviderContact>) {
         let mut people: HashMap<String, Person> = HashMap::new();
         for contact in contacts {
             if contact.photo.is_none() && contact.company.is_none() && contact.title.is_none() {
@@ -203,7 +202,7 @@ pub(crate) fn photo_for(ctx: &egui::Context, account: &str, email: &str) -> Opti
         let registry = shared.lock().unwrap_or_else(PoisonError::into_inner);
         let (photos, people) = registry.accounts.get(&account.to_lowercase())?;
         let url = people.get(&email.to_lowercase())?.photo.as_deref()?;
-        (photos.clone(), sized(url))
+        (photos.clone(), normalize_photo(url))
     };
     photo_from_cache(ctx, photos, url)
 }
@@ -223,17 +222,18 @@ pub fn photo(ctx: &egui::Context, email: &str) -> Option<AvatarPhoto> {
         let email = email.to_lowercase();
         let (photos, people) = registry.accounts.values().next()?;
         let url = people.get(&email)?.photo.as_deref()?;
-        (photos.clone(), sized(url))
+        (photos.clone(), normalize_photo(url))
     };
     photo_from_cache(ctx, photos, url)
 }
 
 fn photo_from_cache(ctx: &egui::Context, photos: Photos, url: String) -> Option<AvatarPhoto> {
     let cache = photo_cache(ctx);
-    match cache.get_or_claim(url.clone()) {
+    let key = cache_key(&photos.account, &url);
+    match cache.get_or_claim(key.clone()) {
         Lookup::Shown(photo) => Some(photo),
         Lookup::Claimed => {
-            load(cache, photos, url);
+            load(cache, photos, key, url);
             None
         }
         Lookup::Unavailable => None,
@@ -276,17 +276,19 @@ fn paint_avatar_photo(
     }
 }
 
-/// A copy of `email`'s photo for the notification `key` to show: the account's own when `email` is
-/// one of the accounts, else a contact's, from the cache or, when it isn't there, from Google if it
-/// comes within [`NOTIFICATION_WAIT`]. macOS moves the copy into its own store.
-pub(crate) async fn notification_photo(
+/// A copy of `email`'s photo for the notification `key` to show, scoped to `account`: the
+/// account's own when `email` is one of the accounts, else a contact's, from the cache or, when it
+/// isn't there, from the provider if it comes within [`NOTIFICATION_WAIT`]. macOS moves the copy
+/// into its own store.
+pub(crate) async fn notification_photo_for(
     ctx: &egui::Context,
+    account: &str,
     email: &str,
     key: &str,
 ) -> Option<PathBuf> {
-    let photo = match crate::profile_pictures::saved(ctx, email) {
+    let photo = match crate::profile_pictures::saved_for(ctx, account, email) {
         Some(photo) => photo.to_vec(),
-        None => contact_photo(ctx, email).await?,
+        None => contact_photo(ctx, Some(account), email).await?,
     };
     notification_copy(&photo, key)
 }
@@ -305,56 +307,101 @@ pub(crate) fn notification_copy(photo: &[u8], key: &str) -> Option<PathBuf> {
     Some(file)
 }
 
-/// `email`'s photo, if Google has one of them: the saved copy, else Google's within
+/// `email`'s photo, if the provider has one of them: the saved copy, else fetched within
 /// [`NOTIFICATION_WAIT`], which is saved and shows wherever they're drawn.
-async fn contact_photo(ctx: &egui::Context, email: &str) -> Option<Vec<u8>> {
+async fn contact_photo(ctx: &egui::Context, account: Option<&str>, email: &str) -> Option<Vec<u8>> {
     let email = email.to_lowercase();
     let (photos, url) = {
         let shared = registry(ctx);
         let registry = shared.lock().unwrap_or_else(PoisonError::into_inner);
-        registry.accounts.values().find_map(|(photos, people)| {
-            let url = people.get(&email)?.photo.as_deref()?;
-            Some((photos.clone(), sized(url)))
-        })?
+        match account {
+            Some(account) => {
+                let (photos, people) = registry.accounts.get(&account.to_lowercase())?;
+                let url = people.get(&email)?.photo.as_deref()?;
+                (photos.clone(), normalize_photo(url))
+            }
+            None => registry.accounts.values().find_map(|(photos, people)| {
+                let url = people.get(&email)?.photo.as_deref()?;
+                Some((photos.clone(), normalize_photo(url)))
+            })?,
+        }
     };
     let cache = photo_cache(ctx);
-    let shown = cache.is_shown(&url);
+    let key = cache_key(&photos.account, &url);
+    let shown = cache.is_shown(&key);
     let photo = tokio::time::timeout(NOTIFICATION_WAIT, fetch(&photos, &url))
         .await
         .inspect_err(|_| log::info!("a notification goes without its photo, which is slow to come"))
         .ok()??;
     if !shown {
-        cache.finish_decode(url, "contact photo", &photo);
+        cache.finish_decode(key, "contact photo", &photo);
     }
     Some(photo)
 }
 
-/// Loads the photo at `url` into `cache`, or marks it missing.
-fn load(cache: AvatarCache<String>, photos: Photos, url: String) {
-    let (source, asked) = (photos.clone(), url.clone());
+/// Loads the photo at `url` into `cache` under `key`, or marks it missing.
+fn load(cache: AvatarCache<String>, photos: Photos, key: String, url: String) {
+    let source = photos.clone();
     photos.loader.run(
-        move |_| async move { fetch(&source, &asked).await },
-        move |photo| cache.finish_decode(url, "contact photo", &photo.unwrap_or_default()),
+        move |_| async move { fetch(&source, &url).await },
+        move |photo| cache.finish_decode(key, "contact photo", &photo.unwrap_or_default()),
     );
 }
 
-/// The photo at `url`: the saved copy, else Google's, which is saved. `None` when Google doesn't
-/// give an image, or `url` isn't one of its photos.
+/// The photo at `url`: the saved copy, else fetched from Google or Outlook Graph and saved.
+/// `None` when the provider doesn't give an image, or `url` isn't an allowed photo locator.
 async fn fetch(photos: &Photos, url: &str) -> Option<Vec<u8>> {
     let file = photos.dir.join(file_name(url));
     if let Ok(saved) = std::fs::read(&file) {
         return Some(saved);
     }
-    if !is_google_photo(url, photos.local) {
-        log::warn!("not loading a contact photo from {url}");
-        return None;
-    }
-    let photo = photos.loader.get(url).await?;
+    let photo = if is_outlook_photo(url) {
+        photos.loader.contact_photo(url).await?
+    } else {
+        if !is_google_photo(url, photos.local) {
+            log::warn!("not loading a contact photo from {url}");
+            return None;
+        }
+        photos.loader.get(url).await?
+    };
     image::load_from_memory(&photo).ok()?;
     if let Err(error) = save(&file, &photo) {
         log::warn!("saving a contact photo: {error}");
     }
     Some(photo)
+}
+
+/// Normalizes `url` before caching or fetching: Outlook locators stay verbatim; Google URLs ask
+/// for [`SIZE`].
+fn normalize_photo(url: &str) -> String {
+    if is_outlook_photo(url) {
+        url.to_owned()
+    } else {
+        sized(url)
+    }
+}
+
+/// Key for the shared [`AvatarCache`]: Outlook locators (`outlook://...`) are scoped per account so
+/// two signed-in Outlook accounts never collide on `outlook://me/photo` or identical user IDs.
+fn cache_key(account: &str, url: &str) -> String {
+    if is_outlook_photo(url) {
+        format!("{}|{url}", account.to_ascii_lowercase())
+    } else {
+        url.to_owned()
+    }
+}
+
+/// Whether `url` is an authenticated Outlook photo locator (`outlook://me/photo`,
+/// `outlook://me/photo/{version}`, or `outlook://users/{id}/photo`).
+fn is_outlook_photo(url: &str) -> bool {
+    url == "outlook://me/photo"
+        || url
+            .strip_prefix("outlook://me/photo/")
+            .is_some_and(|rest| !rest.is_empty() && !rest.contains('/'))
+        || url
+            .strip_prefix("outlook://users/")
+            .and_then(|rest| rest.strip_suffix("/photo"))
+            .is_some_and(|id| !id.is_empty() && !id.contains('/'))
 }
 
 /// Writes `bytes` to `file` through a unique temporary file, so concurrent saves never race and a
@@ -477,7 +524,7 @@ mod tests {
             gmail::Endpoints::mock(&"http://127.0.0.1:9/".parse().expect("mock origin"));
         let account = crate::account::Account::open(
             &dir,
-            crate::account::Credentials {
+            crate::account::Credentials::Gmail {
                 email: "alice@work.example".into(),
                 endpoints,
                 tokens: Arc::new(gmail::StaticToken("dev".into())),
@@ -513,7 +560,7 @@ mod tests {
             false,
         );
 
-        let secret = GoogleContact {
+        let secret = ProviderContact {
             person: "people/c1".into(),
             email: "secret@client.example".into(),
             name: Some("Secret Client".into()),
@@ -521,7 +568,7 @@ mod tests {
             company: Some("ClientCo".into()),
             title: Some("CEO".into()),
         };
-        let friend = GoogleContact {
+        let friend = ProviderContact {
             person: "people/c2".into(),
             email: "friend@home.example".into(),
             name: Some("Best Friend".into()),
@@ -579,5 +626,29 @@ mod tests {
 
         drop(account);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn outlook_photo_locators_are_validated_and_scoped_per_account() {
+        assert!(is_outlook_photo("outlook://me/photo"));
+        assert!(is_outlook_photo("outlook://me/photo/240X240"));
+        assert!(is_outlook_photo("outlook://users/u-123/photo"));
+        assert!(!is_outlook_photo("outlook://users//photo"));
+        assert!(!is_outlook_photo("outlook://users/a/b/photo"));
+        assert!(!is_outlook_photo("outlook://me/photo/a/b"));
+        assert!(!is_outlook_photo("https://example.com/photo.jpg"));
+
+        assert_ne!(
+            cache_key("microsoft alice@a.example", "outlook://me/photo"),
+            cache_key("microsoft bob@b.example", "outlook://me/photo"),
+            "identical Outlook photo locators stay isolated per account"
+        );
+        assert_eq!(
+            cache_key(
+                "alice@a.example",
+                "https://lh3.googleusercontent.com/x=s112"
+            ),
+            "https://lh3.googleusercontent.com/x=s112"
+        );
     }
 }

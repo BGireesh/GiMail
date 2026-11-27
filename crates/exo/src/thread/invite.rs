@@ -635,6 +635,7 @@ pub(super) struct Context<'a> {
     pub message: &'a MessageDetail,
     pub calendar: Option<&'a exo_mail::CalendarData>,
     pub about_open: bool,
+    pub outlook: bool,
 }
 
 /// The status over the photo: a cancellation or an update, else a guest's answer.
@@ -1396,9 +1397,16 @@ pub(super) fn show(
                     text_top: 4.0,
                     animated: false,
                 };
-                // `show_rsvp_buttons`' row, but the current answer is clickable too.
+                // Outlook can't take back a decline, so a declined Outlook invite offers only that.
+                let choices: &[Response] = if context.outlook && *answer == Some(Response::Declined)
+                {
+                    &[Response::Declined]
+                } else {
+                    &ANSWERS
+                };
+                // `show_rsvp_choices`' row, but the current answer is clickable too.
                 let mut x = card.left() + ROWS_SIDE + QUESTION;
-                for (index, response) in ANSWERS.into_iter().enumerate() {
+                for (index, &response) in choices.iter().enumerate() {
                     let label = response.button_label();
                     let selected = *answer == Some(response);
                     let (button, clicked) = show_rsvp_button(
@@ -1538,6 +1546,7 @@ mod tests {
             message,
             calendar: None,
             about_open: false,
+            outlook: false,
         }
     }
 

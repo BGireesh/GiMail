@@ -958,6 +958,8 @@ pub struct Context<'a> {
     pub own_domains: &'a [String],
     /// Whether the selection is exactly the loaded rows. Remove all Labels is only offered then.
     pub exact: bool,
+    /// Whether the account is Outlook / Microsoft, swapping wording and hiding Gmail-only commands.
+    pub outlook: bool,
 }
 
 /// The palette's copy rows that apply.
@@ -1212,6 +1214,26 @@ const STAR_PAIR: [CommandSpec; 2] = [
     .keys(&["s"])
     .aliases(&["Remove Flag"]),
 ];
+const OUTLOOK_STAR_PAIR: [CommandSpec; 2] = [
+    conv(
+        "STAR",
+        "Flag",
+        "data/flag",
+        9.0,
+        Action::Apply(Mutation::Star),
+    )
+    .keys(&["s"])
+    .aliases(&["Star"]),
+    conv(
+        "STAR",
+        "Unflag",
+        "data/flag",
+        9.0,
+        Action::Apply(Mutation::Unstar),
+    )
+    .keys(&["s"])
+    .aliases(&["Unstar"]),
+];
 const TRASH_PAIR: [CommandSpec; 2] = [
     conv(
         "TRASH",
@@ -1222,6 +1244,25 @@ const TRASH_PAIR: [CommandSpec; 2] = [
     )
     .keys(&["#", "del"])
     .aliases(&["Delete"]),
+    conv(
+        "TRASH",
+        "Remove from Trash",
+        "data/discard",
+        6.0,
+        Action::Apply(Mutation::Untrash),
+    )
+    .keys(&["#", "del"]),
+];
+const OUTLOOK_TRASH_PAIR: [CommandSpec; 2] = [
+    conv(
+        "TRASH",
+        "Delete",
+        "data/discard",
+        6.0,
+        Action::Apply(Mutation::Trash),
+    )
+    .keys(&["#", "del"])
+    .aliases(&["Trash"]),
     conv(
         "TRASH",
         "Remove from Trash",
@@ -1248,8 +1289,8 @@ const TRASH_UK_PAIR: [CommandSpec; 2] = [
     )
     .when_typing("#"),
 ];
-/// For a single sender, `!` opens the Mark Spam picker, which offers blocking. Otherwise it
-/// reports spam directly (`crate::pickers`).
+/// For a single sender on Gmail, `!` opens the Mark Spam picker, which offers blocking. Otherwise
+/// it reports spam directly (`crate::pickers`).
 const SPAM_PAIR: [CommandSpec; 2] = [
     conv(
         "MARK_SPAM",
@@ -1269,6 +1310,26 @@ const SPAM_PAIR: [CommandSpec; 2] = [
     )
     .keys(&["!"])
     .aliases(&["Mark not Junk"]),
+];
+const OUTLOOK_SPAM_PAIR: [CommandSpec; 2] = [
+    conv(
+        "MARK_SPAM",
+        "Mark Junk",
+        "data/spam",
+        5.0,
+        Action::Apply(Mutation::Spam),
+    )
+    .keys(&["!"])
+    .aliases(&["Mark Spam"]),
+    conv(
+        "MARK_SPAM",
+        "Mark not Junk",
+        "data/spam",
+        5.0,
+        Action::Apply(Mutation::NotSpam),
+    )
+    .keys(&["!"])
+    .aliases(&["Mark not Spam"]),
 ];
 const UNREAD_PAIR: [CommandSpec; 2] = [
     conv(
@@ -1353,19 +1414,36 @@ fn conversation(commands: &mut Commands<Action>, cx: &Context<'_>) {
     let trashed = usize::from(all(|thread| thread.trashed));
     let spam = usize::from(all(|thread| thread.has_label("SPAM")) || *cx.list == ListId::Spam);
 
-    commands.add(STAR_PAIR[usize::from(all(|thread| thread.starred))].build());
-    commands.add(TRASH_PAIR[trashed].build());
+    let star_pair = if cx.outlook {
+        &OUTLOOK_STAR_PAIR
+    } else {
+        &STAR_PAIR
+    };
+    let trash_pair = if cx.outlook {
+        &OUTLOOK_TRASH_PAIR
+    } else {
+        &TRASH_PAIR
+    };
+    let spam_pair = if cx.outlook {
+        &OUTLOOK_SPAM_PAIR
+    } else {
+        &SPAM_PAIR
+    };
+    commands.add(star_pair[usize::from(all(|thread| thread.starred))].build());
+    commands.add(trash_pair[trashed].build());
     commands.add(TRASH_UK_PAIR[trashed].build());
-    commands.add(SPAM_PAIR[spam].build());
+    commands.add(spam_pair[spam].build());
     commands.add(UNREAD_PAIR[usize::from(all(|thread| thread.unread))].build());
-    commands.add(MUTE_PAIR[usize::from(all(|thread| thread.muted))].build());
-    commands.add(MUTE_INTENT_SPEC.build());
+    if !cx.outlook {
+        commands.add(MUTE_PAIR[usize::from(all(|thread| thread.muted))].build());
+        commands.add(MUTE_INTENT_SPEC.build());
+    }
 
     unsubscribe(commands, cx);
     block(commands, cx);
     important_or_other(commands, cx);
     copy(commands, cx.copy);
-    labels(commands, cx.exact);
+    labels(commands, cx.exact, cx.outlook);
     reminders(commands, cx);
 
     // `e` marks done and `⇧E` not done anywhere but Spam. The palette row, which toggles, isn't
@@ -1548,11 +1626,16 @@ const LABEL_TAIL_SPECS: &[CommandSpec] = &[
 ];
 
 /// Move, then the label commands, and the keys that take threads out of the list on screen.
-/// Without an exact selection, `⇧Y` only says why it can't.
-fn labels(commands: &mut Commands<Action>, exact: bool) {
+/// Without an exact selection, `⇧Y` only says why it can't. Outlook omits Gmail-only label
+/// commands (`L` and `⇧Y`) while keeping `Move` (`V`) and list-removal shortcuts (`Y`, `[`, `]`).
+fn labels(commands: &mut Commands<Action>, exact: bool, outlook: bool) {
     commands.add(MOVE_SPEC.build());
-    commands.add(REMOVE_ALL_PAIR[usize::from(exact)].build());
-    register_specs(commands, LABEL_TAIL_SPECS);
+    if outlook {
+        register_specs(commands, &LABEL_TAIL_SPECS[1..]);
+    } else {
+        commands.add(REMOVE_ALL_PAIR[usize::from(exact)].build());
+        register_specs(commands, LABEL_TAIL_SPECS);
+    }
 }
 
 const SNOOZE_OPEN: Action = Action::Remind(Remind::Open { button: false });
@@ -1719,6 +1802,9 @@ fn go_to(commands: &mut Commands<Action>, cx: &Context<'_>) {
         .icon("data/go-to")
         .multiple()
         .regions(GO_TO);
+        if !go.aliases.is_empty() {
+            command = command.aliases(go.aliases.iter().map(|alias| format!("go to {alias}")));
+        }
         if let Some(follow) = go.follow {
             command = command.follow(follow);
         }
@@ -1729,13 +1815,13 @@ fn go_to(commands: &mut Commands<Action>, cx: &Context<'_>) {
             command
         }
     };
-    for system in lists::system_go_tos(cx.unified) {
+    for system in lists::system_go_tos_for(cx.unified, cx.outlook) {
         commands.add(go(&system));
         if !system.keys.is_empty() {
             commands.add(from_week(system.id, system.keys, Action::Go(system.list)));
         }
     }
-    for label in lists::listed_labels(cx.labels) {
+    for label in lists::listed_labels_for(cx.labels, cx.outlook) {
         let command = Command::new(
             lists::slug(&label.name),
             format!("go to {}", label.name),
@@ -1753,7 +1839,7 @@ fn go_to(commands: &mut Commands<Action>, cx: &Context<'_>) {
             command
         });
     }
-    for late in lists::late_go_tos() {
+    for late in lists::late_go_tos_for(cx.outlook) {
         commands.add(go(&late));
         if !late.keys.is_empty() {
             commands.add(from_week(late.id, late.keys, Action::Go(late.list)));
@@ -1895,6 +1981,7 @@ mod tests {
                     sender: None,
                     own_domains: &[],
                     exact: true,
+                    outlook: false,
                 },
             );
             dispatch_key(&ctx, &mut commands, key, modifiers)
@@ -2040,6 +2127,7 @@ mod tests {
                 sender: None,
                 own_domains: &[],
                 exact: true,
+                outlook: false,
             },
         );
         let mut raw = egui::RawInput::default();

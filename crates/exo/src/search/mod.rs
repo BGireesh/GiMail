@@ -124,6 +124,7 @@ pub(crate) struct Search {
     /// taken), the caret goes to its end, as a textarea's does.
     field_text: String,
     labels: Vec<LabelChoice>,
+    outlook: bool,
     /// Whom the contact pane shows, as a suggestion or history row named them. `Some(None)` is
     /// nobody, and `None` means the results' cursor decides.
     pub contact: Option<Option<Person>>,
@@ -131,7 +132,7 @@ pub(crate) struct Search {
 
 impl Search {
     /// Search mode, with the bar holding `initial`.
-    pub fn new(initial: &str, labels: &[Label]) -> Self {
+    pub fn new(initial: &str, labels: &[Label], outlook: bool) -> Self {
         let value = normalize_quotes(initial);
         Self {
             underlay: Some(value.clone()),
@@ -152,7 +153,8 @@ impl Search {
             focus_pending: None,
             caret_at_end: true,
             field_text: String::new(),
-            labels: autocomplete::label_choices(labels),
+            labels: autocomplete::label_choices(labels, outlook),
+            outlook,
             contact: None,
         }
     }
@@ -201,7 +203,7 @@ impl Search {
 
     /// Keeps the labels the bar suggests current.
     pub fn set_labels(&mut self, labels: &[Label]) {
-        self.labels = autocomplete::label_choices(labels);
+        self.labels = autocomplete::label_choices(labels, self.outlook);
     }
 
     /// The bar takes the keyboard, remembering the results' cursor.
@@ -338,7 +340,7 @@ impl Search {
             } else {
                 Vec::new()
             };
-        let results = autocomplete::suggest(&self.value, &self.labels, &people);
+        let results = autocomplete::suggest(&self.value, &self.labels, &people, self.outlook);
         self.on_results(results)
     }
 
@@ -820,11 +822,12 @@ pub(crate) fn initial_query<'a>(
     labels: &[Label],
     splits: impl IntoIterator<Item = &'a SplitInbox>,
     filter: Option<&str>,
+    outlook: bool,
 ) -> String {
     let query = match list {
         ListId::Inbox | ListId::Important | ListId::Other => String::new(),
         ListId::Done => "-in:inbox".into(),
-        ListId::Starred => "is:starred".into(),
+        ListId::Starred => if outlook { "is:flagged" } else { "is:starred" }.into(),
         ListId::Split(id) => splits
             .into_iter()
             .find(|split| split.id == *id)
@@ -924,6 +927,7 @@ mod tests {
         let mut search = Search::new(
             "",
             &["INBOX", "SENT", "STARRED", "SPAM", "TRASH", "UNREAD"].map(system),
+            false,
         );
         let person = |name: &str, email: &str| ScoredContact {
             email: email.into(),
@@ -1194,18 +1198,25 @@ mod tests {
 
     #[test]
     fn search_opens_with_the_view_and_filter_in_the_bar() {
-        assert_eq!(initial_query(&ListId::Inbox, &[], &[], None), "");
-        assert_eq!(initial_query(&ListId::Done, &[], &[], None), "-in:inbox ");
+        assert_eq!(initial_query(&ListId::Inbox, &[], &[], None, false), "");
         assert_eq!(
-            initial_query(&ListId::Starred, &[], &[], None),
+            initial_query(&ListId::Done, &[], &[], None, false),
+            "-in:inbox "
+        );
+        assert_eq!(
+            initial_query(&ListId::Starred, &[], &[], None, false),
             "is:starred "
         );
         assert_eq!(
-            initial_query(&ListId::Sent, &[], &[], Some("is:unread")),
+            initial_query(&ListId::Starred, &[], &[], None, true),
+            "is:flagged "
+        );
+        assert_eq!(
+            initial_query(&ListId::Sent, &[], &[], Some("is:unread"), false),
             "in:sent is:unread "
         );
         assert_eq!(
-            initial_query(&ListId::Inbox, &[], &[], Some("is:unread")),
+            initial_query(&ListId::Inbox, &[], &[], Some("is:unread"), false),
             "is:unread "
         );
     }

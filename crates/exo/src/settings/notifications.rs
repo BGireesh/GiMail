@@ -286,7 +286,7 @@ fn lines<'a>(calendars: &'a [ListedCalendar]) -> Vec<(Line<'a>, f32)> {
     for calendar in calendars.iter().filter(|calendar| calendar.shown) {
         if headed && account != Some(calendar.account.as_str()) {
             lines.push((
-                Line::Account(&calendar.account),
+                Line::Account(&calendar.account_email),
                 if account.is_none() {
                     FIRST_HEADER
                 } else {

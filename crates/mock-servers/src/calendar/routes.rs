@@ -252,7 +252,7 @@ async fn list_events(
 
 /// `id` is a colleague's address: someone on the account's own workspace, whose primary
 /// calendar a workspace shares.
-fn colleague(world: &World, id: &str) -> bool {
+pub(crate) fn colleague(world: &World, id: &str) -> bool {
     let domain = world
         .account
         .email
@@ -263,7 +263,7 @@ fn colleague(world: &World, id: &str) -> bool {
 
 /// The events of the user's calendars that colleague `person` organizes or attends, from
 /// `min` to `max`, as their own calendar has them (instances, their attendee entry `self`).
-fn colleague_occurrences(
+pub(crate) fn colleague_occurrences(
     world: &World,
     person: &str,
     min: Timestamp,

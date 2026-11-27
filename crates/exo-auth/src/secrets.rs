@@ -1,11 +1,12 @@
-//! Where refresh tokens live: the macOS Keychain, one item per account.
+//! Where refresh tokens live: the macOS Keychain, one item per account and per calendar grant.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use crate::Error;
 
-/// Keeps one secret (a refresh token) per account address.
+/// Keeps one secret (a refresh token) per key: an account's [`Account::key`](crate::Account::key),
+/// or a calendar grant's.
 ///
 /// Calls are synchronous and may block, because the Keychain can ask the user to allow access
 /// (macOS asks again whenever an unsigned build changes). Keep them off the UI thread.
@@ -77,8 +78,10 @@ impl SecretStore for MemorySecrets {
     }
 }
 
-/// The login keychain: a generic password per account, under the service `Exo Google sign-in`
-/// with the account's address as its account name (as Keychain Access shows them).
+/// The login keychain: a generic password per grant, named as Keychain Access shows them.
+/// Microsoft grants live under `Exo Microsoft sign-in`: a mail account by its address, a calendar
+/// grant by its key. Google grants live under `Exo Google sign-in`: a mail account by its address,
+/// a calendar grant by its key.
 #[cfg(target_os = "macos")]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Keychain;
@@ -91,13 +94,29 @@ mod keychain {
 
     use super::{Keychain, SecretStore};
     use crate::Error;
+    use crate::accounts::{CALENDAR_KEY, Provider, parse_key};
 
-    const SERVICE: &str = "Exo Google sign-in";
+    const GOOGLE: &str = "Exo Google sign-in";
+    const MICROSOFT: &str = "Exo Microsoft sign-in";
     /// `errSecItemNotFound`.
     const NOT_FOUND: i32 = -25300;
 
     fn failed(error: impl std::error::Error + Send + Sync + 'static) -> Error {
         Error::Secrets(Box::new(error))
+    }
+
+    /// The service and account name of `key`'s item.
+    fn item(key: &str) -> (&'static str, &str) {
+        if let Some(calendar) = key.strip_prefix(CALENDAR_KEY) {
+            return match parse_key(calendar).0 {
+                Provider::Microsoft => (MICROSOFT, key),
+                Provider::Google => (GOOGLE, key),
+            };
+        }
+        match parse_key(key) {
+            (Provider::Microsoft, email) => (MICROSOFT, email),
+            (Provider::Google, _) => (GOOGLE, key),
+        }
     }
 
     /// The item's text. The error leaves the bytes out (`FromUtf8Error` would list them).
@@ -106,20 +125,23 @@ mod keychain {
     }
 
     impl SecretStore for Keychain {
-        fn get(&self, account: &str) -> Result<Option<String>, Error> {
-            match generic_password(PasswordOptions::new_generic_password(SERVICE, account)) {
+        fn get(&self, key: &str) -> Result<Option<String>, Error> {
+            let (service, account) = item(key);
+            match generic_password(PasswordOptions::new_generic_password(service, account)) {
                 Ok(secret) => text(secret).map(Some),
                 Err(error) if error.code() == NOT_FOUND => Ok(None),
                 Err(error) => Err(failed(error)),
             }
         }
 
-        fn set(&self, account: &str, secret: &str) -> Result<(), Error> {
-            set_generic_password(SERVICE, account, secret.as_bytes()).map_err(failed)
+        fn set(&self, key: &str, secret: &str) -> Result<(), Error> {
+            let (service, account) = item(key);
+            set_generic_password(service, account, secret.as_bytes()).map_err(failed)
         }
 
-        fn delete(&self, account: &str) -> Result<(), Error> {
-            match delete_generic_password(SERVICE, account) {
+        fn delete(&self, key: &str) -> Result<(), Error> {
+            let (service, account) = item(key);
+            match delete_generic_password(service, account) {
                 Err(error) if error.code() != NOT_FOUND => Err(failed(error)),
                 _ => Ok(()),
             }
@@ -129,6 +151,26 @@ mod keychain {
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        #[test]
+        fn microsoft_grants_have_a_service_of_their_own() {
+            assert_eq!(item("ada@example.com"), (GOOGLE, "ada@example.com"));
+            assert_eq!(
+                item("microsoft ada@example.com"),
+                (MICROSOFT, "ada@example.com")
+            );
+            let google_cal = "calendar cal@example.com for ada@example.com";
+            assert_eq!(item(google_cal), (GOOGLE, google_cal));
+            let google_cal_for_ms = "calendar cal@example.com for microsoft ada@example.com";
+            assert_eq!(item(google_cal_for_ms), (GOOGLE, google_cal_for_ms));
+            let ms_cal_for_google = "calendar microsoft cal@example.com for ada@example.com";
+            assert_eq!(item(ms_cal_for_google), (MICROSOFT, ms_cal_for_google));
+            let ms_cal_for_ms = "calendar microsoft cal@example.com for microsoft ada@example.com";
+            assert_eq!(item(ms_cal_for_ms), (MICROSOFT, ms_cal_for_ms));
+            let ms_same_email = "calendar microsoft ada@example.com for ada@example.com";
+            assert_eq!(item(ms_same_email), (MICROSOFT, ms_same_email));
+            assert_ne!(item(ms_same_email), item("microsoft ada@example.com"));
+        }
 
         #[test]
         fn a_garbled_item_stays_out_of_errors() {

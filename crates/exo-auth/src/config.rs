@@ -1,7 +1,9 @@
-//! Exo's OAuth client: Google's downloaded client JSON for a "Desktop app" client.
+//! Exo's OAuth clients: Google's downloaded client JSON for a "Desktop app" client, and
+//! Microsoft's ([`MicrosoftClient`]).
 //!
-//! Exo ships no client of its own. Everyone creates theirs in Google Cloud Console and puts the
-//! JSON where [`ClientConfig::load`] looks.
+//! Exo ships no Google client of its own. Everyone creates theirs in Google Cloud Console and
+//! puts the JSON where [`ClientConfig::load`] looks. Exo signs in to Microsoft as itself unless
+//! a file in the same folder names another registration.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -10,29 +12,59 @@ use gmail::Endpoints;
 use gmail::oauth::OAuthClient;
 use serde::Deserialize;
 
-use crate::Error;
+use crate::{Error, MicrosoftClient};
 
 /// The variable naming a client file, which wins over the config folder's.
 pub(crate) const ENV: &str = "EXO_GOOGLE_OAUTH_CLIENT";
 /// The client file's name in Exo's config folder.
 pub(crate) const FILE_NAME: &str = "google-oauth-client.json";
 
-/// Who Exo is to Google, and where Google is.
+/// Why Google's client JSON wasn't loaded, kept so attempting Google sign-in reports where to put
+/// the file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MissingGoogle {
+    pub(crate) path: PathBuf,
+    pub(crate) from_env: bool,
+}
+
+impl MissingGoogle {
+    pub(crate) fn to_error(&self) -> Error {
+        Error::MissingClient {
+            path: self.path.clone(),
+            from_env: self.from_env,
+        }
+    }
+}
+
 #[derive(Clone)]
-pub struct ClientConfig {
+struct GoogleClient {
     client_id: String,
     /// Google issues Desktop clients a secret and expects it, though it isn't confidential. It's
     /// still never printed.
     client_secret: String,
+}
+
+#[derive(Clone)]
+enum GoogleConfig {
+    Present(GoogleClient),
+    Missing(MissingGoogle),
+}
+
+/// Who Exo is to Google and to Microsoft, and where they are.
+#[derive(Clone)]
+pub struct ClientConfig {
+    google: GoogleConfig,
     endpoints: Endpoints,
+    microsoft: MicrosoftClient,
 }
 
 /// Leaves the secret out.
 impl std::fmt::Debug for ClientConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ClientConfig")
-            .field("client_id", &self.client_id)
+            .field("client_id", &self.client_id())
             .field("endpoints", &self.endpoints)
+            .field("microsoft", &self.microsoft)
             .finish_non_exhaustive()
     }
 }
@@ -53,42 +85,74 @@ struct Installed {
 }
 
 impl ClientConfig {
-    /// A client for `endpoints`, e.g. the mock servers'.
+    /// A Google client for `endpoints`, e.g. the mock servers'. Microsoft's is Exo's own, at
+    /// Microsoft, unless [`with_microsoft`](Self::with_microsoft) says otherwise.
     pub fn new(
         client_id: impl Into<String>,
         client_secret: impl Into<String>,
         endpoints: Endpoints,
     ) -> Self {
         Self {
-            client_id: client_id.into(),
-            client_secret: client_secret.into(),
+            google: GoogleConfig::Present(GoogleClient {
+                client_id: client_id.into(),
+                client_secret: client_secret.into(),
+            }),
             endpoints,
+            microsoft: MicrosoftClient::default(),
         }
+    }
+
+    /// A configuration without a Google client file (reporting `path` / `from_env` if Google
+    /// sign-in is attempted), using Exo's built-in Microsoft client unless
+    /// [`with_microsoft`](Self::with_microsoft) overrides it.
+    pub fn without_google(path: PathBuf, from_env: bool) -> Self {
+        Self {
+            google: GoogleConfig::Missing(MissingGoogle { path, from_env }),
+            endpoints: Endpoints::google(),
+            microsoft: MicrosoftClient::default(),
+        }
+    }
+
+    /// The same configuration, with `microsoft` for Microsoft accounts.
+    #[must_use]
+    pub fn with_microsoft(self, microsoft: MicrosoftClient) -> Self {
+        Self { microsoft, ..self }
     }
 
     /// Reads the client file named by `EXO_GOOGLE_OAUTH_CLIENT`, or else
     /// `google-oauth-client.json` in `config_dir` (Exo's config folder,
-    /// `~/Library/Application Support/Exo` on macOS). It talks to Google's production endpoints,
-    /// whatever URLs the file lists.
+    /// `~/Library/Application Support/Exo` on macOS), and Microsoft's from the same folder
+    /// ([`MicrosoftClient::load`]). Both talk to their production endpoints, whatever URLs the
+    /// files list.
+    ///
+    /// A missing Google client file is allowed so Microsoft-only users can sign in with Exo's
+    /// built-in Microsoft client; attempting Google sign-in then fails with
+    /// [`Error::MissingClient`] naming where to put the file.
     ///
     /// # Errors
-    /// [`Error::MissingClient`] (whose message says where to put the file) when there's no file,
-    /// [`Error::InvalidClient`] when it can't be read or isn't a Desktop app client.
+    /// [`Error::InvalidClient`] when an existing Google or Microsoft client file can't be read or
+    /// isn't a client Exo can use.
     pub fn load(config_dir: &Path) -> Result<Self, Error> {
+        let microsoft = MicrosoftClient::load(config_dir)?;
         let (path, from_env) = locate(std::env::var_os(ENV), config_dir);
-        let text = match std::fs::read_to_string(&path) {
-            Ok(text) => text,
+        let config = match std::fs::read_to_string(&path) {
+            Ok(text) => Self::parse(&text).map_err(|reason| Error::InvalidClient {
+                provider: crate::Provider::Google,
+                path,
+                reason,
+            })?,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Err(Error::MissingClient { path, from_env });
+                Self::without_google(path, from_env)
             }
             Err(error) => {
                 return Err(Error::InvalidClient {
+                    provider: crate::Provider::Google,
                     path,
                     reason: format!("can't be read: {error}"),
                 });
             }
         };
-        Self::parse(&text).map_err(|reason| Error::InvalidClient { path, reason })
+        Ok(config.with_microsoft(microsoft))
     }
 
     /// Parses Google's client JSON, explaining what's wrong when it isn't a Desktop app client.
@@ -112,10 +176,20 @@ impl ClientConfig {
         ))
     }
 
-    /// The client's ID, which Google shows on the consent screen's "app info".
+    /// The Google client's ID, which Google shows on the consent screen's "app info", or `None`
+    /// when no Google client file was loaded.
     #[must_use]
-    pub fn client_id(&self) -> &str {
-        &self.client_id
+    pub fn client_id(&self) -> Option<&str> {
+        match &self.google {
+            GoogleConfig::Present(google) => Some(&google.client_id),
+            GoogleConfig::Missing(_) => None,
+        }
+    }
+
+    /// Whether a Google OAuth client was loaded.
+    #[must_use]
+    pub fn has_google(&self) -> bool {
+        matches!(self.google, GoogleConfig::Present(_))
     }
 
     /// The Google APIs this client talks to.
@@ -124,12 +198,21 @@ impl ClientConfig {
         &self.endpoints
     }
 
-    pub(crate) fn oauth(&self) -> OAuthClient {
-        OAuthClient::new(
-            self.endpoints.oauth.clone(),
-            &self.client_id,
-            Some(self.client_secret.clone()),
-        )
+    /// Who Exo is to Microsoft.
+    #[must_use]
+    pub fn microsoft(&self) -> &MicrosoftClient {
+        &self.microsoft
+    }
+
+    pub(crate) fn oauth(&self) -> Result<OAuthClient, MissingGoogle> {
+        match &self.google {
+            GoogleConfig::Present(google) => Ok(OAuthClient::new(
+                self.endpoints.oauth.clone(),
+                &google.client_id,
+                Some(google.client_secret.clone()),
+            )),
+            GoogleConfig::Missing(missing) => Err(missing.clone()),
+        }
     }
 }
 
@@ -151,8 +234,11 @@ mod tests {
     #[test]
     fn reads_a_desktop_client() {
         let config = ClientConfig::parse(DESKTOP).unwrap();
-        assert_eq!(config.client_id(), "123-abc.apps.googleusercontent.com");
-        assert_eq!(config.client_secret, "GOCSPX-not-a-real-secret");
+        assert_eq!(
+            config.client_id(),
+            Some("123-abc.apps.googleusercontent.com")
+        );
+        assert!(config.has_google());
         assert_eq!(config.endpoints(), &Endpoints::google());
     }
 
@@ -177,7 +263,7 @@ mod tests {
     fn debug_leaves_the_secret_out() {
         let config = ClientConfig::parse(DESKTOP).unwrap();
         assert!(!format!("{config:?}").contains("GOCSPX"));
-        assert!(!format!("{:?}", config.oauth()).contains("GOCSPX"));
+        assert!(!format!("{:?}", config.oauth().unwrap()).contains("GOCSPX"));
     }
 
     #[test]
@@ -215,18 +301,20 @@ mod tests {
     }
 
     #[test]
-    fn missing_files_say_where_to_put_one() {
+    fn missing_google_file_loads_with_builtin_microsoft_and_remembers_where_to_put_one() {
         let dir = tempfile::tempdir().unwrap();
-        let message = match ClientConfig::load(dir.path()) {
-            // Unless the environment names a file, which a developer's shell might.
-            Err(
-                error @ Error::MissingClient {
-                    from_env: false, ..
-                },
-            ) => error.to_string(),
-            Err(Error::MissingClient { from_env: true, .. }) | Ok(_) => return,
-            Err(error) => panic!("{error}"),
+        let config = ClientConfig::load(dir.path()).unwrap();
+        assert_eq!(config.microsoft().client_id(), crate::EXO_CLIENT_ID);
+        let Err(missing) = config.oauth() else {
+            // Unless the environment names a Google client file, which a developer's shell might.
+            return;
         };
+        if missing.from_env {
+            return;
+        }
+        assert!(!config.has_google());
+        assert_eq!(config.client_id(), None);
+        let message = missing.to_error().to_string();
         assert!(
             message.contains(&dir.path().join(FILE_NAME).display().to_string()),
             "{message}"
@@ -234,6 +322,25 @@ mod tests {
         assert!(
             message.contains("Desktop app") && message.contains(ENV),
             "{message}"
+        );
+    }
+
+    #[test]
+    fn broken_microsoft_override_still_fails_loudly_without_google_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join(crate::microsoft::FILE_NAME);
+        std::fs::write(&file, "{ not json").unwrap();
+        let error = ClientConfig::load(dir.path()).unwrap_err();
+        assert!(
+            matches!(
+                &error,
+                Error::InvalidClient {
+                    provider: crate::Provider::Microsoft,
+                    path,
+                    ..
+                } if *path == file
+            ),
+            "{error}"
         );
     }
 
@@ -246,8 +353,11 @@ mod tests {
         let config =
             ClientConfig::load(Path::new("/nonexistent")).map_err(|error| error.to_string());
         let config = config.expect("the client file parses");
-        assert!(config.client_id().ends_with(".apps.googleusercontent.com"));
-        assert!(!config.client_secret.is_empty());
+        assert!(
+            config
+                .client_id()
+                .is_some_and(|id| id.ends_with(".apps.googleusercontent.com"))
+        );
         assert_eq!(
             config.endpoints().oauth.token.host_str(),
             Some("oauth2.googleapis.com")

@@ -15,10 +15,11 @@
 
 use egui::{Color32, Context, CornerRadius, Rect, Sense, Shape, Stroke, Ui, pos2, vec2};
 use exo_commands::{Command, Commands, Region};
+use exo_editor::{BodyText, Editor, EditorStyle};
 use exo_store::{Alias, Contact, MessageDetail};
 use exo_ui::{
-    Dialog, DialogDropdown, DialogMenuKind, DialogResponse, DialogSelect, DialogSelectEvent,
-    Family, Font, TextStyle, motion,
+    ActionKind, DIALOG_ACTION_HEIGHT, Dialog, DialogAction, DialogDropdown, DialogMenuKind,
+    DialogResponse, DialogSelect, DialogSelectEvent, Family, Font, TextStyle, motion,
 };
 
 use crate::{
@@ -74,8 +75,19 @@ const DIALOG_PADDING: f32 = 32.0;
 /// The signature's width: the dialog's content, less the bar.
 const CONTENT_WIDTH: f32 = exo_ui::DIALOG_WIDTH - 2.0 * DIALOG_PADDING - CONTENT_LEFT;
 const ON_REPLIES: &str = "Include signature on replies and forwards";
+/// Outlook signature dialog subheader and editor metrics.
+const OUTLOOK_SUBHEADER: &str = "Your signature will be automatically included in all messages.";
+const OUTLOOK_SUBHEADER_INK: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 217);
+const OUTLOOK_EDITOR_TOP: f32 = 60.0;
+const OUTLOOK_EDITOR_HEIGHT: f32 = 164.0;
+const OUTLOOK_EDITOR_GUTTER: f32 = 14.0;
+const OUTLOOK_PLACEHOLDER: &str = "Paste your signature here";
+const OUTLOOK_ACTIONS_GAP: f32 = 24.0;
+const OUTLOOK_ACTIONS_BOTTOM: f32 = 4.0;
+const OUTLOOK_ACTION_GAP: f32 = 8.0;
+const OUTLOOK_ACTIONS_OVERHANG: f32 = 13.0;
 
-/// What has the keyboard, in Tab's order.
+/// What has the keyboard in Gmail's read-only dialog, in Tab's order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Focus {
     /// The aliases' dropdown.
@@ -87,6 +99,19 @@ pub enum Focus {
     OnReplies,
 }
 
+/// What has the keyboard in Outlook's editable signature dialog, in Tab's order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LocalFocus {
+    /// The rich-text signature editor.
+    Editor,
+    /// `Include signature on replies and forwards`.
+    OnReplies,
+    /// `Cancel`.
+    Cancel,
+    /// `Save`.
+    Save,
+}
+
 /// Something done in the dialog.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
@@ -94,6 +119,8 @@ pub enum Event {
     Tab(isize),
     /// The pointer came onto something that takes the keyboard.
     Focus(Focus),
+    /// Focus moved inside Outlook's signature dialog.
+    FocusLocal(LocalFocus),
     /// Open or close the list (a click, Enter or an arrow on the dropdown).
     ToggleMenu,
     /// ↓ (1) or ↑ (-1) in the open list.
@@ -112,16 +139,40 @@ pub enum Event {
     ToggleOnReplies,
     /// `Gmail settings`, clicked.
     OpenGmail,
+    /// `Save` in Outlook's signature dialog.
+    Save,
+    /// `Cancel` in Outlook's signature dialog.
+    Cancel,
 }
 
-/// The dialog's alias, keyboard and list.
-#[derive(Clone, Debug, Default)]
+/// Editable signature state for Outlook accounts.
+struct LocalState {
+    editor: Editor,
+    focus: LocalFocus,
+    focus_pending: bool,
+}
+
+/// The dialog's alias, keyboard and list (or local rich-text editor on Outlook).
+#[derive(Default)]
 pub struct State {
     /// The alias shown, which is the default one until another is chosen.
     selected: Option<String>,
     focus: Option<Focus>,
     /// The list is open, with this row highlighted.
     menu: Option<usize>,
+    /// Present when editing a local Outlook signature instead of previewing Gmail's `sendAs`.
+    local: Option<LocalState>,
+}
+
+impl std::fmt::Debug for State {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("State")
+            .field("selected", &self.selected)
+            .field("focus", &self.focus)
+            .field("menu", &self.menu)
+            .field("local", &self.local.as_ref().map(|local| local.focus))
+            .finish()
+    }
 }
 
 /// The aliases as the dropdown lists them: active ones, the shown one first and the rest by
@@ -147,11 +198,34 @@ fn shown<'a>(selected: Option<&str>, aliases: &'a [Alias]) -> Option<&'a Alias> 
 }
 
 impl State {
-    /// The dialog opening on `aliases`.
+    /// The dialog opening on `aliases` (Gmail read-only mode).
     pub fn open(aliases: &[Alias]) -> Self {
         let mut state = Self::default();
         state.focus = state.first_focus(aliases);
         state
+    }
+
+    /// The dialog opening for an Outlook account with its saved local signature HTML, if any.
+    pub fn open_outlook(signature: Option<&str>) -> Self {
+        let mut editor = Editor::new();
+        editor.set_body_text(BodyText::SMALL);
+        if let Some(html) = signature.filter(|html| !html.trim().is_empty()) {
+            editor.set_html(html);
+        }
+        Self {
+            local: Some(LocalState {
+                editor,
+                focus: LocalFocus::Editor,
+                focus_pending: true,
+            }),
+            ..Self::default()
+        }
+    }
+
+    /// The sanitized local signature HTML ready to save, or `None` when empty.
+    pub fn cleaned_html(&self) -> Option<String> {
+        let local = self.local.as_ref()?;
+        clean_signature_html(&local.editor.html())
     }
 
     /// Where the keyboard starts: the dropdown with several aliases, else the row when there's one.
@@ -170,7 +244,7 @@ impl State {
         self.menu.is_some()
     }
 
-    /// What has the keyboard.
+    /// What has the keyboard in Gmail mode.
     pub fn focus(&self) -> Option<Focus> {
         self.focus
     }
@@ -187,6 +261,20 @@ impl State {
                 .keys(keys.iter().copied())
                 .regions(DIALOG)
         };
+        if let Some(local) = &self.local {
+            commands.add(key("SIGNATURES_TAB", Event::Tab(1), &["tab"]));
+            commands.add(key("SIGNATURES_SHIFT_TAB", Event::Tab(-1), &["shift+tab"]));
+            commands.add(key("SIGNATURES_SAVE", Event::Save, &["mod+enter"]));
+            // Leave Enter and Space to the rich-text editor while typing in it.
+            if local.focus != LocalFocus::Editor {
+                commands.add(key(
+                    "SIGNATURES_ACTIVATE",
+                    Event::Activate,
+                    &["enter", "space"],
+                ));
+            }
+            return;
+        }
         if self.menu_open() {
             commands.add(key(
                 "SIGNATURES_MENU_DOWN",
@@ -222,9 +310,43 @@ impl State {
         }
     }
 
-    /// Applies `event` and returns what's left for the app, which is toggling the setting or
-    /// opening Gmail.
+    /// Applies `event` and returns what's left for the app, which is toggling the setting,
+    /// opening Gmail, or saving/cancelling Outlook's local signature.
     pub fn handle(&mut self, event: Event, aliases: &[Alias]) -> Option<Event> {
+        if let Some(local) = &mut self.local {
+            const ORDER: [LocalFocus; 4] = [
+                LocalFocus::Editor,
+                LocalFocus::OnReplies,
+                LocalFocus::Cancel,
+                LocalFocus::Save,
+            ];
+            return match event {
+                Event::Tab(step) => {
+                    let at = ORDER
+                        .iter()
+                        .position(|candidate| *candidate == local.focus)
+                        .unwrap_or(0);
+                    let next =
+                        ORDER[(at as isize + step).rem_euclid(ORDER.len() as isize) as usize];
+                    local.focus = next;
+                    local.focus_pending = next == LocalFocus::Editor;
+                    None
+                }
+                Event::FocusLocal(focus) => {
+                    local.focus = focus;
+                    local.focus_pending = focus == LocalFocus::Editor;
+                    None
+                }
+                Event::Activate => match local.focus {
+                    LocalFocus::Editor => None,
+                    LocalFocus::OnReplies => Some(Event::ToggleOnReplies),
+                    LocalFocus::Cancel => Some(Event::Cancel),
+                    LocalFocus::Save => Some(Event::Save),
+                },
+                Event::ToggleOnReplies | Event::Save | Event::Cancel => Some(event),
+                _ => None,
+            };
+        }
         let shown_email = shown(self.selected.as_deref(), aliases)
             .map(|alias| alias.email.clone())
             .unwrap_or_default();
@@ -283,7 +405,10 @@ impl State {
                 Some(Focus::Link) => return Some(Event::OpenGmail),
                 None => {}
             },
-            Event::ToggleOnReplies | Event::OpenGmail => return Some(event),
+            Event::ToggleOnReplies | Event::OpenGmail | Event::Save | Event::Cancel => {
+                return Some(event);
+            }
+            Event::FocusLocal(_) => {}
         }
         // An alias without a signature has no row to keep the keyboard.
         if self.focus == Some(Focus::OnReplies)
@@ -293,6 +418,41 @@ impl State {
         }
         None
     }
+}
+
+/// Sanitizes edited signature HTML, trims trailing contentless blocks, and returns `None` when no
+/// visible text or image remains.
+pub fn clean_signature_html(html: &str) -> Option<String> {
+    let sanitized = exo_mail::sanitize_fragment(html);
+    let mut trimmed = sanitized.trim();
+    loop {
+        let next = [
+            "<div><br></div>",
+            "<div><br/></div>",
+            "<div><br /></div>",
+            "<p><br></p>",
+            "<p><br/></p>",
+            "<p><br /></p>",
+            "<div></div>",
+            "<p></p>",
+            "<br>",
+            "<br/>",
+            "<br />",
+        ]
+        .iter()
+        .find_map(|suffix| trimmed.strip_suffix(suffix))
+        .map(str::trim);
+        match next {
+            Some(shorter) => trimmed = shorter,
+            None => break,
+        }
+    }
+    if trimmed.is_empty() {
+        return None;
+    }
+    let has_content =
+        trimmed.contains("<img") || !crate::compose::plain::from_html(trimmed).trim().is_empty();
+    has_content.then(|| trimmed.to_owned())
 }
 
 /// Whether `alias` has a signature to show.
@@ -323,6 +483,18 @@ pub fn dialog(
     preview: &mut Preview,
     shown: &Shown<'_>,
 ) -> DialogResponse<Option<Event>> {
+    if let Some(local) = &mut state.local {
+        let rule = OUTLOOK_EDITOR_TOP + OUTLOOK_EDITOR_HEIGHT + RULE_GAP;
+        let row_top = rule + ROW_GAP;
+        let actions_top = row_top + ROW_HEIGHT + OUTLOOK_ACTIONS_GAP;
+        let body_height = actions_top + DIALOG_ACTION_HEIGHT + OUTLOOK_ACTIONS_BOTTOM;
+        return Dialog::new("signatures", "Signature", body_height).show(
+            ctx,
+            area,
+            open,
+            |ui, body| draw_outlook(ui, body, local, shown.on_replies),
+        );
+    }
     let alias = self::shown(state.selected.as_deref(), shown.aliases);
     let signature = alias.filter(|alias| has_signature(alias));
     // The signature's left edge (the card is centred on a device pixel), for its glyphs' phase.
@@ -508,6 +680,150 @@ fn draw(
     );
     if response.clicked() {
         event = Some(Event::ToggleOnReplies);
+    }
+    event
+}
+
+fn draw_outlook(
+    ui: &mut Ui,
+    body: Rect,
+    local: &mut LocalState,
+    on_replies: bool,
+) -> Option<Event> {
+    let ctx = ui.ctx().clone();
+    let painter = ui.painter().clone();
+    let (left, right, top) = (body.left(), body.right(), body.top());
+    let mut event = None;
+
+    LABEL.paint_line(
+        &painter,
+        pos2(left, top + LABEL_TOP),
+        OUTLOOK_SUBHEADER,
+        OUTLOOK_SUBHEADER_INK,
+        None,
+    );
+
+    let editor_rect = Rect::from_min_size(
+        pos2(left, top + OUTLOOK_EDITOR_TOP),
+        vec2(
+            (right - left - OUTLOOK_EDITOR_GUTTER).max(1.0),
+            OUTLOOK_EDITOR_HEIGHT,
+        ),
+    );
+    let mut child = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(editor_rect)
+            .id_salt("outlook-signature-editor"),
+    );
+    child.set_clip_rect(editor_rect.intersect(ui.clip_rect()));
+    let output = egui::ScrollArea::vertical()
+        .id_salt("outlook-signature-scroll")
+        .max_height(OUTLOOK_EDITOR_HEIGHT)
+        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+        .show(&mut child, |ui| {
+            let style = EditorStyle {
+                placeholder: Some(OUTLOOK_PLACEHOLDER.into()),
+                min_height: OUTLOOK_EDITOR_HEIGHT,
+            };
+            let edited = local.editor.ui(ui, &style);
+            (
+                edited.response.id,
+                edited.response.clicked() || edited.response.gained_focus(),
+            )
+        });
+    let (editor_id, editor_clicked) = output.inner;
+    if editor_clicked && local.focus != LocalFocus::Editor {
+        event = Some(Event::FocusLocal(LocalFocus::Editor));
+    }
+    if local.focus == LocalFocus::Editor {
+        if std::mem::take(&mut local.focus_pending) || !ctx.memory(|m| m.has_focus(editor_id)) {
+            ctx.memory_mut(|memory| memory.request_focus(editor_id));
+        }
+    } else if ctx.memory(|m| m.has_focus(editor_id)) {
+        ctx.memory_mut(|memory| memory.surrender_focus(editor_id));
+    }
+
+    let rule_y = top + OUTLOOK_EDITOR_TOP + OUTLOOK_EDITOR_HEIGHT + RULE_GAP;
+    painter.hline(
+        left..=right,
+        rule_y + RULE_INSET + 0.5,
+        Stroke::new(1.0, RULE),
+    );
+
+    let row = Rect::from_min_size(pos2(left, rule_y + ROW_GAP), vec2(right - left, ROW_HEIGHT));
+    let response = ui
+        .interact(
+            row,
+            exo_ui::id(&ctx, "outlook-signatures-on-replies"),
+            Sense::click(),
+        )
+        .on_hover_cursor(egui::CursorIcon::PointingHand);
+    if response.hovered() && local.focus != LocalFocus::OnReplies {
+        event = event.or(Some(Event::FocusLocal(LocalFocus::OnReplies)));
+    }
+    if local.focus == LocalFocus::OnReplies {
+        let band = Rect::from_x_y_ranges(
+            left - DIALOG_PADDING..=right + DIALOG_PADDING,
+            row.top() + FOCUS_TOP..=row.top() + FOCUS_TOP + FOCUS_HEIGHT,
+        );
+        painter.rect_filled(band, 0.0, FOCUS.gamma_multiply(0.15));
+        painter.rect_filled(
+            Rect::from_min_size(band.min, vec2(FOCUS_BAR, FOCUS_HEIGHT)),
+            0.0,
+            FOCUS,
+        );
+    }
+    ROW_LABEL.paint_line(
+        &painter,
+        pos2(left, row.top() + ROW_LABEL_TOP),
+        ON_REPLIES,
+        LABEL_INK,
+        None,
+    );
+    exo_ui::paint_checkbox(
+        &painter,
+        pos2(right - CHECKBOX, row.top() + CHECKBOX_TOP),
+        on_replies,
+        exo_ui::palette(&ctx),
+    );
+    if response.clicked() {
+        event = Some(Event::ToggleOnReplies);
+    }
+
+    let actions_top = row.bottom() + OUTLOOK_ACTIONS_GAP;
+    let save = DialogAction::new("Save", ActionKind::Primary)
+        .focused(matches!(local.focus, LocalFocus::Save | LocalFocus::Editor));
+    let cancel = DialogAction::new("Cancel", ActionKind::Plain)
+        .unfilled()
+        .focused(local.focus == LocalFocus::Cancel);
+    let save_width = save.width(&ctx);
+    let cancel_width = cancel.width(&ctx);
+    let save_rect = Rect::from_min_size(
+        pos2(right + OUTLOOK_ACTIONS_OVERHANG - save_width, actions_top),
+        vec2(save_width, DIALOG_ACTION_HEIGHT),
+    );
+    let cancel_rect = Rect::from_min_size(
+        pos2(
+            save_rect.left() - OUTLOOK_ACTION_GAP - cancel_width,
+            actions_top,
+        ),
+        vec2(cancel_width, DIALOG_ACTION_HEIGHT),
+    );
+    if save
+        .show(ui, exo_ui::id(&ctx, "outlook-signatures-save"), save_rect)
+        .clicked()
+    {
+        event = Some(Event::Save);
+    }
+    if cancel
+        .show(
+            ui,
+            exo_ui::id(&ctx, "outlook-signatures-cancel"),
+            cancel_rect,
+        )
+        .clicked()
+    {
+        event = Some(Event::Cancel);
     }
     event
 }
@@ -746,5 +1062,51 @@ mod tests {
         assert_eq!(state.selected.as_deref(), Some("bare@mayaokafor.com"));
         assert_eq!(state.focus(), Some(Focus::Dropdown));
         assert!(!state.menu_open());
+    }
+
+    #[test]
+    fn clean_signature_html_strips_trailing_empty_blocks_and_empty_input() {
+        assert_eq!(clean_signature_html(""), None);
+        assert_eq!(
+            clean_signature_html("<div><br></div><div><br/></div>"),
+            None
+        );
+        assert_eq!(
+            clean_signature_html("<div>Best,<br>Maya</div><div><br></div>"),
+            Some("<div>Best,<br>Maya</div>".into())
+        );
+        assert_eq!(
+            clean_signature_html("<img src=\"https://example.com/logo.png\">"),
+            Some("<img src=\"https://example.com/logo.png\">".into())
+        );
+    }
+
+    #[test]
+    fn outlook_signature_dialog_tabs_across_editor_checkbox_and_buttons() {
+        let mut state = State::open_outlook(Some("<div>Best,<br>Maya</div>"));
+        assert_eq!(
+            state.cleaned_html().as_deref(),
+            Some("<div>Best,<br>Maya</div>")
+        );
+        assert_eq!(
+            state.handle(Event::Activate, &[]),
+            None,
+            "Editor keeps Enter"
+        );
+        state.handle(Event::Tab(1), &[]);
+        assert_eq!(
+            state.handle(Event::Activate, &[]),
+            Some(Event::ToggleOnReplies)
+        );
+        state.handle(Event::Tab(1), &[]);
+        assert_eq!(state.handle(Event::Activate, &[]), Some(Event::Cancel));
+        state.handle(Event::Tab(1), &[]);
+        assert_eq!(state.handle(Event::Activate, &[]), Some(Event::Save));
+        state.handle(Event::Tab(1), &[]);
+        assert_eq!(
+            state.handle(Event::Activate, &[]),
+            None,
+            "wrapped back to editor"
+        );
     }
 }

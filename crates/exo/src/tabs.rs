@@ -26,8 +26,12 @@ const FILE_NAME: &str = "tabs.json";
 /// Where a tab is: an account and a route, as its link says it.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Route {
-    /// The account.
+    /// The account's display address (and key for Google accounts).
     pub email: String,
+    /// The account's storage/auth key when it differs from [`Self::email`] (Microsoft accounts:
+    /// `microsoft {email}`). Omitted for Google accounts so `tabs.json` stays unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account: Option<String>,
     /// The list, or none for the account's home (`/{email}`).
     pub list: Option<ListId>,
     /// The conversation open, if one is.
@@ -60,11 +64,30 @@ impl Route {
     pub(crate) fn home(email: String) -> Self {
         Self {
             email,
+            account: None,
             list: None,
             thread: None,
             view: View::List,
             filter: None,
         }
+    }
+
+    /// Home for the account keyed `key` with display address `email`.
+    pub(crate) fn home_for(key: String, email: String) -> Self {
+        let account = (key != email).then_some(key);
+        Self {
+            email,
+            account,
+            list: None,
+            thread: None,
+            view: View::List,
+            filter: None,
+        }
+    }
+
+    /// The account's auth/storage key (`email` for Google, `microsoft {email}` for Microsoft).
+    pub(crate) fn account_key(&self) -> &str {
+        self.account.as_deref().unwrap_or(&self.email)
     }
 }
 
@@ -82,11 +105,20 @@ pub(crate) enum Parked {
 }
 
 impl Parked {
-    /// The account it shows, if it's an account's mail.
+    /// The account's display address, if it's an account's mail.
     pub(crate) fn email(&self) -> Option<&str> {
         match self {
             Self::Page(page) => Some(page.account().email()),
             Self::Route(route) => Some(&route.email),
+            Self::SignIn | Self::Screen(_) => None,
+        }
+    }
+
+    /// The account's auth/storage key, if it's an account's mail.
+    pub(crate) fn account_key(&self) -> Option<&str> {
+        match self {
+            Self::Page(page) => Some(page.account().key()),
+            Self::Route(route) => Some(route.account_key()),
             Self::SignIn | Self::Screen(_) => None,
         }
     }
@@ -168,16 +200,16 @@ impl Tabs {
         self.active
     }
 
-    /// Whether a tab not on screen shows `email`'s mail.
-    pub(crate) fn shows(&self, email: &str) -> bool {
+    /// Whether a tab not on screen shows the account keyed `key`.
+    pub(crate) fn shows(&self, key: &str) -> bool {
         self.parked()
-            .any(|(_, parked)| parked.email() == Some(email))
+            .any(|(_, parked)| parked.account_key() == Some(key))
     }
 
-    /// The first tab not on screen showing `email`'s mail.
-    pub(crate) fn find(&self, email: &str) -> Option<usize> {
+    /// The first tab not on screen showing the account keyed `key`.
+    pub(crate) fn find(&self, key: &str) -> Option<usize> {
         self.parked()
-            .find(|(_, parked)| parked.email() == Some(email))
+            .find(|(_, parked)| parked.account_key() == Some(key))
             .map(|(index, _)| index)
     }
 
@@ -217,13 +249,13 @@ impl Tabs {
         self.tabs.get_mut(index).map(|tab| &mut tab.pill)
     }
 
-    /// Takes the pages on `email`'s account out of the tabs not on screen, which keep their
+    /// Takes the pages on the account keyed `key` out of the tabs not on screen, which keep their
     /// routes, for the account to close.
-    pub(crate) fn unpage(&mut self, email: &str) -> Vec<Box<Mail>> {
+    pub(crate) fn unpage(&mut self, key: &str) -> Vec<Box<Mail>> {
         let mut pages = Vec::new();
         for tab in &mut self.tabs {
             if let Some(Parked::Page(page)) = &tab.parked
-                && page.account().email() == email
+                && page.account().key() == key
             {
                 let route = Parked::Route(page.route());
                 if let Some(Parked::Page(page)) = tab.parked.replace(route) {
@@ -579,7 +611,12 @@ pub(crate) fn parked_title(account: &Account, route: &Route, who: &str) -> Optio
         .get(&name)
         .and_then(crate::splits::count_label);
     Some(title(
-        crate::lists::name(&name, &snapshot.labels, account.settings().splits()),
+        crate::lists::name_for(
+            &name,
+            &snapshot.labels,
+            account.settings().splits(),
+            account.is_outlook(),
+        ),
         count.as_deref(),
         who,
     ))
@@ -597,8 +634,10 @@ impl crate::Mail {
         } else {
             View::List
         };
+        let (email, key) = (self.account.email(), self.account.key());
         Route {
-            email: self.account.email().to_owned(),
+            email: email.to_owned(),
+            account: (key != email).then(|| key.to_owned()),
             list: Some(self.list.clone()),
             thread: self.thread.as_ref().map(|thread| thread.id().to_owned()),
             view,
@@ -689,10 +728,11 @@ impl crate::Mail {
             (Some(_), Some(query)) => format!("Search: {query}"),
             (Some(_), None) => "Search".to_owned(),
             (None, _) if self.snippets.folder.is_open() => "Snippets".to_owned(),
-            (None, _) => crate::lists::name(
+            (None, _) => crate::lists::name_for(
                 &self.list,
                 &self.snapshot.labels,
                 self.account.settings().splits(),
+                self.account.is_outlook(),
             )
             .to_owned(),
         };
@@ -846,6 +886,7 @@ mod tests {
         };
         tabs.push(pill("c"), Parked::Route(week.clone()));
         let on_screen = Route {
+            account: None,
             email: "a".into(),
             list: Some(ListId::Label("Label_1".into())),
             thread: Some("t".into()),

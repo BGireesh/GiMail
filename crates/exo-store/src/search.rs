@@ -15,7 +15,6 @@ use std::collections::{BTreeSet, HashMap};
 use std::ops::Range;
 use std::sync::LazyLock;
 
-use gmail::ListQuery;
 use jiff::Timestamp;
 use regex::Regex;
 use toasty::Executor;
@@ -26,18 +25,18 @@ use crate::db::{
     query_rows,
 };
 use crate::drafts::EditableDraft;
+use crate::entities::unescape_html;
 use crate::error::Result;
 use crate::ids::ListId;
 use crate::ids::ThreadId;
 use crate::ids::labels::{INBOX, SH_ALL, SH_IMPORTANT, SH_OTHER, TRASH};
 use crate::model::{Contact, ThreadSummary};
 use crate::notes::TermMatch;
-use crate::parse::unescape_html;
-use crate::provider;
+use crate::provider::Searching;
 use crate::query::{Cond, FTS_ANCHOR, LabelIndex, Recheck, SearchQuery, tokenize_email};
 use crate::quota::Lane;
-use crate::split::{Me, important_definition};
 use crate::store::{Store, load_attachments_by_thread, load_views, reindex};
+use crate::truth;
 use crate::view::{Router, ThreadView};
 
 /// `snippet()`'s column numbers.
@@ -995,24 +994,6 @@ impl Store {
         let mut db = inner.db.clone();
         let router = inner.router();
         let labels = label_index(&mut db).await?;
-        let me = Me {
-            addresses: &router.me.addresses,
-            name: router.me.name.as_deref(),
-        };
-        let q = search
-            .query
-            .to_gmail(&labels, &router.me.addresses, &important_definition(&me));
-        let query = ListQuery {
-            q: Some(q),
-            include_spam_trash: search.query.includes_spam_trash(),
-            max_results: Some(if search.next_page.is_some() {
-                GMAIL_PAGE
-            } else {
-                FIRST_GMAIL_PAGE
-            }),
-            page_token: search.next_page.clone(),
-            ..ListQuery::default()
-        };
         // The first page is what the user just asked for. Later ones fill in as they scroll,
         // and a search run ahead may never be asked for.
         let lane = if search.next_page.is_some() || search.preloaded {
@@ -1020,19 +1001,22 @@ impl Store {
         } else {
             Lane::Act
         };
-        let page = inner
-            .api
-            .call(lane, crate::sync::ATTEMPTS, |gmail| gmail.messages(&query))
-            .await?;
-        let hits: Vec<GmailHit> = page
-            .messages
-            .iter()
-            .filter_map(|message| {
-                Some(GmailHit {
-                    thread: message.thread_id.clone()?,
-                    message: message.id.clone()?,
-                })
-            })
+        let searching = Searching {
+            query: &search.query,
+            labels: &labels,
+            router: &router,
+            page: search.next_page.as_deref(),
+            size: if search.next_page.is_some() {
+                GMAIL_PAGE
+            } else {
+                FIRST_GMAIL_PAGE
+            },
+        };
+        let found = inner.mail.search(searching, lane).await?;
+        let hits: Vec<GmailHit> = found
+            .hits
+            .into_iter()
+            .map(|(thread, message)| GmailHit { thread, message })
             .collect();
         let threads: Vec<(String, u64)> = hits
             .iter()
@@ -1044,8 +1028,8 @@ impl Store {
         let fetched = inner.fetch_stale(lane, &threads).await?;
         if !fetched.is_empty() {
             let mut write = inner.begin(&mut db).await?;
-            for rows in &fetched {
-                if let Some(id) = provider::save_rows(write.exec(), rows).await? {
+            for rows in fetched {
+                if let Some(id) = truth::save_rows(write.exec(), rows).await? {
                     reindex(write.exec(), &id, &router).await?;
                 }
             }
@@ -1053,7 +1037,7 @@ impl Store {
         }
         Ok(GmailPage {
             hits,
-            next: page.next_page_token,
+            next: found.next,
         })
     }
 }
@@ -1404,8 +1388,10 @@ mod tests {
         let store = Store::open(
             &dir,
             "maya@brightmoor.co",
-            gmail::Endpoints::google(),
-            gmail::StaticToken("unused".into()),
+            crate::Remote::gmail(
+                gmail::Endpoints::google(),
+                gmail::StaticToken("unused".into()),
+            ),
         )
         .await
         .expect("opens");
@@ -1441,8 +1427,8 @@ mod tests {
         };
         {
             let mut write = store.inner.begin(&mut db).await.expect("tx");
-            let parsed = crate::parse::parse(&msg, true).expect("parses");
-            provider::save_message(write.exec(), parsed)
+            let parsed = crate::provider::gmail::parse::parse(&msg, true).expect("parses");
+            truth::save_message(write.exec(), parsed)
                 .await
                 .expect("saves");
             reindex(write.exec(), "t1", &store.inner.router())
@@ -1592,8 +1578,8 @@ mod tests {
         };
         {
             let mut write = store.inner.begin(&mut db).await.expect("tx");
-            let parsed = crate::parse::parse(&msg2, true).expect("parses");
-            provider::save_message(write.exec(), parsed)
+            let parsed = crate::provider::gmail::parse::parse(&msg2, true).expect("parses");
+            truth::save_message(write.exec(), parsed)
                 .await
                 .expect("saves");
             reindex(write.exec(), "t2", &store.inner.router())

@@ -325,8 +325,10 @@ mod tests {
             let store = Store::open(
                 &dir,
                 "maya@brightmoor.co",
-                gmail::Endpoints::mock(&"http://127.0.0.1:9/".parse().expect("origin")),
-                gmail::StaticToken("dev".into()),
+                exo_store::Remote::gmail(
+                    gmail::Endpoints::mock(&"http://127.0.0.1:9/".parse().expect("origin")),
+                    gmail::StaticToken("dev".into()),
+                ),
             )
             .await
             .expect("store opens");

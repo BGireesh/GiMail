@@ -1,0 +1,2904 @@
+//! The calendar end to end: the right pane's day view (its keys, the palette's rows, following
+//! the cursor and an invite, the footer's button), the calendars a new account switches on, the
+//! week view, Jump to Date, and an event's details answering an invitation.
+
+use crate::support;
+
+use egui::{Event, Key, Modifiers, Pos2};
+use jiff::civil::date;
+use support::{Fixture, start};
+
+/// The footer's calendar button at 1280×800.
+const FOOTER_CALENDAR: Pos2 = Pos2::new(1217.0, 777.0);
+/// The day view's next-day chevron at 1280×800 (1105.8,72 20×24).
+const NEXT_DAY: Pos2 = Pos2::new(1115.0, 84.0);
+/// The week's new event form's Repeat at 1280×800 (543,369 85×20), and the day view's Today
+/// (1210,72 24×19) and `+` (1234,72 19×19).
+const REPEAT: Pos2 = Pos2::new(570.0, 378.0);
+const DAY_TODAY: Pos2 = Pos2::new(1222.0, 81.0);
+const DAY_CREATE: Pos2 = Pos2::new(1244.0, 81.0);
+/// The week's new event form's `Add a meeting link` at 1280×800.
+const MEETING: Pos2 = Pos2::new(600.0, 409.0);
+/// In the week view at 1280×800: the rail's Calendar, Thursday's 2pm `Calloway: Atlas feedback
+/// call`, and its details' `Yes`.
+const RAIL_CALENDAR: Pos2 = Pos2::new(20.0, 112.0);
+const CALLOWAY: Pos2 = Pos2::new(660.0, 520.0);
+const YES: Pos2 = Pos2::new(271.0, 754.0);
+
+const CMD: Modifiers = Modifiers {
+    mac_cmd: true,
+    command: true,
+    ..Modifiers::NONE
+};
+
+fn palette(app: &mut Fixture, query: &str) {
+    app.press(Key::K, CMD);
+    app.harness
+        .input_mut()
+        .events
+        .push(Event::Text(query.to_owned()));
+    app.harness.run_steps(1);
+    app.key(Key::Enter);
+}
+
+#[test]
+fn keys_open_and_move_the_day_and_the_cursor_closes_it() {
+    let mut app = start("calendar-keys");
+    assert_eq!(app.mail().calendar_day(), None);
+    app.key(Key::Num0);
+    assert_eq!(
+        app.mail().calendar_day(),
+        Some(date(2026, 11, 17)),
+        "today, the mock's now"
+    );
+    app.key(Key::Equals);
+    app.key(Key::Equals);
+    assert_eq!(app.mail().calendar_day(), Some(date(2026, 11, 19)));
+    app.key(Key::Minus);
+    assert_eq!(app.mail().calendar_day(), Some(date(2026, 11, 18)));
+    // Moving to a conversation without an invite brings its contact back.
+    app.key(Key::J);
+    app.key(Key::J);
+    app.settle();
+    assert_eq!(app.mail().calendar_day(), None);
+    app.click(FOOTER_CALENDAR);
+    assert_eq!(app.mail().calendar_day(), Some(date(2026, 11, 17)));
+    app.click(NEXT_DAY);
+    assert_eq!(app.mail().calendar_day(), Some(date(2026, 11, 18)));
+}
+
+#[test]
+fn a_day_opened_from_the_palette_stays_as_the_cursor_moves() {
+    let mut app = start("calendar-palette");
+    palette(&mut app, "open day");
+    assert_eq!(app.mail().calendar_day(), Some(date(2026, 11, 17)));
+    app.key(Key::J);
+    app.key(Key::J);
+    app.settle();
+    assert_eq!(
+        app.mail().calendar_day(),
+        Some(date(2026, 11, 17)),
+        "a command's day isn't contextual"
+    );
+    palette(&mut app, "close calendar");
+    assert_eq!(app.mail().calendar_day(), None);
+}
+
+#[test]
+fn jump_to_date_moves_the_day_and_the_week() {
+    let mut app = start("calendar-jump");
+    let jump = |app: &mut Fixture, query: &str| {
+        palette(app, "jump to date");
+        app.harness.run_steps(1);
+        app.harness
+            .input_mut()
+            .events
+            .push(Event::Text(query.to_owned()));
+        app.harness.run_steps(1);
+        app.key(Key::Enter);
+    };
+    app.key(Key::Num0);
+    jump(&mut app, "nov 25");
+    assert_eq!(app.mail().calendar_day(), Some(date(2026, 11, 25)));
+    app.key(Key::Num2);
+    jump(&mut app, "2 weeks");
+    assert_eq!(
+        app.mail().calendar_week(),
+        Some(date(2026, 12, 1)),
+        "the week view moves instead"
+    );
+}
+
+#[test]
+fn an_invite_shows_its_day() {
+    let mut app = start("calendar-invite");
+    // The second row is Grace's invitation for coffee on the 25th.
+    app.key(Key::J);
+    app.settle();
+    assert!(
+        app.cursor().starts_with("Invitation: Coffee with Grace"),
+        "{}",
+        app.cursor()
+    );
+    assert_eq!(
+        app.mail().calendar_day(),
+        Some(date(2026, 11, 25)),
+        "the cursor's invite"
+    );
+    app.key(Key::Enter);
+    app.settle();
+    assert_eq!(
+        app.mail().calendar_day(),
+        Some(date(2026, 11, 25)),
+        "and the open thread's"
+    );
+}
+
+#[test]
+fn a_new_account_switches_on_its_listed_calendars() {
+    let mut app = start("calendar-defaults");
+    app.settle();
+    let account = app.mail().account();
+    let calendars = &account.settings().calendar_accounts[account.email()].calendars;
+    let colors: Vec<(&str, Option<&str>)> = calendars
+        .values()
+        .map(|calendar| (calendar.id.as_str(), calendar.color.as_deref()))
+        .collect();
+    assert_eq!(
+        colors,
+        [
+            (
+                "c_8f3b2a1d9e7c4b6a5f01@group.calendar.google.com",
+                Some("green")
+            ),
+            ("en.usa#holiday@group.v.calendar.google.com", Some("forest")),
+            ("maya@brightmoor.co", Some("blue")),
+        ],
+        "Birthdays is hidden"
+    );
+    palette(&mut app, "show declined events");
+    assert!(
+        app.mail()
+            .account()
+            .settings()
+            .calendar
+            .show_declined_events
+    );
+}
+
+#[test]
+fn the_week_opens_moves_and_closes() {
+    let mut app = start("calendar-week");
+    app.key(Key::Num2);
+    assert_eq!(app.mail().calendar_week(), Some(date(2026, 11, 17)));
+    app.key(Key::Equals);
+    app.key(Key::J);
+    assert_eq!(
+        app.mail().calendar_week(),
+        Some(date(2026, 12, 1)),
+        "= and j a week on each"
+    );
+    app.key(Key::T);
+    assert_eq!(app.mail().calendar_week(), Some(date(2026, 11, 17)));
+    app.key(Key::Escape);
+    assert_eq!(app.mail().calendar_week(), None);
+    // From the day view, `0` opens the week on its day.
+    app.key(Key::Num0);
+    app.key(Key::Equals);
+    app.key(Key::Num0);
+    assert_eq!(
+        (app.mail().calendar_week(), app.mail().calendar_day()),
+        (Some(date(2026, 11, 18)), None)
+    );
+    app.key(Key::Num1);
+    assert_eq!(app.mail().calendar_week(), None);
+    app.click(RAIL_CALENDAR);
+    assert_eq!(app.mail().calendar_week(), Some(date(2026, 11, 17)));
+}
+
+#[test]
+fn go_to_sequences_close_the_week_first() {
+    let mut app = start("calendar-week-go-to");
+    app.key(Key::Num2);
+    app.key(Key::G);
+    app.key(Key::E);
+    assert_eq!(app.mail().calendar_week(), None);
+    assert_eq!(app.mail().list(), &exo_store::ListId::Done);
+    app.key(Key::Num2);
+    app.key(Key::G);
+    app.key(Key::I);
+    assert_eq!(
+        (app.mail().calendar_week(), app.mail().list()),
+        (None, &exo_store::ListId::Inbox),
+        "`g i` goes home"
+    );
+}
+
+#[test]
+fn calendar_settings_start_the_week_on_monday_and_hide_weekends() {
+    let mut app = start("calendar-week-options");
+    app.key(Key::Num2);
+    app.settle();
+    let week = |app: &Fixture| app.mail().calendar_week_days(date(2026, 11, 17));
+    assert_eq!(
+        week(&app).first(),
+        Some(&date(2026, 11, 15)),
+        "Sunday first"
+    );
+    // The gutter's time zone opens Calendar Settings.
+    app.click(Pos2::new(90.0, 180.0));
+    assert!(app.mail().calendar_settings_open());
+    // `Start week on Monday`, the dialog's first option. The dialog is centered, so its place
+    // moves with its height.
+    click_widget(
+        &mut app,
+        ("calendar-settings-option", "Start week on Monday"),
+    );
+    assert_eq!(
+        week(&app).first(),
+        Some(&date(2026, 11, 16)),
+        "Monday first"
+    );
+    app.key(Key::Escape);
+    palette(&mut app, "Hide Weekends");
+    assert_eq!(
+        week(&app),
+        (16..=20).map(|day| date(2026, 11, day)).collect::<Vec<_>>()
+    );
+    palette(&mut app, "Show Weekends");
+    assert_eq!(week(&app).len(), 7);
+}
+
+#[test]
+fn an_events_details_answer_it() {
+    let mut app = start("calendar-details");
+    app.key(Key::Num2);
+    app.settle();
+    app.click(CALLOWAY);
+    assert_eq!(
+        app.mail().calendar_details(),
+        Some(false),
+        "the details are up"
+    );
+    app.click(YES);
+    app.settle();
+    let gmail = app.gmail();
+    let query = gmail::calendar::EventsQuery {
+        q: Some("Calloway: Atlas".into()),
+        single_events: true,
+        ..Default::default()
+    };
+    let events = app
+        .block_on(
+            gmail
+                .calendar()
+                .events("maya@brightmoor.co", &query)
+                .into_future(),
+        )
+        .expect("lists");
+    let call = events
+        .items
+        .iter()
+        .find(|event| event.summary.as_deref() == Some("Calloway: Atlas feedback call"))
+        .expect("on the calendar");
+    let mine = call
+        .attendees
+        .iter()
+        .find(|attendee| attendee.email.as_deref() == Some("maya@brightmoor.co"))
+        .and_then(|attendee| attendee.response_status.as_deref());
+    assert_eq!(mine, Some("accepted"));
+    // Escape closes the details, then the week.
+    app.key(Key::Escape);
+    assert_eq!(
+        (
+            app.mail().calendar_details(),
+            app.mail().calendar_week().is_some()
+        ),
+        (None, true)
+    );
+    app.key(Key::Escape);
+    assert_eq!(app.mail().calendar_week(), None);
+}
+
+/// My answer to Thursday's `Calloway: Atlas feedback call`, as Calendar has it.
+fn calloway_answer(app: &Fixture) -> Option<String> {
+    let gmail = app.gmail();
+    let query = gmail::calendar::EventsQuery {
+        q: Some("Calloway: Atlas".into()),
+        single_events: true,
+        ..Default::default()
+    };
+    let events = app
+        .block_on(
+            gmail
+                .calendar()
+                .events("maya@brightmoor.co", &query)
+                .into_future(),
+        )
+        .expect("lists");
+    let call = events
+        .items
+        .iter()
+        .find(|event| event.summary.as_deref() == Some("Calloway: Atlas feedback call"))
+        .expect("on the calendar");
+    call.attendees
+        .iter()
+        .find(|attendee| attendee.email.as_deref() == Some("maya@brightmoor.co"))
+        .and_then(|attendee| attendee.response_status.clone())
+}
+
+#[test]
+fn an_answer_given_offline_goes_once_online() {
+    let mut app = start("calendar-answer-offline");
+    app.key(Key::Num2);
+    app.settle();
+    app.click(CALLOWAY);
+    assert_eq!(
+        app.mail().calendar_details(),
+        Some(false),
+        "the details are up"
+    );
+    app.disconnect();
+    app.mail().account().network_changed();
+    // Not settled, because offline the details' guests keep the app busy for longer than a toast
+    // shows.
+    let started = std::time::Instant::now();
+    while app.mail().status_bar().is_none() && started.elapsed() < std::time::Duration::from_secs(5)
+    {
+        app.harness.run_steps(1);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    app.harness.run_steps(2);
+    // The offline bar takes the page's bottom, and the details move up with it.
+    let yes = YES - egui::vec2(0.0, exo_ui::MESSAGE_BAR_HEIGHT);
+    app.harness
+        .input_mut()
+        .events
+        .push(Event::PointerMoved(yes));
+    app.harness.run_steps(1);
+    for pressed in [true, false] {
+        app.harness.input_mut().events.push(Event::PointerButton {
+            pos: yes,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        });
+        app.harness.run_steps(1);
+    }
+    assert_eq!(
+        app.mail().toast_text(),
+        Some("RSVP will be sent when online.")
+    );
+    app.reconnect();
+    assert_eq!(
+        calloway_answer(&app).as_deref(),
+        Some("needsAction"),
+        "not sent yet"
+    );
+    // Opened again online, it goes.
+    app.relaunch();
+    app.wait(1.0);
+    assert_eq!(calloway_answer(&app).as_deref(), Some("accepted"));
+}
+
+#[test]
+fn an_answer_calendar_refuses_says_so() {
+    let mut app = start("calendar-answer-refused");
+    app.key(Key::Num2);
+    app.settle();
+    app.fault(Some(serde_json::json!({ "method": "PATCH", "path": "/calendar/v3/calendars/", "status": 403, "message": "Forbidden", "reason": "forbidden" })));
+    app.click(CALLOWAY);
+    app.click(YES);
+    app.wait(0.5);
+    assert_eq!(
+        app.mail().toast_text(),
+        Some("Sorry! Failed to save your RSVP.")
+    );
+    assert_eq!(calloway_answer(&app).as_deref(), Some("needsAction"));
+}
+
+/// The week view at 1280×800, the morning's scroll: a time's y on the grid, and the day
+/// columns' centres (Sunday first).
+fn at(day: usize, hour: f32) -> Pos2 {
+    Pos2::new(
+        104.0 + 127.0 * (day as f32 + 0.5),
+        194.0 + hour * 44.0 - 312.0,
+    )
+}
+
+/// A double click at `at`, two clicks a frame apart.
+fn double_click(app: &mut Fixture, at: Pos2) {
+    app.harness.input_mut().events.push(Event::PointerMoved(at));
+    app.harness.run_steps(1);
+    for _ in 0..2 {
+        for pressed in [true, false] {
+            app.harness.input_mut().events.push(Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: Modifiers::NONE,
+            });
+            app.harness.run_steps(1);
+        }
+    }
+    app.settle();
+}
+
+/// A drag from `from` to `to` in steps, as a hand moves.
+fn drag(app: &mut Fixture, from: Pos2, to: Pos2) {
+    app.harness
+        .input_mut()
+        .events
+        .push(Event::PointerMoved(from));
+    app.harness.run_steps(1);
+    app.harness.input_mut().events.push(Event::PointerButton {
+        pos: from,
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: Modifiers::NONE,
+    });
+    app.harness.run_steps(1);
+    for step in 1..=10 {
+        app.harness.input_mut().events.push(Event::PointerMoved(
+            from + (to - from) * (step as f32 / 10.0),
+        ));
+        app.harness.run_steps(1);
+    }
+    app.harness.input_mut().events.push(Event::PointerButton {
+        pos: to,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: Modifiers::NONE,
+    });
+    app.harness.run_steps(1);
+    app.settle();
+}
+
+fn shown_on(app: &Fixture, day: jiff::civil::Date) -> Vec<String> {
+    app.mail()
+        .calendar_events_on(day)
+        .into_iter()
+        .map(|(title, start)| format!("{title} {start}"))
+        .collect()
+}
+
+#[test]
+fn a_new_event_is_held_for_undo_then_sent() {
+    let mut app = start("calendar-create");
+    app.key(Key::Num2);
+    app.settle();
+    // `b` opens the next half hour on the week's day, with its title focused.
+    app.key(Key::B);
+    assert_eq!(app.mail().calendar_form(), Some(true));
+    app.press(Key::Enter, CMD);
+    assert_eq!(
+        app.mail().calendar_prompt(),
+        Some("Almost there…"),
+        "a title is needed"
+    );
+    app.key(Key::Enter);
+    app.type_text("Lunch with Lena");
+    app.press(Key::Enter, CMD);
+    assert_eq!(app.mail().calendar_form(), None);
+    let tuesday = date(2026, 11, 17);
+    assert!(
+        shown_on(&app, tuesday).contains(&"Lunch with Lena 9:00 AM".to_owned()),
+        "shown at once: {:?}",
+        shown_on(&app, tuesday)
+    );
+    // Undo takes it back and opens the form again.
+    app.key(Key::Z);
+    assert!(
+        !shown_on(&app, tuesday)
+            .iter()
+            .any(|event| event.starts_with("Lunch"))
+    );
+    assert_eq!(app.mail().calendar_form(), Some(true));
+    app.press(Key::Enter, CMD);
+    // Past the hold, Calendar has it.
+    std::thread::sleep(std::time::Duration::from_millis(10_500));
+    app.wait(1.0);
+    let gmail = app.gmail();
+    let query = gmail::calendar::EventsQuery {
+        q: Some("Lunch with Lena".into()),
+        ..Default::default()
+    };
+    let found = app
+        .block_on(
+            gmail
+                .calendar()
+                .events("maya@brightmoor.co", &query)
+                .into_future(),
+        )
+        .expect("lists");
+    assert_eq!(found.items.len(), 1, "sent once");
+    assert!(shown_on(&app, tuesday).contains(&"Lunch with Lena 9:00 AM".to_owned()));
+    // The toast outlives the hold (hovered, it stays): an Undo then can't take the event back,
+    // so it doesn't reopen the form to make it a second time.
+    app.key(Key::Z);
+    assert_eq!(app.mail().calendar_form(), None, "nothing was undone");
+    assert!(shown_on(&app, tuesday).contains(&"Lunch with Lena 9:00 AM".to_owned()));
+}
+
+#[test]
+fn the_calendar_field_filters_the_calendars_as_typed_and_enter_takes_one_then_saves() {
+    const TEAM: &str = "c_8f3b2a1d9e7c4b6a5f01@group.calendar.google.com";
+    let mut app = start("calendar-field");
+    app.key(Key::Num2);
+    app.settle();
+    app.key(Key::B);
+    app.type_text("Standup");
+    // The writable calendars, the primary first. ↓ takes the highlight to the team's, and round
+    // to the primary again.
+    palette(&mut app, "change calendar");
+    app.key(Key::ArrowDown);
+    app.key(Key::Enter);
+    assert_eq!(app.mail().calendar_form_calendar(), Some(TEAM));
+    palette(&mut app, "change calendar");
+    app.key(Key::ArrowDown);
+    app.key(Key::ArrowDown);
+    app.key(Key::Enter);
+    assert_eq!(
+        app.mail().calendar_form_calendar(),
+        Some("maya@brightmoor.co")
+    );
+    // What's typed that matches nothing leaves the field as it is. Escape empties it and the
+    // field keeps the keyboard.
+    palette(&mut app, "change calendar");
+    app.type_text("zzz");
+    app.key(Key::Enter);
+    app.key(Key::Escape);
+    assert_eq!(
+        app.mail().calendar_form(),
+        Some(true),
+        "Escape takes the text first"
+    );
+    app.type_text("team");
+    app.key(Key::Enter);
+    assert_eq!(app.mail().calendar_form_calendar(), Some(TEAM));
+    // Taking one moves on to Save, which Enter presses.
+    app.key(Key::Enter);
+    assert_eq!(app.mail().calendar_form(), None);
+    assert!(
+        shown_on(&app, date(2026, 11, 17)).contains(&"Standup 9:00 AM".to_owned()),
+        "{:?}",
+        shown_on(&app, date(2026, 11, 17))
+    );
+}
+
+/// Presses `key` and runs the frames it takes, without settling, because offline, sync's retries
+/// keep the app busy for longer than a toast shows.
+fn press_unsettled(app: &mut Fixture, key: Key, modifiers: Modifiers) {
+    for pressed in [true, false] {
+        app.harness.input_mut().events.push(Event::Key {
+            key,
+            physical_key: None,
+            pressed,
+            repeat: false,
+            modifiers,
+        });
+        app.harness.run_steps(1);
+    }
+}
+
+/// Runs frames until `done` holds, for a few seconds at most, without settling.
+fn frames_until(app: &mut Fixture, done: impl Fn(&Fixture) -> bool) {
+    let started = std::time::Instant::now();
+    while !done(app) && started.elapsed() < std::time::Duration::from_secs(5) {
+        app.harness.run_steps(1);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+#[test]
+fn an_event_made_offline_waits_through_a_quit_and_goes_once_online() {
+    let mut app = start("calendar-offline");
+    app.key(Key::Num2);
+    app.settle();
+    app.disconnect();
+    app.mail().account().network_changed();
+    app.settle();
+    let tuesday = date(2026, 11, 17);
+    for title in ["Lunch with Lena", "Coffee with Sam"] {
+        app.key(Key::B);
+        app.type_text(title);
+        press_unsettled(&mut app, Key::Enter, CMD);
+        assert_eq!(
+            app.mail().toast_text(),
+            Some("Event will be scheduled when online.")
+        );
+        let shown = format!("{title} 9:00 AM");
+        frames_until(&mut app, |app| shown_on(app, tuesday).contains(&shown));
+        assert!(
+            shown_on(&app, tuesday).contains(&shown),
+            "shown at once: {:?}",
+            shown_on(&app, tuesday)
+        );
+    }
+    // Past the hold, still offline, Undo on the toast (it stays while hovered) takes the last
+    // back, because it hasn't gone.
+    std::thread::sleep(std::time::Duration::from_millis(10_500));
+    app.harness.run_steps(2);
+    press_unsettled(&mut app, Key::Z, Modifiers::NONE);
+    assert_eq!(app.mail().toast_text(), Some("Scheduling undone."));
+    app.settle();
+    app.key(Key::Escape);
+    app.key(Key::Enter);
+    assert_eq!(app.mail().calendar_form(), None);
+    let shown = shown_on(&app, tuesday);
+    assert!(
+        shown.contains(&"Lunch with Lena 9:00 AM".to_owned())
+            && !shown.iter().any(|event| event.starts_with("Coffee")),
+        "{shown:?}"
+    );
+
+    // Quit offline and open again online, and the event Calendar didn't get goes then.
+    app.reconnect();
+    app.relaunch();
+    app.key(Key::Num2);
+    app.settle();
+    assert!(
+        shown_on(&app, tuesday).contains(&"Lunch with Lena 9:00 AM".to_owned()),
+        "kept across the quit: {:?}",
+        shown_on(&app, tuesday)
+    );
+    app.wait(1.0);
+    let gmail = app.gmail();
+    let made = |title: &str| {
+        let query = gmail::calendar::EventsQuery {
+            q: Some(title.into()),
+            ..Default::default()
+        };
+        app.block_on(
+            gmail
+                .calendar()
+                .events("maya@brightmoor.co", &query)
+                .into_future(),
+        )
+        .expect("lists")
+        .items
+        .len()
+    };
+    assert_eq!((made("Lunch with Lena"), made("Coffee with Sam")), (1, 0));
+}
+
+#[test]
+fn a_new_events_time_is_typed() {
+    let mut app = start("calendar-when");
+    app.key(Key::Num2);
+    app.settle();
+    app.key(Key::B);
+    app.type_text("Lunch with Lena");
+    // Tab to Who, then to When, whose text is the draft's time.
+    app.key(Key::Tab);
+    app.key(Key::Tab);
+    app.press(Key::A, CMD);
+    app.type_text("blah");
+    app.key(Key::Enter);
+    assert_eq!(app.mail().calendar_form(), Some(true), "nothing to take");
+    app.press(Key::A, CMD);
+    app.type_text("tomorrow 2pm");
+    app.key(Key::Enter);
+    app.press(Key::Enter, CMD);
+    assert_eq!(app.mail().calendar_form(), None);
+    let wednesday = date(2026, 11, 18);
+    assert!(
+        shown_on(&app, wednesday).contains(&"Lunch with Lena 2:00 PM".to_owned()),
+        "{:?}",
+        shown_on(&app, wednesday)
+    );
+}
+
+#[test]
+fn an_event_is_edited_moved_and_deleted() {
+    let mut app = start("calendar-edit");
+    app.key(Key::Num2);
+    app.settle();
+    let thursday = date(2026, 11, 19);
+    // A double click opens my dinner's form, with the title focused.
+    double_click(&mut app, at(4, 19.8));
+    assert_eq!(app.mail().calendar_form(), Some(false));
+    app.press(Key::End, Modifiers::NONE);
+    app.type_text(" at Lilia");
+    app.press(Key::Enter, CMD);
+    assert_eq!(app.mail().calendar_prompt(), None, "no guests, no dialog");
+    assert!(
+        shown_on(&app, thursday).contains(&"Dinner with Jess 🍕 at Lilia 7:30 PM".to_owned()),
+        "{:?}",
+        shown_on(&app, thursday)
+    );
+
+    // Dragging a recurring event of mine asks which events. Enter takes this one.
+    let wednesday = date(2026, 11, 18);
+    drag(&mut app, at(3, 9.5), at(3, 10.5));
+    assert_eq!(app.mail().calendar_prompt(), Some("Edit recurring event"));
+    app.key(Key::Enter);
+    assert_eq!(app.mail().calendar_prompt(), None);
+    assert!(
+        shown_on(&app, wednesday).contains(&"Focus time 10:00 AM".to_owned()),
+        "{:?}",
+        shown_on(&app, wednesday)
+    );
+
+    // Deleting the weekly sync asks which events, then whether to tell its guests.
+    let monday = date(2026, 11, 16);
+    app.click(at(1, 10.2));
+    assert_eq!(app.mail().calendar_details(), Some(false));
+    app.click(Pos2::new(810.0, 327.0));
+    app.click(Pos2::new(820.0, 407.0));
+    assert_eq!(app.mail().calendar_prompt(), Some("Delete recurring event"));
+    app.key(Key::ArrowDown);
+    app.key(Key::ArrowDown);
+    app.key(Key::Enter);
+    assert_eq!(
+        app.mail().calendar_prompt(),
+        Some("Send a cancellation email?")
+    );
+    app.key(Key::Escape);
+    assert_eq!(
+        app.mail().calendar_prompt(),
+        Some("Delete recurring event"),
+        "Go back"
+    );
+    app.key(Key::Enter);
+    app.key(Key::Enter);
+    assert!(
+        !shown_on(&app, monday)
+            .iter()
+            .any(|event| event.starts_with("Weekly product sync"))
+    );
+    assert!(
+        !shown_on(&app, monday + jiff::ToSpan::days(7))
+            .iter()
+            .any(|event| event.starts_with("Weekly product sync")),
+        "all of them"
+    );
+}
+
+#[test]
+fn an_edited_events_date_times_and_zone_are_typed() {
+    let mut app = start("calendar-when-edit");
+    app.key(Key::Num2);
+    app.settle();
+    double_click(&mut app, at(4, 19.8));
+    assert_eq!(app.mail().calendar_form(), Some(false));
+    // `Edit Date & Time` takes the keyboard to the start's date. Enter takes a typed date and
+    // moves on to the start's time, then its end.
+    palette(&mut app, "edit date");
+    app.type_text("nov 20");
+    app.key(Key::Enter);
+    app.type_text("8p");
+    app.key(Key::Enter);
+    app.type_text("11p");
+    app.key(Key::Enter);
+    app.press(Key::Enter, CMD);
+    assert_eq!(app.mail().calendar_form(), None);
+    let friday = date(2026, 11, 20);
+    assert!(
+        shown_on(&app, friday).contains(&"Dinner with Jess 🍕 8:00 PM".to_owned()),
+        "{:?}",
+        shown_on(&app, friday)
+    );
+    assert!(
+        !shown_on(&app, date(2026, 11, 19))
+            .iter()
+            .any(|event| event.starts_with("Dinner"))
+    );
+
+    // Another zone keeps the clock times: 8 pm in London is 3 pm here.
+    app.key(Key::Num2);
+    app.settle();
+    double_click(&mut app, at(5, 20.3));
+    assert_eq!(app.mail().calendar_form(), Some(false));
+    palette(&mut app, "edit date");
+    for _ in 0..4 {
+        app.key(Key::Tab);
+    }
+    app.type_text("london");
+    app.key(Key::Enter);
+    app.press(Key::Enter, CMD);
+    assert!(
+        shown_on(&app, friday).contains(&"Dinner with Jess 🍕 3:00 PM".to_owned()),
+        "{:?}",
+        shown_on(&app, friday)
+    );
+}
+
+#[test]
+fn who_first_offers_everybody_in_the_conversation() {
+    let mut app = start("calendar-everybody");
+    // With the first conversation open and a new event's Who empty, its people show, each once
+    // and without me.
+    app.key(Key::Enter);
+    app.settle();
+    app.key(Key::B);
+    app.key(Key::Tab);
+    app.key(Key::Enter);
+    let (_, guests) = app.mail().calendar_form_values().expect("the form");
+    assert_eq!(guests, ["tom@brightmoor.co", "priya@brightmoor.co"]);
+}
+
+#[test]
+fn about_is_rich_text() {
+    let mut app = start("calendar-about");
+    app.key(Key::Num2);
+    app.settle();
+    app.key(Key::B);
+    palette(&mut app, "edit description");
+    app.type_text("Agenda ");
+    app.press(Key::B, CMD);
+    app.type_text("first");
+    let (about, _) = app.mail().calendar_form_about().expect("the form");
+    assert!(
+        about.contains("Agenda") && about.contains("<b>first</b>"),
+        "{about}"
+    );
+}
+
+#[test]
+fn where_takes_a_place_apple_maps_suggests() {
+    exo::places::answer_with(vec![
+        exo::places::Place {
+            name: "Lilia".into(),
+            address: "567 Union Ave, Brooklyn, NY".into(),
+        },
+        exo::places::Place {
+            name: "Lilac Wine".into(),
+            address: "Lilac Wine, Berlin".into(),
+        },
+    ]);
+    let mut app = start("calendar-where");
+    app.key(Key::Num2);
+    app.settle();
+    app.key(Key::B);
+    palette(&mut app, "edit location");
+    app.type_text("lil");
+    app.key(Key::ArrowDown);
+    app.key(Key::ArrowDown);
+    app.key(Key::Enter);
+    let (_, location) = app.mail().calendar_form_about().expect("the form");
+    assert_eq!(
+        location, "Lilac Wine, Berlin",
+        "the address alone when it starts with the name"
+    );
+    // What's typed and not picked stays as typed.
+    app.press(Key::A, CMD);
+    app.type_text("Rooftop");
+    app.key(Key::Enter);
+    assert_eq!(
+        app.mail()
+            .calendar_form_about()
+            .map(|(_, location)| location),
+        Some("Rooftop".to_owned())
+    );
+}
+
+#[test]
+fn tab_answers_an_invite_and_the_card_reads_the_answer_back() {
+    let mut app = start("calendar-invite-keys");
+    // Grace's invitation for coffee on the 25th, open.
+    app.key(Key::J);
+    app.key(Key::Enter);
+    app.settle();
+    assert_eq!(app.mail().invite_answer(), Some("needsAction"));
+    // Tab takes the card's first button and → the next. Enter answers with it.
+    app.key(Key::Tab);
+    app.key(Key::ArrowRight);
+    app.key(Key::Enter);
+    app.settle();
+    assert_eq!(app.mail().invite_answer(), Some("tentative"));
+    let gmail = app.gmail();
+    let query = gmail::calendar::EventsQuery {
+        q: Some("Coffee with Grace".into()),
+        single_events: true,
+        ..Default::default()
+    };
+    let found = app
+        .block_on(
+            gmail
+                .calendar()
+                .events("maya@brightmoor.co", &query)
+                .into_future(),
+        )
+        .expect("lists");
+    let mine = found
+        .items
+        .iter()
+        .flat_map(|event| &event.attendees)
+        .find(|attendee| attendee.email.as_deref() == Some("maya@brightmoor.co"))
+        .and_then(|attendee| attendee.response_status.clone());
+    assert_eq!(mine.as_deref(), Some("tentative"));
+    // Opened again, the card has the calendar's answer, not the invitation's.
+    app.key(Key::Escape);
+    app.key(Key::Escape);
+    app.settle();
+    app.key(Key::Enter);
+    app.settle();
+    app.wait(1.0);
+    assert_eq!(app.mail().invite_answer(), Some("tentative"));
+}
+
+#[test]
+fn an_invite_answer_calendar_refuses_offers_gmail() {
+    let mut app = start("calendar-invite-refused");
+    app.key(Key::J);
+    app.key(Key::Enter);
+    app.settle();
+    assert_eq!(app.mail().invite_answer(), Some("needsAction"));
+    app.fault(Some(serde_json::json!({ "method": "PATCH", "path": "/calendar/v3/calendars/", "status": 403, "message": "Forbidden", "reason": "forbidden" })));
+    app.key(Key::Tab);
+    app.key(Key::Enter);
+    app.wait(0.5);
+    let alert = app
+        .mail()
+        .alert()
+        .map(|(title, text)| (title.to_owned(), text.to_owned()));
+    assert_eq!(alert, Some(("Sorry!".to_owned(), "We couldn't RSVP due to an error in Gmail. Please try opening this message in Gmail to save your RSVP.".to_owned())));
+    assert_eq!(
+        app.mail().invite_answer(),
+        Some("needsAction"),
+        "the card shows the calendar's answer again"
+    );
+    // Escape closes it, without going anywhere.
+    app.key(Key::Escape);
+    assert_eq!(app.mail().alert(), None);
+}
+
+/// Theo's invitation to a pitch on Friday, with event `uid`, as Google Calendar sends one from a
+/// sender it doesn't know: Yes, Maybe and No links, and one that marks Theo as known.
+fn unknown_senders_invite(uid: &str) -> gmail::mime::Email {
+    let link = |query: &str| format!("https://calendar.google.com/calendar/{query}&amp;tok=dG9r");
+    let html = format!(
+        "<html><head><meta itemprop=\"name\" content=\"Google Calendar\"></head><body><p>Theo Park has invited you to Pitch</p><p>Reply for maya@brightmoor.co <a class=\"grey-button-text\" href=\"{yes}\">Yes</a> <a class=\"grey-button-text\" href=\"{maybe}\">Maybe</a> <a class=\"grey-button-text\" href=\"{no}\">No</a></p><p><a href=\"{known}\">Know this sender? Mark them as known</a></p></body></html>",
+        yes = link("event?action=RESPOND&amp;rst=1"),
+        maybe = link("event?action=RESPOND&amp;rst=3"),
+        no = link("event?action=RESPOND&amp;rst=2"),
+        known = link("marksenderasknown?eid=cGl0Y2g"),
+    );
+    let ics = format!(
+        "BEGIN:VCALENDAR\r\nPRODID:-//Google Inc//Google Calendar 70.9054//EN\r\nVERSION:2.0\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nDTSTART:20261120T160000Z\r\nDTEND:20261120T170000Z\r\nDTSTAMP:20261117T133000Z\r\nUID:{uid}\r\nSUMMARY:Pitch\r\nORGANIZER;CN=Theo Park:mailto:theo@juniperpartners.vc\r\nATTENDEE;CN=Theo Park;PARTSTAT=ACCEPTED:mailto:theo@juniperpartners.vc\r\nATTENDEE;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:maya@brightmoor.co\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+    );
+    gmail::mime::Email {
+        from: Some(gmail::mime::Mailbox::new(
+            "Theo Park",
+            "theo@juniperpartners.vc",
+        )),
+        to: vec![gmail::mime::Mailbox::address("maya@brightmoor.co")],
+        subject: "Invitation: Pitch @ Fri Nov 20, 2026 11am - 12pm (EST) (maya@brightmoor.co)"
+            .into(),
+        html: Some(html),
+        attachments: vec![gmail::mime::Attachment {
+            filename: "invite.ics".into(),
+            content_type: "text/calendar; method=REQUEST".into(),
+            data: ics.into_bytes(),
+            content_id: None,
+        }],
+        message_id: Some(format!("{uid}-invite")),
+        ..gmail::mime::Email::default()
+    }
+}
+
+/// Delivers `email` to the inbox, syncs and opens it.
+fn deliver_and_open(app: &mut Fixture, email: &gmail::mime::Email) {
+    let delivery = serde_json::json!({ "raw": gmail::wire::encode_base64url(&email.to_rfc822()), "labelIds": ["INBOX", "UNREAD"] });
+    let url = app.mock_url().join("__mock/deliver").expect("a URL");
+    app.block_on(async {
+        reqwest::Client::new()
+            .post(url)
+            .json(&delivery)
+            .send()
+            .await?
+            .error_for_status()
+    })
+    .expect("delivered");
+    app.sync();
+    while app.cursor() != email.subject {
+        app.key(Key::K);
+    }
+    app.key(Key::Enter);
+    app.settle();
+}
+
+/// Answers the open invite with its card's first button (Yes) and runs frames until an alert
+/// shows. Returns the links opened meanwhile.
+fn answer_yes_until_alert(app: &mut Fixture) -> Vec<String> {
+    app.key(Key::Tab);
+    let mut opened = enter_opening(app);
+    let started = std::time::Instant::now();
+    while app.mail().alert().is_none() && started.elapsed() < std::time::Duration::from_secs(10) {
+        opened.extend(step_opening(app));
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    opened
+}
+
+/// Presses Enter and returns the links its frames opened.
+fn enter_opening(app: &mut Fixture) -> Vec<String> {
+    let mut opened = Vec::new();
+    for pressed in [true, false] {
+        app.harness.input_mut().events.push(Event::Key {
+            key: Key::Enter,
+            physical_key: None,
+            pressed,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        });
+        opened.extend(step_opening(app));
+    }
+    opened
+}
+
+/// Runs a frame and returns the links it opened.
+fn step_opening(app: &mut Fixture) -> Vec<String> {
+    app.harness.run_steps(1);
+    app.harness
+        .output()
+        .platform_output
+        .commands
+        .iter()
+        .filter_map(|command| match command {
+            egui::OutputCommand::OpenUrl(open) => Some(open.url.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn an_unknown_senders_invite_is_answered_with_its_own_link() {
+    let mut app = start("calendar-invite-unknown-sender");
+    deliver_and_open(
+        &mut app,
+        &unknown_senders_invite("pitch-1120@juniperpartners.vc"),
+    );
+    assert_eq!(app.mail().invite_answer(), Some("needsAction"));
+    let opened = answer_yes_until_alert(&mut app);
+    assert_eq!(
+        opened,
+        ["https://calendar.google.com/calendar/event?action=RESPOND&rst=1&tok=dG9r"]
+    );
+    assert_eq!(
+        app.mail().alert().map(|(title, _)| title),
+        Some("RSVP faster next time")
+    );
+    // `Event settings` opens Calendar's, as the account.
+    assert_eq!(
+        enter_opening(&mut app),
+        ["https://calendar.google.com/calendar/u/0/r/settings?authuser=maya%40brightmoor.co"]
+    );
+    assert!(
+        app.mail()
+            .calendar_events_on(date(2026, 11, 20))
+            .iter()
+            .all(|(title, _)| title != "Pitch"),
+        "Calendar isn't given the event"
+    );
+}
+
+#[test]
+fn an_answer_only_the_organizer_may_give_asks_to_mark_the_sender_known() {
+    let mut app = start("calendar-invite-organizer-only");
+    let gmail = app.gmail();
+    let pitch = gmail::calendar::Event {
+        summary: Some("Pitch".into()),
+        start: Some(gmail::calendar::EventDateTime {
+            date_time: Some("2026-11-20T16:00:00Z".into()),
+            ..Default::default()
+        }),
+        end: Some(gmail::calendar::EventDateTime {
+            date_time: Some("2026-11-20T17:00:00Z".into()),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let made = app
+        .block_on(
+            gmail
+                .calendar()
+                .insert_event("maya@brightmoor.co", &pitch, None)
+                .into_future(),
+        )
+        .expect("inserts");
+    let uid = made.ical_uid.expect("a UID");
+    deliver_and_open(&mut app, &unknown_senders_invite(&uid));
+    app.fault(Some(serde_json::json!({ "method": "PATCH", "path": "/calendar/v3/calendars/", "status": 403, "message": "Forbidden", "reason": "forbiddenForNonOrganizer" })));
+    assert!(answer_yes_until_alert(&mut app).is_empty());
+    let alert = app
+        .mail()
+        .alert()
+        .map(|(title, text)| (title.to_owned(), text.to_owned()));
+    assert_eq!(alert, Some(("Sorry!".to_owned(), "Your RSVP cannot be saved because Google thinks you might not know the sender. Go to Google Calendar to mark them as safe, then retry RSVPing.".to_owned())));
+}
+
+#[test]
+fn find_time_offers_free_slots_and_a_slot_makes_the_meeting() {
+    let mut app = start("calendar-find-time");
+    app.key(Key::Num2);
+    app.settle();
+    // `m` takes the keyboard to Meet's input. Lena comes from the suggestions, then Enter finds
+    // time.
+    app.key(Key::M);
+    app.type_text("lena");
+    app.key(Key::Enter);
+    app.key(Key::Enter);
+    app.wait(0.5);
+    assert!(app.mail().calendar_free_slots() > 0, "free slots this week");
+    // Tuesday 9:00, the first: a meeting with Lena, named for the two of us.
+    app.click(at(2, 9.25));
+    let (title, guests) = app.mail().calendar_form_values().expect("the form");
+    assert_eq!(
+        (title.as_str(), guests),
+        ("Maya / Lena", vec!["lena@brightmoor.co".to_owned()])
+    );
+    // Escape asks before the meeting goes (it has a title and a guest), then Escape ends Find
+    // Time.
+    app.key(Key::Escape);
+    assert_eq!(app.mail().calendar_prompt(), Some("Discard this event?"));
+    app.key(Key::Enter);
+    app.key(Key::Escape);
+    assert_eq!(app.mail().calendar_free_slots(), 0);
+    assert!(app.mail().calendar_week().is_some(), "the week stays");
+}
+
+#[test]
+fn the_right_pane_s_form_gives_the_keyboard_to_the_mail_and_cmd_d_takes_it_back() {
+    let mut app = start("calendar-form-away");
+    app.key(Key::B);
+    app.type_text("Lunch");
+    // After a click in the list, the mail has the keyboard and the form says how to come back.
+    app.click(Pos2::new(300.0, 250.0));
+    assert_eq!(app.mail().calendar_form_away(), Some(true));
+    app.type_text("x");
+    assert_eq!(
+        app.mail()
+            .calendar_form_values()
+            .map(|(title, _)| title)
+            .as_deref(),
+        Some("Lunch"),
+        "the title doesn't take the mail's keys"
+    );
+    // ⌘D goes back to the title, where typing goes on.
+    app.press(Key::D, CMD);
+    assert_eq!(app.mail().calendar_form_away(), Some(false));
+    app.type_text("!");
+    assert!(
+        app.mail()
+            .calendar_form_values()
+            .is_some_and(|(title, _)| title.contains('!')),
+        "{:?}",
+        app.mail().calendar_form_values()
+    );
+    // ⌘D again gives the keyboard to the mail.
+    app.press(Key::D, CMD);
+    assert_eq!(app.mail().calendar_form_away(), Some(true));
+}
+
+#[test]
+fn a_guest_s_event_opens_its_details() {
+    let mut app = start("calendar-guest-details");
+    app.key(Key::Num2);
+    app.settle();
+    app.key(Key::M);
+    app.type_text("priya");
+    app.wait(0.3);
+    app.key(Key::Enter);
+    app.wait(1.0);
+    app.settle();
+    // Tuesday's Design crit, 3:00–4:00, in Priya's column (the day's right half).
+    let mine = at(2, 15.5);
+    app.click(Pos2::new(mine.x + 127.0 / 4.0, mine.y));
+    assert_eq!(
+        app.mail().calendar_details_event(),
+        Some(("Design crit".to_owned(), "priya@brightmoor.co".to_owned()))
+    );
+}
+
+#[test]
+fn a_new_event_on_a_hidden_weekend_day_opens_its_form() {
+    // (Out of office's nudge for the week after stays away.)
+    let mut app = support::start_with_settings("calendar-hidden-weekend", &|settings| {
+        settings.calendar.show_weekends = false;
+        settings.out_of_office_event_detection.opted_out_at = Some("2026-11-01T00:00:00Z".into());
+    });
+    // Saturday, which the week leaves out.
+    let saturday = mock_servers::Config::default()
+        .now
+        .checked_add(jiff::SignedDuration::from_hours(4 * 24))
+        .expect("in range");
+    app.set_now(saturday);
+    app.key(Key::Num2);
+    app.settle();
+    app.key(Key::B);
+    // The form is up beside the grid's edge, its title taking what's typed.
+    app.type_text("Brunch");
+    assert_eq!(
+        app.mail().calendar_form_values().map(|(title, _)| title),
+        Some("Brunch".to_owned())
+    );
+}
+
+#[test]
+fn today_is_the_clocks_day_not_the_day_exo_opened() {
+    let mut app = start("calendar-today-button");
+    let later = mock_servers::Config::default()
+        .now
+        .checked_add(jiff::SignedDuration::from_hours(2 * 24))
+        .expect("in range");
+    app.set_now(later);
+    app.key(Key::Num0);
+    assert_eq!(
+        app.mail().calendar_day(),
+        Some(date(2026, 11, 19)),
+        "two days on"
+    );
+}
+
+#[test]
+fn a_new_event_repeats_and_shows_its_instances_at_once() {
+    let mut app = start("calendar-repeat");
+    app.key(Key::Num2);
+    app.settle();
+    app.key(Key::B);
+    app.type_text("Standup");
+    assert_eq!(
+        app.mail().calendar_form_repeat(),
+        Some(("Does not repeat".to_owned(), false))
+    );
+    // The presets, for the draft's Tuesday: Weekly on Tuesday is the third.
+    app.click(REPEAT);
+    app.key(Key::ArrowDown);
+    app.key(Key::ArrowDown);
+    app.key(Key::Enter);
+    assert_eq!(
+        app.mail().calendar_form_repeat(),
+        Some(("Weekly on Tuesday".to_owned(), false))
+    );
+    app.press(Key::Enter, CMD);
+    assert_eq!(app.mail().calendar_form(), None);
+    // Its instances show before Calendar has the series.
+    let (tuesday, next) = (date(2026, 11, 17), date(2026, 11, 24));
+    assert!(
+        shown_on(&app, tuesday).contains(&"Standup 9:00 AM".to_owned()),
+        "{:?}",
+        shown_on(&app, tuesday)
+    );
+    app.key(Key::Equals);
+    app.settle();
+    assert!(
+        shown_on(&app, next).contains(&"Standup 9:00 AM".to_owned()),
+        "next week's: {:?}",
+        shown_on(&app, next)
+    );
+    // Past the hold, Calendar has the series and its rule.
+    std::thread::sleep(std::time::Duration::from_millis(10_500));
+    app.wait(1.0);
+    let gmail = app.gmail();
+    let query = gmail::calendar::EventsQuery {
+        q: Some("Standup".into()),
+        ..Default::default()
+    };
+    let found = app
+        .block_on(
+            gmail
+                .calendar()
+                .events("maya@brightmoor.co", &query)
+                .into_future(),
+        )
+        .expect("lists");
+    let rules: Vec<Vec<String>> = found
+        .items
+        .iter()
+        .map(|event| event.recurrence.clone())
+        .collect();
+    assert_eq!(
+        rules,
+        [vec!["RRULE:FREQ=WEEKLY;BYDAY=TU;WKST=SU".to_owned()]]
+    );
+    assert!(
+        shown_on(&app, next).contains(&"Standup 9:00 AM".to_owned()),
+        "Calendar's instances"
+    );
+}
+
+#[test]
+fn a_click_opens_the_meeting_links_and_enter_takes_google_meet() {
+    let mut app = start("calendar-meeting");
+    app.key(Key::Num2);
+    app.settle();
+    app.key(Key::B);
+    assert_eq!(app.mail().calendar_form_new_meet(), Some(false));
+    app.click(MEETING);
+    app.key(Key::Enter);
+    assert_eq!(app.mail().calendar_form_new_meet(), Some(true));
+}
+
+#[test]
+fn repeat_s_custom_dialog_makes_a_rule_and_escape_closes_it() {
+    let mut app = start("calendar-repeat-custom");
+    app.key(Key::Num2);
+    app.settle();
+    app.key(Key::B);
+    app.click(REPEAT);
+    for _ in 0..6 {
+        app.key(Key::ArrowDown);
+    }
+    app.key(Key::Enter);
+    assert_eq!(
+        app.mail().calendar_form_repeat(),
+        Some(("Does not repeat".to_owned(), true)),
+        "Custom opens its dialog"
+    );
+    app.key(Key::Escape);
+    assert_eq!(
+        app.mail().calendar_form_repeat(),
+        Some(("Does not repeat".to_owned(), false)),
+        "Escape closes it, not the form"
+    );
+    assert_eq!(app.mail().calendar_form(), Some(true));
+    app.click(REPEAT);
+    for _ in 0..6 {
+        app.key(Key::ArrowDown);
+    }
+    app.key(Key::Enter);
+    // ⌘Enter is Done. The rule is weekly on the draft's day, said as a custom rule is.
+    app.press(Key::Enter, CMD);
+    assert_eq!(
+        app.mail().calendar_form_repeat(),
+        Some(("Weekly on Tue".to_owned(), false))
+    );
+    assert_eq!(app.mail().calendar_form(), Some(true), "the form stays");
+}
+
+#[test]
+fn tab_goes_through_the_custom_dialogs_fields() {
+    let mut app = start("calendar-repeat-tab");
+    app.key(Key::Num2);
+    app.settle();
+    app.key(Key::B);
+    app.click(REPEAT);
+    for _ in 0..6 {
+        app.key(Key::ArrowDown);
+    }
+    app.key(Key::Enter);
+    // Tab enters at Every's count, then the unit, whose list ↓ opens on `week` and moves on.
+    app.key(Key::Tab);
+    app.key(Key::Tab);
+    app.key(Key::ArrowDown);
+    app.key(Key::ArrowDown);
+    app.key(Key::Enter);
+    assert_eq!(
+        app.mail().calendar_form_repeat().map(|(_, custom)| custom),
+        Some(true),
+        "the dialog stays"
+    );
+    app.press(Key::Enter, CMD);
+    assert_eq!(
+        app.mail().calendar_form_repeat(),
+        Some(("Monthly".to_owned(), false))
+    );
+}
+
+#[test]
+fn tab_goes_through_share_availabilitys_sidebar() {
+    let mut app = start("calendar-share-tab");
+    app.key(Key::Num2);
+    app.settle();
+    app.press(Key::A, CMD.plus(Modifiers::SHIFT));
+    assert_eq!(app.mail().calendar_share_minutes(), Some(30));
+    // Who has the keyboard. ⇧Tab goes back to Duration, whose list ↓ opens and Enter picks from.
+    app.press(Key::Tab, Modifiers::SHIFT);
+    app.key(Key::ArrowDown);
+    app.key(Key::ArrowDown);
+    app.key(Key::Enter);
+    assert_eq!(app.mail().calendar_share_minutes(), Some(45));
+    // On to Who, then the one attendee listed, which Enter would remove.
+    app.key(Key::Tab);
+    app.key(Key::Tab);
+    app.key(Key::Enter);
+    assert_eq!(
+        app.mail().toast_text(),
+        Some("Include at least one attendee to share availability.")
+    );
+}
+
+#[test]
+fn the_day_view_s_today_and_plus_and_t() {
+    let mut app = start("calendar-day-view-today");
+    app.key(Key::Num0);
+    app.key(Key::Equals);
+    assert_eq!(app.mail().calendar_day(), Some(date(2026, 11, 18)));
+    app.click(DAY_TODAY);
+    assert_eq!(app.mail().calendar_day(), Some(date(2026, 11, 17)));
+    app.key(Key::Equals);
+    app.key(Key::T);
+    assert_eq!(
+        app.mail().calendar_day(),
+        Some(date(2026, 11, 17)),
+        "t opens today"
+    );
+    app.click(DAY_CREATE);
+    assert_eq!(app.mail().calendar_form(), Some(true));
+}
+
+#[test]
+fn this_and_following_events_take_an_edit_as_a_new_series() {
+    let mut app = start("calendar-following");
+    app.key(Key::Num2);
+    app.settle();
+    let (wednesday, friday) = (date(2026, 11, 18), date(2026, 11, 20));
+    drag(&mut app, at(3, 9.5), at(3, 10.5));
+    assert_eq!(app.mail().calendar_prompt(), Some("Edit recurring event"));
+    app.key(Key::ArrowDown);
+    app.key(Key::Enter);
+    assert_eq!(app.mail().calendar_prompt(), None, "no guests to tell");
+    // Shown at once: this one and those after it, an hour later.
+    assert!(
+        shown_on(&app, wednesday).contains(&"Focus time 10:00 AM".to_owned()),
+        "{:?}",
+        shown_on(&app, wednesday)
+    );
+    assert!(
+        shown_on(&app, friday).contains(&"Focus time 10:00 AM".to_owned()),
+        "{:?}",
+        shown_on(&app, friday)
+    );
+    // Past the hold, the series ends before Wednesday's, and a new one takes over from there.
+    std::thread::sleep(std::time::Duration::from_millis(10_500));
+    app.wait(1.0);
+    let gmail = app.gmail();
+    let query = gmail::calendar::EventsQuery {
+        q: Some("Focus time".into()),
+        ..Default::default()
+    };
+    let found = app
+        .block_on(
+            gmail
+                .calendar()
+                .events("maya@brightmoor.co", &query)
+                .into_future(),
+        )
+        .expect("lists");
+    let mut series: Vec<(Option<String>, Vec<String>)> = found
+        .items
+        .iter()
+        .map(|event| {
+            (
+                event
+                    .start
+                    .as_ref()
+                    .and_then(|start| start.date_time.clone()),
+                event.recurrence.clone(),
+            )
+        })
+        .collect();
+    series.sort();
+    assert_eq!(series.len(), 2, "{series:?}");
+    assert_eq!(
+        series[0].1,
+        ["RRULE:FREQ=WEEKLY;BYDAY=WE,FR;UNTIL=20261118T135959Z"]
+    );
+    assert_eq!(
+        series[1],
+        (
+            Some("2026-11-18T10:00:00-05:00".to_owned()),
+            vec!["RRULE:FREQ=WEEKLY;BYDAY=WE,FR;WKST=SU".to_owned()]
+        )
+    );
+    assert!(
+        shown_on(&app, friday).contains(&"Focus time 10:00 AM".to_owned()),
+        "Calendar's instances: {:?}",
+        shown_on(&app, friday)
+    );
+}
+
+#[test]
+fn a_series_details_say_its_rule() {
+    let mut app = start("calendar-rule");
+    app.key(Key::Num2);
+    app.settle();
+    app.click(at(1, 10.2));
+    assert_eq!(app.mail().calendar_details(), Some(false));
+    app.wait(0.5);
+    assert_eq!(
+        app.mail().calendar_details_rule().as_deref(),
+        Some("Weekly on Monday"),
+        "Calendar's rule for the series"
+    );
+}
+
+#[test]
+fn the_details_date_opens_the_form_on_the_start_s_date() {
+    let mut app = start("calendar-details-date");
+    app.key(Key::Num2);
+    app.settle();
+    // The dinner's details, then their date (`Thu, Nov 19`, 183,679 64×16).
+    app.click(at(4, 19.8));
+    assert_eq!(app.mail().calendar_details(), Some(false));
+    app.click(Pos2::new(210.0, 687.0));
+    assert_eq!(app.mail().calendar_form(), Some(false));
+    app.type_text("nov 20");
+    app.key(Key::Enter);
+    app.press(Key::Enter, CMD);
+    assert_eq!(app.mail().calendar_form(), None);
+    assert!(
+        shown_on(&app, date(2026, 11, 20)).contains(&"Dinner with Jess 🍕 7:30 PM".to_owned()),
+        "{:?}",
+        shown_on(&app, date(2026, 11, 20))
+    );
+}
+
+#[test]
+fn a_guest_s_calendar_shows_beside_mine_and_their_chip_says_when_they_re_busy() {
+    let mut app = start("calendar-guest-columns");
+    app.key(Key::Num2);
+    app.settle();
+    // A new event (Tuesday 9:00 to 9:30) with Priya, a colleague, and Grace, who isn't.
+    app.key(Key::B);
+    app.key(Key::Tab);
+    for guest in ["priya", "grace"] {
+        app.type_text(guest);
+        app.wait(0.3);
+        app.key(Key::Enter);
+    }
+    app.wait(1.0);
+    app.settle();
+    let tuesday = date(2026, 11, 17);
+    let columns = app.mail_mut().calendar_guest_columns(tuesday);
+    assert_eq!(
+        columns,
+        [(
+            "priya@brightmoor.co".to_owned(),
+            vec!["Priya / Maya 1:1".to_owned(), "Design crit".to_owned()]
+        )],
+        "Grace's calendar isn't shared"
+    );
+    let chips = app.mail().calendar_form_chips();
+    assert_eq!(
+        chips,
+        [
+            (
+                "grace@juniperpartners.vc".to_owned(),
+                "empty".to_owned(),
+                None
+            ),
+            ("priya@brightmoor.co".to_owned(), "pink".to_owned(), None)
+        ],
+        "Priya's colour, after my blue; she's free at 9"
+    );
+}
+
+#[test]
+fn a_calendar_s_colour_picker_takes_the_keyboard() {
+    let mut app = start("calendar-recolor-keys");
+    app.key(Key::Num2);
+    app.settle();
+    app.hover(egui::pos2(1100.0, 501.0));
+    app.click(egui::pos2(1256.0, 501.0));
+    let color = |app: &Fixture| {
+        let account = app.mail().account();
+        account.settings().calendar_accounts[account.email()].calendars["maya@brightmoor.co"]
+            .color
+            .clone()
+    };
+    let opened = color(&app);
+    // → applies the next colour at once, ↓ the one a row on, and Escape puts the first back and
+    // closes the picker.
+    app.key(Key::ArrowRight);
+    let next = color(&app);
+    assert_ne!(next, opened, "→ applies the next colour at once");
+    app.key(Key::ArrowDown);
+    assert_ne!(color(&app), next);
+    app.key(Key::Escape);
+    assert_eq!(color(&app), opened, "Escape puts the colour back");
+    assert!(
+        app.mail().calendar_week().is_some(),
+        "Escape closed the picker, not the week"
+    );
+    // Enter keeps a new one and closes the picker, after which ← is the week's again.
+    app.click(egui::pos2(1256.0, 501.0));
+    app.key(Key::ArrowLeft);
+    let picked = color(&app);
+    app.key(Key::Enter);
+    assert_eq!(color(&app), picked);
+    app.key(Key::ArrowLeft);
+    assert_eq!(color(&app), picked, "the picker closed");
+}
+
+#[test]
+fn a_calendar_s_menu_picks_its_colour() {
+    let mut app = start("calendar-recolor");
+    app.key(Key::Num2);
+    app.settle();
+    // On `maya@brightmoor.co`'s row, the `…` shows on hover and opens the 25 colours.
+    app.hover(egui::pos2(1100.0, 501.0));
+    app.click(egui::pos2(1256.0, 501.0));
+    // Red, the first, at the picker's top left (its box 16px past the button, 8px under it).
+    app.click(egui::pos2(1092.0 + 7.0 + 16.0, 516.0 + 6.0 + 16.0));
+    let account = app.mail().account();
+    let color =
+        account.settings().calendar_accounts[account.email()].calendars["maya@brightmoor.co"]
+            .color
+            .clone();
+    assert_eq!(color.as_deref(), Some("red"));
+}
+
+/// Presses and lets go on the first row of the suggestions in the area `list`, as a mouse picks.
+fn pick_first_suggestion(app: &mut Fixture, list: &str) {
+    let ctx = app.harness.ctx.clone();
+    let id = exo_ui::id(&ctx, list);
+    let shown = ctx.memory(|memory| {
+        memory
+            .areas()
+            .visible_last_frame(&egui::LayerId::new(egui::Order::Tooltip, id))
+    });
+    assert!(shown, "{list} is up");
+    let rect = ctx
+        .memory(|memory| memory.area_rect(id))
+        .expect("the suggestions' area");
+    app.click(rect.left_top() + egui::vec2(40.0, 25.0));
+}
+
+/// Whether the widget `source` names (through `exo_ui::id`) has the keyboard.
+fn has_keyboard(app: &Fixture, source: &str) -> bool {
+    let ctx = app.harness.ctx.clone();
+    ctx.memory(|memory| memory.focused()) == Some(exo_ui::id(&ctx, source))
+}
+
+#[test]
+fn meet_takes_a_suggestion_clicked_and_keeps_the_keyboard_for_the_next() {
+    let mut app = start("calendar-meet-click");
+    app.key(Key::Num2);
+    app.settle();
+    app.key(Key::M);
+    app.type_text("priya");
+    app.wait(0.3);
+    pick_first_suggestion(&mut app, "calendar-meet-suggestions");
+    assert_eq!(app.mail().calendar_meet_guests(), ["priya@brightmoor.co"]);
+    assert!(
+        has_keyboard(&app, "calendar-meet-input"),
+        "the input keeps the keyboard"
+    );
+    // What's typed next goes in the emptied input, and a second click takes Lena.
+    app.type_text("lena");
+    app.wait(0.3);
+    pick_first_suggestion(&mut app, "calendar-meet-suggestions");
+    assert_eq!(
+        app.mail().calendar_meet_guests(),
+        ["priya@brightmoor.co", "lena@brightmoor.co"]
+    );
+    assert!(has_keyboard(&app, "calendar-meet-input"));
+    app.wait(1.0);
+    let columns = app.mail_mut().calendar_guest_columns(date(2026, 11, 17));
+    assert!(
+        columns
+            .iter()
+            .any(|(email, _)| email == "priya@brightmoor.co"),
+        "Priya's calendar shows: {columns:?}"
+    );
+}
+
+#[test]
+fn the_form_s_who_takes_two_suggestions_clicked_in_a_row() {
+    let mut app = start("calendar-form-who-click");
+    app.key(Key::Num2);
+    app.settle();
+    app.key(Key::B);
+    app.key(Key::Tab);
+    for guest in ["priya", "lena"] {
+        app.type_text(guest);
+        app.wait(0.3);
+        pick_first_suggestion(&mut app, "calendar-form-suggestions");
+    }
+    let (_, guests) = app.mail().calendar_form_values().expect("the form");
+    assert_eq!(guests, ["priya@brightmoor.co", "lena@brightmoor.co"]);
+}
+
+#[test]
+fn share_availability_s_who_takes_two_suggestions_clicked_in_a_row() {
+    let mut app = start("calendar-share-who-click");
+    app.key(Key::Num2);
+    app.settle();
+    app.press(Key::A, CMD.plus(Modifiers::SHIFT));
+    let before = app.mail().calendar_share_attendees();
+    for guest in ["priya", "lena"] {
+        app.type_text(guest);
+        app.wait(0.3);
+        pick_first_suggestion(&mut app, "share-who-suggestions");
+    }
+    let added: Vec<String> = app
+        .mail()
+        .calendar_share_attendees()
+        .into_iter()
+        .filter(|email| !before.contains(email))
+        .collect();
+    assert_eq!(added, ["priya@brightmoor.co", "lena@brightmoor.co"]);
+    assert!(has_keyboard(&app, "share-who"), "Who keeps the keyboard");
+}
+
+/// Clicks the widget `source` names (through `exo_ui::id`), where it was drawn last frame.
+fn click_widget(app: &mut Fixture, source: impl egui::AsId) {
+    let ctx = app.harness.ctx.clone();
+    let rect = ctx
+        .read_response(exo_ui::id(&ctx, source))
+        .expect("the widget is up")
+        .rect;
+    app.click(rect.center());
+}
+
+/// The days the full calendar shows.
+fn days_shown(app: &Fixture) -> Vec<jiff::civil::Date> {
+    app.mail().calendar_days_shown()
+}
+
+/// The Day view at 1280×800, the morning's scroll: a time's y, and its x a `fraction` of the way
+/// across the day's column.
+fn in_day(fraction: f32, hour: f32) -> Pos2 {
+    Pos2::new(
+        104.0 + (993.0 - 104.0) * fraction,
+        194.0 + hour * 44.0 - 312.0,
+    )
+}
+
+#[test]
+fn the_calendar_shows_a_day_or_its_week_and_remembers_which() {
+    let mut app = start("calendar-day-view");
+    app.key(Key::Num2);
+    app.settle();
+    assert_eq!(days_shown(&app).len(), 7, "the week, at first");
+    app.key(Key::D);
+    assert_eq!(days_shown(&app), [date(2026, 11, 17)], "`d`: the day");
+    // Next and previous step a day, and `t` is today again.
+    app.key(Key::Equals);
+    app.key(Key::J);
+    assert_eq!(days_shown(&app), [date(2026, 11, 19)]);
+    app.key(Key::Minus);
+    assert_eq!(days_shown(&app), [date(2026, 11, 18)]);
+    app.key(Key::T);
+    assert_eq!(days_shown(&app), [date(2026, 11, 17)]);
+    app.key(Key::W);
+    assert_eq!(days_shown(&app).len(), 7, "`w`: the week");
+    // Without weekends the week is five days, but a weekend day still shows in Day.
+    palette(&mut app, "Hide Weekends");
+    assert_eq!(days_shown(&app).len(), 5);
+    app.key(Key::D);
+    for _ in 0..4 {
+        app.key(Key::Equals);
+    }
+    assert_eq!(days_shown(&app), [date(2026, 11, 21)], "Saturday");
+    // The header's toggle switches by mouse.
+    click_widget(&mut app, ("calendar-week-view", "Week"));
+    assert_eq!(days_shown(&app).len(), 5);
+    click_widget(&mut app, ("calendar-week-view", "Day"));
+    assert_eq!(days_shown(&app), [date(2026, 11, 21)]);
+    // The calendar opens in the view last used, after closing and after a relaunch.
+    app.key(Key::Escape);
+    app.key(Key::Num2);
+    assert_eq!(days_shown(&app), [date(2026, 11, 17)], "Day, on today");
+    app.relaunch();
+    app.key(Key::Num2);
+    assert_eq!(
+        days_shown(&app),
+        [date(2026, 11, 17)],
+        "Day after a relaunch"
+    );
+}
+
+#[test]
+fn jump_to_date_lands_on_the_day_in_the_day_view() {
+    let mut app = start("calendar-day-jump");
+    app.key(Key::Num2);
+    app.key(Key::D);
+    palette(&mut app, "jump to date");
+    app.harness.run_steps(1);
+    app.type_text("nov 25");
+    app.key(Key::Enter);
+    assert_eq!(days_shown(&app), [date(2026, 11, 25)]);
+}
+
+#[test]
+fn in_the_day_view_each_person_in_meet_has_a_full_width_column() {
+    let mut app = start("calendar-day-columns");
+    app.key(Key::Num2);
+    app.key(Key::D);
+    app.settle();
+    app.key(Key::M);
+    for guest in ["priya", "lena"] {
+        app.type_text(guest);
+        app.wait(0.3);
+        app.key(Key::Enter);
+    }
+    app.wait(1.0);
+    app.settle();
+    let columns = app.mail().calendar_columns_drawn();
+    let heads: Vec<&str> = columns.iter().map(|(head, ..)| head.as_str()).collect();
+    assert_eq!(
+        heads,
+        ["Maya Okafor", "Priya Raman", "Lena Fischer"],
+        "mine first, then each person in the order added"
+    );
+    let widths: Vec<f32> = columns.iter().map(|(_, width, _)| *width).collect();
+    assert!(
+        widths
+            .iter()
+            .all(|width| (width - widths[0]).abs() < 1.0 && *width > 250.0),
+        "three wide columns alike: {widths:?}"
+    );
+    assert!(
+        columns[1].2.contains(&"Design crit".to_owned()),
+        "Priya's events in her column: {columns:?}"
+    );
+    // Her Design crit, 3:00–4:00, opens its details from her column.
+    app.click(in_day(0.5, 15.5));
+    assert_eq!(
+        app.mail().calendar_details_event(),
+        Some(("Design crit".to_owned(), "priya@brightmoor.co".to_owned()))
+    );
+    app.key(Key::Escape);
+    // The week's days still split as before: one column open at half the day, two collapsed.
+    app.key(Key::W);
+    app.settle();
+    let week = app.mail().calendar_columns_drawn();
+    assert!(
+        week.len() == 21
+            && week.chunks(3).all(|day| {
+                let mut widths: Vec<f32> = day.iter().map(|(_, width, _)| *width).collect();
+                widths.sort_by(f32::total_cmp);
+                (widths[2] - 2.0 * widths[0]).abs() < 1.0
+            }),
+        "the week's columns: {week:?}"
+    );
+}
+
+#[test]
+fn a_new_event_in_the_day_view_is_on_its_day() {
+    let mut app = start("calendar-day-create");
+    app.key(Key::Num2);
+    app.key(Key::D);
+    app.key(Key::Equals);
+    app.settle();
+    // Dragged out from 1:00 to 2:00 on Wednesday, after its Focus time.
+    drag(&mut app, in_day(0.3, 13.1), in_day(0.3, 13.9));
+    let when = |app: &Fixture| {
+        app.mail()
+            .calendar_form_when()
+            .map(|(start, end)| (start.to_string(), end.to_string()))
+    };
+    assert_eq!(
+        when(&app),
+        Some((
+            "2026-11-18T13:00:00-05:00[America/New_York]".to_owned(),
+            "2026-11-18T14:00:00-05:00[America/New_York]".to_owned()
+        ))
+    );
+    app.key(Key::Escape);
+    assert_eq!(app.mail().calendar_form(), None);
+    // `b` makes one at 9:00 on the day shown.
+    app.key(Key::B);
+    assert!(
+        when(&app).is_some_and(|(start, _)| start.starts_with("2026-11-18T09:00")),
+        "{:?}",
+        when(&app)
+    );
+}
+
+#[test]
+fn find_time_in_the_day_view_offers_the_day_s_slots_and_a_slot_makes_the_meeting() {
+    let mut app = start("calendar-day-find-time");
+    app.key(Key::Num2);
+    app.key(Key::D);
+    app.settle();
+    app.key(Key::M);
+    app.type_text("lena");
+    app.key(Key::Enter);
+    app.key(Key::Enter);
+    app.wait(0.5);
+    assert!(app.mail().calendar_free_slots() > 0, "free slots");
+    // Tuesday 9:00, the first, across the day.
+    app.click(in_day(0.8, 9.25));
+    let (title, guests) = app.mail().calendar_form_values().expect("the form");
+    assert_eq!(
+        (title.as_str(), guests),
+        ("Maya / Lena", vec!["lena@brightmoor.co".to_owned()])
+    );
+}
+
+#[test]
+fn the_day_view_s_gutter_shows_the_secondary_time_zone() {
+    let mut app = support::start_with_settings("calendar-day-zones", &|settings| {
+        settings.calendar.show_additional_timezones = true;
+        settings.calendar.additional_timezones = vec![exo_store::AdditionalTimezone {
+            iana_id: "Europe/London".to_owned(),
+        }];
+    });
+    app.key(Key::Num2);
+    app.key(Key::D);
+    app.settle();
+    assert_eq!(days_shown(&app), [date(2026, 11, 17)]);
+    // London's name, left of New York's in the gutter, opens Calendar Settings.
+    app.click(Pos2::new(70.0, 180.0));
+    assert!(app.mail().calendar_settings_open());
+}
+
+#[test]
+fn share_availability_in_the_day_view_picks_times_on_the_day() {
+    let mut app = start("calendar-day-share");
+    app.key(Key::Num2);
+    app.key(Key::D);
+    app.settle();
+    app.press(Key::A, CMD.plus(Modifiers::SHIFT));
+    assert_eq!(app.mail().calendar_share_minutes(), Some(30));
+    assert_eq!(days_shown(&app), [date(2026, 11, 17)], "still a day");
+    // A click on 2:00 picks half an hour there.
+    app.click(in_day(0.5, 14.1));
+    let slots: Vec<String> = app
+        .mail()
+        .calendar_share_slots()
+        .into_iter()
+        .map(|(start, end)| format!("{} {}", start.strftime("%F %R"), end.strftime("%R")))
+        .collect();
+    assert_eq!(slots, ["2026-11-17 14:00 14:30"]);
+}
+
+/// Opens `trigger`'s menu in Calendar Settings' cache section and picks `label`, scrolling its
+/// rows with the wheel as far as it takes.
+fn choose_in_cache_menu(app: &mut Fixture, trigger: &str, label: &str) {
+    click_widget(app, trigger);
+    let ctx = app.harness.ctx.clone();
+    let id = exo_ui::id(&ctx, "calendar-cache-menu");
+    let rect = ctx
+        .memory(|memory| memory.area_rect(id))
+        .expect("the menu is up");
+    app.hover(rect.center());
+    let wheel = |app: &mut Fixture, rows: f32| {
+        app.harness.input_mut().events.push(Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, -32.0 * rows),
+            phase: egui::TouchPhase::Move,
+            modifiers: Modifiers::NONE,
+        });
+        app.harness.run_steps(2);
+    };
+    let shown = |app: &Fixture| app.mail().calendar_cache_menu();
+    for _ in 0..30 {
+        if shown(app).iter().any(|item| item == label) {
+            break;
+        }
+        wheel(app, 4.0);
+    }
+    for _ in 0..30 {
+        if shown(app).iter().any(|item| item == label) {
+            break;
+        }
+        wheel(app, -4.0);
+    }
+    let at = shown(app)
+        .iter()
+        .position(|item| item == label)
+        .unwrap_or_else(|| panic!("{label} is in the menu: {:?}", shown(app)));
+    let rect = ctx
+        .memory(|memory| memory.area_rect(id))
+        .expect("the menu is still up");
+    app.click(rect.left_top() + egui::vec2(40.0, 11.0 + 32.0 * at as f32 + 16.0));
+    assert!(shown(app).is_empty(), "choosing {label} closes the menu");
+}
+
+#[test]
+fn calendar_cache_settings_list_people_and_their_schedule() {
+    let mut app = start("calendar-cache-settings");
+    app.key(Key::Num2);
+    app.settle();
+    palette(&mut app, "Calendar Settings");
+    assert!(app.mail().calendar_settings_open());
+    let cache = |app: &Fixture| app.mail().account().settings().calendar.cache.clone();
+    assert!(!cache(&app).enabled);
+
+    click_widget(&mut app, "calendar-cache-enabled");
+    assert!(cache(&app).enabled);
+    // People: Enter takes the typed name's top suggestion, and a click takes the next.
+    click_widget(&mut app, "calendar-cache-people");
+    app.type_text("priya");
+    app.wait(0.3);
+    app.key(Key::Enter);
+    assert_eq!(cache(&app).people, ["priya@brightmoor.co"]);
+    app.type_text("lena");
+    app.wait(0.3);
+    let ctx = app.harness.ctx.clone();
+    let list = ctx
+        .memory(|memory| memory.area_rect(exo_ui::id(&ctx, "calendar-cache-people").with("list")))
+        .expect("the suggestions are up");
+    app.click(list.left_top() + egui::vec2(40.0, 18.0));
+    assert_eq!(
+        cache(&app).people,
+        ["priya@brightmoor.co", "lena@brightmoor.co"]
+    );
+    assert!(
+        has_keyboard(&app, "calendar-cache-people"),
+        "the field keeps the keyboard after a click"
+    );
+    // The same person twice adds nothing.
+    app.type_text("priya");
+    app.wait(0.3);
+    app.key(Key::Enter);
+    assert_eq!(cache(&app).people.len(), 2);
+
+    choose_in_cache_menu(&mut app, "calendar-cache-every", "30 minutes");
+    click_widget(&mut app, ("calendar-cache-day", 4));
+    let now = cache(&app);
+    assert_eq!(now.every_minutes, 30);
+    assert_eq!(now.days, [true, true, true, true, false]);
+
+    click_widget(&mut app, ("calendar-cache-remove", "priya@brightmoor.co"));
+    assert_eq!(cache(&app).people, ["lena@brightmoor.co"]);
+
+    // Between: the second menu offers only times after the first.
+    choose_in_cache_menu(&mut app, "calendar-cache-from", "5:00 PM");
+    assert_eq!(cache(&app).from_minute, 17 * 60);
+    click_widget(&mut app, "calendar-cache-to");
+    assert_eq!(
+        app.mail().calendar_cache_menu().first().map(String::as_str),
+        Some("5:30 PM")
+    );
+    click_widget(&mut app, "calendar-cache-to");
+    assert!(app.mail().calendar_cache_menu().is_empty());
+    // A first time past the second moves the second to half an hour after it.
+    choose_in_cache_menu(&mut app, "calendar-cache-from", "7:00 PM");
+    let now = cache(&app);
+    assert_eq!((now.from_minute, now.to_minute), (19 * 60, 19 * 60 + 30));
+
+    click_widget(&mut app, "calendar-cache-enabled");
+    let now = cache(&app);
+    assert!(!now.enabled);
+    assert_eq!(now.people, ["lena@brightmoor.co"], "its people are kept");
+}
+
+#[test]
+fn a_long_people_list_scrolls_and_leaves_the_rest_of_calendar_settings_reachable() {
+    let people: Vec<String> = (1..=14)
+        .map(|n| format!("person{n}@brightmoor.co"))
+        .collect();
+    let seeded = people.clone();
+    let mut app = support::start_with_settings("calendar-cache-long", &move |settings| {
+        settings.calendar.cache.enabled = true;
+        settings.calendar.cache.people = seeded.clone();
+    });
+    app.key(Key::Num2);
+    app.settle();
+    palette(&mut app, "Calendar Settings");
+    assert!(app.mail().calendar_settings_open());
+    let ctx = app.harness.ctx.clone();
+    let screen = ctx.content_rect();
+    // The last control of the dialog is inside the card, which stops 36px short of the window's
+    // bottom, with 20px of padding in it.
+    let sign_in = ctx
+        .read_response(exo_ui::id(&ctx, "calendar-settings-sign-in"))
+        .expect("Sign in with Google is up")
+        .rect;
+    assert!(
+        sign_in.bottom() <= screen.bottom() - 36.0 - 20.0,
+        "Sign in with Google at {sign_in:?} is inside the card"
+    );
+    let last = people.last().expect("people").clone();
+    let remove_of = |who: &str| exo_ui::id(&ctx, ("calendar-cache-remove", who.to_owned()));
+    assert!(
+        ctx.read_response(remove_of(&last)).is_none(),
+        "the last person is below the rows shown"
+    );
+    // The wheel over the list moves it down to the last person.
+    let first = ctx
+        .read_response(remove_of(&people[0]))
+        .expect("the first person shows")
+        .rect;
+    app.hover(first.center() - egui::vec2(120.0, 0.0));
+    for _ in 0..20 {
+        app.harness.input_mut().events.push(Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, -24.0 * 3.0),
+            phase: egui::TouchPhase::Move,
+            modifiers: Modifiers::NONE,
+        });
+        app.harness.run_steps(2);
+    }
+    app.settle();
+    click_widget(&mut app, ("calendar-cache-remove", last.as_str()));
+    let now = app
+        .mail()
+        .account()
+        .settings()
+        .calendar
+        .cache
+        .people
+        .clone();
+    assert_eq!(now.len(), 13);
+    assert!(!now.contains(&last));
+    // Sign in with Google is still where it was, and clickable.
+    let again = ctx
+        .read_response(exo_ui::id(&ctx, "calendar-settings-sign-in"))
+        .expect("Sign in with Google is up")
+        .rect;
+    assert_eq!(again.bottom(), sign_in.bottom());
+}
+
+const PRIYA: &str = "priya@brightmoor.co";
+const LENA: &str = "lena@brightmoor.co";
+
+/// The cache switched on for `people`, refreshing on its defaults (weekdays, 8 AM to 6 PM, every
+/// hour).
+fn cache_on(people: &'static [&'static str]) -> impl Fn(&mut exo_store::Settings) {
+    move |settings| {
+        settings.calendar.cache.enabled = true;
+        settings.calendar.cache.people = people.iter().map(|&email| email.to_owned()).collect();
+    }
+}
+
+/// A time in New York, the mock's zone.
+fn new_york(time: &str) -> jiff::Zoned {
+    format!("{time}[America/New_York]").parse().expect("a time")
+}
+
+/// Changes the cache's settings, as Calendar Settings does, and lets the task take them up.
+fn change_cache(app: &mut Fixture, change: impl FnOnce(&mut exo_store::CalendarCache)) {
+    app.mail_mut()
+        .account_mut()
+        .update_settings(|settings| change(&mut settings.calendar.cache));
+    app.settle();
+}
+
+/// The titles of `email`'s cached events.
+fn cached_titles(app: &Fixture, email: &str) -> Vec<String> {
+    app.mail()
+        .calendar_cached(email)
+        .map(|cached| {
+            cached
+                .events
+                .iter()
+                .filter_map(|event| event.summary.clone())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+#[test]
+fn listed_colleagues_are_cached_on_launch() {
+    let app = support::start_with_settings("calendar-cached-launch", &cache_on(&[PRIYA, LENA]));
+    let ny = jiff::tz::TimeZone::get("America/New_York").expect("zone");
+    for email in [PRIYA, LENA] {
+        let cached = app
+            .mail()
+            .calendar_cached(email)
+            .unwrap_or_else(|| panic!("{email} is cached"));
+        assert_eq!(cached.fetched_at, new_york("2026-11-17T09:00").timestamp());
+        assert!(!cached.events.is_empty(), "{email} has events");
+        // The window from Tuesday the 17th: today and the six days after, weekdays only.
+        let window = [
+            date(2026, 11, 17),
+            date(2026, 11, 18),
+            date(2026, 11, 19),
+            date(2026, 11, 20),
+            date(2026, 11, 23),
+        ];
+        for event in &cached.events {
+            let start = event.start.as_ref().expect("a start");
+            let day = match (&start.date, &start.date_time) {
+                (Some(day), _) => day.parse().expect("a date"),
+                (None, Some(at)) => at
+                    .parse::<jiff::Timestamp>()
+                    .expect("a time")
+                    .to_zoned(ny.clone())
+                    .date(),
+                (None, None) => panic!("{event:?} has no start"),
+            };
+            assert!(window.contains(&day), "{event:?} is in the window");
+        }
+    }
+    let titles = cached_titles(&app, PRIYA);
+    assert!(
+        titles.iter().any(|title| title == "Priya / Maya 1:1"),
+        "{titles:?}"
+    );
+    assert!(
+        titles.iter().any(|title| title == "Design crit"),
+        "{titles:?}"
+    );
+    assert!(
+        cached_titles(&app, LENA)
+            .iter()
+            .any(|title| title == "Design crit")
+    );
+}
+
+#[test]
+fn nothing_is_cached_outside_the_schedule_or_with_nobody_listed() {
+    let mut app = start("calendar-cached-schedule");
+    // Saturday.
+    app.set_now(new_york("2026-11-21T10:00"));
+    change_cache(&mut app, |cache| {
+        cache.enabled = true;
+        cache.people = vec![PRIYA.into()];
+    });
+    app.wait(0.1);
+    assert!(
+        app.mail().calendar_cached(PRIYA).is_none(),
+        "not on a Saturday"
+    );
+    // Tuesday evening, after the 6 PM end.
+    app.set_now(new_york("2026-11-24T19:00"));
+    app.wait(0.1);
+    assert!(
+        app.mail().calendar_cached(PRIYA).is_none(),
+        "not after hours"
+    );
+    // Inside the schedule, with nobody listed.
+    change_cache(&mut app, |cache| cache.people.clear());
+    app.set_now(new_york("2026-11-24T10:00"));
+    app.wait(0.1);
+    assert!(
+        app.mail().calendar_cached(PRIYA).is_none(),
+        "nobody is listed"
+    );
+    assert!(
+        app.mail().calendar_cached(LENA).is_none(),
+        "nobody is listed"
+    );
+}
+
+#[test]
+fn the_cache_refreshes_at_its_frequency_and_forgets_whom_it_drops() {
+    let mut app =
+        support::start_with_settings("calendar-cached-refresh", &cache_on(&[PRIYA, LENA]));
+    let fetched = |app: &Fixture, email: &str| {
+        app.mail()
+            .calendar_cached(email)
+            .map(|cached| cached.fetched_at)
+    };
+    let nine = new_york("2026-11-17T09:00").timestamp();
+    assert_eq!(fetched(&app, PRIYA), Some(nine));
+    // Every hour: not again at 9:30.
+    app.set_now(new_york("2026-11-17T09:30"));
+    app.wait(0.1);
+    assert_eq!(fetched(&app, PRIYA), Some(nine), "not due yet");
+    let ten = new_york("2026-11-17T10:01");
+    app.set_now(ten.clone());
+    app.wait(0.1);
+    assert_eq!(fetched(&app, PRIYA), Some(ten.timestamp()), "refreshed");
+    assert_eq!(fetched(&app, LENA), Some(ten.timestamp()), "refreshed");
+    change_cache(&mut app, |cache| {
+        cache.people.retain(|email| email != PRIYA)
+    });
+    assert_eq!(fetched(&app, PRIYA), None, "Priya is forgotten");
+    assert_eq!(fetched(&app, LENA), Some(ten.timestamp()), "Lena stays");
+    change_cache(&mut app, |cache| cache.enabled = false);
+    assert_eq!(fetched(&app, LENA), None, "the cache is gone when it's off");
+}
+
+/// When the calendar task last cached `email`'s calendar, as Calendar Settings shows it.
+fn synced(app: &Fixture, email: &str) -> Option<jiff::Timestamp> {
+    app.mail()
+        .account()
+        .calendar()
+        .data()
+        .cache_synced
+        .get(email)
+        .copied()
+}
+
+#[test]
+fn calendar_settings_say_when_each_colleague_was_synced_and_resync_one_on_demand() {
+    let mut app = support::start_with_settings("calendar-cached-resync", &cache_on(&[PRIYA, LENA]));
+    let nine = new_york("2026-11-17T09:00").timestamp();
+    assert_eq!(
+        synced(&app, PRIYA),
+        Some(nine),
+        "known once cached at launch"
+    );
+    assert_eq!(synced(&app, LENA), Some(nine));
+    app.key(Key::Num2);
+    app.settle();
+    palette(&mut app, "Calendar Settings");
+    assert!(app.mail().calendar_settings_open());
+
+    // Re-sync works outside the schedule too: 8 PM, after its 6 PM end.
+    let eight = new_york("2026-11-17T20:00");
+    app.set_now(eight.clone());
+    app.wait(0.1);
+    assert_eq!(synced(&app, PRIYA), Some(nine), "nothing's due after hours");
+    click_widget(&mut app, ("calendar-cache-resync", PRIYA));
+    app.settle();
+    assert_eq!(
+        synced(&app, PRIYA),
+        Some(eight.timestamp()),
+        "Priya re-synced"
+    );
+    assert_eq!(
+        app.mail()
+            .calendar_cached(PRIYA)
+            .map(|cached| cached.fetched_at),
+        Some(eight.timestamp()),
+        "and her cache with her"
+    );
+    assert_eq!(synced(&app, LENA), Some(nine), "Lena wasn't asked for");
+
+    // Syncing shows from the moment it's asked for, before the task gets to it.
+    app.mail().account().calendar().resync_cache(LENA);
+    assert!(
+        app.mail()
+            .account()
+            .calendar()
+            .data()
+            .cache_syncing
+            .contains(LENA),
+        "syncing at once"
+    );
+    app.settle();
+    assert!(
+        app.mail()
+            .account()
+            .calendar()
+            .data()
+            .cache_syncing
+            .is_empty()
+    );
+    assert_eq!(
+        synced(&app, LENA),
+        Some(eight.timestamp()),
+        "Lena re-synced"
+    );
+
+    // Offline, re-sync can't be clicked, and one asked for anyway ends without a spinner left.
+    app.disconnect();
+    app.set_now(new_york("2026-11-17T20:30"));
+    click_widget(&mut app, ("calendar-cache-resync", LENA));
+    app.settle();
+    assert_eq!(
+        synced(&app, LENA),
+        Some(eight.timestamp()),
+        "nothing read offline"
+    );
+    app.mail().account().calendar().resync_cache(LENA);
+    app.settle();
+    assert!(
+        app.mail()
+            .account()
+            .calendar()
+            .data()
+            .cache_syncing
+            .is_empty(),
+        "nothing left syncing"
+    );
+    app.reconnect();
+    app.settle();
+
+    // Taken off the list, a person's time goes with their cache.
+    click_widget(&mut app, ("calendar-cache-remove", PRIYA));
+    app.settle();
+    assert_eq!(synced(&app, PRIYA), None);
+    assert_eq!(synced(&app, LENA), Some(eight.timestamp()));
+}
+
+#[test]
+fn a_resync_in_calendar_settings_shows_its_new_time_without_another_touch() {
+    let mut app =
+        support::start_with_settings("calendar-cached-resync-label", &cache_on(&[PRIYA, LENA]));
+    app.key(Key::Num2);
+    app.settle();
+    palette(&mut app, "Calendar Settings");
+    let said = |app: &Fixture, email: &str| {
+        app.mail()
+            .calendar_cache_statuses()
+            .into_iter()
+            .find(|(each, _)| each == email)
+            .map(|(_, said)| said)
+    };
+    app.set_now(new_york("2026-11-17T20:00"));
+    app.wait(0.1);
+    assert_eq!(said(&app, PRIYA).as_deref(), Some("Synced 9:00 AM"));
+    // A click, then only frames: no pointer moves, no keys.
+    click_widget(&mut app, ("calendar-cache-resync", PRIYA));
+    // As the window does: a frame only when one is asked for.
+    let ctx = app.harness.ctx.clone();
+    let started = std::time::Instant::now();
+    while started.elapsed() < std::time::Duration::from_secs(5) {
+        if ctx.has_requested_repaint() {
+            app.harness.step();
+        } else {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+    assert_eq!(said(&app, PRIYA).as_deref(), Some("Synced just now"));
+    assert_eq!(said(&app, LENA).as_deref(), Some("Synced 9:00 AM"));
+}
+
+#[test]
+fn a_colleague_added_to_the_cache_shows_syncing_then_synced() {
+    let mut app = support::start_with_settings("calendar-cached-added-status", &cache_on(&[PRIYA]));
+    assert_eq!(synced(&app, LENA), None, "not listed, not cached");
+    change_cache(&mut app, |cache| cache.people.push(LENA.to_owned()));
+    let data = app.mail().account().calendar().data();
+    assert!(data.cache_syncing.is_empty(), "nothing's left reading");
+    assert_eq!(
+        synced(&app, LENA),
+        Some(new_york("2026-11-17T09:00").timestamp()),
+        "cached at once, and known"
+    );
+}
+
+#[test]
+fn a_colleague_who_stops_sharing_is_forgotten_and_an_offline_refresh_keeps_the_cache() {
+    // Sam, outside the workspace, shared their calendar once and shares nothing now.
+    const SAM: &str = "sam@elsewhere.example";
+    let nine = new_york("2026-11-17T09:00").timestamp();
+    let old = |summary: &str| exo_store::CachedGuest {
+        fetched_at: nine,
+        from: nine,
+        to: nine,
+        events: vec![gmail::calendar::Event {
+            summary: Some(summary.into()),
+            ..gmail::calendar::Event::default()
+        }],
+    };
+    let mut app = support::start_with_cached_guests(
+        "calendar-cached-hidden",
+        &cache_on(&[SAM, LENA]),
+        &[(SAM, old("Sam's planning")), (LENA, old("Lena's planning"))],
+    );
+    assert_eq!(
+        cached_titles(&app, SAM),
+        ["Sam's planning"],
+        "fresh at launch"
+    );
+    let ten = new_york("2026-11-17T10:01");
+    app.set_now(ten.clone());
+    app.wait(0.1);
+    assert!(
+        app.mail().calendar_cached(SAM).is_none(),
+        "hidden, so forgotten"
+    );
+    let lena = app.mail().calendar_cached(LENA).expect("Lena is cached");
+    assert_eq!(lena.fetched_at, ten.timestamp());
+    assert!(
+        cached_titles(&app, LENA)
+            .iter()
+            .any(|title| title == "Design crit")
+    );
+    // Due again, offline.
+    app.disconnect();
+    app.set_now(new_york("2026-11-17T11:02"));
+    app.wait(0.1);
+    assert_eq!(
+        app.mail().calendar_cached(LENA),
+        Some(lena),
+        "kept as it was"
+    );
+}
+
+#[test]
+fn a_colleague_removed_during_a_refresh_isn_t_written_back() {
+    let mut app = start("calendar-cached-removed");
+    // Priya's calendar answers after a retry, a second or two from now.
+    app.fault(Some(serde_json::json!({
+        "method": "GET",
+        "path": "/calendar/v3/calendars/priya@brightmoor.co/events",
+        "status": 503,
+        "times": 1,
+    })));
+    app.mail_mut().account_mut().update_settings(|settings| {
+        settings.calendar.cache.enabled = true;
+        settings.calendar.cache.people = vec![PRIYA.into()];
+    });
+    app.harness.run_steps(1);
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    change_cache(&mut app, |cache| cache.people.clear());
+    app.wait(0.1);
+    assert!(
+        app.mail().calendar_cached(PRIYA).is_none(),
+        "not written back"
+    );
+}
+
+#[test]
+fn a_colleague_added_to_the_list_is_cached_at_once() {
+    let mut app = support::start_with_settings("calendar-cached-added", &cache_on(&[PRIYA]));
+    let fetched = |app: &Fixture, email: &str| {
+        app.mail()
+            .calendar_cached(email)
+            .map(|cached| cached.fetched_at)
+    };
+    let nine = new_york("2026-11-17T09:00").timestamp();
+    assert_eq!(fetched(&app, PRIYA), Some(nine));
+    // Well before the next hourly refresh.
+    let ten_past = new_york("2026-11-17T09:10");
+    app.set_now(ten_past.clone());
+    app.settle();
+    change_cache(&mut app, |cache| cache.people.push(LENA.into()));
+    assert_eq!(
+        fetched(&app, LENA),
+        Some(ten_past.timestamp()),
+        "Lena at once"
+    );
+    assert_eq!(fetched(&app, PRIYA), Some(nine), "Priya waits for her hour");
+}
+
+#[test]
+fn nudges_that_land_together_leave_the_calendar_idle() {
+    let mut app = support::start_with_settings("calendar-cached-nudges", &cache_on(&[PRIYA]));
+    for minute in 1..=5 {
+        // A settings change, a clock nudge and a minute changing, all before the task looks.
+        app.mail_mut().account_mut().update_settings(|settings| {
+            settings.calendar.cache.every_minutes = if minute % 2 == 0 { 30 } else { 60 };
+        });
+        app.mail().account().calendar().check_cache();
+        app.set_now(new_york(&format!("2026-11-17T09:0{minute}")));
+        app.settle();
+        assert!(
+            app.mail().account().calendar().is_idle(),
+            "every nudge's busy count is given back ({minute})"
+        );
+    }
+}
+
+#[test]
+fn the_calendar_answers_other_requests_while_the_cache_is_read() {
+    let mut app = start("calendar-cached-meanwhile");
+    // Priya's calendar answers after a retry, a second or two from now.
+    app.fault(Some(serde_json::json!({
+        "method": "GET",
+        "path": "/calendar/v3/calendars/priya@brightmoor.co/events",
+        "status": 503,
+        "times": 1,
+    })));
+    app.mail_mut().account_mut().update_settings(|settings| {
+        settings.calendar.cache.enabled = true;
+        settings.calendar.cache.people = vec![PRIYA.into()];
+    });
+    app.harness.run_steps(1);
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    // Meanwhile, a guest's calendar is asked for, as Meet does.
+    let (from, to) = (
+        new_york("2026-11-17T00:00").timestamp(),
+        new_york("2026-11-18T00:00").timestamp(),
+    );
+    app.mail()
+        .account()
+        .calendar()
+        .load_guests(&[LENA.to_owned()], from, to);
+    let started = std::time::Instant::now();
+    while !app.mail().calendar_guest_shown(LENA)
+        && started.elapsed() < std::time::Duration::from_millis(800)
+    {
+        app.harness.run_steps(1);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(
+        app.mail().calendar_guest_shown(LENA),
+        "Lena's calendar came"
+    );
+    assert!(
+        app.mail().calendar_cached(PRIYA).is_none(),
+        "while Priya's was still being read"
+    );
+    app.settle();
+    assert!(
+        app.mail().calendar_cached(PRIYA).is_some(),
+        "then Priya's came"
+    );
+}
+
+#[test]
+fn a_colleague_taken_off_the_list_and_put_back_is_cached_at_once() {
+    let mut app = support::start_with_settings("calendar-cached-back", &cache_on(&[PRIYA, LENA]));
+    let fetched = |app: &Fixture, email: &str| {
+        app.mail()
+            .calendar_cached(email)
+            .map(|cached| cached.fetched_at)
+    };
+    let nine = new_york("2026-11-17T09:00").timestamp();
+    assert_eq!(fetched(&app, PRIYA), Some(nine));
+    app.set_now(new_york("2026-11-17T09:05"));
+    change_cache(&mut app, |cache| {
+        cache.people.retain(|email| email != PRIYA)
+    });
+    assert_eq!(fetched(&app, PRIYA), None, "Priya is forgotten");
+    let ten_past = new_york("2026-11-17T09:10");
+    app.set_now(ten_past.clone());
+    change_cache(&mut app, |cache| cache.people.push(PRIYA.into()));
+    assert_eq!(
+        fetched(&app, PRIYA),
+        Some(ten_past.timestamp()),
+        "Priya at once"
+    );
+    assert_eq!(fetched(&app, LENA), Some(nine), "Lena waits for her hour");
+}
+
+/// Opens the calendar's `view` (`W`eek or `D`ay) and Meet, and types `who` into Meet's guests,
+/// leaving the suggestion to be picked.
+fn meet_typing(app: &mut Fixture, view: Key, who: &str) {
+    app.key(Key::Num2);
+    app.key(view);
+    app.settle();
+    app.key(Key::M);
+    app.type_text(who);
+    app.wait(0.3);
+}
+
+/// Priya's events that `day`, as overlaid on the calendar.
+fn priya_on(app: &mut Fixture, day: jiff::civil::Date) -> Vec<String> {
+    app.mail_mut()
+        .calendar_guest_columns(day)
+        .into_iter()
+        .filter(|(email, _)| email == PRIYA)
+        .flat_map(|(_, titles)| titles)
+        .collect()
+}
+
+/// Brings the mock back and has the app check it, as it does every few seconds while offline,
+/// until the connection is back.
+fn back_online(app: &mut Fixture) {
+    app.reconnect();
+    let started = std::time::Instant::now();
+    while app.mail().status_bar().is_some()
+        && started.elapsed() < std::time::Duration::from_secs(15)
+    {
+        app.mail().account().network_changed();
+        app.wait(0.2);
+    }
+    assert_eq!(app.mail().status_bar().map(|bar| bar.title), None, "online");
+    app.settle();
+}
+
+#[test]
+fn a_cached_colleague_shows_at_once_and_stays_when_the_live_read_fails() {
+    let mut app = support::start_with_settings("calendar-cached-meet", &cache_on(&[PRIYA]));
+    assert!(
+        app.mail().calendar_cached(PRIYA).is_some(),
+        "cached at launch"
+    );
+    // Every read of Priya's calendar fails from here on.
+    app.fault(Some(serde_json::json!({
+        "method": "GET",
+        "path": "/calendar/v3/calendars/priya@brightmoor.co/events",
+        "status": 500,
+        "times": 20,
+    })));
+    meet_typing(&mut app, Key::W, "priya");
+    app.key(Key::Enter);
+    app.wait(1.0);
+    app.settle();
+    app.fault(None);
+    assert_eq!(
+        app.mail().calendar_guest_state_for_test(PRIYA),
+        Some(("stale", false))
+    );
+    let (tuesday, next_tuesday) = (date(2026, 11, 17), date(2026, 11, 24));
+    assert!(
+        priya_on(&mut app, tuesday).contains(&"Design crit".to_owned()),
+        "her column, from the cache"
+    );
+    assert_eq!(
+        priya_on(&mut app, next_tuesday),
+        Vec::<String>::new(),
+        "past the cache's window, nothing's known"
+    );
+    let marker = |app: &Fixture| app.mail().calendar_meet_markers_for_test()[PRIYA].clone();
+    assert_eq!(marker(&app), "empty", "not current, as a failed read isn't");
+    assert_eq!(
+        app.mail_mut().calendar_day_heads_for_test(),
+        [("Priya Raman".to_owned(), "empty".to_owned())],
+        "her Day head says so too"
+    );
+    // Once the connection comes back, she's read again.
+    app.disconnect();
+    app.mail().account().network_changed();
+    app.settle();
+    back_online(&mut app);
+    assert_eq!(
+        app.mail().calendar_guest_state_for_test(PRIYA),
+        Some(("shown", false))
+    );
+    assert_eq!(marker(&app), "pink");
+    assert_eq!(
+        app.mail_mut().calendar_day_heads_for_test(),
+        [("Priya Raman".to_owned(), "pink".to_owned())]
+    );
+    assert!(
+        priya_on(&mut app, next_tuesday).contains(&"Design crit".to_owned()),
+        "live past the window"
+    );
+}
+
+#[test]
+fn meet_shows_a_spinner_before_a_colleague_while_their_calendar_loads() {
+    let mut app = support::start_with_latency(
+        "calendar-meet-spinner",
+        &cache_on(&[PRIYA]),
+        std::time::Duration::from_millis(300),
+    );
+    let marker = |app: &Fixture, email: &str| {
+        app.mail()
+            .calendar_meet_markers_for_test()
+            .get(email)
+            .cloned()
+    };
+    // Return picks the suggestion, and a few frames later (Google's still to answer) the list
+    // says so.
+    let pick = |app: &mut Fixture| {
+        for pressed in [true, false] {
+            app.harness.input_mut().events.push(Event::Key {
+                key: Key::Enter,
+                physical_key: None,
+                pressed,
+                repeat: false,
+                modifiers: Modifiers::NONE,
+            });
+            app.harness.run_steps(1);
+        }
+        app.harness.run_steps(3);
+    };
+    meet_typing(&mut app, Key::W, "lena");
+    pick(&mut app);
+    assert_eq!(
+        marker(&app, LENA).as_deref(),
+        Some("loading"),
+        "a spinner at once, while Google hasn't answered"
+    );
+    app.settle();
+    let lena = marker(&app, LENA).expect("Lena's listed");
+    assert!(
+        !lena.starts_with("loading") && !lena.starts_with("refreshing"),
+        "her colour once it's read: {lena}"
+    );
+    // A cached colleague shows at once, her colour after a spinner while the latest loads.
+    app.type_text("priya");
+    app.wait(0.3);
+    pick(&mut app);
+    assert!(
+        marker(&app, PRIYA).is_some_and(|marker| marker.starts_with("refreshing:")),
+        "{:?}",
+        marker(&app, PRIYA)
+    );
+    app.settle();
+    assert!(
+        marker(&app, PRIYA).is_some_and(|marker| !marker.starts_with("refreshing")),
+        "{:?}",
+        marker(&app, PRIYA)
+    );
+}
+
+#[test]
+fn a_cached_colleague_added_offline_shows_stale_and_is_read_once_online() {
+    let mut app = support::start_with_settings("calendar-cached-offline", &cache_on(&[PRIYA]));
+    meet_typing(&mut app, Key::W, "priya");
+    app.disconnect();
+    app.mail().account().network_changed();
+    app.settle();
+    app.key(Key::Enter);
+    app.wait(0.5);
+    assert_eq!(
+        app.mail().calendar_guest_state_for_test(PRIYA),
+        Some(("stale", false)),
+        "her cached copy, not a failure"
+    );
+    assert!(
+        priya_on(&mut app, date(2026, 11, 17)).contains(&"Design crit".to_owned()),
+        "her column, from the cache, while offline"
+    );
+    assert_eq!(
+        app.mail().calendar_meet_markers_for_test()[PRIYA],
+        "empty",
+        "not current"
+    );
+    assert_eq!(
+        app.mail_mut().calendar_day_heads_for_test(),
+        [("Priya Raman".to_owned(), "empty".to_owned())]
+    );
+    back_online(&mut app);
+    assert_eq!(
+        app.mail().calendar_guest_state_for_test(PRIYA),
+        Some(("shown", false))
+    );
+    assert_eq!(app.mail().calendar_meet_markers_for_test()[PRIYA], "pink");
+    assert!(priya_on(&mut app, date(2026, 11, 24)).contains(&"Design crit".to_owned()));
+}
+
+#[test]
+fn a_live_read_updates_the_cache() {
+    let mut app = support::start_with_settings("calendar-cached-live", &cache_on(&[PRIYA]));
+    let nine = new_york("2026-11-17T09:00").timestamp();
+    assert_eq!(
+        app.mail()
+            .calendar_cached(PRIYA)
+            .map(|cached| cached.fetched_at),
+        Some(nine)
+    );
+    // Not due again until 10:00.
+    let twenty_past = new_york("2026-11-17T09:20");
+    app.set_now(twenty_past.clone());
+    meet_typing(&mut app, Key::W, "priya");
+    app.key(Key::Enter);
+    app.wait(1.0);
+    app.settle();
+    assert_eq!(
+        app.mail()
+            .calendar_cached(PRIYA)
+            .map(|cached| cached.fetched_at),
+        Some(twenty_past.timestamp()),
+        "Meet's read of her calendar is cached"
+    );
+    assert!(
+        cached_titles(&app, PRIYA)
+            .iter()
+            .any(|title| title == "Design crit")
+    );
+}
+
+#[test]
+fn a_live_read_of_someone_not_listed_is_not_cached() {
+    let mut app = support::start_with_settings("calendar-cached-unlisted", &cache_on(&[LENA]));
+    assert!(app.mail().calendar_cached(LENA).is_some(), "Lena is cached");
+    meet_typing(&mut app, Key::W, "priya");
+    app.key(Key::Enter);
+    app.wait(1.0);
+    app.settle();
+    assert_eq!(
+        app.mail().calendar_guest_state_for_test(PRIYA),
+        Some(("shown", false)),
+        "Meet read her calendar"
+    );
+    assert!(
+        priya_on(&mut app, date(2026, 11, 17)).contains(&"Design crit".to_owned()),
+        "and shows it"
+    );
+    assert!(
+        app.mail().calendar_cached(PRIYA).is_none(),
+        "but she isn't listed, so it isn't kept"
+    );
+}
+
+#[test]
+fn the_day_view_head_spins_before_the_swatch_while_refreshing() {
+    let mut app = support::start_with_settings("calendar-cached-spin", &cache_on(&[PRIYA]));
+    meet_typing(&mut app, Key::D, "priya");
+    // Priya's calendar answers after a retry, a second or two from now.
+    app.fault(Some(serde_json::json!({
+        "method": "GET",
+        "path": "/calendar/v3/calendars/priya@brightmoor.co/events",
+        "status": 503,
+        "times": 1,
+    })));
+    for pressed in [true, false] {
+        app.harness.input_mut().events.push(Event::Key {
+            key: Key::Enter,
+            physical_key: None,
+            pressed,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        });
+        app.harness.run_steps(1);
+    }
+    let refreshing = |app: &Fixture| {
+        app.mail()
+            .calendar_meet_markers_for_test()
+            .get(PRIYA)
+            .cloned()
+    };
+    let started = std::time::Instant::now();
+    while refreshing(&app).as_deref() != Some("refreshing:pink")
+        && started.elapsed() < std::time::Duration::from_millis(800)
+    {
+        app.harness.run_steps(1);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_eq!(
+        refreshing(&app).as_deref(),
+        Some("refreshing:pink"),
+        "her colour from the cache, and the spinner while the latest loads"
+    );
+    assert_eq!(
+        app.mail_mut().calendar_day_heads_for_test(),
+        [("Priya Raman".to_owned(), "refreshing:pink".to_owned())],
+        "her head spins"
+    );
+    app.settle();
+    assert_eq!(refreshing(&app).as_deref(), Some("pink"), "then it stops");
+    assert_eq!(
+        app.mail_mut().calendar_day_heads_for_test(),
+        [("Priya Raman".to_owned(), "pink".to_owned())]
+    );
+}

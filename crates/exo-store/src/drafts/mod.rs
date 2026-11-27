@@ -96,7 +96,7 @@ impl Store {
                 DraftRow::create()
                     .id(&id)
                     .thread_id(thread.clone())
-                    .gmail_id(None)
+                    .draft_id(None)
                     .message_id(adopted)
                     .record(record)
                     .raw(raw)
