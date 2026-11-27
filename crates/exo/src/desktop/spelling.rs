@@ -126,6 +126,17 @@ mod macos {
         }
     }
 
+    /// The paragraph's language, as `Automatic by Language` detects it, else the one set.
+    fn language(
+        checker: &NSSpellChecker,
+        range: NSRange,
+        string: &NSString,
+    ) -> objc2::rc::Retained<NSString> {
+        checker
+            .languageForWordRange_inString_orthography(range, string, None)
+            .unwrap_or_else(|| checker.language())
+    }
+
     impl exo_editor::Spelling for Document {
         fn check(&mut self, text: &str) -> Vec<Range<usize>> {
             let units = Units::of(text);
@@ -153,13 +164,15 @@ mod macos {
 
         fn guesses(&mut self, text: &str, word: Range<usize>) -> Vec<String> {
             let units = Units::of(text);
-            let guesses = NSSpellChecker::sharedSpellChecker()
-                .guessesForWordRange_inString_language_inSpellDocumentWithTag(
-                    units.units(word),
-                    &units.string,
-                    None,
-                    self.tag,
-                );
+            let checker = NSSpellChecker::sharedSpellChecker();
+            let range = units.units(word);
+            let language = language(&checker, range, &units.string);
+            let guesses = checker.guessesForWordRange_inString_language_inSpellDocumentWithTag(
+                range,
+                &units.string,
+                Some(&language),
+                self.tag,
+            );
             guesses
                 .map(|guesses| guesses.iter().map(|guess| guess.to_string()).collect())
                 .unwrap_or_default()
@@ -188,10 +201,7 @@ mod macos {
             let units = Units::of(text);
             let checker = NSSpellChecker::sharedSpellChecker();
             let range = units.units(word);
-            // The paragraph's language, as `Automatic by Language` detects it, else the one set.
-            let language = checker
-                .languageForWordRange_inString_orthography(range, &units.string, None)
-                .unwrap_or_else(|| checker.language());
+            let language = language(&checker, range, &units.string);
             checker
                 .correctionForWordRange_inString_language_inSpellDocumentWithTag(
                     range,
@@ -204,11 +214,14 @@ mod macos {
 
         fn completions(&mut self, text: &str, word: Range<usize>) -> Vec<String> {
             let units = Units::of(text);
-            let completions = NSSpellChecker::sharedSpellChecker()
+            let checker = NSSpellChecker::sharedSpellChecker();
+            let range = units.units(word);
+            let language = language(&checker, range, &units.string);
+            let completions = checker
                 .completionsForPartialWordRange_inString_language_inSpellDocumentWithTag(
-                    units.units(word),
+                    range,
                     &units.string,
-                    None,
+                    Some(&language),
                     self.tag,
                 );
             completions
@@ -219,14 +232,22 @@ mod macos {
 
     #[cfg(test)]
     mod tests {
+        use std::sync::Mutex;
+
         use exo_editor::Spelling as _;
 
         use super::*;
+
+        // `NSSpellChecker::sharedSpellChecker()` is not thread-safe, so keep the tests serial.
+        static SPELL_CHECKER: Mutex<()> = Mutex::new(());
 
         // Reaches macOS's spell server (outside the sandbox, as the suite runs). Never learns a
         // word, because that would change the user's dictionary.
         #[test]
         fn macos_marks_a_misspelling_and_guesses_its_correction() {
+            let _guard = SPELL_CHECKER
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             let mut document = Document::new();
             let text = "Café: I saw teh cat 👋 yesterdy";
             let (teh, yesterdy) = (12..15, 22..30);
@@ -258,6 +279,9 @@ mod macos {
         // macOS's autocorrection and completion, as autocorrect and autocomplete ask them.
         #[test]
         fn macos_corrects_a_misspelling_and_completes_a_word() {
+            let _guard = SPELL_CHECKER
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             let mut document = Document::new();
             assert_eq!(
                 document.correction("I saw teh cat", 6..9).as_deref(),
@@ -272,7 +296,8 @@ mod macos {
             assert_eq!(
                 completions.first().map(String::as_str),
                 Some("yesterday"),
-                "{completions:?}"
+                "{completions:?} (language: {})",
+                NSSpellChecker::sharedSpellChecker().language()
             );
         }
     }

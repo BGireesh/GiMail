@@ -1,4 +1,4 @@
-//! The app driven end to end for the integration tests: gmail-mock, a fresh store, keys and
+//! The app driven end to end for the integration tests: mock-servers, a fresh store, keys and
 //! clicks.
 
 #![allow(
@@ -20,12 +20,12 @@ use exo::{
     account::{Account, Credentials},
 };
 
-/// The app on a fresh store synced from an in-process gmail-mock, at 1280×800.
+/// The app on a fresh store synced from in-process mock servers, at 1280×800.
 pub struct Fixture {
     pub harness: Running,
     /// Serves the mock, and runs what other devices do to it.
     runtime: tokio::runtime::Runtime,
-    server: gmail_mock::MockServer,
+    server: mock_servers::MockServer,
     endpoints: gmail::Endpoints,
     /// What time the app thinks it is, which is the mock's clock until [`Fixture::set_now`].
     now: Arc<Mutex<jiff::Zoned>>,
@@ -70,7 +70,7 @@ const PREVIEWS: &str = "previews";
 pub fn start(name: &str) -> Fixture {
     start_with(
         name,
-        gmail_mock::Config::default(),
+        mock_servers::Config::default(),
         false,
         true,
         &|_| {},
@@ -82,7 +82,7 @@ pub fn start(name: &str) -> Fixture {
 pub fn start_with_settings(name: &str, change: &dyn Fn(&mut exo_store::Settings)) -> Fixture {
     start_with(
         name,
-        gmail_mock::Config::default(),
+        mock_servers::Config::default(),
         false,
         true,
         change,
@@ -99,7 +99,7 @@ pub fn start_with_cached_guests(
 ) -> Fixture {
     start_with(
         name,
-        gmail_mock::Config::default(),
+        mock_servers::Config::default(),
         false,
         true,
         change,
@@ -115,9 +115,9 @@ pub fn start_with_latency(
 ) -> Fixture {
     start_with(
         name,
-        gmail_mock::Config {
+        mock_servers::Config {
             latency,
-            ..gmail_mock::Config::default()
+            ..mock_servers::Config::default()
         },
         false,
         true,
@@ -130,7 +130,7 @@ pub fn start_with_latency(
 pub fn start_with_silent_people(name: &str) -> Fixture {
     start_with(
         name,
-        gmail_mock::Config::default(),
+        mock_servers::Config::default(),
         true,
         true,
         &|_| {},
@@ -142,7 +142,7 @@ pub fn start_with_silent_people(name: &str) -> Fixture {
 pub fn start_new_account(name: &str) -> Fixture {
     start_with(
         name,
-        gmail_mock::Config::default(),
+        mock_servers::Config::default(),
         false,
         false,
         &|_| {},
@@ -152,16 +152,16 @@ pub fn start_new_account(name: &str) -> Fixture {
 
 /// [`start`], with the saved contacts and colleagues having photos of their own.
 pub fn start_with_contact_photos(name: &str) -> Fixture {
-    let config = gmail_mock::Config {
+    let config = mock_servers::Config {
         contact_photos: true,
-        ..gmail_mock::Config::default()
+        ..mock_servers::Config::default()
     };
     start_with(name, config, false, true, &|_| {}, &[])
 }
 
 fn start_with(
     name: &str,
-    config: gmail_mock::Config,
+    config: mock_servers::Config,
     silent_people: bool,
     one_inbox: bool,
     change: &dyn Fn(&mut exo_store::Settings),
@@ -170,7 +170,7 @@ fn start_with(
     let now = Arc::new(Mutex::new(config.now.clone()));
     let runtime = tokio::runtime::Runtime::new().expect("runtime");
     let server = runtime
-        .block_on(gmail_mock::MockServer::start(config))
+        .block_on(mock_servers::MockServer::start(config))
         .expect("mock starts");
     let mut endpoints = server.endpoints();
     let silent = silent_people.then(|| {
@@ -180,13 +180,15 @@ fn start_with(
         listener
     });
     let dir = std::env::temp_dir().join(format!("exo-keyboard-{name}-{}", std::process::id()));
+    // A killed test process leaves its folder behind, and process ids come round again.
+    let _ = std::fs::remove_dir_all(&dir);
     if one_inbox {
         runtime.block_on(async {
             let store = exo_store::Store::open(
                 &dir,
                 ACCOUNT,
                 endpoints.clone(),
-                gmail::StaticToken(gmail_mock::DEV_ACCESS_TOKEN.into()),
+                gmail::StaticToken(mock_servers::DEV_ACCESS_TOKEN.into()),
             )
             .await
             .expect("store opens");
@@ -242,7 +244,7 @@ fn launch(
     let credentials = Credentials {
         email: ACCOUNT.into(),
         endpoints: endpoints.clone(),
-        tokens: std::sync::Arc::new(gmail::StaticToken(gmail_mock::DEV_ACCESS_TOKEN.into())),
+        tokens: std::sync::Arc::new(gmail::StaticToken(mock_servers::DEV_ACCESS_TOKEN.into())),
     };
     let assets = exo::assets_dir();
     let store_dir = dir.to_owned();
@@ -456,11 +458,11 @@ impl Fixture {
     pub fn gmail(&self) -> gmail::Client {
         gmail::Client::new(
             self.server.endpoints(),
-            gmail::StaticToken(gmail_mock::DEV_ACCESS_TOKEN.into()),
+            gmail::StaticToken(mock_servers::DEV_ACCESS_TOKEN.into()),
         )
     }
 
-    /// Arms a gmail-mock fault (`/__mock/faults`), or with `None` clears every one.
+    /// Arms a mock server fault (`/__mock/faults`), or with `None` clears every one.
     pub fn fault(&self, fault: Option<serde_json::Value>) {
         let url = self.server.url().join("/__mock/faults").expect("a URL");
         let client = reqwest::Client::new();

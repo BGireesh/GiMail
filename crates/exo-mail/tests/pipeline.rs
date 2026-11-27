@@ -1,6 +1,6 @@
-//! The render pipeline against the exact markup expected for gmail-mock's fixtures.
+//! The render pipeline against the exact markup expected for mock-servers' fixtures.
 
-use exo_mail::{Message, Render, html_from_payload, render, text_to_html};
+use exo_mail::{Message, Render, render, text_to_html};
 
 const ZARA: &str = r#"<div dir="ltr"><div>Thanks both for making time for Aiko's onsite. Could you drop your scorecards in by tomorrow noon? She has another offer with a deadline on Friday, so we need to move quickly if it's a yes.</div></div>"#;
 
@@ -168,30 +168,4 @@ fn tabs_become_spaces_to_the_next_stop() {
     let plain = text_to_html("Name\tTeam\nAna\tDesign");
     let rendered = render(&message(plain, "Ann", "ann@x.co"), None, &[]);
     assert!(!rendered.html.contains('\t'), "{}", rendered.html);
-}
-
-#[test]
-fn picks_the_html_alternative() {
-    use gmail::{MessagePart, MessagePartBody};
-    let part = |mime: &str, data: &str| MessagePart {
-        mime_type: Some(mime.into()),
-        body: Some(MessagePartBody {
-            data: Some(data.as_bytes().to_vec()),
-            ..MessagePartBody::default()
-        }),
-        ..MessagePart::default()
-    };
-    let payload = MessagePart {
-        mime_type: Some("multipart/alternative".into()),
-        parts: vec![
-            part("text/plain", "plain"),
-            part("text/html", "<b>rich</b>"),
-        ],
-        ..MessagePart::default()
-    };
-    assert_eq!(html_from_payload(&payload), "<b>rich</b>");
-    assert_eq!(
-        html_from_payload(&part("text/plain", "a <b>")),
-        "<p>a &lt;b&gt;</p>"
-    );
 }

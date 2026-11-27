@@ -64,9 +64,8 @@ use std::path::Path;
 
 use toasty::Db;
 use toasty::migration::{MigrationFile, MigrationSet};
-use toasty::stmt::Value;
 
-use crate::db::query_i64;
+use crate::db::{query_i64, query_rows};
 use crate::error::{Error, Result};
 
 /// The migrations, oldest first, each with an id of its own.
@@ -107,19 +106,26 @@ static FILES: &[MigrationFile] = &[
         include_str!("../migrations/0007_bulk_actions.sql"),
     ),
     MigrationFile::new(
+        0x2e4c_91a7_3b8d_605f,
+        "0008_indexes.sql",
+        include_str!("../migrations/0008_indexes.sql"),
+    ),
+    // Our fork's three, renumbered after upstream's 0008 with their ids kept: files that ran them
+    // as 0008–0010 still count them as run, and run 0008_indexes once.
+    MigrationFile::new(
         0x3d5b_f125_1559_fc79,
-        "0008_notes.sql",
-        include_str!("../migrations/0008_notes.sql"),
+        "0009_notes.sql",
+        include_str!("../migrations/0009_notes.sql"),
     ),
     MigrationFile::new(
         0x146a_3275_fa46_c731,
-        "0009_note_threads_gone.sql",
-        include_str!("../migrations/0009_note_threads_gone.sql"),
+        "0010_note_threads_gone.sql",
+        include_str!("../migrations/0010_note_threads_gone.sql"),
     ),
     MigrationFile::new(
         0x2284_9f14_8fa9_1fa7,
-        "0010_guest_cache.sql",
-        include_str!("../migrations/0010_guest_cache.sql"),
+        "0011_guest_cache.sql",
+        include_str!("../migrations/0011_guest_cache.sql"),
     ),
 ];
 
@@ -140,22 +146,15 @@ pub(crate) async fn migrate(db: &mut Db, path: &Path) -> Result<()> {
 
 /// Refuses a file that has run a migration [`FILES`] doesn't have, one from a newer Exo.
 async fn refuse_unknown(db: &mut Db, path: &Path) -> Result<()> {
-    let rows = toasty::sql::query("SELECT id, name FROM __toasty_migrations ORDER BY applied_at")
-        .exec(db)
-        .await?;
+    let rows = query_rows::<(i64, String)>(
+        db,
+        toasty::sql::query("SELECT id, name FROM __toasty_migrations ORDER BY applied_at"),
+    )
+    .await?;
     let unknown: Vec<String> = rows
-        .iter()
-        .filter_map(|row| match row {
-            Value::Record(row) => match &row.fields[..] {
-                [Value::I64(run), Value::String(name)]
-                    if !FILES.iter().any(|file| id(file) == *run) =>
-                {
-                    Some(name.clone())
-                }
-                _ => None,
-            },
-            _ => None,
-        })
+        .into_iter()
+        .filter(|(run, _)| !FILES.iter().any(|file| id(file) == *run))
+        .map(|(_, name)| name)
         .collect();
     if unknown.is_empty() {
         return Ok(());
@@ -192,7 +191,7 @@ fn id(file: &MigrationFile) -> i64 {
 #[cfg(test)]
 mod tests {
     //! `tests/fixtures/store-0001.sqlite3` is the file Exo wrote at 2a2832a while syncing
-    //! gmail-mock's default mailbox. It has every list backfilled and its first bodies fetched,
+    //! mock-servers' default mailbox. It has every list backfilled and its first bodies fetched,
     //! the search index, a week of the calendar, three drafts (one in Gmail, one held to send in
     //! 2030, one on this device only), a star Gmail hasn't got and the Carbon theme. The baseline
     //! is recorded as run, as files from then have it. The fixture stands for those files, so
@@ -202,8 +201,8 @@ mod tests {
     use std::path::PathBuf;
     use std::time::Duration;
 
-    use gmail_mock::{Config, DEV_ACCESS_TOKEN, MockServer};
     use jiff::Timestamp;
+    use mock_servers::{Config, DEV_ACCESS_TOKEN, MockServer};
     use toasty::stmt::Value;
 
     use super::*;
@@ -569,7 +568,7 @@ mod tests {
         let dir = TempDir::new("migrate-kept");
         let path = fixture(&dir.0);
         let mut db = db::connect(&path).await.expect("opens the file as it is");
-        // Its mail came from another gmail-mock, so take up history where this one is.
+        // Its mail came from another mock server, so take up history where this one is.
         let gmail = gmail::Client::new(
             server.endpoints(),
             gmail::StaticToken(DEV_ACCESS_TOKEN.into()),
@@ -900,9 +899,10 @@ mod tests {
                 "0005_list_floors.sql",
                 "0006_calendar_accounts.sql",
                 "0007_bulk_actions.sql",
-                "0008_notes.sql",
-                "0009_note_threads_gone.sql",
-                "0010_guest_cache.sql",
+                "0008_indexes.sql",
+                "0009_notes.sql",
+                "0010_note_threads_gone.sql",
+                "0011_guest_cache.sql",
                 "9002_extra.sql"
             ]
         );
@@ -938,9 +938,10 @@ mod tests {
                 "0005_list_floors.sql",
                 "0006_calendar_accounts.sql",
                 "0007_bulk_actions.sql",
-                "0008_notes.sql",
-                "0009_note_threads_gone.sql",
-                "0010_guest_cache.sql",
+                "0008_indexes.sql",
+                "0009_notes.sql",
+                "0010_note_threads_gone.sql",
+                "0011_guest_cache.sql",
                 "9002_extra.sql",
                 "9003_remind_at.sql"
             ]
