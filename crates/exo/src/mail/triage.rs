@@ -204,6 +204,11 @@ impl Mail {
             .iter()
             .filter(|id| self.search.is_none() && !stays && !leaving.contains(id));
         let moves_on = moves_on(&mutation);
+        // Search results stay put, so an open result that was triaged moves on at once.
+        let open = self.thread.as_ref().map(|thread| thread.id().to_owned());
+        let open_result_moves_on = self.search.is_some()
+            && moves_on
+            && open.is_some_and(|open| ids.contains(&open) && !leaving.contains(&open));
         self.departing.extend(unpredicted.map(|id| Departure {
             thread: id.clone(),
             applied,
@@ -227,12 +232,7 @@ impl Mail {
         if !leaving.is_empty() {
             self.dismiss_and_advance(&leaving, direction, now);
         }
-        // Search results stay put, so an open result that was triaged moves on now.
-        let open = self.thread.as_ref().map(|thread| thread.id().to_owned());
-        if self.search.is_some()
-            && moves_on
-            && open.is_some_and(|open| ids.contains(&open) && !leaving.contains(&open))
-        {
+        if open_result_moves_on {
             self.move_on_from_open(direction);
         }
         Some(token)
