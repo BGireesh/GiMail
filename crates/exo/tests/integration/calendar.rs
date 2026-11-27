@@ -2069,7 +2069,7 @@ fn a_long_people_list_scrolls_and_leaves_the_rest_of_calendar_settings_reachable
     // The last control of the dialog is inside the card, which stops 36px short of the window's
     // bottom, with 20px of padding in it.
     let sign_in = ctx
-        .read_response(exo_ui::id(&ctx, "calendar-settings-sign-in"))
+        .read_response(exo_ui::id(&ctx, "calendar-settings-sign-in-google"))
         .expect("Sign in with Google is up")
         .rect;
     assert!(
@@ -2111,7 +2111,7 @@ fn a_long_people_list_scrolls_and_leaves_the_rest_of_calendar_settings_reachable
     assert!(!now.contains(&last));
     // Sign in with Google is still where it was, and clickable.
     let again = ctx
-        .read_response(exo_ui::id(&ctx, "calendar-settings-sign-in"))
+        .read_response(exo_ui::id(&ctx, "calendar-settings-sign-in-google"))
         .expect("Sign in with Google is up")
         .rect;
     assert_eq!(again.bottom(), sign_in.bottom());
@@ -2467,12 +2467,14 @@ fn a_colleague_who_stops_sharing_is_forgotten_and_an_offline_refresh_keeps_the_c
 #[test]
 fn a_colleague_removed_during_a_refresh_isn_t_written_back() {
     let mut app = start("calendar-cached-removed");
-    // Priya's calendar answers after a retry, a second or two from now.
+    // Priya's calendar answers after a retry, a second and a half from now.
     app.fault(Some(serde_json::json!({
         "method": "GET",
         "path": "/calendar/v3/calendars/priya@brightmoor.co/events",
         "status": 503,
         "times": 1,
+        // The app retries at once against the mock, so the failure itself takes the time.
+        "delayMs": 1500,
     })));
     app.mail_mut().account_mut().update_settings(|settings| {
         settings.calendar.cache.enabled = true;
@@ -2532,12 +2534,14 @@ fn nudges_that_land_together_leave_the_calendar_idle() {
 #[test]
 fn the_calendar_answers_other_requests_while_the_cache_is_read() {
     let mut app = start("calendar-cached-meanwhile");
-    // Priya's calendar answers after a retry, a second or two from now.
+    // Priya's calendar answers after a retry, a second and a half from now.
     app.fault(Some(serde_json::json!({
         "method": "GET",
         "path": "/calendar/v3/calendars/priya@brightmoor.co/events",
         "status": 503,
         "times": 1,
+        // The app retries at once against the mock, so the failure itself takes the time.
+        "delayMs": 1500,
     })));
     app.mail_mut().account_mut().update_settings(|settings| {
         settings.calendar.cache.enabled = true;
@@ -2850,12 +2854,14 @@ fn a_live_read_of_someone_not_listed_is_not_cached() {
 fn the_day_view_head_spins_before_the_swatch_while_refreshing() {
     let mut app = support::start_with_settings("calendar-cached-spin", &cache_on(&[PRIYA]));
     meet_typing(&mut app, Key::D, "priya");
-    // Priya's calendar answers after a retry, a second or two from now.
+    // Priya's calendar answers after a retry, a second and a half from now.
     app.fault(Some(serde_json::json!({
         "method": "GET",
         "path": "/calendar/v3/calendars/priya@brightmoor.co/events",
         "status": 503,
         "times": 1,
+        // The app retries at once against the mock, so the failure itself takes the time.
+        "delayMs": 1500,
     })));
     for pressed in [true, false] {
         app.harness.input_mut().events.push(Event::Key {

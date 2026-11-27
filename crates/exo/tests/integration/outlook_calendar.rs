@@ -745,6 +745,17 @@ fn press_with(harness: &mut Harness<'_, App>, key: Key, modifiers: Modifiers) {
     harness.run_steps(1);
 }
 
+/// Clicks Calendar Settings' `Sign in with …` button `name` where it is: the dialog's height
+/// depends on what it lists (our fork's calendar cache section sits above the buttons).
+fn click_sign_in(harness: &mut Harness<'_, App>, name: &str) {
+    let ctx = harness.ctx.clone();
+    let rect = ctx
+        .read_response(exo_ui::id(&ctx, name))
+        .unwrap_or_else(|| panic!("{name} is shown"))
+        .rect;
+    click(harness, rect.center());
+}
+
 fn click(harness: &mut Harness<'_, App>, pos: Pos2) {
     for to in [pos - vec2(5.0, 0.0), pos] {
         harness.input_mut().events.push(Event::PointerMoved(to));
@@ -879,7 +890,7 @@ fn google_mail_adds_microsoft_calendar_switches_meet_to_teams_and_removes_by_key
     run_until(&mut app, "Calendar Settings open", |app| {
         app.mail().is_some_and(exo::Mail::calendar_settings_open)
     });
-    click(&mut app, pos2(615.0, 616.0));
+    click_sign_in(&mut app, "calendar-settings-sign-in-microsoft");
     run_until(
         &mut app,
         "Microsoft calendar re-added from settings",
@@ -918,8 +929,8 @@ fn microsoft_mail_adds_google_calendar_for_same_email_from_calendar_settings() {
         app.mail().is_some_and(exo::Mail::calendar_settings_open)
     });
 
-    // Click `Sign in with Google` at bottom left of Calendar Settings (body.top = 234, y = 616).
-    click(&mut app, pos2(455.0, 616.0));
+    // Click `Sign in with Google` at bottom left of Calendar Settings.
+    click_sign_in(&mut app, "calendar-settings-sign-in-google");
     run_until(&mut app, "dual-provider calendar added", |app| {
         app.mail().is_some_and(|mail| {
             let accounts = &mail.account().settings().calendar_accounts;
