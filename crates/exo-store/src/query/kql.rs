@@ -133,7 +133,14 @@ fn leaf(token: &Token, me: &[String]) -> (Option<String>, bool) {
                 true,
             );
         }
-        Kind::Label | Kind::Category | Kind::AutoLabel | Kind::Shared | Kind::Header => {
+        // Notes are Exo's own: a query needing one is answered locally, and Outlook is asked
+        // without them.
+        Kind::Label
+        | Kind::Category
+        | Kind::AutoLabel
+        | Kind::Shared
+        | Kind::Header
+        | Kind::Notes => {
             return (None, false);
         }
     };
