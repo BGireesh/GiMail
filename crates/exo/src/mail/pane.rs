@@ -125,13 +125,18 @@ impl Mail {
             false
         } else if let Some(open) = &self.thread {
             match open.detail() {
-                Some(detail) => brands::allowed_in_thread(detail, open.focused(), &person.email)
-                    .unwrap_or_else(|| {
-                        !matches!(
-                            &self.snapshot.contact_brand,
-                            Some((email, _, Some(false))) if *email == key
-                        )
-                    }),
+                Some(detail) => brands::allowed_in_thread(
+                    detail,
+                    open.focused(),
+                    &person.email,
+                    self.account.provider(),
+                )
+                .unwrap_or_else(|| {
+                    !matches!(
+                        &self.snapshot.contact_brand,
+                        Some((email, _, Some(false))) if *email == key
+                    )
+                }),
                 None => false,
             }
         } else if self.compose.pane().is_some() {
@@ -177,15 +182,18 @@ impl Mail {
         }
         // The pane's body, first match wins: the multi-select shortcuts, the Go to…
         // panel while a `g` sequence is pending, then the contact.
+        let outlook = self.account.is_outlook();
         let panel = if self.inbox.is_selecting() {
             Some(shortcuts_pane::Panel::MultiSelect {
                 select_all: self.inbox.is_select_all_mode(),
+                outlook,
             })
         } else {
             self.commands
                 .go_menu_visible()
                 .then_some(shortcuts_pane::Panel::GoTo {
                     unified: self.account.settings().unified_inbox,
+                    outlook,
                 })
         };
         match panel {
@@ -193,7 +201,7 @@ impl Mail {
             None if self.settings.visible() => {
                 if let Some(action) =
                     self.settings
-                        .show_menu(ui, pane, rem, zero, self.account.settings())
+                        .show_menu(ui, pane, rem, zero, self.account.settings(), outlook)
                 {
                     self.run(Action::Settings(action), now);
                 }
@@ -253,7 +261,7 @@ impl Mail {
                 rem,
                 &card,
                 contact_pane::PaneContext {
-                    account: self.account.email(),
+                    account: self.account.key(),
                     current: shown.as_deref(),
                     is_me,
                     allow_brand,
@@ -278,9 +286,12 @@ impl Mail {
                 None => {}
             }
         } else if self.search.is_some() && self.thread.is_none() {
-            search::show_tips(ui.painter(), pane, rem);
+            search::show_tips(ui.painter(), pane, rem, self.account.is_outlook());
         }
-        if self.search.is_some() && !zero && search::tips_overflow(pane, rem) {
+        if self.search.is_some()
+            && !zero
+            && search::tips_overflow(pane, rem, self.account.is_outlook())
+        {
             settings::footer_shadow(ui, pane, rem, true);
         }
     }

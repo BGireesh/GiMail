@@ -235,6 +235,10 @@ const SECTIONS: &[Section] = &[
 /// and returns the row clicked. At Inbox Zero (`zero`) the right pane is gone and the menu sits
 /// in the footer, with no line over the footer, in white over the blurred photo.
 /// `settings` are the account's, for the toggles, and `exos` are Exo's own rows.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "menu layout and account settings inputs"
+)]
 pub fn show(
     ui: &mut Ui,
     pane: Rect,
@@ -243,6 +247,7 @@ pub fn show(
     scroll: &mut Scroll,
     settings: &exo_store::Settings,
     exos: ExoRows,
+    outlook: bool,
 ) -> Option<Action> {
     let ctx = ui.ctx().clone();
     let tokens = palette(&ctx);
@@ -285,7 +290,15 @@ pub fn show(
                 section
                     .rows
                     .iter()
-                    .map(|(title, action)| (*title, action.clone(), slider(action)))
+                    .map(|(title, action)| {
+                        let title = if outlook && matches!(action, Action::Open(Dialog::Signatures))
+                        {
+                            "Signature"
+                        } else {
+                            *title
+                        };
+                        (title, action.clone(), slider(action))
+                    })
                     .collect(),
             )
         })
@@ -488,9 +501,7 @@ pub(crate) fn footer_shadow(ui: &Ui, pane: Rect, rem: f32, on: bool) {
 mod tests {
     use super::*;
 
-    /// Clicks at `at` on the menu at 400×1300 (all of it, unscrolled), with `Open at Login` off
-    /// and `Warn Before Quitting` as `warn` has it, and returns the action clicked.
-    fn click_with(at: egui::Pos2, warn: Option<bool>) -> Option<Action> {
+    fn click_for(at: egui::Pos2, warn: Option<bool>, outlook: bool) -> Option<Action> {
         let ctx = egui::Context::default();
         exo_ui::install(&ctx).expect("the system fonts load");
         let pane = Rect::from_min_size(egui::Pos2::ZERO, vec2(400.0, 1300.0));
@@ -519,6 +530,7 @@ mod tests {
                         open_at_login: Some(false),
                         warn_before_quitting: warn,
                     },
+                    outlook,
                 ) {
                     clicked = Some(action);
                 }
@@ -526,6 +538,12 @@ mod tests {
             output.drop_without_applying_deltas();
         }
         clicked
+    }
+
+    /// Clicks at `at` on the menu at 400×1300 (all of it, unscrolled), with `Open at Login` off
+    /// and `Warn Before Quitting` as `warn` has it, and returns the action clicked.
+    fn click_with(at: egui::Pos2, warn: Option<bool>) -> Option<Action> {
+        click_for(at, warn, false)
     }
 
     /// [`click_with`], without `Warn Before Quitting`.
@@ -669,6 +687,22 @@ mod tests {
             click(pos2(32.0 + 5.0, 988.0)),
             Some(Action::OutOfOffice),
             "Out of Office Reply, after Notes"
+        );
+    }
+
+    #[test]
+    fn outlook_menu_shows_blocked_senders() {
+        assert_eq!(
+            click_for(pos2(32.0 + 5.0, 844.0), None, true),
+            Some(Action::Open(Dialog::AutoBcc))
+        );
+        assert_eq!(
+            click_for(pos2(32.0 + 5.0, 868.0), None, true),
+            Some(Action::Open(Dialog::BlockedSenders))
+        );
+        assert_eq!(
+            click_for(pos2(32.0 + 5.0, 892.0), None, true),
+            Some(Action::Open(Dialog::Downloads))
         );
     }
 

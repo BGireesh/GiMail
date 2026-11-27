@@ -1,6 +1,6 @@
 [package]
 name = "exo-auth"
-description = "Google sign-in for Exo: installed-app OAuth with PKCE and a loopback redirect, refreshing access tokens, and the account list with refresh tokens in the Keychain."
+description = "Google and Microsoft sign-in for Exo: installed-app OAuth with PKCE and a loopback redirect, refreshing access tokens, and the account list with refresh tokens in the Keychain."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -13,6 +13,7 @@ getrandom = { workspace = true }
 gmail = { workspace = true }
 jiff = { workspace = true }
 log = { workspace = true }
+outlook = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

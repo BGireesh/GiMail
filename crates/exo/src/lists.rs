@@ -5,21 +5,26 @@ use exo_store::{Label, LabelKind, ListId, SplitInbox};
 
 use crate::mailbox::{EXO_LABEL_PREFIX, FOREIGN_STATE_LABEL_PREFIX};
 
-/// The name a view's header and the window title show. `splits` are the account's.
-pub fn name<'a>(
+/// The name a view's header and the window title show. `splits` are the account's, using Outlook
+/// folder wording (`Flagged`, `Junk Email`, `Deleted Items`) when `outlook` is set.
+pub fn name_for<'a>(
     list: &ListId,
     labels: &'a [Label],
     splits: impl IntoIterator<Item = &'a SplitInbox>,
+    outlook: bool,
 ) -> &'a str {
     match list {
         ListId::Inbox => "Inbox",
         ListId::Important => "Important",
         ListId::Other => "Other",
         ListId::Done => "Done",
+        ListId::Starred if outlook => "Flagged",
         ListId::Starred => "Starred",
         ListId::Sent => "Sent",
         ListId::Drafts => "Drafts",
+        ListId::Spam if outlook => "Junk Email",
         ListId::Spam => "Spam",
+        ListId::Trash if outlook => "Deleted Items",
         ListId::Trash => "Trash",
         ListId::Muted => "Muted",
         ListId::Scheduled => "Scheduled",
@@ -50,6 +55,8 @@ pub struct GoTo {
     pub id: &'static str,
     /// The view's name (`go to {name}`).
     pub name: &'static str,
+    /// Extra `go to {alias}` names that find the row (`Spam` for `Junk Email`).
+    pub aliases: &'static [&'static str],
     /// The word that boosts the row when typed.
     pub operative_word: &'static str,
     /// The sequences that go there.
@@ -72,6 +79,7 @@ const fn go_to(
         list,
         id,
         name,
+        aliases: &[],
         operative_word: name,
         keys,
         key_code,
@@ -80,10 +88,16 @@ const fn go_to(
 }
 
 /// The system views before the user's labels, in the palette's order: Important and Other
-/// unless the inbox is unified, All Mail spliced in after them, then Gmail's labels as
-/// `labels.list` orders them. Snippets don't exist in Exo yet. `g i` and `g o` aren't bound
-/// here, because they go home and to Other whatever the rows are.
+/// unless the inbox is unified, All Mail spliced in after them, then provider labels in list
+/// order. `g i` and `g o` aren't bound here, because they go home and to Other whatever the rows
+/// are.
 pub fn system_go_tos(unified: bool) -> Vec<GoTo> {
+    system_go_tos_for(unified, false)
+}
+
+/// [`system_go_tos`], with Outlook folder names, aliases (`Spam`/`Trash`), and no `g s` binding
+/// when `outlook` is set.
+pub fn system_go_tos_for(unified: bool, outlook: bool) -> Vec<GoTo> {
     let important_other = [
         go_to(
             ListId::Important,
@@ -106,6 +120,65 @@ pub fn system_go_tos(unified: bool) -> Vec<GoTo> {
         Vec::new()
     } else {
         important_other.into()
+    };
+    let trash = if outlook {
+        GoTo {
+            aliases: &["Trash"],
+            ..go_to(
+                ListId::Trash,
+                "trash",
+                "Deleted Items",
+                &["g #"],
+                &["G", "then", "#"],
+                Some("TRASH"),
+            )
+        }
+    } else {
+        go_to(
+            ListId::Trash,
+            "trash",
+            "Trash",
+            &["g #"],
+            &["G", "then", "#"],
+            Some("TRASH"),
+        )
+    };
+    let spam = if outlook {
+        GoTo {
+            aliases: &["Spam"],
+            ..go_to(
+                ListId::Spam,
+                "spam",
+                "Junk Email",
+                &["g !"],
+                &["G", "then", "!"],
+                Some("MARK_SPAM"),
+            )
+        }
+    } else {
+        go_to(
+            ListId::Spam,
+            "spam",
+            "Spam",
+            &["g !"],
+            &["G", "then", "!"],
+            Some("MARK_SPAM"),
+        )
+    };
+    let starred = if outlook {
+        GoTo {
+            aliases: &["Starred"],
+            ..go_to(ListId::Starred, "flagged", "Flagged", &[], &[], None)
+        }
+    } else {
+        go_to(
+            ListId::Starred,
+            "starred",
+            "Starred",
+            &["g s"],
+            &["G", "then", "S"],
+            None,
+        )
     };
     important_other
         .into_iter()
@@ -138,14 +211,7 @@ pub fn system_go_tos(unified: bool) -> Vec<GoTo> {
                 &["G", "then", "I"],
                 None,
             ),
-            go_to(
-                ListId::Trash,
-                "trash",
-                "Trash",
-                &["g #"],
-                &["G", "then", "#"],
-                Some("TRASH"),
-            ),
+            trash,
             go_to(
                 ListId::Drafts,
                 "draft",
@@ -154,22 +220,8 @@ pub fn system_go_tos(unified: bool) -> Vec<GoTo> {
                 &["G", "then", "D"],
                 None,
             ),
-            go_to(
-                ListId::Spam,
-                "spam",
-                "Spam",
-                &["g !"],
-                &["G", "then", "!"],
-                Some("MARK_SPAM"),
-            ),
-            go_to(
-                ListId::Starred,
-                "starred",
-                "Starred",
-                &["g s"],
-                &["G", "then", "S"],
-                None,
-            ),
+            spam,
+            starred,
         ])
         .collect()
 }
@@ -206,6 +258,14 @@ pub fn late_go_tos() -> [GoTo; 4] {
     ]
 }
 
+/// [`late_go_tos`], omitting `Muted` on Outlook accounts.
+pub fn late_go_tos_for(outlook: bool) -> Vec<GoTo> {
+    late_go_tos()
+        .into_iter()
+        .filter(|item| !(outlook && item.list == ListId::Muted))
+        .collect()
+}
+
 /// The user's labels, which show as chips and can be gone to or added. That's every user label
 /// but the `[Superhuman]/…` and Exo's own state labels, in Gmail's order. Hiding a label from
 /// Gmail's label list doesn't hide it here.
@@ -220,7 +280,15 @@ pub fn user_labels(labels: &[Label]) -> impl Iterator<Item = &Label> {
 /// The user's labels as the palette lists them to go to, move to or add, and the folder drawer
 /// lists them. That's [`user_labels`] without Auto Labels (`[News]`), which show only as chips.
 pub fn listed_labels(labels: &[Label]) -> impl Iterator<Item = &Label> {
-    user_labels(labels).filter(|label| !crate::mailbox::is_auto_label(&label.name))
+    listed_labels_for(labels, false)
+}
+
+/// [`listed_labels`], also hiding `Deleted Items/…` subfolders on Outlook accounts.
+pub fn listed_labels_for(labels: &[Label], outlook: bool) -> impl Iterator<Item = &Label> {
+    user_labels(labels).filter(move |label| {
+        !crate::mailbox::is_auto_label(&label.name)
+            && !(outlook && label.name.starts_with("Deleted Items/"))
+    })
 }
 
 /// A label's slug, which is its `go to` row's id: the name lowercased, with whitespace, `&`, `(`

@@ -1,14 +1,16 @@
 use egui::{Rect, Ui};
 use exo_commands::{Toast, ToastKind};
-use exo_store::{CalendarChange, Cut, StoredEvent};
-use gmail::calendar::Event as ApiEvent;
+use exo_store::{
+    CalendarChange, CalendarEvent, CalendarProviderKind, ConferenceKind, Cut, EventPatch,
+    EventTime, StoredEvent,
+};
 use jiff::Zoned;
 
 use super::{
     Action,
     event::Event,
     form::{EventForm, Field, Meeting, Mode, Values},
-    patch::{ONE_ON_ONE, merged, new_event, new_id, patch_of, shift_of, values_of},
+    patch::{is_one_on_one, new_event, new_id, patch_of, shift_of, values_of},
 };
 
 /// What Undo takes back.
@@ -50,25 +52,30 @@ pub(super) enum Prompt {
         selected: usize,
         then: Then,
     },
-    /// Saving an edit, which asks which events and then whether to tell the guests.
+    /// Saving an edit, which asks which events and then (on Google) whether to tell the guests.
     Edit {
         notify_step: bool,
         scopes: Vec<Scope>,
         choice: usize,
         selected: usize,
         ask_notify: bool,
+        /// True for Outlook events with other guests (Graph always sends update emails).
+        always_notify: bool,
         form: Box<EventForm>,
         /// Whether cancelling restores `form` to `self.calendar.form` (true for form saves,
         /// false for direct grid drags).
         restore_form: bool,
     },
-    /// Deleting, which asks which events and then whether to tell the guests.
+    /// Deleting, which asks which events and then whether to tell the guests (Google) or
+    /// include an optional cancellation note (Outlook).
     Delete {
         notify_step: bool,
         scopes: Vec<Scope>,
         choice: usize,
         selected: usize,
         ask_notify: bool,
+        outlook_note: bool,
+        note: String,
         target: Box<Target>,
     },
     /// The invite card's `RSVP` alert, where signed-out calendar account `email` signs in with the
@@ -97,11 +104,64 @@ impl Prompt {
                 notify_step: false, ..
             } => "Delete recurring event",
             Prompt::Delete {
-                notify_step: true, ..
+                notify_step: true,
+                outlook_note: true,
+                ..
+            } => "Include a note for attendees?",
+            Prompt::Delete {
+                notify_step: true,
+                outlook_note: false,
+                ..
             } => "Send a cancellation email?",
             Prompt::SignIn { .. } => "RSVP",
         }
     }
+}
+
+/// Outlook organizer deletion's optional attendee note prompt over `page`.
+fn show_cancel_note(
+    ui: &mut Ui,
+    page: Rect,
+    title: &str,
+    note: &mut String,
+    has_back: bool,
+    selected: usize,
+) -> Option<usize> {
+    const NOTE_HEIGHT: f32 = 72.0;
+    const INSET: f32 = 8.0;
+    let actions: &[&str] = if has_back {
+        &["Send", "Go back"]
+    } else {
+        &["Send", "Cancel"]
+    };
+    exo_ui::Alert {
+        title,
+        text: "",
+        actions,
+        selected,
+    }
+    .show_body(ui, page, NOTE_HEIGHT, |ui, body| {
+        let box_rect = egui::Rect::from_min_size(body.min, egui::vec2(body.width(), NOTE_HEIGHT));
+        let stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(0xd8, 0xdb, 0xe0));
+        ui.painter().rect(
+            exo_ui::pixel_snap(box_rect),
+            egui::CornerRadius::same(4),
+            egui::Color32::WHITE,
+            stroke,
+            egui::StrokeKind::Inside,
+        );
+        let inner = box_rect.shrink(INSET);
+        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(inner));
+        child.add_sized(
+            inner.size(),
+            egui::TextEdit::multiline(note)
+                .id(exo_ui::id(ui.ctx(), "calendar-cancel-note"))
+                .hint_text("Add an optional note")
+                .font(exo_ui::ALERT_TEXT.format(exo_ui::ALERT_TEXT_INK).font_id)
+                .text_color(exo_ui::ALERT_TEXT_INK)
+                .frame(egui::Frame::NONE),
+        );
+    })
 }
 
 /// The invite card's `RSVP` alert over `page`: the ask, and the provider dropdown 8px under it
@@ -174,7 +234,7 @@ pub(super) enum Then {
 /// The event a deletion is about.
 pub(super) struct Target {
     calendar: String,
-    event: ApiEvent,
+    event: CalendarEvent,
     start: Zoned,
 }
 
@@ -233,9 +293,7 @@ impl crate::Mail {
                     .iter()
                     .any(|guest| !guest.me && !guest.email.eq_ignore_ascii_case(&me))
             });
-            let one_on_one = ONE_ON_ONE.iter().any(|pattern| {
-                regex::Regex::new(pattern).is_ok_and(|pattern| pattern.is_match(&title))
-            });
+            let one_on_one = is_one_on_one(&title);
             if one_on_one && !others && !alone_checked {
                 self.calendar.prompt = Some(Prompt::Confirm {
                     title: "Did you forget to add an attendee?",
@@ -263,7 +321,8 @@ impl crate::Mail {
             return;
         };
         let me = self.calendar_account(&values.calendar);
-        let event = new_event(&values, &start, &end, &me);
+        let provider = self.calendar_provider(&values.calendar);
+        let event = new_event(&values, &start, &end, &me, provider);
         self.out_of_office_created(&values.calendar, &event);
         let token = self.account.calendar().hold(CalendarChange::Create {
             calendar: values.calendar.clone(),
@@ -286,61 +345,48 @@ impl crate::Mail {
 
     /// Whether Calendar hasn't got `event` of `calendar` yet, because it's a new event still
     /// queued. A deletion takes such an event back from the queue, with no Undo.
-    fn calendar_unsynced(&self, calendar: &str, event: &ApiEvent) -> bool {
+    fn calendar_unsynced(&self, calendar: &str, event: &CalendarEvent) -> bool {
         self.account.calendar().data().events.iter().any(|stored| {
             stored.unsynced && stored.calendar_id == calendar && stored.event.id == event.id
         })
     }
 
     /// For a recurring event, asks which events: only this one, or all of them too while its
-    /// start stays on its day. For a Google event with guests, asks whether to tell them. Then
-    /// makes the edit.
+    /// start stays on its day. For a Google event with guests, asks whether to tell them (Graph
+    /// always notifies attendees on edit). Then makes the edit.
     pub(super) fn calendar_edit_dialogs(&mut self, form: EventForm, restore_form: bool) {
         let Some(edited) = &form.edited else { return };
         let dirty = form.dirty();
         let recurring = edited.event.recurring_event_id.is_some();
         let original_source = edited
             .event
-            .original_start_time
+            .original_start
             .as_ref()
             .or(edited.event.start.as_ref());
         let same_day = match (&form.values.when, original_source) {
-            (Some((start, _)), Some(original)) => {
-                let day = original
-                    .date
-                    .as_deref()
-                    .and_then(|date| date.parse::<jiff::civil::Date>().ok())
-                    .or_else(|| {
-                        original
-                            .timestamp(start.time_zone())
-                            .map(|at| at.to_zoned(start.time_zone().clone()).date())
-                    });
-                day.is_none_or(|day| day == start.date())
-            }
+            (Some((start, _)), Some(original)) => original
+                .zoned(start.time_zone())
+                .is_none_or(|at| at.date() == start.date()),
             _ => true,
         };
         let allow_all = !dirty.contains(&Field::When) || same_day;
         let me = self.calendar_account(&form.values.calendar);
-        let notifiable = |is_self: bool, email: &str| !is_self && !email.eq_ignore_ascii_case(&me);
-        let ask_notify = form
+        let has_guests = form
             .values
             .guests
             .iter()
-            .any(|guest| notifiable(guest.me, &guest.email))
-            || (dirty.contains(&Field::Guests)
-                && edited.event.attendees.iter().any(|attendee| {
-                    notifiable(
-                        attendee.is_self == Some(true),
-                        attendee.email.as_deref().unwrap_or_default(),
-                    )
-                }));
+            .any(|guest| !guest.me && !guest.email.eq_ignore_ascii_case(&me))
+            || (dirty.contains(&Field::Guests) && edited.event.has_other_guests(&me));
+        let outlook = edited.event.provider == CalendarProviderKind::Microsoft;
+        let ask_notify = has_guests && !outlook;
+        let always_notify = has_guests && outlook;
         // A new series that Calendar hasn't got yet has no instance of its own to change, so it
         // changes as a whole.
         let unsynced = recurring && self.calendar_unsynced(&form.values.calendar, &edited.event);
         let scope_step = recurring && allow_all;
         let scopes = edit_scopes(scope_step, unsynced);
         if !scope_step && !ask_notify {
-            return self.calendar_apply_edit(form, scopes[0], false);
+            return self.calendar_apply_edit(form, scopes[0], always_notify);
         }
         self.calendar.prompt = Some(Prompt::Edit {
             notify_step: !scope_step,
@@ -348,6 +394,7 @@ impl crate::Mail {
             choice: 0,
             selected: 0,
             ask_notify,
+            always_notify,
             form: Box::new(form),
             restore_form,
         });
@@ -359,11 +406,10 @@ impl crate::Mail {
         let dirty = form.dirty();
         let calendar = form.values.calendar.clone();
         let me = self.calendar_account(&calendar);
-        let patch = patch_of(&form.values, &dirty, &me, Some(&edited.event));
+        let mut patch = patch_of(&form.values, &dirty, &me, Some(&edited.event));
         let data = self.account.calendar().data();
         let instance = edited.event.clone();
-        let clear_attendees = patch.clear_attendees;
-        let (id, shift, shown) = match (scope, instance.recurring_event_id.clone()) {
+        let (id, series_id, shift, shown) = match (scope, instance.recurring_event_id.clone()) {
             (Scope::All, Some(series)) => {
                 let shift = dirty
                     .contains(&Field::When)
@@ -381,50 +427,49 @@ impl crate::Mail {
                             && stored.event.recurring_event_id.as_deref() == Some(series.as_str())
                     })
                     .map(|stored| {
-                        let mut event = merged(&stored.event, &series_patch);
+                        let mut event = stored.event.clone();
+                        event.apply_patch(&series_patch);
                         if let Some((start, end)) = shift {
-                            event.start = CalendarChange::retime_event_time(
-                                event.start.as_ref(),
-                                start,
-                                start_template.as_ref(),
-                            )
-                            .or(event.start);
-                            event.end = CalendarChange::retime_event_time(
-                                event.end.as_ref(),
-                                end,
-                                end_template.as_ref(),
-                            )
-                            .or(event.end);
+                            event.start = event
+                                .start
+                                .as_ref()
+                                .and_then(|t| shift_time(t, start, start_template.as_ref()))
+                                .or(event.start);
+                            event.end = event
+                                .end
+                                .as_ref()
+                                .and_then(|t| shift_time(t, end, end_template.as_ref()))
+                                .or(event.end);
                         }
                         event
                     })
                     .collect();
-                (series, shift, shown)
+                (series, None, shift, shown)
             }
             (Scope::Following, Some(series)) => {
                 let token = self.calendar_split(&form, &instance, series, patch, notify);
                 return self.calendar_edited_toast(token, notify);
             }
-            _ => (
-                instance.id.clone().unwrap_or_default(),
-                None,
-                vec![merged(&instance, &patch)],
-            ),
-        };
-        let patch = if scope == Scope::All && shift.is_none() {
-            ApiEvent {
-                start: None,
-                end: None,
-                ..patch
+            _ => {
+                let mut updated = instance.clone();
+                updated.apply_patch(&patch);
+                (
+                    instance.id.clone().unwrap_or_default(),
+                    instance.recurring_event_id.clone(),
+                    None,
+                    vec![updated],
+                )
             }
-        } else {
-            patch
         };
+        if scope == Scope::All && shift.is_none() {
+            patch.start = None;
+            patch.end = None;
+        }
         let token = self.account.calendar().hold(CalendarChange::Edit {
             calendar,
             id,
+            series_id,
             patch,
-            clear_attendees,
             notify,
             shift,
             shown,
@@ -438,37 +483,34 @@ impl crate::Mail {
     fn calendar_split(
         &mut self,
         form: &EventForm,
-        instance: &ApiEvent,
+        instance: &CalendarEvent,
         series: String,
-        patch: ApiEvent,
+        mut patch: EventPatch,
         notify: bool,
     ) -> u64 {
         let calendar = form.values.calendar.clone();
-        let clear_attendees = patch.clear_attendees;
         let original = instance
-            .original_start_time
+            .original_start
             .clone()
-            .or_else(|| instance.start.clone())
-            .unwrap_or_default();
-        let from = match (&original.date, original.timestamp(&jiff::tz::TimeZone::UTC)) {
-            (Some(day), _) => Cut::Day(day.parse().unwrap_or_else(|_| self.now.date())),
-            (None, at) => Cut::At(at.unwrap_or_else(jiff::Timestamp::now)),
+            .or_else(|| instance.start.clone());
+        let from = match original {
+            Some(EventTime::AllDay(day)) => Cut::Day(day),
+            Some(EventTime::Timed { at, .. }) => Cut::At(at),
+            None => Cut::At(jiff::Timestamp::now()),
         };
         let shift = form
             .dirty()
             .contains(&Field::When)
             .then(|| shift_of(instance, &form.values))
             .flatten();
-        let following = |event: &ApiEvent| {
+        let following = |event: &CalendarEvent| {
             event.recurring_event_id.as_deref() == Some(series.as_str())
                 && event.start.as_ref().is_none_or(|start| !from.keeps(start))
         };
         let (start_template, end_template) = (patch.start.clone(), patch.end.clone());
-        let series_patch = ApiEvent {
-            start: None,
-            end: None,
-            ..patch.clone()
-        };
+        let mut series_patch = patch.clone();
+        series_patch.start = None;
+        series_patch.end = None;
         let shown = self
             .account
             .calendar()
@@ -477,38 +519,34 @@ impl crate::Mail {
             .iter()
             .filter(|stored| stored.calendar_id == calendar && following(&stored.event))
             .map(|stored| {
-                let mut event = merged(&stored.event, &series_patch);
+                let mut event = stored.event.clone();
+                event.apply_patch(&series_patch);
                 if let Some((start, end)) = shift {
-                    event.start = CalendarChange::retime_event_time(
-                        event.start.as_ref(),
-                        start,
-                        start_template.as_ref(),
-                    )
-                    .or(event.start);
-                    event.end = CalendarChange::retime_event_time(
-                        event.end.as_ref(),
-                        end,
-                        end_template.as_ref(),
-                    )
-                    .or(event.end);
+                    event.start = event
+                        .start
+                        .as_ref()
+                        .and_then(|t| shift_time(t, start, start_template.as_ref()))
+                        .or(event.start);
+                    event.end = event
+                        .end
+                        .as_ref()
+                        .and_then(|t| shift_time(t, end, end_template.as_ref()))
+                        .or(event.end);
                 }
                 event
             })
             .collect();
+        let fallback = EventTime::timed(self.now.timestamp(), None);
         let (start, end) = (
-            instance.start.clone().unwrap_or_default(),
-            instance.end.clone().unwrap_or_default(),
+            instance.start.clone().unwrap_or_else(|| fallback.clone()),
+            instance.end.clone().unwrap_or(fallback),
         );
-        let patch = ApiEvent {
-            id: Some(new_id()),
-            ..patch
-        };
+        patch.id = Some(new_id());
         self.account.calendar().hold(CalendarChange::Split {
             calendar,
             series,
             from,
             patch,
-            clear_attendees,
             start,
             end,
             notify,
@@ -533,30 +571,21 @@ impl crate::Mail {
     }
 
     /// The details menu's `Delete`. It asks which events for a recurring event, and whether to
-    /// tell the guests for my event with guests, then makes the deletion, with Undo.
+    /// tell the guests (or include a note on Outlook) for my event with guests, then makes the
+    /// deletion, with Undo.
     pub(super) fn calendar_delete(&mut self, key: &str, now: &Zoned) {
         let Some((event, source, _)) = self.calendar_detailed(key, now) else {
             return;
         };
         self.calendar.details = None;
         let me = self.calendar_account(&event.calendar_id);
-        let organizer = source.organizer.as_ref().is_some_and(|organizer| {
-            organizer.is_self == Some(true)
-                || organizer
-                    .email
-                    .as_deref()
-                    .is_some_and(|email| email.eq_ignore_ascii_case(&me))
-        });
-        // Ask whether to tell them when it's mine, with someone else on it, and Calendar has it.
+        let organizer = source.is_me_organizer(&me);
+        // Ask whether to tell them (or add an optional cancel note on Outlook) when it's mine,
+        // with someone else on it, and Calendar has it.
         let ask_notify = organizer
             && !self.calendar_unsynced(&event.calendar_id, &source)
-            && source.attendees.iter().any(|attendee| {
-                attendee.is_self != Some(true)
-                    && !attendee
-                        .email
-                        .as_deref()
-                        .is_some_and(|email| email.eq_ignore_ascii_case(&me))
-            });
+            && source.has_other_guests(&me);
+        let outlook_note = source.provider == CalendarProviderKind::Microsoft;
         let target = Target {
             calendar: event.calendar_id.clone(),
             event: source.clone(),
@@ -574,6 +603,8 @@ impl crate::Mail {
                 choice: 0,
                 selected: 0,
                 ask_notify,
+                outlook_note,
+                note: String::new(),
                 target: Box::new(target),
             });
         } else if ask_notify {
@@ -583,30 +614,40 @@ impl crate::Mail {
                 choice: 0,
                 selected: 0,
                 ask_notify,
+                outlook_note,
+                note: String::new(),
                 target: Box::new(target),
             });
         } else {
-            self.calendar_apply_delete(&target, Scope::Only, false);
+            self.calendar_apply_delete(&target, Scope::Only, false, None);
         }
     }
 
     /// Holds the deletion and says so, with Undo. A new event that Calendar hasn't got yet is
     /// simply taken back, with no Undo.
-    fn calendar_apply_delete(&mut self, target: &Target, scope: Scope, notify: bool) {
+    fn calendar_apply_delete(
+        &mut self,
+        target: &Target,
+        scope: Scope,
+        notify: bool,
+        comment: Option<String>,
+    ) {
         let instance = target.event.id.clone().unwrap_or_default();
         let series = target.event.recurring_event_id.clone();
         let change = match (scope, series) {
             (Scope::All, Some(series)) => CalendarChange::Delete {
                 calendar: target.calendar.clone(),
                 id: series,
+                series_id: None,
                 notify,
+                comment,
             },
             (Scope::Following, Some(series)) => {
                 let all_day = target
                     .event
                     .start
                     .as_ref()
-                    .is_some_and(|start| start.date.is_some());
+                    .is_some_and(EventTime::is_all_day);
                 let from = if all_day {
                     Cut::Day(target.start.date())
                 } else {
@@ -619,10 +660,12 @@ impl crate::Mail {
                     notify,
                 }
             }
-            _ => CalendarChange::Delete {
+            (_, series_id) => CalendarChange::Delete {
                 calendar: target.calendar.clone(),
                 id: instance,
+                series_id,
                 notify,
+                comment,
             },
         };
         if self.calendar_unsynced(&target.calendar, &target.event) {
@@ -696,7 +739,7 @@ impl crate::Mail {
                 // An unknown sender's invitation, still open, is answered with its own link.
                 let answer = links
                     .as_ref()
-                    .and_then(|links| links.answer(&status))
+                    .and_then(|links| links.answer(status))
                     .filter(|_| refusal == Refusal::UnknownSender && elsewhere.is_none())
                     .map(str::to_owned);
                 let mark_known = links
@@ -771,7 +814,7 @@ impl crate::Mail {
     }
 
     /// The form's values for a new event of `calendar` that Calendar refused.
-    fn calendar_values_of_new(&self, calendar: &str, event: &ApiEvent) -> Option<Values> {
+    fn calendar_values_of_new(&self, calendar: &str, event: &CalendarEvent) -> Option<Values> {
         let me = self.calendar_account(calendar);
         let stored = StoredEvent {
             calendar_id: calendar.to_owned(),
@@ -781,15 +824,14 @@ impl crate::Mail {
         let colors = super::event::colors(self.account.settings());
         let shown = Event::new(&stored, None, &colors, &me, self.now.time_zone())?;
         let mut values = values_of(&shown, event, &me);
-        values.repeat =
-            exo_store::Recurrence::from_rules(&event.recurrence, shown.start.time_zone());
-        // A Meet link still to make (`createRequest`) comes again with the form's Save.
-        if event
-            .conference_data
-            .as_ref()
-            .is_some_and(|conference| conference.get("createRequest").is_some())
+        values.repeat = event.recurrence.clone();
+        if let Some(conf) = &event.conference
+            && conf.pending
         {
-            values.meeting = Meeting::NewMeet;
+            values.meeting = match conf.kind {
+                ConferenceKind::Teams => Meeting::NewTeams,
+                _ => Meeting::NewMeet,
+            };
         }
         Some(values)
     }
@@ -861,6 +903,7 @@ impl crate::Mail {
                 scopes,
                 choice,
                 ask_notify,
+                always_notify,
                 form,
                 restore_form,
                 ..
@@ -869,6 +912,7 @@ impl crate::Mail {
                 scopes,
                 choice,
                 ask_notify,
+                always_notify,
                 form,
                 restore_form,
                 index,
@@ -887,23 +931,30 @@ impl crate::Mail {
                 scopes,
                 choice,
                 ask_notify,
+                outlook_note,
+                note,
                 target,
                 ..
             } => {
                 if index != 0 {
                     return;
                 }
-                if ask_notify {
-                    self.calendar.prompt = Some(Prompt::Delete {
-                        notify_step: true,
-                        scopes,
-                        choice,
-                        selected: 0,
-                        ask_notify,
-                        target,
-                    });
-                } else {
-                    self.calendar_apply_delete(&target, scopes[choice], false);
+                match step_delete_scope(scopes[choice], ask_notify, outlook_note) {
+                    DeleteScopeOutcome::NotifyStep => {
+                        self.calendar.prompt = Some(Prompt::Delete {
+                            notify_step: true,
+                            scopes,
+                            choice,
+                            selected: 0,
+                            ask_notify,
+                            outlook_note,
+                            note,
+                            target,
+                        });
+                    }
+                    DeleteScopeOutcome::Apply { scope, notify } => {
+                        self.calendar_apply_delete(&target, scope, notify, None);
+                    }
                 }
             }
             Prompt::Delete {
@@ -911,17 +962,46 @@ impl crate::Mail {
                 scopes,
                 choice,
                 ask_notify,
+                outlook_note: true,
+                note,
                 target,
                 ..
             } => match index {
-                0 | 1 => self.calendar_apply_delete(&target, scopes[choice], index == 0),
-                _ if target.event.recurring_event_id.is_some() => {
+                0 => self.calendar_apply_delete(&target, scopes[choice], true, Some(note)),
+                _ if scopes.len() > 1 => {
                     self.calendar.prompt = Some(Prompt::Delete {
                         notify_step: false,
                         scopes,
                         choice,
                         selected: 0,
                         ask_notify,
+                        outlook_note: true,
+                        note,
+                        target,
+                    });
+                }
+                _ => {}
+            },
+            Prompt::Delete {
+                notify_step: true,
+                scopes,
+                choice,
+                ask_notify,
+                outlook_note: false,
+                note,
+                target,
+                ..
+            } => match index {
+                0 | 1 => self.calendar_apply_delete(&target, scopes[choice], index == 0, None),
+                _ if scopes.len() > 1 => {
+                    self.calendar.prompt = Some(Prompt::Delete {
+                        notify_step: false,
+                        scopes,
+                        choice,
+                        selected: 0,
+                        ask_notify,
+                        outlook_note: false,
+                        note,
                         target,
                     });
                 }
@@ -936,8 +1016,11 @@ impl crate::Mail {
                 mut provider,
                 selected,
             } => {
-                if index == 0 && provider.chosen {
+                if index == 0
+                    && let Some(chosen) = provider.chosen
+                {
                     self.calendar_sign_in(
+                        chosen,
                         Some(&email),
                         super::accounts::SignInFor::Invite(invite.clone(), response),
                     );
@@ -999,6 +1082,20 @@ impl crate::Mail {
         }
     }
 
+    /// Whether the Outlook cancel-note textarea currently owns keyboard focus.
+    pub(super) fn calendar_cancel_note_focused(&self) -> bool {
+        matches!(
+            self.calendar.prompt,
+            Some(Prompt::Delete {
+                notify_step: true,
+                outlook_note: true,
+                ..
+            })
+        ) && self.ctx.memory(|memory| {
+            memory.focused() == Some(exo_ui::id(&self.ctx, "calendar-cancel-note"))
+        })
+    }
+
     /// The prompt's actions and which button is selected, for its keys.
     pub(super) fn calendar_prompt_actions(&self) -> Option<(usize, usize)> {
         Some(match self.calendar.prompt.as_ref()? {
@@ -1012,6 +1109,7 @@ impl crate::Mail {
             }
             | Prompt::Delete {
                 notify_step: true,
+                outlook_note: false,
                 selected,
                 ..
             } => (3, *selected),
@@ -1091,6 +1189,15 @@ impl crate::Mail {
                 .show(area, page),
                 Prompt::Delete {
                     notify_step: true,
+                    outlook_note: true,
+                    scopes,
+                    selected,
+                    note,
+                    ..
+                } => show_cancel_note(area, page, title, note, scopes.len() > 1, *selected),
+                Prompt::Delete {
+                    notify_step: true,
+                    outlook_note: false,
                     selected,
                     ..
                 } => exo_ui::Alert {
@@ -1114,6 +1221,19 @@ impl crate::Mail {
     }
 }
 
+/// Shifts `time` by civil wall-clock delta `by`, adopting all-day/zone from `template` if set.
+fn shift_time(
+    time: &EventTime,
+    by: jiff::SignedDuration,
+    template: Option<&EventTime>,
+) -> Option<EventTime> {
+    time.shift_wall_clock(
+        by,
+        template.map(EventTime::is_all_day),
+        template.and_then(EventTime::time_zone),
+    )
+}
+
 /// The scopes offered for an edit. When `scope_step` is false (non-recurring, or a recurring
 /// instance moved to another day), only a single scope applies: `Scope::All` for an unsynced
 /// series (which has no server instance id yet) or `Scope::Only` otherwise.
@@ -1123,6 +1243,27 @@ fn edit_scopes(scope_step: bool, unsynced: bool) -> Vec<Scope> {
         (true, true) => vec![Scope::Following, Scope::All],
         (false, true) => vec![Scope::All],
         (false, false) => vec![Scope::Only],
+    }
+}
+
+/// Result of confirming the scope step on [`Prompt::Delete`].
+#[derive(Debug, PartialEq, Eq)]
+enum DeleteScopeOutcome {
+    NotifyStep,
+    Apply { scope: Scope, notify: bool },
+}
+
+/// Decides whether confirming `scope` on [`Prompt::Delete`] proceeds to the notification/note
+/// step or deletes immediately. On Outlook, `Scope::Following` truncates the series (which has no
+/// cancellation comment field), so it skips the optional note prompt and notifies directly.
+fn step_delete_scope(scope: Scope, ask_notify: bool, outlook_note: bool) -> DeleteScopeOutcome {
+    if ask_notify && !(outlook_note && scope == Scope::Following) {
+        DeleteScopeOutcome::NotifyStep
+    } else {
+        DeleteScopeOutcome::Apply {
+            scope,
+            notify: ask_notify,
+        }
     }
 }
 
@@ -1140,11 +1281,16 @@ enum EditOutcome {
 
 /// Advances [`Prompt::Edit`] by action `index` (Scope step: 0 = Ok, 1 = Cancel; Notify step:
 /// 0 = Send, 1 = Don't send, 2 = Go back).
+#[expect(
+    clippy::too_many_arguments,
+    reason = "pure state transition for Prompt::Edit fields"
+)]
 fn step_edit_prompt(
     notify_step: bool,
     scopes: Vec<Scope>,
     choice: usize,
     ask_notify: bool,
+    always_notify: bool,
     form: Box<EventForm>,
     restore_form: bool,
     index: usize,
@@ -1164,13 +1310,14 @@ fn step_edit_prompt(
                 choice,
                 selected: 0,
                 ask_notify,
+                always_notify,
                 form,
                 restore_form,
             });
         }
         return EditOutcome::Apply {
             scope: scopes[choice],
-            notify: false,
+            notify: always_notify,
             form,
         };
     }
@@ -1187,6 +1334,7 @@ fn step_edit_prompt(
             choice,
             selected: 0,
             ask_notify,
+            always_notify,
             form,
             restore_form,
         }),
@@ -1214,10 +1362,10 @@ mod tests {
         };
         let edited = Edited {
             key: "k1".into(),
-            event: ApiEvent {
+            event: CalendarEvent {
                 id: Some("e1".into()),
                 recurring_event_id: recurring.then(|| "series1".into()),
-                ..ApiEvent::default()
+                ..CalendarEvent::default()
             },
             color: exo_ui::CalendarColor::BLUE,
         };
@@ -1246,14 +1394,14 @@ mod tests {
     fn cancelling_scope_step_restores_form_edits_and_dismisses_grid_drags() {
         let form = edited_form(true, "Edited title");
         let scopes = edit_scopes(true, false);
-        match step_edit_prompt(false, scopes.clone(), 0, true, form, true, 1) {
+        match step_edit_prompt(false, scopes.clone(), 0, true, false, form, true, 1) {
             EditOutcome::Restore(restored) => assert_eq!(restored.values.title, "Edited title"),
             _ => panic!("cancelling scope step from form must restore form"),
         }
 
         let drag_form = edited_form(true, "Moved on grid");
         assert!(matches!(
-            step_edit_prompt(false, scopes, 0, true, drag_form, false, 1),
+            step_edit_prompt(false, scopes, 0, true, false, drag_form, false, 1),
             EditOutcome::Dismiss
         ));
     }
@@ -1266,7 +1414,7 @@ mod tests {
         let form = edited_form(true, "Moved recurring");
         let scopes = edit_scopes(false, false);
         assert_eq!(scopes.len(), 1);
-        match step_edit_prompt(true, scopes, 0, true, form, true, 2) {
+        match step_edit_prompt(true, scopes, 0, true, false, form, true, 2) {
             EditOutcome::Restore(restored) => {
                 assert_eq!(restored.values.title, "Moved recurring");
             }
@@ -1276,7 +1424,16 @@ mod tests {
         // Unsynced moved recurring event: single scope [Scope::All], applying uses Scope::All.
         let unsynced_form = edited_form(true, "Unsynced moved");
         let unsynced_scopes = edit_scopes(false, true);
-        match step_edit_prompt(true, unsynced_scopes, 0, true, unsynced_form, true, 0) {
+        match step_edit_prompt(
+            true,
+            unsynced_scopes,
+            0,
+            true,
+            false,
+            unsynced_form,
+            true,
+            0,
+        ) {
             EditOutcome::Apply { scope, notify, .. } => {
                 assert_eq!(scope, Scope::All);
                 assert!(notify);
@@ -1287,7 +1444,7 @@ mod tests {
         // Non-recurring event with guests: Go back restores the form.
         let single_form = edited_form(false, "Edited lunch");
         let single_scopes = edit_scopes(false, false);
-        match step_edit_prompt(true, single_scopes, 0, true, single_form, true, 2) {
+        match step_edit_prompt(true, single_scopes, 0, true, false, single_form, true, 2) {
             EditOutcome::Restore(restored) => assert_eq!(restored.values.title, "Edited lunch"),
             _ => panic!("Go back on non-recurring notify step must restore form"),
         }
@@ -1302,10 +1459,11 @@ mod tests {
             scopes,
             choice,
             ask_notify,
+            always_notify,
             form,
             restore_form,
             ..
-        }) = step_edit_prompt(true, scopes, 2, true, form, true, 2)
+        }) = step_edit_prompt(true, scopes, 2, true, false, form, true, 2)
         else {
             panic!("expected return to scope step");
         };
@@ -1318,6 +1476,7 @@ mod tests {
             scopes,
             choice,
             ask_notify,
+            always_notify,
             form,
             restore_form,
             1,
@@ -1325,5 +1484,52 @@ mod tests {
             EditOutcome::Restore(restored) => assert_eq!(restored.values.title, "Series title"),
             _ => panic!("expected restored form after cancelling returned scope step"),
         }
+    }
+
+    #[test]
+    fn outlook_recurring_edit_skips_notify_prompt_and_preserves_always_notify() {
+        let form = edited_form(true, "Outlook standup");
+        let scopes = edit_scopes(true, false);
+        match step_edit_prompt(false, scopes, 2, false, true, form, true, 0) {
+            EditOutcome::Apply { scope, notify, .. } => {
+                assert_eq!(scope, Scope::All);
+                assert!(notify);
+            }
+            _ => panic!("Outlook edit must apply immediately without Send an update? step"),
+        }
+    }
+
+    #[test]
+    fn outlook_recurring_delete_skips_cancel_note_for_following_only() {
+        assert_eq!(
+            step_delete_scope(Scope::Following, true, true),
+            DeleteScopeOutcome::Apply {
+                scope: Scope::Following,
+                notify: true,
+            },
+            "Outlook series truncation skips cancel-note prompt instead of silently dropping it"
+        );
+        assert_eq!(
+            step_delete_scope(Scope::Only, true, true),
+            DeleteScopeOutcome::NotifyStep,
+            "Outlook single-occurrence cancel prompts for optional note"
+        );
+        assert_eq!(
+            step_delete_scope(Scope::All, true, true),
+            DeleteScopeOutcome::NotifyStep,
+            "Outlook whole-series cancel prompts for optional note"
+        );
+        assert_eq!(
+            step_delete_scope(Scope::Following, true, false),
+            DeleteScopeOutcome::NotifyStep,
+            "Google recurring delete still asks Send cancellation? for Following"
+        );
+        assert_eq!(
+            step_delete_scope(Scope::Only, false, true),
+            DeleteScopeOutcome::Apply {
+                scope: Scope::Only,
+                notify: false,
+            }
+        );
     }
 }

@@ -10,6 +10,7 @@ use tokio::task::JoinSet;
 use url::Url;
 
 use crate::Error;
+use crate::accounts::Provider;
 
 /// How long a connection may take to send its request head. Browsers open spare connections
 /// they never use, so each is read on its own and dropped when its time is up.
@@ -101,11 +102,16 @@ async fn read_request(mut stream: TcpStream) -> io::Result<(Url, TcpStream)> {
     Ok((target, stream))
 }
 
-/// Answers the redirect with how sign-in went. The browser may have gone, which is fine.
-pub(crate) async fn respond<T>(mut stream: TcpStream, result: &Result<T, Error>) {
+/// Answers the redirect with how `provider`'s sign-in went. The browser may have gone, which is
+/// fine.
+pub(crate) async fn respond<T>(
+    mut stream: TcpStream,
+    provider: Provider,
+    result: &Result<T, Error>,
+) {
     let (status, text) = match result {
         Ok(_) => ("200 OK", copy::SIGNED_IN),
-        Err(error) => ("400 Bad Request", failure(error)),
+        Err(error) => ("400 Bad Request", failure(provider, error)),
     };
     if let Err(error) = write(&mut stream, status, &page(text)).await {
         log::debug!("answering the sign-in redirect: {error}");
@@ -124,10 +130,11 @@ fn page(text: &str) -> String {
     )
 }
 
-fn failure(error: &Error) -> &'static str {
-    match error {
-        Error::MissingScopes(_) => copy::MISSING_SCOPES,
-        Error::NoMailbox => copy::NO_MAILBOX,
+/// The page for `error`. Microsoft's sign-in gets the generic one: the others name Google.
+fn failure(provider: Provider, error: &Error) -> &'static str {
+    match (provider, error) {
+        (Provider::Google, Error::MissingScopes(_)) => copy::MISSING_SCOPES,
+        (Provider::Google, Error::NoMailbox) => copy::NO_MAILBOX,
         _ => copy::FAILED,
     }
 }
@@ -181,7 +188,7 @@ mod tests {
         let (target, stream) = receiving.await.unwrap().unwrap();
         let query: Vec<_> = target.query_pairs().collect();
         assert_eq!(query[1], ("code".into(), "4/0A".into()));
-        respond::<()>(stream, &Ok(())).await;
+        respond::<()>(stream, Provider::Google, &Ok(())).await;
         let page = redirect.await.unwrap();
         assert!(page.starts_with("HTTP/1.1 200 OK\r\n"), "{page}");
         assert!(page.contains("Thanks for allowing Exo!"));
@@ -218,10 +225,16 @@ mod tests {
 
     #[test]
     fn each_failure_shows_its_copy() {
+        let missing = Error::MissingScopes(vec!["x".into()]);
+        assert_eq!(failure(Provider::Google, &missing), copy::MISSING_SCOPES);
         assert_eq!(
-            failure(&Error::MissingScopes(vec!["x".into()])),
-            copy::MISSING_SCOPES
+            failure(Provider::Google, &Error::AccessDenied),
+            copy::FAILED
         );
-        assert_eq!(failure(&Error::AccessDenied), copy::FAILED);
+        assert_eq!(failure(Provider::Microsoft, &missing), copy::FAILED);
+        assert_eq!(
+            failure(Provider::Microsoft, &Error::NoMailbox),
+            copy::FAILED
+        );
     }
 }

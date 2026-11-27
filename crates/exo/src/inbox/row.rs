@@ -115,8 +115,10 @@ pub(super) struct State<'a> {
     /// The status of a bulk action that waits or runs for it, shown instead of the date and hover
     /// actions.
     pub pending: Option<&'a str>,
-    /// Whether Gmail can't be reached, which a send waiting to go says instead of the date.
+    /// Whether the provider can't be reached, which a send waiting to go says instead of the date.
     pub offline: bool,
+    /// Whether the account is Outlook/Microsoft.
+    pub outlook: bool,
     /// For a search result with files, how far the strip of files under the row is scrolled.
     pub strip: Option<f32>,
 }
@@ -229,7 +231,7 @@ pub(super) fn paint(
         .rect(origin);
     if lively && let Some(area) = area {
         let response = ui.interact(area, id.with("status"), Sense::click());
-        if let Some(text) = status_tooltip(thread) {
+        if let Some(text) = status_tooltip(thread, state.outlook) {
             // The tooltip's left edge is on the status's 0×0 box, and its middle 8px below that
             // box.
             KeyTooltip { text, keys: &[] }.show_at(
@@ -801,17 +803,20 @@ fn chevron(painter: &Painter, at: Pos2, direction: isize, color: Color32) {
     )));
 }
 
-/// The status's tooltip: a failed draft's failure, else what the dot and the star mean. Exo's
+/// The status's tooltip: a failed draft's failure, else what the dot and the star/flag mean. Exo's
 /// reminders are all set by hand, so none is `an Auto Reminder`.
-fn status_tooltip(thread: &ThreadSummary) -> Option<&'static str> {
+fn status_tooltip(thread: &ThreadSummary, outlook: bool) -> Option<&'static str> {
     if let Some(reason) = thread.failure {
-        return Some(failure::information(reason).notification);
+        return Some(failure::information(reason, outlook).notification);
     }
     match (thread.reminder_unread(), thread.unread, thread.starred) {
+        (true, _, true) if outlook => Some("Conversation is Flagged and returned from a Reminder"),
         (true, _, true) => Some("Conversation is Starred and returned from a Reminder"),
         (true, _, false) => Some("Conversation returned from a Reminder"),
+        (false, true, true) if outlook => Some("Conversation is Flagged and Unread"),
         (false, true, true) => Some("Conversation is Starred and Unread"),
         (false, true, false) => Some("Conversation is Unread"),
+        (false, false, true) if outlook => Some("Conversation is Flagged"),
         (false, false, true) => Some("Conversation is Starred"),
         (false, false, false) => None,
     }
@@ -1096,7 +1101,7 @@ fn metadata(
     let ink = |color| if selected { ON_SELECTED } else { color };
     let (date, style, color, date_margin) = match (thread.failure, thread.scheduled) {
         (Some(reason), _) => (
-            failure::information(reason).title.to_owned(),
+            failure::information(reason, state.outlook).title.to_owned(),
             FAILED,
             ink(FAILED_INK),
             DATE_MARGIN,

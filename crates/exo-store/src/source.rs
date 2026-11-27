@@ -1,79 +1,30 @@
-//! A thread's source as the raw source viewer shows it. This is Gmail's `threads.get` response
-//! with the HTML entities in its snippets decoded, written the way
-//! `JSON.stringify(thread, null, 4)` writes it.
+//! A thread's raw source as the original-message viewer shows it: Gmail's `threads.get` response
+//! (with HTML entities in snippets decoded) or Microsoft Graph's conversation messages, written
+//! the way `JSON.stringify(thread, null, 4)` writes it.
 
-use futures::future;
 use serde::Serialize as _;
 use serde_json::{Serializer, Value, ser::PrettyFormatter};
 
-use crate::{
-    error::Result, parse::unescape_html, quota::Lane, store::Store, sync::MESSAGES_AT_ONCE,
-};
+use crate::{entities::unescape_html, error::Result, store::Store};
 
 impl Store {
-    /// Thread `id`'s source for the raw source viewer, from `threads.get` (format `full`, 10
-    /// units). A thread too large for one answer is its `format=minimal` answer with each message
-    /// in full from `messages.get`, as sync fetches it.
+    /// Thread `id`'s raw JSON source for the original-message viewer: Gmail's `threads.get`
+    /// (`format=full`, falling back to per-message fetches when too large) or Outlook's Graph
+    /// conversation messages (`id`, `messages`), pretty-printed four spaces deep.
     ///
     /// # Errors
-    /// [`crate::Error::Offline`] without a network; [`crate::Error::Gmail`] when Gmail refuses.
+    /// [`crate::Error::Offline`] without a network; [`crate::Error::UnknownThread`] if the
+    /// conversation doesn't exist; [`crate::Error::Gmail`] or [`crate::Error::Outlook`] when the
+    /// provider refuses.
     pub async fn thread_source(&self, id: &str) -> Result<String> {
-        let api = &self.inner.api;
-        let get = |format| {
-            api.call(Lane::Act, ATTEMPTS, move |gmail| {
-                gmail.thread(id, format, &[]).returning::<Value>()
-            })
-        };
-        let mut thread = match get(gmail::Format::Full).await {
-            Err(failure) if failure.is_too_large() => {
-                let mut thread = get(gmail::Format::Minimal).await?;
-                let mut messages = Vec::new();
-                for chunk in message_ids(&thread).chunks(MESSAGES_AT_ONCE) {
-                    messages.extend(
-                        future::try_join_all(chunk.iter().map(|message| {
-                            api.call(Lane::Act, ATTEMPTS, |gmail| {
-                                gmail
-                                    .message(message, gmail::Format::Full, &[])
-                                    .returning::<Value>()
-                            })
-                        }))
-                        .await?,
-                    );
-                }
-                if let Some(slot) = messages_mut(&mut thread) {
-                    *slot = messages;
-                }
-                thread
-            }
-            fetched => fetched?,
-        };
-        normalize(&mut thread);
+        let thread = self.inner.mail.thread_source(id).await?;
         Ok(stringify(&thread))
     }
 }
 
-/// Tries per call, since someone is waiting.
-const ATTEMPTS: u32 = 3;
-
-/// A thread's `messages`.
-fn messages_mut(thread: &mut Value) -> Option<&mut Vec<Value>> {
-    thread.get_mut("messages")?.as_array_mut()
-}
-
-/// The `id` of each of a thread's messages.
-fn message_ids(thread: &Value) -> Vec<String> {
-    thread
-        .get("messages")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|message| message.get("id")?.as_str().map(str::to_owned))
-        .collect()
-}
-
-/// Decodes the HTML entities in each message's `snippet`.
-fn normalize(thread: &mut Value) {
-    let Some(messages) = messages_mut(thread) else {
+/// Decodes the HTML entities in each Gmail message's `snippet`.
+pub(crate) fn normalize_snippets(thread: &mut Value) {
+    let Some(messages) = thread.get_mut("messages").and_then(Value::as_array_mut) else {
         return;
     };
     for message in messages {
@@ -100,7 +51,7 @@ mod tests {
 
     fn source(json: &str) -> String {
         let mut thread: Value = serde_json::from_str(json).expect("valid JSON");
-        normalize(&mut thread);
+        normalize_snippets(&mut thread);
         stringify(&thread)
     }
 

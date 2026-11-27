@@ -1677,6 +1677,7 @@ impl Inbox {
                         archivable: self.view.archivable,
                         pending: self.context.pending.get(&thread.id).map(String::as_str),
                         offline: !self.context.online,
+                        outlook: self.context.outlook,
                         strip: self.has_strip(thread).then(|| {
                             self.file_pages
                                 .get(&thread.id)

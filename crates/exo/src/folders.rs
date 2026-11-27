@@ -104,16 +104,16 @@ impl Line {
 }
 
 /// The system folders in the drawer's order. Scheduled, which has no `g` key, always shows, and so
-/// do Reminders and Snippets. Muted shows once mute has been used.
-fn folders(muted: bool) -> Vec<Line> {
+/// do Reminders and Snippets. Muted shows on Gmail once mute has been used.
+fn folders(muted: bool, outlook: bool) -> Vec<Line> {
     let folder = |list: ListId, key: Option<&'static str>| Line::Folder {
-        name: lists::name(&list, &[], &[]),
+        name: lists::name_for(&list, &[], &[], outlook),
         place: Place::List(list),
         key,
     };
     let mut folders = vec![
         folder(ListId::Inbox, Some("I")),
-        folder(ListId::Starred, Some("S")),
+        folder(ListId::Starred, (!outlook).then_some("S")),
         folder(ListId::Drafts, Some("D")),
         folder(ListId::Sent, Some("T")),
         folder(ListId::Done, Some("E")),
@@ -125,7 +125,7 @@ fn folders(muted: bool) -> Vec<Line> {
             key: Some(";"),
         },
     ];
-    if muted {
+    if muted && !outlook {
         folders.push(folder(ListId::Muted, Some("M")));
     }
     folders.extend([
@@ -137,8 +137,8 @@ fn folders(muted: bool) -> Vec<Line> {
 
 /// The drawer's lines: the folders, then the user's labels by name (a leading `[` ignored), nested
 /// ones under their parent, and `Load More` past 100 of them unless `all`.
-pub fn lines(labels: &[Label], muted: bool, all: bool) -> Vec<Line> {
-    let mut user: Vec<&Label> = lists::listed_labels(labels).collect();
+pub fn lines(labels: &[Label], muted: bool, all: bool, outlook: bool) -> Vec<Line> {
+    let mut user: Vec<&Label> = lists::listed_labels_for(labels, outlook).collect();
     user.sort_by(|a, b| {
         crate::mailbox::compare_label_names(
             a.name.trim_start_matches('['),
@@ -150,7 +150,7 @@ pub fn lines(labels: &[Label], muted: bool, all: bool) -> Vec<Line> {
     } else {
         LABELS_SHOWN
     };
-    let mut lines = folders(muted);
+    let mut lines = folders(muted, outlook);
     let mut parent = String::new();
     for label in &user[..shown] {
         let list = ListId::Label(label.id.clone());
@@ -232,8 +232,10 @@ pub enum Hint {
 
 /// What the drawer shows besides its lines.
 pub struct View<'a> {
-    /// The account's address.
+    /// The account's display address.
     pub email: &'a str,
+    /// The account's key (`email` for Google, `microsoft {email}` for Microsoft), for its photo.
+    pub account_key: &'a str,
     /// The account's color.
     pub color: Color32,
     /// The Inbox's count, shown on its row while hovered. It's Important's count while Important
@@ -878,7 +880,7 @@ fn paint_account(ui: &Ui, row: Rect, left: f32, right: f32, view: &View<'_>, ink
         pos2(left, row.center().y - AVATAR / 2.0),
         Vec2::splat(AVATAR),
     ));
-    match crate::profile_pictures::photo(ctx, view.email) {
+    match crate::profile_pictures::photo(ctx, view.account_key) {
         // A 3px ring in the account's color.
         Some(photo) => exo_ui::paint_photo_avatar(painter, avatar, &photo, 3.0, view.color, 1.0),
         // The initial: `#fff`, `#27292d` in Carbon; `dy: .35em`.
@@ -1016,7 +1018,7 @@ mod tests {
             label("L7", "[Exo]/Muted"),
         ];
         assert_eq!(
-            names(&lines(&labels, false, false)),
+            names(&lines(&labels, false, false, false)),
             [
                 "Inbox",
                 "Starred",
@@ -1037,9 +1039,38 @@ mod tests {
             ]
         );
         assert!(
-            names(&lines(&labels, true, false)).contains(&"Muted".to_owned()),
+            names(&lines(&labels, true, false, false)).contains(&"Muted".to_owned()),
             "once mute is used"
         );
+        let outlook_labels = [
+            label("L1", "Deleted Items/Archive"),
+            label("L2", "Projects"),
+        ];
+        let outlook = lines(&outlook_labels, true, false, true);
+        assert_eq!(
+            names(&outlook),
+            [
+                "Inbox",
+                "Flagged",
+                "Drafts",
+                "Sent",
+                "Done",
+                "Scheduled",
+                "Reminders",
+                "Snippets",
+                "Junk Email",
+                "Deleted Items",
+                "Projects",
+            ]
+        );
+        assert!(matches!(
+            outlook[1],
+            Line::Folder {
+                place: Place::List(ListId::Starred),
+                name: "Flagged",
+                key: None
+            }
+        ));
     }
 
     #[test]
@@ -1047,7 +1078,7 @@ mod tests {
         let many: Vec<Label> = (0..120)
             .map(|i| label(&format!("L{i}"), &format!("Label {i}")))
             .collect();
-        let short = lines(&many, false, false);
+        let short = lines(&many, false, false, false);
         assert_eq!(short.last(), Some(&Line::LoadMore));
         assert_eq!(
             short
@@ -1057,7 +1088,7 @@ mod tests {
             100
         );
         assert_eq!(
-            lines(&many[..105], false, false)
+            lines(&many[..105], false, false, false)
                 .iter()
                 .filter(|line| matches!(line, Line::Label { .. }))
                 .count(),
@@ -1075,7 +1106,7 @@ mod tests {
     #[test]
     fn opens_on_the_current_view() {
         let labels = [label("L1", "Clients"), label("L2", "Clients/Calloway")];
-        let lines = lines(&labels, false, false);
+        let lines = lines(&labels, false, false, false);
         let mut folders = Folders::default();
         folders.open(&lines, &Place::List(ListId::Important));
         assert_eq!(folders.cursor, 1, "the inbox views open on Inbox");
@@ -1097,7 +1128,7 @@ mod tests {
 
     #[test]
     fn keys_walk_the_account_folders_and_labels() {
-        let lines = lines(&[label("L1", "Family")], false, false);
+        let lines = lines(&[label("L1", "Family")], false, false, false);
         let mut folders = Folders::default();
         folders.open(&lines, &Place::List(ListId::Inbox));
         folders.key(Key::UpWithin, &lines);
@@ -1132,7 +1163,7 @@ mod tests {
 
     #[test]
     fn clicks_hint_at_the_keyboard() {
-        let lines = lines(&[label("L1", "Family")], false, false);
+        let lines = lines(&[label("L1", "Family")], false, false, false);
         let mut folders = Folders::default();
         assert_eq!(
             folders.choose(&lines, 4, true),

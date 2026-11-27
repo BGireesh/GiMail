@@ -305,12 +305,21 @@ impl crate::Mail {
         self.open_new(Open::new(factory::new_id(), None, record), field);
     }
 
+    /// Copies the account's signature settings onto `open` so new, reopened, and saved drafts
+    /// immediately include Outlook's local signature and respect `include_signature_on_replies`.
+    fn sync_signature_state(&self, open: &mut Open) {
+        open.body.signature_on_replies = self.account.settings().include_signature_on_replies();
+        open.body.outlook = self.account.is_outlook();
+        open.body.local_signature = self.account.local_signature().map(str::to_owned);
+    }
+
     /// Shows `open`, a new message, in the thread pane with the keyboard (on `field`).
     pub(super) fn open_new(&mut self, mut open: Open, field: Option<Field>) {
         if self.snippet_unsaved() {
             self.ask_leaving_snippet(Box::new(move |mail| mail.open_new(open, field)));
             return;
         }
+        self.sync_signature_state(&mut open);
         self.with_auto_bcc(&mut open);
         // Leaving any other new message first.
         self.leave_pane();
@@ -348,6 +357,7 @@ impl crate::Mail {
         let mut record = reply.record;
         factory::unthread(&mut record);
         let mut open = Open::new(factory::new_id(), None, record);
+        self.sync_signature_state(&mut open);
         open.header.select_subject = true;
         open.touch(now);
         let new = open.id.clone();
@@ -517,6 +527,7 @@ impl crate::Mail {
                     Timestamp::now(),
                 );
                 let mut open = Open::new(factory::new_id(), Some(thread_id), record);
+                self.sync_signature_state(&mut open);
                 self.with_auto_bcc(&mut open);
                 let id = open.id.clone();
                 self.compose.drafts.push(open);
@@ -675,7 +686,8 @@ impl crate::Mail {
             self.pop_in();
             return true;
         }
-        let open = Open::stored(stored);
+        let mut open = Open::stored(stored);
+        self.sync_signature_state(&mut open);
         self.leave_pane();
         self.compose.focus = Some(open.id.clone());
         self.compose.pane = Some((open.id.clone(), None));
@@ -856,8 +868,14 @@ impl crate::Mail {
                         alias.active && recipients::same_address(&alias.email, &from.email)
                     })
             });
-            if let Some(problem) = checks::check(open, &html, from_ok, bypass, self.now.timestamp())
-            {
+            if let Some(problem) = checks::check(
+                open,
+                &html,
+                from_ok,
+                bypass,
+                self.now.timestamp(),
+                self.account.is_outlook(),
+            ) {
                 let (actions, then) = match problem.kind {
                     checks::Kind::SendAnyway(bypass) => (
                         vec![checks::anyway(open), "Cancel"],
@@ -1062,6 +1080,8 @@ impl crate::Mail {
             ..exo_editor::Settings::default()
         };
         let signature_on_replies = settings.include_signature_on_replies();
+        let outlook = self.account.is_outlook();
+        let local_signature = self.account.local_signature().map(str::to_owned);
         let online = self.snapshot.connection.is_online();
         for open in &mut self.compose.drafts {
             // A snippet's body detects no dates. Whether this draft or another is popped out sets
@@ -1075,6 +1095,8 @@ impl crate::Mail {
                 ..editor
             });
             open.body.signature_on_replies = signature_on_replies;
+            open.body.outlook = outlook;
+            open.body.local_signature.clone_from(&local_signature);
             open.sync.upload = self.account.upload(&open.id);
             open.sync.online = online;
         }
@@ -1425,8 +1447,10 @@ impl crate::Mail {
                             else {
                                 continue;
                             };
+                            let mut open = Open::stored(stored);
+                            self.sync_signature_state(&mut open);
                             save(
-                                &mut Open::stored(stored),
+                                &mut open,
                                 &self.account,
                                 &self.snapshot.aliases,
                                 &self.now,
@@ -1464,7 +1488,7 @@ impl crate::Mail {
                 else {
                     return;
                 };
-                match crate::format::failure::alert(reason) {
+                match crate::format::failure::alert(reason, self.account.is_outlook()) {
                     // The alert's See Message takes the send from there.
                     Some(text) => {
                         self.commands.hide_toast();

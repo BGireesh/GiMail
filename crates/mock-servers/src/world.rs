@@ -152,6 +152,10 @@ pub struct Fault {
     /// Seconds a throttled Microsoft Graph request is told to wait (`Retry-After`), or Graph's
     /// usual 10 when absent.
     pub retry_after: Option<u64>,
+    /// Milliseconds to wait before answering, so a test can keep one request in flight while
+    /// others are answered (the app retries at once against a local mock).
+    #[serde(default)]
+    pub delay_ms: Option<u64>,
 }
 
 fn one() -> u32 {

@@ -1,5 +1,6 @@
-//! The iTIP (RFC 5546) part of meeting mail, read as far as Outlook's `eventMessage` needs: the
-//! method, and the first `VEVENT`'s times, place, recurrence, organizer and attendees.
+//! The iTIP (RFC 5546) part of meeting mail: read as far as Outlook's `eventMessage` needs (the
+//! method, and the first `VEVENT`'s times, place, recurrence, organizer and attendees), and
+//! written for the invitations, updates, responses and cancellations Outlook sends.
 
 use jiff::Timestamp;
 use jiff::civil::{Date, DateTime};
@@ -108,6 +109,146 @@ impl Itip {
             .find(|(email, ..)| email.eq_ignore_ascii_case(address))
             .map(|(_, partstat, _)| partstat.as_str())
     }
+}
+
+/// A meeting's calendar object as Outlook sends it, for one method.
+#[derive(Debug, Clone)]
+pub struct Outgoing<'a> {
+    /// `REQUEST`, `REPLY`, `COUNTER` or `CANCEL`.
+    pub method: &'a str,
+    pub uid: &'a str,
+    pub sequence: u32,
+    pub summary: &'a str,
+    pub location: &'a str,
+    pub description: &'a str,
+    pub start: When,
+    pub end: When,
+    /// A series' `RRULE` lines.
+    pub recurrence: &'a [String],
+    /// The occurrence a message is about.
+    pub recurrence_id: Option<When>,
+    /// The organizer's name and address.
+    pub organizer: (&'a str, &'a str),
+    pub attendees: Vec<Attendee>,
+    /// Whether the organizer refuses new time proposals.
+    pub no_counter: bool,
+    pub stamp: Timestamp,
+}
+
+/// An `ATTENDEE` line's parts.
+#[derive(Debug, Clone)]
+pub struct Attendee {
+    pub name: String,
+    pub address: String,
+    /// `NEEDS-ACTION`, `ACCEPTED`, `TENTATIVE` or `DECLINED`.
+    pub partstat: &'static str,
+    /// `REQ-PARTICIPANT`, `OPT-PARTICIPANT`, or `NON-PARTICIPANT` for a room.
+    pub role: &'static str,
+    pub rsvp: bool,
+}
+
+impl Outgoing<'_> {
+    /// The calendar object, with long lines folded.
+    pub fn write(&self) -> String {
+        let when = |name: &str, value: When| match value {
+            When::At(at) => format!("{name}:{}", at.strftime("%Y%m%dT%H%M%SZ")),
+            When::Day(day) => format!("{name};VALUE=DATE:{}", day.strftime("%Y%m%d")),
+        };
+        let mut lines = vec![
+            "BEGIN:VCALENDAR".to_owned(),
+            format!("METHOD:{}", self.method),
+            "PRODID:Microsoft Exchange Server 2010".to_owned(),
+            "VERSION:2.0".to_owned(),
+            "BEGIN:VEVENT".to_owned(),
+            format!(
+                "ORGANIZER;CN={}:mailto:{}",
+                quoted(self.organizer.0),
+                self.organizer.1
+            ),
+        ];
+        for attendee in &self.attendees {
+            let kind = if attendee.role == "NON-PARTICIPANT" {
+                "RESOURCE"
+            } else {
+                "INDIVIDUAL"
+            };
+            lines.push(format!(
+                "ATTENDEE;ROLE={};PARTSTAT={};RSVP={};CUTYPE={kind};CN={}:mailto:{}",
+                attendee.role,
+                attendee.partstat,
+                if attendee.rsvp { "TRUE" } else { "FALSE" },
+                quoted(&attendee.name),
+                attendee.address
+            ));
+        }
+        lines.push(format!("SUMMARY:{}", escape(self.summary)));
+        if !self.description.is_empty() {
+            lines.push(format!("DESCRIPTION:{}", escape(self.description)));
+        }
+        lines.push(when("DTSTART", self.start));
+        lines.push(when("DTEND", self.end));
+        lines.extend(self.recurrence.iter().cloned());
+        if let Some(id) = self.recurrence_id {
+            lines.push(when("RECURRENCE-ID", id));
+        }
+        lines.extend([
+            format!("UID:{}", self.uid),
+            format!("SEQUENCE:{}", self.sequence),
+            format!("DTSTAMP:{}", self.stamp.strftime("%Y%m%dT%H%M%SZ")),
+            format!("LOCATION:{}", escape(self.location)),
+            format!(
+                "STATUS:{}",
+                if self.method == "CANCEL" {
+                    "CANCELLED"
+                } else {
+                    "CONFIRMED"
+                }
+            ),
+        ]);
+        if self.no_counter {
+            lines.push("X-MICROSOFT-DISALLOW-COUNTER:TRUE".to_owned());
+        }
+        lines.extend(["END:VEVENT".to_owned(), "END:VCALENDAR".to_owned()]);
+        lines.iter().map(|line| fold(line)).collect::<String>()
+    }
+}
+
+/// A parameter value, with RFC 6868's `^` escapes and quoted when it has to be.
+fn quoted(value: &str) -> String {
+    let escaped = value
+        .replace('^', "^^")
+        .replace('"', "^'")
+        .replace('\n', "^n");
+    if escaped.contains([':', ';', ',']) {
+        format!("\"{escaped}\"")
+    } else {
+        escaped
+    }
+}
+
+fn escape(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace(';', "\\;")
+        .replace(',', "\\,")
+        .replace("\r\n", "\n")
+        .replace('\n', "\\n")
+}
+
+/// A content line folded at 75 octets, with its line break.
+fn fold(line: &str) -> String {
+    let mut out = String::new();
+    let mut width = 0;
+    for ch in line.chars() {
+        if width + ch.len_utf8() > 75 {
+            out.push_str("\r\n ");
+            width = 1;
+        }
+        out.push(ch);
+        width += ch.len_utf8();
+    }
+    out.push_str("\r\n");
+    out
 }
 
 /// `20261118T150000Z`, `20261118T100000` in `tzid`, or `20261118` (a day).
@@ -246,5 +387,64 @@ mod tests {
                 .to_string(),
             "2026-11-18T16:00:00Z"
         );
+    }
+
+    #[test]
+    fn what_it_writes_it_reads() {
+        let start = "2026-11-18T15:00:00Z".parse().unwrap();
+        let end = "2026-11-18T15:30:00Z".parse().unwrap();
+        let outgoing = Outgoing {
+            method: "REQUEST",
+            uid: "abc@google.com",
+            sequence: 2,
+            summary: "Atlas sync, weekly; with notes",
+            location: "Hudson Room",
+            description: "Line one\nLine two",
+            start: When::At(start),
+            end: When::At(end),
+            recurrence: &["RRULE:FREQ=WEEKLY;BYDAY=WE".to_owned()],
+            recurrence_id: None,
+            organizer: ("Maya Okafor", "maya@brightmoor.co"),
+            attendees: vec![Attendee {
+                name: "Reyes, \"Dan\" Daniel".into(),
+                address: "daniel@brightmoor.co".into(),
+                partstat: "NEEDS-ACTION",
+                role: "REQ-PARTICIPANT",
+                rsvp: true,
+            }],
+            no_counter: true,
+            stamp: start,
+        };
+        let text = outgoing.write();
+        assert!(text.lines().all(|line| line.len() <= 76), "{text}");
+        let attendee = gmail::ics::unfold(&text)
+            .into_iter()
+            .find(|line| line.starts_with("ATTENDEE"))
+            .unwrap();
+        let (_, params, _) = gmail::ics::content_line(&attendee).unwrap();
+        assert_eq!(
+            params.get("CN").map(String::as_str),
+            Some("Reyes, \"Dan\" Daniel"),
+            "names survive quoting"
+        );
+        let itip = Itip::parse(&text).unwrap();
+        assert_eq!(itip.method, "REQUEST");
+        assert_eq!(itip.summary, "Atlas sync, weekly; with notes");
+        assert_eq!(
+            (itip.start, itip.end),
+            (Some(When::At(start)), Some(When::At(end)))
+        );
+        assert_eq!(itip.sequence, 2);
+        assert_eq!(itip.organizer.as_deref(), Some("maya@brightmoor.co"));
+        assert_eq!(
+            itip.attendees,
+            [(
+                "daniel@brightmoor.co".to_owned(),
+                "NEEDS-ACTION".to_owned(),
+                true
+            )]
+        );
+        assert_eq!(itip.recurrence, ["RRULE:FREQ=WEEKLY;BYDAY=WE"]);
+        assert!(itip.no_counter);
     }
 }

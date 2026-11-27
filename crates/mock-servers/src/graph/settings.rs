@@ -400,6 +400,27 @@ fn auto_replies(world: &World) -> Value {
     })
 }
 
+/// The user's working hours: as set through Graph, else Outlook's default of 8 to 5, Monday to
+/// Friday, in the mailbox's zone.
+pub fn working_hours(world: &World) -> Value {
+    world
+        .graph
+        .settings
+        .get("workingHours")
+        .cloned()
+        .unwrap_or_else(|| default_hours(world.account.tz.iana_name().unwrap_or("UTC")))
+}
+
+/// Outlook's default working hours in `zone` (an IANA name).
+pub fn default_hours(zone: &str) -> Value {
+    json!({
+        "daysOfWeek": ["monday", "tuesday", "wednesday", "thursday", "friday"],
+        "startTime": "08:00:00.0000000",
+        "endTime": "17:00:00.0000000",
+        "timeZone": { "name": project::windows_zone(zone) },
+    })
+}
+
 fn settings_json(world: &World) -> Map<String, Value> {
     let zone = project::windows_zone(world.account.tz.iana_name().unwrap_or("UTC"));
     let stored = &world.graph.settings;
@@ -415,18 +436,7 @@ fn settings_json(world: &World) -> Map<String, Value> {
             json!({ "locale": "en-US", "displayName": "English (United States)" }),
         ),
     );
-    json.insert(
-        "workingHours".into(),
-        get(
-            "workingHours",
-            json!({
-                "daysOfWeek": ["monday", "tuesday", "wednesday", "thursday", "friday"],
-                "startTime": "08:00:00.0000000",
-                "endTime": "17:00:00.0000000",
-                "timeZone": { "name": zone },
-            }),
-        ),
-    );
+    json.insert("workingHours".into(), working_hours(world));
     json.insert("dateFormat".into(), get("dateFormat", "M/d/yyyy".into()));
     json.insert("timeFormat".into(), get("timeFormat", "h:mm tt".into()));
     json.insert(

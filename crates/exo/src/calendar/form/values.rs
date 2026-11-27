@@ -3,9 +3,8 @@
 use std::collections::BTreeMap;
 
 use egui::Id;
-use exo_store::Address;
+use exo_store::{Address, CalendarEvent, CalendarProviderKind, RsvpStatus};
 use exo_ui::CalendarColor;
-use gmail::calendar::Event as ApiEvent;
 use jiff::{Zoned, civil::Weekday};
 
 use crate::{
@@ -100,7 +99,7 @@ pub struct Guest {
     pub name: Option<String>,
     pub optional: bool,
     /// Their answer, as Calendar has it.
-    pub response: Option<String>,
+    pub response: Option<RsvpStatus>,
     /// The guest is the event's calendar (me), which isn't shown but is kept when saving.
     pub me: bool,
     pub organizer: bool,
@@ -112,6 +111,8 @@ pub enum Meeting {
     None,
     /// A Google Meet link, made when the event is saved.
     NewMeet,
+    /// A Microsoft Teams link, made when the event is saved.
+    NewTeams,
     /// The event's own link.
     Existing(String),
 }
@@ -139,7 +140,7 @@ pub struct Edited {
     /// Its key on the calendar ([`crate::calendar::event::Event::key`]).
     pub key: String,
     /// Calendar's copy (an instance, for a recurring event).
-    pub event: ApiEvent,
+    pub event: CalendarEvent,
     pub color: CalendarColor,
 }
 
@@ -161,11 +162,41 @@ pub enum FormAction {
 
 /// A calendar the event can go on.
 pub struct CalendarOption {
-    /// The calendar account it's listed under.
+    /// The canonical calendar account key it's listed under.
     pub account: String,
+    /// The display email address of its calendar account.
+    pub email: String,
+    pub provider: CalendarProviderKind,
     pub id: String,
     pub name: String,
     pub color: CalendarColor,
+    pub supports_meet: bool,
+    pub supports_teams: bool,
+}
+
+impl CalendarOption {
+    /// The online-meeting choices this calendar supports, in menu order.
+    pub fn available_meetings(&self) -> Vec<(Meeting, &'static str)> {
+        let mut out = Vec::new();
+        if self.supports_meet {
+            out.push((Meeting::NewMeet, "Google Meet"));
+        }
+        if self.supports_teams {
+            out.push((Meeting::NewTeams, "Microsoft Teams"));
+        }
+        out
+    }
+
+    /// The default new meeting link for this calendar when automatic meeting links are enabled.
+    pub fn default_meeting(&self) -> Meeting {
+        if self.supports_meet {
+            Meeting::NewMeet
+        } else if self.supports_teams {
+            Meeting::NewTeams
+        } else {
+            Meeting::None
+        }
+    }
 }
 
 /// What the form shows besides itself.
@@ -181,7 +212,7 @@ pub struct Shown<'a> {
     pub conversation: &'a [Address],
     /// The places found for what's typed in Where.
     pub places: &'a [Place],
-    /// Whether Exo is online, which a new Meet link waits for.
+    /// Whether Exo is online, which a new meeting link waits for.
     pub online: bool,
     /// Each guest's marker and busy status (`(busy)`/`(OOO)`), by address.
     pub chips: &'a BTreeMap<String, (Marker, Option<&'static str>)>,

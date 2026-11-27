@@ -59,14 +59,16 @@ impl crate::Mail {
             self.pop_out(&id);
         }
         self.search_enter(None, now);
+        let outlook = self.account.is_outlook();
         let initial = crate::search::initial_query(
             &exo_store::ListId::Inbox,
             &[],
             [],
             self.filter_search_suffix(),
+            outlook,
         );
         if let Some(search) = &mut self.search {
-            *search = crate::search::Search::new(&initial, &self.snapshot.labels);
+            *search = crate::search::Search::new(&initial, &self.snapshot.labels, outlook);
             search.contact = Some(None);
         }
         self.compose.focus = None;
@@ -152,12 +154,13 @@ impl crate::Mail {
 
     /// `Share notes by email`: a new message holding a thread's notes, popped out with no
     /// recipients. The notes' images go as its inline images. Their files are attached in order,
-    /// each one that keeps the message under Gmail's limit: one that would take it past is listed
+    /// each one that keeps the message under the provider's limit: one that would take it past is listed
     /// at the body's end instead, and a smaller one after it that still fits is attached. Then
     /// it's a draft like any other.
     pub(crate) fn compose_share_popped(&mut self, shared: crate::notes::share::Shared, now: f64) {
         let notes = self.account.note_files();
         let folder = self.account.draft_files().to_owned();
+        let outlook = self.account.is_outlook();
         let mut attachments = Vec::new();
         let mut notice = None;
         for image in &shared.images {
@@ -177,12 +180,13 @@ impl crate::Mail {
         }
         let mut left_out: Vec<&str> = Vec::new();
         for file in &shared.files {
-            let fits = !files::exceeds_gmail_limit(
+            let fits = !files::exceeds_limit(
                 attachments
                     .iter()
                     .map(|attachment| attachment.size)
                     .chain([file.size]),
                 &shared.html,
+                outlook,
             );
             if !fits {
                 left_out.push(&file.name);
@@ -193,6 +197,7 @@ impl crate::Mail {
                 &attachments,
                 &shared.html,
                 &folder,
+                outlook,
             );
             attachments.extend(added);
             notice = why.or(notice);

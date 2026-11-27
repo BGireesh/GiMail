@@ -47,7 +47,13 @@ impl Mail {
         };
         splits::describe(&mut tabs, settings, self.settings.split_library());
         self.inbox.set_view(View {
-            title: lists::name(&self.list, &self.snapshot.labels, settings.splits()).to_owned(),
+            title: lists::name_for(
+                &self.list,
+                &self.snapshot.labels,
+                settings.splits(),
+                self.account.is_outlook(),
+            )
+            .to_owned(),
             // While Tab is held, the tab it has reached.
             selected: tabs
                 .iter()
@@ -203,7 +209,9 @@ impl Mail {
             list: self.list.clone(),
             direction,
         }));
-        let text = text.unwrap_or_else(|| triage_copy::toast(&mutation, &self.snapshot.labels));
+        let text = text.unwrap_or_else(|| {
+            triage_copy::toast(&mutation, &self.snapshot.labels, self.account.is_outlook())
+        });
         self.commands
             .toast(Toast::new(text).undo(Action::Undo(token)));
         self.undoable = Some(Undoable {
@@ -320,7 +328,9 @@ impl Mail {
         for event in events {
             match event {
                 Event::Failed { mutation, undo } => {
-                    if let Some(text) = triage_copy::failure(&mutation, undo) {
+                    if let Some(text) =
+                        triage_copy::failure(&mutation, undo, self.account.is_outlook())
+                    {
                         self.commands.toast(Toast::new(text).kind(ToastKind::Error));
                     }
                 }

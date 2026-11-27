@@ -34,7 +34,7 @@ mod mailto;
 mod media;
 mod outgoing;
 mod picker;
-mod plain;
+pub(crate) mod plain;
 mod popout;
 pub(crate) mod recipients;
 mod reminder;

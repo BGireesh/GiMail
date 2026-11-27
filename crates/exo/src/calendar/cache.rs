@@ -2,7 +2,7 @@
 //! a person's events belong in it, and when a refresh is due.
 
 use exo_store::CalendarCache;
-use gmail::calendar::{Event, EventDateTime};
+use exo_store::{CalendarEvent as Event, EventTime};
 use jiff::{
     Timestamp, Zoned,
     civil::{Date, Weekday},
@@ -56,30 +56,27 @@ pub fn keep_window(events: Vec<Event>, today: Date, tz: &TimeZone) -> Vec<Event>
 /// When an event starting at `start` and ending at `end` (exclusive) is under way, in `tz`: an
 /// all-day event from the start of its first day to the start of its end date (the next day
 /// without one), a timed one from its start to its end (a moment, without one).
-fn span(
-    start: &EventDateTime,
-    end: Option<&EventDateTime>,
-    tz: &TimeZone,
-) -> Option<(Timestamp, Timestamp)> {
-    if let Some(first) = &start.date {
-        let first: Date = first.parse().ok()?;
-        let last = end
-            .and_then(|end| end.date.as_deref())
-            .and_then(|end| end.parse::<Date>().ok())
-            .filter(|end| *end > first)
+fn span(start: &EventTime, end: Option<&EventTime>, tz: &TimeZone) -> Option<(Timestamp, Timestamp)> {
+    match start {
+        EventTime::AllDay(first) => {
+            let last = match end {
+                Some(EventTime::AllDay(end)) if end > first => Some(*end),
+                _ => None,
+            }
             .or_else(|| first.tomorrow().ok())?;
-        let (from, _) = day_span(first, tz)?;
-        let (to, _) = day_span(last, tz)?;
-        return Some((from, to));
+            let (from, _) = day_span(*first, tz)?;
+            let (to, _) = day_span(last, tz)?;
+            Some((from, to))
+        }
+        EventTime::Timed { at: from, .. } => {
+            let to = match end {
+                Some(EventTime::Timed { at, .. }) if at > from => *at,
+                // A moment still falls on its day.
+                _ => *from + jiff::SignedDuration::from_nanos(1),
+            };
+            Some((*from, to))
+        }
     }
-    let from: Timestamp = start.date_time.as_deref()?.parse().ok()?;
-    let to = end
-        .and_then(|end| end.date_time.as_deref())
-        .and_then(|end| end.parse::<Timestamp>().ok())
-        .filter(|to| *to > from)
-        // A moment still falls on its day.
-        .unwrap_or_else(|| from + jiff::SignedDuration::from_nanos(1));
-    Some((from, to))
 }
 
 /// The start of `day` and of the day after, in `tz`.
@@ -113,22 +110,24 @@ mod tests {
     use super::*;
     use jiff::civil::date;
 
+    fn at(rfc3339: &str) -> EventTime {
+        EventTime::timed(rfc3339.parse().expect("time"), None)
+    }
+
+    fn on(day: &str) -> EventTime {
+        EventTime::all_day(day.parse().expect("date"))
+    }
+
     fn timed(rfc3339: &str) -> Event {
         Event {
-            start: Some(EventDateTime {
-                date_time: Some(rfc3339.into()),
-                ..EventDateTime::default()
-            }),
+            start: Some(at(rfc3339)),
             ..Event::default()
         }
     }
 
     fn all_day(day: &str) -> Event {
         Event {
-            start: Some(EventDateTime {
-                date: Some(day.into()),
-                ..EventDateTime::default()
-            }),
+            start: Some(on(day)),
             ..Event::default()
         }
     }
@@ -179,20 +178,14 @@ mod tests {
 
     fn timed_until(start: &str, end: &str) -> Event {
         Event {
-            end: Some(EventDateTime {
-                date_time: Some(end.into()),
-                ..EventDateTime::default()
-            }),
+            end: Some(at(end)),
             ..timed(start)
         }
     }
 
     fn all_days(first: &str, end: &str) -> Event {
         Event {
-            end: Some(EventDateTime {
-                date: Some(end.into()),
-                ..EventDateTime::default()
-            }),
+            end: Some(on(end)),
             ..all_day(first)
         }
     }

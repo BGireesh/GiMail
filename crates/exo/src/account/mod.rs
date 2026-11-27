@@ -1,7 +1,7 @@
-//! One Gmail account's mail, as the UI sees it.
+//! One mail account (Gmail or Outlook), as the UI sees it.
 //!
 //! The UI is immediate-mode and synchronous, while the store is async. An [`Account`] runs the
-//! store, its sync and outbox loops and every Gmail call on a tokio runtime of its own. The UI
+//! store, its sync and outbox loops and every provider call on a tokio runtime of its own. The UI
 //! sends it requests (show a list, apply a mutation, undo) that return at once, and each frame
 //! reads the latest [`Snapshot`] of the list on screen without waiting. Each new snapshot asks egui
 //! to repaint. Nothing in `ui()` blocks on the network or the database.
@@ -42,7 +42,7 @@ use tokio::{
 pub use ui_tasks::Loader;
 use ui_tasks::{DOWNLOAD_TIMEOUT, Requests, Wake};
 pub(crate) use ui_tasks::{Repaint, UiSender, UiTasks};
-pub(crate) use worker::Health;
+pub(crate) use worker::{Health, PaceIntervals};
 use worker::{
     Pace, Request, ViewId, ViewRequest, Worker, connection_loop, evict_loop, prerender_loop,
     reminder_loop, sync_loop,
@@ -55,28 +55,123 @@ use crate::{
     recovery::{self, Restarts},
 };
 
-/// Where the Gmail parts of `email` are kept: `~/Library/Caches/Exo/<account>/parts`. macOS may
-/// empty this cache, and signing out and Clear Cache delete it.
-pub(crate) fn parts_cache(email: &str) -> Option<PathBuf> {
-    std::env::home_dir().map(|home| home.join("Library/Caches/Exo").join(email).join("parts"))
+/// Where the parts of the account keyed `key` are kept: `~/Library/Caches/Exo/<key>/parts`.
+/// macOS may empty this cache, and signing out and Clear Cache delete it.
+pub(crate) fn parts_cache(key: &str) -> Option<PathBuf> {
+    std::env::home_dir().map(|home| home.join("Library/Caches/Exo").join(key).join("parts"))
 }
 
-/// Where the photos of `email`'s contacts are kept: `~/Library/Caches/Exo/<account>/photos`,
-/// which signing out and Clear Cache delete with the parts.
-pub(crate) fn photos_cache(email: &str) -> Option<PathBuf> {
-    std::env::home_dir().map(|home| home.join("Library/Caches/Exo").join(email).join("photos"))
+/// Where the photos of the contacts of the account keyed `key` are kept:
+/// `~/Library/Caches/Exo/<key>/photos`, which signing out and Clear Cache delete with the parts.
+pub(crate) fn photos_cache(key: &str) -> Option<PathBuf> {
+    std::env::home_dir().map(|home| home.join("Library/Caches/Exo").join(key).join("photos"))
 }
 
 /// Who an account is and how to reach its mail. Sign-in builds these from the account's grant, and
 /// the tests build them for a mock server.
 #[derive(Clone)]
-pub struct Credentials {
-    /// The account's address, which also names its store.
-    pub email: String,
-    /// Where Gmail is.
-    pub endpoints: gmail::Endpoints,
-    /// Access tokens for it.
-    pub tokens: Arc<dyn TokenProvider>,
+#[expect(
+    clippy::large_enum_variant,
+    reason = "one is made per account opened, so its size doesn't matter"
+)]
+pub enum Credentials {
+    /// A Google account's.
+    Gmail {
+        /// The account's address, which also names its store.
+        email: String,
+        /// Where Gmail is.
+        endpoints: gmail::Endpoints,
+        /// Access tokens for it.
+        tokens: Arc<dyn TokenProvider>,
+    },
+    /// A Microsoft account's, whose mail is Outlook's.
+    Outlook {
+        /// The account's address.
+        email: String,
+        /// Where Microsoft Graph is.
+        endpoints: outlook::Endpoints,
+        /// Access tokens for it.
+        tokens: Arc<dyn outlook::TokenProvider>,
+    },
+}
+
+impl Credentials {
+    /// A signed-in account's, with `tokens`, its grant, at the endpoints `auth` signs in at.
+    pub fn signed_in(
+        auth: &exo_auth::Auth,
+        account: &exo_auth::Account,
+        tokens: exo_auth::Tokens,
+    ) -> Self {
+        let (email, tokens) = (account.email.clone(), Arc::new(tokens));
+        match account.provider {
+            exo_auth::Provider::Google => Self::Gmail {
+                email,
+                endpoints: auth.endpoints().clone(),
+                tokens,
+            },
+            exo_auth::Provider::Microsoft => Self::Outlook {
+                email,
+                endpoints: auth.microsoft_endpoints().clone(),
+                tokens,
+            },
+        }
+    }
+
+    /// The account's address.
+    #[must_use]
+    pub fn email(&self) -> &str {
+        match self {
+            Self::Gmail { email, .. } | Self::Outlook { email, .. } => email,
+        }
+    }
+
+    /// Which provider serves the account.
+    #[must_use]
+    pub fn provider(&self) -> exo_auth::Provider {
+        match self {
+            Self::Gmail { .. } => exo_auth::Provider::Google,
+            Self::Outlook { .. } => exo_auth::Provider::Microsoft,
+        }
+    }
+
+    /// What names the account's store and caches, as it names its grant: its address for a
+    /// Google account, so the files a Google account has always had stay where they are, and one
+    /// that names Microsoft too for a Microsoft account, so two accounts at one address keep apart.
+    #[must_use]
+    pub fn key(&self) -> String {
+        let provider = match self {
+            Self::Gmail { .. } => exo_auth::Provider::Google,
+            Self::Outlook { .. } => exo_auth::Provider::Microsoft,
+        };
+        exo_auth::Account {
+            email: self.email().to_owned(),
+            provider,
+            ..exo_auth::Account::default()
+        }
+        .key()
+    }
+
+    /// Whether the account's mail is served from this Mac (mock-servers).
+    fn is_local(&self) -> bool {
+        match self {
+            Self::Gmail { endpoints, .. } => crate::remote_content::serves_gmail_locally(endpoints),
+            Self::Outlook { endpoints, .. } => {
+                crate::remote_content::serves_locally(&endpoints.graph)
+            }
+        }
+    }
+
+    /// Where the account's mail is, for its store.
+    fn remote(self) -> exo_store::Remote {
+        match self {
+            Self::Gmail {
+                endpoints, tokens, ..
+            } => exo_store::Remote::Gmail { endpoints, tokens },
+            Self::Outlook {
+                endpoints, tokens, ..
+            } => exo_store::Remote::Outlook { endpoints, tokens },
+        }
+    }
 }
 
 /// How an account signs its calendar accounts in: Exo's sign-in, which keeps their grants, and
@@ -136,19 +231,19 @@ pub enum Event {
         /// Whether it was the undo that failed.
         undo: bool,
     },
-    /// Gmail has a draft's latest version.
+    /// The provider has a draft's latest version.
     DraftSaved(String),
     /// A held draft went out.
     DraftSent(SentDraft),
-    /// Gmail refused to save a draft, or its send failed.
+    /// The provider refused to save a draft, or its send failed.
     DraftFailed(DraftFailure),
     /// A draft is waiting for the network.
     DraftsOffline,
-    /// Gmail didn't take a held send this time, for a reason other than the network, and it's
-    /// tried again later.
+    /// The provider didn't take a held send this time, for a reason other than the network, and
+    /// it's tried again later.
     SendRetrying(String),
     /// Drafts, by id, that an earlier run saved without some of their files. Saving each again now
-    /// that Gmail answers fetches the files, and writes the draft to Gmail once it has them all.
+    /// that the provider answers fetches the files, and writes the draft once it has them all.
     Incomplete(Vec<String>),
     /// Some of a draft's attachments couldn't be read or fetched, so its save left them off.
     AttachmentsFailed {
@@ -172,14 +267,14 @@ pub enum Event {
         /// Because Gmail was out of reach.
         offline: bool,
     },
-    /// What Gmail doesn't have yet, as [`Account::ask_unsent`] asked for.
+    /// What the provider doesn't have yet, as [`Account::ask_unsent`] asked for.
     Unsent(exo_store::Unsent),
-    /// A conversation opened that the store didn't have couldn't be fetched: Gmail can't be reached
-    /// (`offline`), or doesn't have it.
+    /// A conversation opened that the store didn't have couldn't be fetched: the provider can't be
+    /// reached (`offline`), or doesn't have it.
     Unavailable {
         /// The conversation.
         id: String,
-        /// Whether Gmail couldn't be reached.
+        /// Whether the provider couldn't be reached.
         offline: bool,
         /// Whether it has notes, which are still there to show.
         noted: bool,
@@ -258,9 +353,26 @@ struct Events {
 struct CalendarAccounts {
     /// Signs them in, once the app says ([`Account::sign_in_calendars_with`]).
     auth: Option<CalendarAuth>,
-    /// The accounts read, with their tokens, which say when Google refuses a grant.
+    /// The accounts read, with their tokens, which say when a provider refuses a grant.
     tokens: Vec<(String, exo_auth::Tokens)>,
     signing_in: Option<CalendarSignIn>,
+}
+
+/// Builds the provider-specific calendar remote for canonical calendar account key `key`.
+fn calendar_remote(
+    auth: &exo_auth::Auth,
+    key: &str,
+    tokens: exo_auth::Tokens,
+) -> exo_store::CalendarRemote {
+    let (provider, email) = exo_auth::Account::parse_key(key);
+    match provider {
+        exo_auth::Provider::Google => {
+            exo_store::CalendarRemote::gmail(email, auth.endpoints().clone(), tokens)
+        }
+        exo_auth::Provider::Microsoft => {
+            exo_store::CalendarRemote::outlook(email, auth.microsoft_endpoints().clone(), tokens)
+        }
+    }
 }
 
 /// The account itself, which every handle on it shares.
@@ -268,6 +380,8 @@ struct Shared {
     /// The notes folder's loop.
     exports: Arc<Exports>,
     email: String,
+    key: String,
+    provider: exo_auth::Provider,
     /// The folder that holds the bytes of draft attachments.
     files: PathBuf,
     /// The folder that holds the bytes of notes' files.
@@ -414,22 +528,53 @@ impl Account {
         ctx: egui::Context,
         runtime: Arc<Runtime>,
     ) -> Result<Self, OpenError> {
-        let Credentials {
-            email,
-            endpoints,
-            tokens,
-        } = credentials;
-        let reach = crate::unsubscribe::Reach::of(&endpoints);
-        // Remote content may come from this Mac only when Gmail does too, as mock-servers' images
-        // do.
-        let local_gmail = crate::remote_content::serves_gmail_locally(&endpoints);
-        let store = block_on_runtime(&runtime, Store::open(dir, &email, endpoints, tokens))?;
+        Self::open_on_with_pace(dir, credentials, ctx, runtime, PaceIntervals::default())
+    }
+
+    pub(crate) fn open_on_with_pace(
+        dir: &Path,
+        credentials: Credentials,
+        ctx: egui::Context,
+        runtime: Arc<Runtime>,
+        pace_intervals: PaceIntervals,
+    ) -> Result<Self, OpenError> {
+        let (email, key, provider) = (
+            credentials.email().to_owned(),
+            credentials.key(),
+            credentials.provider(),
+        );
+        // Remote content may come from this Mac only when the mail does too, as mock-servers'
+        // images do.
+        let local_gmail = credentials.is_local();
+        let reach = match &credentials {
+            Credentials::Gmail { endpoints, .. } => crate::unsubscribe::Reach::of(endpoints),
+            Credentials::Outlook { .. } if local_gmail => crate::unsubscribe::Reach::Loopback,
+            Credentials::Outlook { .. } => crate::unsubscribe::Reach::Public,
+        };
+        let store = if local_gmail {
+            // Local mock servers don't need multi-second retry backoffs or outage debouncing.
+            let options = exo_store::Options {
+                backoff: std::time::Duration::from_millis(5),
+                quota: None,
+                debounce: exo_store::Debounce {
+                    down: std::time::Duration::ZERO,
+                    bounce: std::time::Duration::ZERO,
+                },
+                ..exo_store::Options::default()
+            };
+            block_on_runtime(
+                &runtime,
+                Store::open_with(dir, &key, credentials.remote(), options),
+            )?
+        } else {
+            block_on_runtime(&runtime, Store::open(dir, &key, credentials.remote()))?
+        };
         // On mock-servers, the parts cache sits beside the store, so a test's or a screenshot's cache
         // is its own.
         let parts = if local_gmail {
-            Some(dir.join(format!("{email}.parts")))
+            Some(dir.join(format!("{key}.parts")))
         } else {
-            parts_cache(&email)
+            parts_cache(&key)
         };
         if let Some(parts) = parts {
             store.cache_parts(exo_store::PartsCache::new(parts));
@@ -496,14 +641,15 @@ impl Account {
         let health = Arc::new(Health::new(repaint.clone()));
 
         // On mock-servers, the photos sit beside the store, as the parts do.
-        let photos = match photos_cache(&email) {
+        let photos = match photos_cache(&key) {
             Some(cache) if !local_gmail => cache,
-            _ => dir.join(format!("{email}.photos")),
+            _ => dir.join(format!("{key}.photos")),
         };
         // Brand logos are looked up in DNS, but not for mock-servers' made-up domains.
         let brands = crate::brands::Brands::new(
             &repaint.ctx,
-            &email,
+            &key,
+            provider,
             store.clone(),
             photos.clone(),
             !local_gmail,
@@ -532,11 +678,11 @@ impl Account {
             }
         });
         sync_now.wake();
-        // What an earlier run left unsent goes now: a send held when Exo crashed, or when
-        // Google signed the account out.
+        // What an earlier run left unsent goes now: a send held when Exo crashed, or when the
+        // provider signed the account out.
         flush.wake();
-        // The contact pane and the calendar show Google's people from the start.
-        requests.post(Request::LoadGoogleContacts);
+        // The contact pane, compose suggestions and calendar show provider contacts from the start.
+        requests.post(Request::LoadContacts);
         // A loop that runs again after a panic starts woken, as at opening, because its timers went
         // with it.
         recovery::spawn(&restarts, {
@@ -545,7 +691,7 @@ impl Account {
                 requests.clone(),
                 presence_receiver.clone(),
                 power_receiver,
-                (email.clone(), notifier_receiver.clone(), brands.clone()),
+                (key.clone(), notifier_receiver.clone(), brands.clone()),
                 sync_now.clone(),
                 health.clone(),
             );
@@ -554,6 +700,7 @@ impl Account {
                 let pace = Pace {
                     presence: presence.clone(),
                     power: power.clone(),
+                    intervals: pace_intervals,
                 };
                 sync_loop(
                     store.clone(),
@@ -580,7 +727,7 @@ impl Account {
                 store.clone(),
                 clock.clone(),
                 flush.clone(),
-                (email.clone(), notifier_receiver.clone(), brands.clone()),
+                (key.clone(), notifier_receiver.clone(), brands.clone()),
             );
             move || {
                 reminder_loop(
@@ -594,10 +741,11 @@ impl Account {
             }
         });
         recovery::spawn(&restarts, {
-            let (store, email) = (store.clone(), email.clone());
+            let (store, key, email) = (store.clone(), key.clone(), email.clone());
             move || {
                 crate::notifications::reminders::run(
                     store.clone(),
+                    key.clone(),
                     email.clone(),
                     notifier_receiver.clone(),
                 )
@@ -698,12 +846,14 @@ impl Account {
             exports: exports.clone(),
             address_book: None,
             mail_contacts: None,
-            google_contacts: None,
-            listing_google: false,
+            contacts: None,
+            me_photo: None,
+            me_photo_checked: false,
+            listing_contacts: false,
             brands: brands.clone(),
             photos: crate::people::Photos::new(
                 &repaint.ctx,
-                &email,
+                &key,
                 loader.clone(),
                 photos,
                 local_gmail,
@@ -748,6 +898,8 @@ impl Account {
         let shared = Shared {
             exports,
             email,
+            key,
+            provider,
             files,
             note_files,
             flush,
@@ -871,19 +1023,19 @@ impl Account {
     /// block, as opening the mail's grant does. An account whose grant is gone is listed as signed
     /// out, and a grant the settings don't list any more is forgotten.
     pub fn sign_in_calendars_with(&mut self, auth: CalendarAuth) {
-        let email = self.shared.email.clone();
+        let owner = self.shared.key.clone();
         let held = auth
             .auth
             .accounts()
             .into_iter()
-            .find(|account| account.email == email)
+            .find(|account| account.key() == owner)
             .map(|account| account.calendars)
             .unwrap_or_default();
         for calendar in held
             .iter()
             .filter(|calendar| !self.settings().calendar_accounts.contains_key(*calendar))
         {
-            if let Err(error) = auth.auth.forget_calendar(&email, calendar) {
+            if let Err(error) = auth.auth.forget_calendar(&owner, calendar) {
                 log::warn!("forgetting a calendar account's grant: {error}");
             }
         }
@@ -891,17 +1043,16 @@ impl Account {
             .settings()
             .calendar_accounts
             .iter()
-            .filter(|(calendar, account)| **calendar != email && account.authed)
+            .filter(|(calendar, account)| **calendar != owner && account.authed)
             .map(|(calendar, _)| calendar.clone())
             .collect();
         let mut signed_out = Vec::new();
         let mut read = Vec::new();
         for calendar in listed {
-            match auth.auth.calendar_tokens(&email, &calendar) {
+            match auth.auth.calendar_tokens(&owner, &calendar) {
                 Ok(tokens) if !tokens.needs_sign_in() => {
-                    self.shared
-                        .calendar
-                        .read_account(&calendar, tokens.clone(), false);
+                    let remote = calendar_remote(&auth.auth, &calendar, tokens.clone());
+                    self.shared.calendar.read_account(&calendar, remote, false);
                     read.push((calendar, tokens));
                 }
                 Ok(_) => signed_out.push(calendar),
@@ -912,8 +1063,8 @@ impl Account {
             }
         }
         self.update_settings(|settings| {
-            for email in &signed_out {
-                if let Some(account) = settings.calendar_accounts.get_mut(email) {
+            for key in &signed_out {
+                if let Some(account) = settings.calendar_accounts.get_mut(key) {
                     account.authed = false;
                 }
             }
@@ -928,23 +1079,23 @@ impl Account {
         self.shared.calendar_accounts.borrow_mut()
     }
 
-    /// Starts signing a calendar account in, with `hint` naming the one asked for
+    /// Starts signing a calendar account in with `provider`, with `hint` naming the one asked for
     /// (by `Sign in again`, or an invite's). Abandons a sign-in in flight. Returns whether it
     /// started, which it can't in a session without Exo's sign-in.
-    pub fn sign_in_calendar(&mut self, hint: Option<&str>) -> bool {
+    pub fn sign_in_calendar(&mut self, provider: exo_auth::Provider, hint: Option<&str>) -> bool {
         let mut calendars = self.calendar_accounts();
         let Some(CalendarAuth { auth, browser }) = calendars.auth.clone() else {
             return false;
         };
         let (owner, hint, ctx) = (
-            self.shared.email.clone(),
+            self.shared.key.clone(),
             hint.map(str::to_owned),
             self.shared.repaint.ctx.clone(),
         );
         let (sender, outcome) = tokio::sync::oneshot::channel();
         let task = self.shared.loader.runtime.spawn(async move {
             let _ = sender.send(
-                auth.sign_in_calendar(&owner, hint.as_deref(), |url| browser(url))
+                auth.sign_in_calendar_with(&owner, provider, hint.as_deref(), |url| browser(url))
                     .await,
             );
             ctx.request_repaint();
@@ -955,33 +1106,38 @@ impl Account {
 
     /// The outcome of the calendar sign-in in flight, once it has one. A calendar account that
     /// signs in is listed (`authed`) and read, and its calendars start loading. Signing in as the
-    /// mail account's own address changes nothing.
+    /// mail account's own key changes nothing.
     pub fn poll_calendar_sign_in(&mut self) -> Option<Result<String, exo_auth::Error>> {
         let mut calendars = self.calendar_accounts();
         let outcome = calendars.signing_in.as_mut()?.outcome.try_recv().ok()?;
         calendars.signing_in = None;
         let auth = calendars.auth.clone();
         drop(calendars);
-        if let Ok(email) = &outcome
-            && *email != self.shared.email
+        if let Ok(key) = &outcome
+            && *key != self.shared.key
             && let Some(auth) = auth
         {
-            match auth.auth.calendar_tokens(&self.shared.email, email) {
+            match auth.auth.calendar_tokens(&self.shared.key, key) {
                 Ok(tokens) => {
                     let mut calendars = self.calendar_accounts();
-                    calendars.tokens.retain(|(known, _)| known != email);
-                    calendars.tokens.push((email.clone(), tokens.clone()));
+                    calendars.tokens.retain(|(known, _)| known != key);
+                    calendars.tokens.push((key.clone(), tokens.clone()));
                     drop(calendars);
-                    self.shared.calendar.read_account(email, tokens, true);
+                    let remote = calendar_remote(&auth.auth, key, tokens);
+                    self.shared.calendar.read_account(key, remote, true);
+                    let (provider, email) = exo_store::CalendarProviderKind::parse_account_key(key);
                     self.update_settings(|settings| {
-                        settings
+                        let account = settings
                             .calendar_accounts
-                            .entry(email.clone())
+                            .entry(key.clone())
                             .or_insert_with(|| exo_store::CalendarAccount {
-                                email: email.clone(),
+                                email: email.to_owned(),
+                                provider: provider.as_str().to_owned(),
                                 ..exo_store::CalendarAccount::default()
-                            })
-                            .authed = true;
+                            });
+                        account.email = email.to_owned();
+                        account.provider = provider.as_str().to_owned();
+                        account.authed = true;
                     });
                 }
                 Err(error) => return Some(Err(error)),
@@ -990,7 +1146,7 @@ impl Account {
         Some(outcome)
     }
 
-    /// Lists the calendar accounts whose grant Google refused as signed out (`authed: false`),
+    /// Lists the calendar accounts whose grant the provider refused as signed out (`authed: false`),
     /// and stops reading them, until they sign in again.
     pub fn check_calendar_grants(&mut self) {
         let refused: Vec<String> = {
@@ -999,46 +1155,44 @@ impl Account {
                 .tokens
                 .iter()
                 .filter(|(_, tokens)| tokens.needs_sign_in())
-                .map(|(email, _)| email.clone())
+                .map(|(key, _)| key.clone())
                 .collect::<Vec<_>>();
-            calendars
-                .tokens
-                .retain(|(email, _)| !refused.contains(email));
+            calendars.tokens.retain(|(key, _)| !refused.contains(key));
             refused
         };
         if refused.is_empty() {
             return;
         }
-        for email in &refused {
-            log::warn!("a calendar account was signed out of Google");
-            self.shared.calendar.forget_account(email, false);
+        for key in &refused {
+            log::warn!("a calendar account was signed out");
+            self.shared.calendar.forget_account(key, false);
         }
         self.update_settings(|settings| {
-            for email in &refused {
-                if let Some(account) = settings.calendar_accounts.get_mut(email) {
+            for key in &refused {
+                if let Some(account) = settings.calendar_accounts.get_mut(key) {
                     account.authed = false;
                 }
             }
         });
     }
 
-    /// Removes calendar account `email`. Its grant is forgotten, it leaves the settings, and its
+    /// Removes calendar account `key`. Its grant is forgotten, it leaves the settings, and its
     /// calendars go, with the events only they had. The mail account's own can't be removed.
-    pub fn remove_calendar_account(&mut self, email: &str) {
-        if email == self.shared.email {
+    pub fn remove_calendar_account(&mut self, key: &str) {
+        if key == self.shared.key {
             return;
         }
         let mut calendars = self.calendar_accounts();
         if let Some(auth) = &calendars.auth
-            && let Err(error) = auth.auth.forget_calendar(&self.shared.email, email)
+            && let Err(error) = auth.auth.forget_calendar(&self.shared.key, key)
         {
             log::warn!("forgetting a calendar account's grant: {error}");
         }
-        calendars.tokens.retain(|(known, _)| known != email);
+        calendars.tokens.retain(|(known, _)| known != key);
         drop(calendars);
-        self.shared.calendar.forget_account(email, true);
+        self.shared.calendar.forget_account(key, true);
         self.update_settings(|settings| {
-            settings.calendar_accounts.remove(email);
+            settings.calendar_accounts.remove(key);
         });
     }
 
@@ -1087,6 +1241,38 @@ impl Account {
     /// The account's address.
     pub fn email(&self) -> &str {
         &self.shared.email
+    }
+
+    /// The account's storage/auth key (`email` for Google, `microsoft {email}` for Microsoft).
+    pub fn key(&self) -> &str {
+        &self.shared.key
+    }
+
+    /// Which provider serves this account.
+    pub fn provider(&self) -> exo_auth::Provider {
+        self.shared.provider
+    }
+
+    /// Whether this account is served by Outlook / Microsoft Graph.
+    pub fn is_outlook(&self) -> bool {
+        self.shared.provider == exo_auth::Provider::Microsoft
+    }
+
+    /// The account's local editable signature for Outlook accounts (or `None` if unset/empty).
+    pub fn local_signature(&self) -> Option<&str> {
+        self.settings
+            .settings
+            .local_signature
+            .as_deref()
+            .filter(|text| !text.trim().is_empty())
+    }
+
+    /// Sets the account's local editable signature (for Outlook accounts), persisting it in account
+    /// settings and sharing the update across every open tab on this account. Empty/whitespace-only
+    /// signatures clear it.
+    pub fn set_local_signature(&mut self, signature: Option<String>) {
+        let cleaned = signature.filter(|text| !text.trim().is_empty());
+        self.update_settings(|settings| settings.local_signature = cleaned);
     }
 
     /// The latest snapshot of the list on screen.
@@ -1170,7 +1356,7 @@ impl Account {
         self.shared.requests.post(Request::Sender { job, undo });
     }
 
-    /// Deletes the Gmail filters blocking `from`, an address or domain (Unblock in Blocked
+    /// Deletes the provider rules blocking `from`, an address or domain (Unblock in Blocked
     /// Senders). Updating the block list is up to the caller.
     pub fn unblock(&self, from: &str) {
         self.shared.requests.post(Request::Unblock(from.to_owned()));
@@ -1237,8 +1423,8 @@ impl Account {
         ));
     }
 
-    /// Checks now whether Gmail still answers after the network changed, as a change to the OS's
-    /// network does ([`exo_store::Store::network_changed`]).
+    /// Checks now whether the mail provider still answers after the network changed, as a change
+    /// to the OS's network does ([`exo_store::Store::network_changed`]).
     pub fn network_changed(&self) {
         self.shared.network.wake();
     }
@@ -1485,7 +1671,7 @@ impl Account {
     }
 
     /// Reads (again) everyone compose can suggest into snapshots, from stored mail (scored) and
-    /// Google contacts.
+    /// provider contacts.
     pub fn load_address_book(&self) {
         self.shared.requests.post(Request::LoadAddressBook);
     }
@@ -1592,7 +1778,7 @@ impl Drop for Account {
 impl Drop for Shared {
     fn drop(&mut self) {
         // Its people show no more, and what loads their photos lets go of the store.
-        crate::people::forget(&self.repaint.ctx, &self.email);
+        crate::people::forget(&self.repaint.ctx, &self.key);
         if *self.closed.get_mut() {
             return;
         }
@@ -1739,7 +1925,7 @@ mod tests {
             .expect("mock starts");
         let dir = std::env::temp_dir().join(format!("exo-account-focus-{}", std::process::id()));
         let tokens = Arc::new(gmail::StaticToken(mock_servers::DEV_ACCESS_TOKEN.into()));
-        let credentials = Credentials {
+        let credentials = Credentials::Gmail {
             email: "maya@brightmoor.co".into(),
             endpoints: server.endpoints(),
             tokens: tokens.clone(),
@@ -1793,7 +1979,7 @@ mod tests {
             "exo-account-reminder-notify-{}",
             std::process::id()
         ));
-        let credentials = Credentials {
+        let credentials = Credentials::Gmail {
             email: "maya@brightmoor.co".into(),
             endpoints: server.endpoints(),
             tokens: Arc::new(gmail::StaticToken(mock_servers::DEV_ACCESS_TOKEN.into())),
@@ -1891,7 +2077,7 @@ mod tests {
             ))
             .expect("mock starts");
         let dir = std::env::temp_dir().join(format!("exo-account-notify-{}", std::process::id()));
-        let credentials = Credentials {
+        let credentials = Credentials::Gmail {
             email: "maya@brightmoor.co".into(),
             endpoints: server.endpoints(),
             tokens: Arc::new(gmail::StaticToken(mock_servers::DEV_ACCESS_TOKEN.into())),
@@ -1964,7 +2150,7 @@ mod tests {
         let dir =
             std::env::temp_dir().join(format!("exo-account-late-sync-{}", std::process::id()));
         let open = || {
-            let credentials = Credentials {
+            let credentials = Credentials::Gmail {
                 email: "maya@brightmoor.co".into(),
                 endpoints: server.endpoints(),
                 tokens: Arc::new(gmail::StaticToken(mock_servers::DEV_ACCESS_TOKEN.into())),
@@ -2031,7 +2217,7 @@ mod tests {
             .block_on(mock_servers::MockServer::start(config))
             .expect("mock starts");
         let dir = std::env::temp_dir().join(format!("exo-account-photo-{}", std::process::id()));
-        let credentials = Credentials {
+        let credentials = Credentials::Gmail {
             email: "maya@brightmoor.co".into(),
             endpoints: server.endpoints(),
             tokens: Arc::new(gmail::StaticToken(mock_servers::DEV_ACCESS_TOKEN.into())),
@@ -2111,7 +2297,7 @@ mod tests {
             .expect("mock starts");
         let dir = std::env::temp_dir().join(format!("exo-account-sync-{}", std::process::id()));
         let open = || {
-            let credentials = Credentials {
+            let credentials = Credentials::Gmail {
                 email: "maya@brightmoor.co".into(),
                 endpoints: server.endpoints(),
                 tokens: Arc::new(gmail::StaticToken(mock_servers::DEV_ACCESS_TOKEN.into())),
@@ -2123,11 +2309,11 @@ mod tests {
         };
         let kept = |account: &Account| {
             runtime
-                .block_on(account.shared.loader.store.google_contacts())
+                .block_on(account.shared.loader.store.contacts())
                 .expect("reads")
                 .expect("kept")
         };
-        let emails = |list: &exo_store::GoogleList| -> Vec<String> {
+        let emails = |list: &exo_store::ContactList| -> Vec<String> {
             list.contacts
                 .iter()
                 .map(|contact| contact.email.clone())
@@ -2147,13 +2333,13 @@ mod tests {
         let age = |account: &Account| {
             let mut listing = kept(account);
             listing.listed -= jiff::SignedDuration::from_hours(2);
-            listing.directory.contacts.push(exo_store::GoogleContact {
+            listing.directory.contacts.push(exo_store::ProviderContact {
                 person: "people/kept".into(),
                 email: "kept@brightmoor.co".into(),
-                ..exo_store::GoogleContact::default()
+                ..exo_store::ProviderContact::default()
             });
             runtime
-                .block_on(account.shared.loader.store.save_google_contacts(&listing))
+                .block_on(account.shared.loader.store.save_contacts(&listing))
                 .expect("saves");
         };
 
@@ -2215,7 +2401,13 @@ mod tests {
                 std::future::pending::<()>().await;
             });
         }
-        Pace { presence, power }.due(ended).await;
+        Pace {
+            presence,
+            power,
+            intervals: PaceIntervals::default(),
+        }
+        .due(ended)
+        .await;
         ended.elapsed()
     }
 
@@ -2280,12 +2472,23 @@ mod tests {
             ))
             .expect("mock starts");
         let dir = std::env::temp_dir().join(format!("exo-account-power-{}", std::process::id()));
-        let credentials = Credentials {
+        let credentials = Credentials::Gmail {
             email: "maya@brightmoor.co".into(),
             endpoints: server.endpoints(),
             tokens: Arc::new(gmail::StaticToken(mock_servers::DEV_ACCESS_TOKEN.into())),
         };
-        let account = Account::open(&dir, credentials, egui::Context::default()).expect("opens");
+        let account = Account::open_on_with_pace(
+            &dir,
+            credentials,
+            egui::Context::default(),
+            new_runtime().expect("runtime"),
+            PaceIntervals {
+                focused: Duration::from_millis(100),
+                fast: Duration::from_millis(250),
+                medium: Duration::from_secs(5),
+            },
+        )
+        .expect("opens");
         let power = PowerSource::fixed(Power::Battery);
         account.follow_power(&power);
         account.set_on_screen(false);
@@ -2307,9 +2510,9 @@ mod tests {
         };
         let synced = units();
 
-        std::thread::sleep(Duration::from_secs(62));
-        assert_eq!(units(), synced, "on battery, no sync a minute later");
-        // Plugged in, the sync due a minute after the last goes at once, as one `history.list`.
+        std::thread::sleep(Duration::from_millis(350));
+        assert_eq!(units(), synced, "on battery, no sync past the mains pace");
+        // Plugged in, the sync due after the mains pace goes at once, as one `history.list`.
         power.set(Power::Plugged);
         let plugged = Instant::now();
         while units() == synced {
@@ -2317,7 +2520,7 @@ mod tests {
                 plugged.elapsed() < Duration::from_secs(5),
                 "no sync once plugged in"
             );
-            std::thread::sleep(Duration::from_millis(50));
+            std::thread::sleep(Duration::from_millis(10));
         }
         settle(&account);
         assert_eq!(units() - synced, 2);
@@ -2330,7 +2533,7 @@ mod tests {
         let dir =
             std::env::temp_dir().join(format!("exo-account-reload-hold-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let credentials = Credentials {
+        let credentials = Credentials::Gmail {
             email: "maya@brightmoor.co".into(),
             endpoints: gmail::Endpoints::google(),
             tokens: Arc::new(gmail::StaticToken("unused".into())),
@@ -2388,8 +2591,10 @@ mod tests {
             let store = Store::open(
                 &dir,
                 "maya@brightmoor.co",
-                gmail::Endpoints::google(),
-                gmail::StaticToken("unused".into()),
+                exo_store::Remote::gmail(
+                    gmail::Endpoints::google(),
+                    gmail::StaticToken("unused".into()),
+                ),
             )
             .await
             .expect("reopens");

@@ -333,9 +333,10 @@ pub(crate) struct ViewContext {
     pub joined: Option<jiff::Timestamp>,
     /// Domains belonging to the user, excluded from mailing-list unsubscribe offers.
     pub own_domains: Vec<String>,
-    /// Other connected calendar accounts, and those currently signed out.
+    /// Other connected calendar accounts, those currently signed out, and emails backed by Outlook.
     pub calendar_accounts: Vec<String>,
     pub signed_out: Vec<String>,
+    pub outlook_calendars: Vec<String>,
     /// Bulk-action status labels waiting or running per thread ID (`Pending: Mark Done`).
     pub pending: std::collections::HashMap<String, String>,
     /// Whether the folder drawer is open, taking keyboard focus off the list.
@@ -347,6 +348,8 @@ pub(crate) struct ViewContext {
     /// Whether the active list or search includes Trash or is Spam.
     pub trash_shown: bool,
     pub spam_view: bool,
+    /// Whether the active account is Outlook/Microsoft.
+    pub outlook: bool,
 }
 
 impl ViewContext {
@@ -359,6 +362,7 @@ impl ViewContext {
             own_domains: Vec::new(),
             calendar_accounts: Vec::new(),
             signed_out: Vec::new(),
+            outlook_calendars: Vec::new(),
             pending: std::collections::HashMap::new(),
             folders_open: false,
             popped_out: false,
@@ -366,6 +370,7 @@ impl ViewContext {
             covered: None,
             trash_shown: false,
             spam_view: false,
+            outlook: false,
         }
     }
 }
@@ -395,7 +400,8 @@ impl Mail {
         let backdrop = backdrop::Backdrop::new(ctx, &now);
         let ui_tasks = account::UiTasks::default();
         let attachment_files =
-            attachment_files::AttachmentFiles::new(ctx, account.email(), ui_tasks.sender(ctx));
+            attachment_files::AttachmentFiles::new(ctx, account.key(), ui_tasks.sender(ctx));
+        let outlook = account.is_outlook();
         let mut mail = Self {
             bodies: Bodies::new(ctx),
             thread: None,
@@ -436,7 +442,7 @@ impl Mail {
             asked_more_at: None,
             undoable: None,
             departing: Vec::new(),
-            pickers: pickers::Pickers::default(),
+            pickers: pickers::Pickers::new(outlook),
             bulk_dialogs: bulk::Dialogs::default(),
             unsubscribing: unsubscribe::State::default(),
             out_of_office: out_of_office::OutOfOffice::default(),
@@ -479,6 +485,7 @@ impl Mail {
         // Until the app says otherwise, the device has this one account.
         mail.accounts = vec![exo_auth::Account {
             email: mail.account.email().to_owned(),
+            provider: mail.account.provider(),
             ..exo_auth::Account::default()
         }];
         mail

@@ -258,10 +258,17 @@ impl State {
 
     /// The query the bulk action runs, as the Bulk Actions dialog shows it, with `before:` as a
     /// local date and `in:inbox` left out.
-    pub(crate) fn display_query(&self, before: &Zoned) -> String {
+    pub(crate) fn display_query(&self, before: &Zoned, outlook: bool) -> String {
         let mut parts = Vec::new();
         if self.keep_starred {
-            parts.push("-is:starred".to_owned());
+            parts.push(
+                if outlook {
+                    "-is:flagged"
+                } else {
+                    "-is:starred"
+                }
+                .to_owned(),
+            );
         }
         if self.keep_unread {
             parts.push("is:read".to_owned());
@@ -277,6 +284,7 @@ pub(crate) fn show(
     area: Rect,
     open: bool,
     state: &State,
+    outlook: bool,
 ) -> DialogResponse<Option<Event>> {
     let extra = if state.more { OPTIONS_EXTRA } else { 0.0 };
     let dialog = if state.first_time {
@@ -290,10 +298,10 @@ pub(crate) fn show(
     } else {
         Dialog::new("get-me-to-zero", "Get Me To Zero", BODY_HEIGHT + extra)
     };
-    dialog.show(ctx, area, open, |ui, body| draw(ui, body, state))
+    dialog.show(ctx, area, open, |ui, body| draw(ui, body, state, outlook))
 }
 
-fn draw(ui: &mut Ui, body: Rect, state: &State) -> Option<Event> {
+fn draw(ui: &mut Ui, body: Rect, state: &State, outlook: bool) -> Option<Event> {
     let tokens = palette(ui.ctx());
     let painter = ui.painter().clone();
     let (left, top) = (body.left(), body.top());
@@ -384,7 +392,11 @@ fn draw(ui: &mut Ui, body: Rect, state: &State) -> Option<Event> {
         let rows = [
             ("Keep unread emails", state.keep_unread, Event::KeepUnread),
             (
-                "Keep starred emails",
+                if outlook {
+                    "Keep flagged emails"
+                } else {
+                    "Keep starred emails"
+                },
                 state.keep_starred,
                 Event::KeepStarred,
             ),
@@ -507,12 +519,16 @@ mod tests {
         let before = RANGES[state.range]
             .before(&now)
             .to_zoned(now.time_zone().clone());
-        assert_eq!(state.display_query(&before), "before:2026/11/10");
+        assert_eq!(state.display_query(&before, false), "before:2026/11/10");
         state.keep_unread = true;
         state.keep_starred = true;
         assert_eq!(
-            state.display_query(&before),
+            state.display_query(&before, false),
             "-is:starred is:read before:2026/11/10"
+        );
+        assert_eq!(
+            state.display_query(&before, true),
+            "-is:flagged is:read before:2026/11/10"
         );
     }
 

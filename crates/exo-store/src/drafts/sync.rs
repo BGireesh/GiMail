@@ -15,16 +15,12 @@ use crate::db::{self, DraftRow, GIVEN_REMINDERS, MessageRow, ThreadRow};
 use crate::error::Result;
 use crate::ids::ThreadId;
 use crate::ids::labels::{DRAFT, SENT};
-use crate::parse::parse;
-use crate::provider;
+use crate::provider::{DraftHandle, Provider, Sent};
 use crate::queue::{self, Disposition};
 use crate::quota::Lane;
 use crate::store::{Inner, Store, reindex, reindex_many};
-use crate::sync::{fetch_message, fetch_row, fetch_rows};
+use crate::truth;
 
-/// Attempts at `drafts.send` before Gmail's server errors fail the send (with the call's backoff,
-/// about 7 s of trying).
-const SEND_ATTEMPTS: u32 = 4;
 /// The longest rate limit that a due send waits out. Gmail asking for longer fails the send.
 const SEND_WAITS: SignedDuration = SignedDuration::from_mins(2);
 /// A rate limit this long is Gmail's daily sending limit ("multiple hours", in Gmail's usage
@@ -35,7 +31,7 @@ const SENDING_LIMIT: SignedDuration = SignedDuration::from_hours(1);
 /// RFC 822 `raw` blob.
 struct DraftPushMeta {
     id: String,
-    gmail_id: Option<String>,
+    draft_id: Option<String>,
     record: DraftRecord,
     revision: u64,
     pushed: u64,
@@ -49,7 +45,7 @@ impl db::FromRecord for DraftPushMeta {
     fn from_record(fields: Vec<toasty::stmt::Value>) -> Option<Self> {
         let [
             id,
-            gmail_id,
+            draft_id,
             record,
             revision,
             pushed,
@@ -61,7 +57,7 @@ impl db::FromRecord for DraftPushMeta {
         let record: toasty::Json<DraftRecord> = db::FromSqlValue::from_sql_value(record)?;
         Some(Self {
             id: db::FromSqlValue::from_sql_value(id)?,
-            gmail_id: db::FromSqlValue::from_sql_value(gmail_id)?,
+            draft_id: db::FromSqlValue::from_sql_value(draft_id)?,
             record: record.0,
             revision: db::FromSqlValue::from_sql_value(revision)?,
             pushed: db::FromSqlValue::from_sql_value(pushed)?,
@@ -114,7 +110,7 @@ impl Store {
         let rows = db::query_rows::<DraftPushMeta>(
             &mut db,
             toasty::sql::query(
-                "SELECT id, gmail_id, record, revision, pushed, discarded, send_at, failures, not_before FROM drafts",
+                "SELECT id, draft_id, record, revision, pushed, discarded, send_at, failures, not_before FROM drafts",
             ),
         )
         .await?;
@@ -174,9 +170,9 @@ impl Store {
                     report.retrying.push(id.clone());
                 }
                 let message = failure.message();
-                let at = match queue::dispose_failure(&inner.api, failure, failures) {
+                let at = match queue::dispose_failure(inner.backoff, failure, failures) {
                     Disposition::Postponed(until) => until,
-                    Disposition::Refused(_) => inner.api.postpone(failures),
+                    Disposition::Refused(_) => queue::postpone(inner.backoff, failures),
                 };
                 log::debug!("postponing draft {id} until {at}: {message}");
                 let mut write = inner.begin(&mut db).await?;
@@ -210,17 +206,6 @@ impl Store {
             }
         }
         Ok(report)
-    }
-}
-
-/// `call`, reporting its upload to `progress` when there's one.
-fn reporting<'a>(
-    call: gmail::Call<'a, gmail::Draft>,
-    progress: Option<&gmail::Progress>,
-) -> gmail::Call<'a, gmail::Draft> {
-    match progress {
-        Some(progress) => call.on_progress(progress.clone()),
-        None => call,
     }
 }
 
@@ -261,7 +246,7 @@ impl Inner {
         if row.pushed >= row.revision
             || row.discarded
             || row.send_at.is_some()
-            || row.gmail_id.is_none()
+            || row.draft_id.is_none()
             || self.uploads_files_meta(&row.id, &row.record)
         {
             return None;
@@ -350,7 +335,7 @@ impl Inner {
                     // server errors are retried, as for any draft.
                     let failed = send_at.and_then(|at| match &failure {
                         Failure::Transient(_) => None,
-                        failure => verdict(failure, at <= now, now),
+                        failure => verdict(&*self.mail, failure, at <= now, now),
                     });
                     if let Some(reason) = failed {
                         self.fail_send(&id, revision, reason, report).await?;
@@ -450,23 +435,14 @@ impl Inner {
     /// Whether `row`'s Gmail draft holds another message than the one Exo last wrote (someone
     /// edited it in Gmail web, say). A draft that's gone is the send's to find out about.
     async fn rewritten_elsewhere(&self, row: &DraftRow) -> std::result::Result<bool, Failure> {
-        let (Some(gmail_id), Some(message)) = (&row.gmail_id, &row.message_id) else {
+        let (Some(draft_id), Some(message)) = (&row.draft_id, &row.message_id) else {
             return Ok(false);
         };
-        match self
-            .api
-            .call(Lane::Act, 2, |gmail| {
-                gmail.draft(gmail_id, gmail::Format::Minimal)
-            })
-            .await
-        {
-            Ok(draft) => Ok(draft
-                .message
-                .and_then(|held| held.id)
-                .is_some_and(|held| held != *message)),
-            Err(failure) if failure.is_not_found() => Ok(false),
-            Err(failure) => Err(failure),
-        }
+        Ok(self
+            .mail
+            .draft_message(draft_id)
+            .await?
+            .is_some_and(|held| held != *message))
     }
 
     /// The reply that calls off scheduled send `row`, if the send is `if no reply` and the thread
@@ -483,27 +459,13 @@ impl Inner {
         ) else {
             return Ok(None);
         };
-        let fetched = match self
-            .api
-            .call(Lane::Act, 2, |gmail| {
-                gmail.thread(thread, gmail::Format::Minimal, &[])
-            })
-            .await
-        {
-            Err(failure) if failure.is_not_found() => return Ok(None),
-            fetched => fetched?,
+        let Some(messages) = self.mail.thread_labels(thread).await? else {
+            return Ok(None);
         };
-        Ok(fetched
-            .messages
+        Ok(messages
             .into_iter()
-            .find(|message| {
-                is_reply(
-                    later,
-                    message.id.as_deref().unwrap_or_default(),
-                    &message.label_ids,
-                )
-            })
-            .and_then(|message| message.id))
+            .find(|(id, labels)| is_reply(later, id, labels))
+            .map(|(id, _)| id))
     }
 
     /// Calls off draft `id`'s scheduled send because a reply came before it (`if no reply`). It's
@@ -581,32 +543,10 @@ impl Inner {
     /// The row's Gmail draft: the one it made, or the one holding the message it took over
     /// (none if that's gone since).
     async fn gmail_draft_id(&self, row: &DraftRow) -> std::result::Result<Option<String>, Failure> {
-        let (None, Some(message)) = (&row.gmail_id, &row.message_id) else {
-            return Ok(row.gmail_id.clone());
+        let (None, Some(message)) = (&row.draft_id, &row.message_id) else {
+            return Ok(row.draft_id.clone());
         };
-        let mut page_token = None;
-        loop {
-            let query = gmail::DraftQuery {
-                max_results: Some(500),
-                page_token: page_token.take(),
-                ..gmail::DraftQuery::default()
-            };
-            let page = self
-                .api
-                .call(Lane::Act, 3, |gmail| gmail.drafts(&query))
-                .await?;
-            let found = page
-                .drafts
-                .into_iter()
-                .find(|draft| draft.message.as_ref().and_then(|m| m.id.as_ref()) == Some(message));
-            if let Some(draft) = found {
-                return Ok(draft.id);
-            }
-            match page.next_page_token {
-                Some(token) => page_token = Some(token),
-                None => return Ok(None),
-            }
-        }
+        self.mail.find_draft(message).await
     }
 
     /// Creates or updates the Gmail draft with the row's message, and returns the row as Gmail
@@ -614,23 +554,18 @@ impl Inner {
     async fn write_gmail_draft(&self, row: DraftRow) -> Result<Result<DraftRow, Failure>> {
         let raw = row.raw.clone().into_bytes();
         let thread = row.thread_id.as_deref();
-        let gmail_id = match self.gmail_draft_id(&row).await {
-            Ok(gmail_id) => gmail_id,
+        let draft_id = match self.gmail_draft_id(&row).await {
+            Ok(draft_id) => draft_id,
             Err(failure) => return Ok(Err(failure)),
         };
         let progress = self.upload_progress(&row);
         // Updating the Gmail draft that holds the row's message replaces that message. A draft
         // made anew leaves it as it was (sent, say).
         let attempt = async {
-            Ok::<_, crate::Error>(match &gmail_id {
-                Some(gmail_id) => match self
-                    .api
-                    .call(Lane::Act, 1, |gmail| {
-                        reporting(
-                            gmail.update_draft(gmail_id, raw.clone(), thread),
-                            progress.as_ref(),
-                        )
-                    })
+            Ok::<_, crate::Error>(match &draft_id {
+                Some(draft_id) => match self
+                    .mail
+                    .update_draft(draft_id, &raw, thread, progress.as_ref())
                     .await
                 {
                     Err(failure) if failure.is_not_found() => (
@@ -657,11 +592,10 @@ impl Inner {
             Err(failure) => return Ok(Err(failure)),
         };
         self.set_gmail_files(&row.id, local_files(&row.record.0));
-        let message = draft.message.unwrap_or_default();
-        let thread_id = message.thread_id.or_else(|| row.thread_id.clone());
+        let thread_id = draft.thread.or_else(|| row.thread_id.clone());
         // Recorded before the row says Gmail has its message, so that a save made meanwhile
         // which matches what Gmail had before isn't taken for one that Gmail has.
-        if let Some(message) = &message.id {
+        if let Some(message) = &draft.message {
             self.acked
                 .lock()
                 .expect("never poisoned")
@@ -677,8 +611,8 @@ impl Inner {
             .await?
         {
             let mut update = DraftRow::update_by_id(&row.id)
-                .gmail_id(draft.id.clone())
-                .message_id(message.id.clone())
+                .draft_id(draft.id.clone())
+                .message_id(draft.message.clone())
                 .thread_id(thread_id.clone().or(current.thread_id))
                 .pushed(row.revision);
             if current.revision == row.revision {
@@ -686,7 +620,7 @@ impl Inner {
             }
             update.exec(write.exec()).await?;
         }
-        if let Some(id) = &message.id
+        if let Some(id) = &draft.message
             && let Some(stored) = MessageRow::filter_by_id(id)
                 .first()
                 .exec(write.exec())
@@ -695,7 +629,7 @@ impl Inner {
             reindex(write.exec(), &stored.thread_id, &self.router()).await?;
         }
         write.commit().await?;
-        match (&message.id, &thread_id, replaced) {
+        match (&draft.message, &thread_id, replaced) {
             (Some(message), Some(thread), Some(replaced)) => {
                 // A listed file shows on the draft's row, and only the message's parts tell of
                 // it. A scheduled send shows in its thread as a message.
@@ -733,8 +667,8 @@ impl Inner {
             .insert(row.id.clone(), Timestamp::now());
         self.notify();
         Ok(Ok(DraftRow {
-            gmail_id: draft.id,
-            message_id: message.id,
+            draft_id: draft.id,
+            message_id: draft.message,
             thread_id,
             pushed: row.revision,
             ..row
@@ -751,49 +685,27 @@ impl Inner {
         raw: &[u8],
         thread: Option<&str>,
         progress: Option<&gmail::Progress>,
-    ) -> Result<std::result::Result<gmail::Draft, Failure>> {
+    ) -> Result<std::result::Result<DraftHandle, Failure>> {
         if row.failures > 0 && !row.record.0.rfc822_id.is_empty() {
-            let query = gmail::DraftQuery {
-                q: Some(format!("rfc822msgid:{}", row.record.0.rfc822_id)),
-                ..gmail::DraftQuery::default()
-            };
-            let found = match self
-                .api
-                .call(Lane::Act, 2, |gmail| gmail.drafts(&query))
-                .await
-            {
-                Ok(found) => found.drafts,
+            let found = match self.mail.drafts_with(&row.record.0.rfc822_id).await {
+                Ok(found) => found,
                 Err(failure) => return Ok(Err(failure)),
             };
             let mut db = self.db.clone();
             let f = DraftRow::fields();
             let others: HashSet<String> = DraftRow::all()
-                .select((f.id(), f.gmail_id()))
+                .select((f.id(), f.draft_id()))
                 .exec(&mut db)
                 .await?
                 .into_iter()
                 .filter(|(id, _)| *id != row.id)
-                .filter_map(|(_, gmail_id)| gmail_id)
+                .filter_map(|(_, draft_id)| draft_id)
                 .collect();
-            if let Some(id) = found
-                .into_iter()
-                .filter_map(|draft| draft.id)
-                .find(|id| !others.contains(id))
-            {
-                return Ok(self
-                    .api
-                    .call(Lane::Act, 1, |gmail| {
-                        reporting(gmail.update_draft(&id, raw.to_vec(), thread), progress)
-                    })
-                    .await);
+            if let Some(id) = found.into_iter().find(|id| !others.contains(id)) {
+                return Ok(self.mail.update_draft(&id, raw, thread, progress).await);
             }
         }
-        Ok(self
-            .api
-            .call(Lane::Act, 1, |gmail| {
-                reporting(gmail.create_draft(raw.to_vec(), thread), progress)
-            })
-            .await)
+        Ok(self.mail.create_draft(raw, thread, progress).await)
     }
 
     /// Sends draft `id`'s Gmail draft (`drafts.send`) and drops the row, unless an undo, a
@@ -814,7 +726,7 @@ impl Inner {
         if row.discarded || row.pushed < row.revision || !row.send_at.is_some_and(|at| at <= now) {
             return Ok(Ok(()));
         }
-        let Some(gmail_id) = row.gmail_id.clone() else {
+        let Some(draft_id) = row.draft_id.clone() else {
             return Ok(Ok(()));
         };
         // A reply that sync hasn't brought in yet (Exo was closed, say) still calls the send off.
@@ -827,12 +739,7 @@ impl Inner {
             }
             Err(failure) => return Ok(Err((row.revision, failure))),
         }
-        let mut result = self
-            .api
-            .call(Lane::Act, SEND_ATTEMPTS, |gmail| {
-                gmail.send_draft(&gmail_id)
-            })
-            .await;
+        let mut result = self.mail.send_draft(&draft_id).await;
         if result.as_ref().is_err_and(|failure| {
             failure.is_not_found() || matches!(failure, Failure::Transient(_))
         }) {
@@ -847,7 +754,7 @@ impl Inner {
         let sent = match result {
             Ok(sent) => sent,
             Err(failure) => {
-                let Some(reason) = verdict(&failure, true, now) else {
+                let Some(reason) = verdict(&*self.mail, &failure, true, now) else {
                     return Ok(Err((row.revision, failure)));
                 };
                 log::warn!(
@@ -860,8 +767,8 @@ impl Inner {
                 return Ok(Ok(()));
             }
         };
-        let thread = sent
-            .thread_id
+        let mut thread = sent
+            .thread
             .clone()
             .or(row.thread_id.clone())
             .unwrap_or_default();
@@ -882,16 +789,18 @@ impl Inner {
         self.given.lock().expect("never poisoned").remove(&row.id);
         drop(giving);
         drop(sending);
-        if let Some(message) = sent.id.as_deref().filter(|_| !thread.is_empty()) {
-            // The thread shows the sent message, so it's fetched whole.
-            self.refresh_message(
-                &thread,
-                row.thread_id.as_deref(),
-                message,
-                row.message_id.as_deref(),
-                true,
-            )
-            .await?;
+        if let Some(message) = sent.message.as_deref() {
+            // The thread shows the sent message, so it's fetched whole. Pass `requested` only when
+            // the provider already confirmed `sent.thread`; otherwise `refresh_message` always
+            // fetches the message itself so a provider that changes conversation id on send (like
+            // Outlook) resolves the real thread id in one round-trip.
+            let requested = sent.thread.as_deref().and(row.thread_id.as_deref());
+            if let Some(actual) = self
+                .refresh_message(&thread, requested, message, row.message_id.as_deref(), true)
+                .await?
+            {
+                thread = actual;
+            }
         }
         let record = row.record.0;
         // The send put the reminder on its thread already, unless the thread wasn't stored then.
@@ -913,7 +822,7 @@ impl Inner {
         report.sent.push(SentDraft {
             id: row.id,
             thread: ThreadId::new(thread),
-            message: sent.id.unwrap_or_default(),
+            message: sent.message.unwrap_or_default(),
         });
         Ok(Ok(()))
     }
@@ -968,37 +877,21 @@ impl Inner {
     }
 
     /// Gmail's sent message with Message-ID `rfc822_id`, if there is one.
-    async fn sent_message(
-        &self,
-        rfc822_id: &str,
-    ) -> std::result::Result<Option<gmail::Message>, Failure> {
+    async fn sent_message(&self, rfc822_id: &str) -> std::result::Result<Option<Sent>, Failure> {
         if rfc822_id.is_empty() {
             return Ok(None);
         }
-        let query = gmail::ListQuery {
-            q: Some(format!("rfc822msgid:{rfc822_id}")),
-            label_ids: vec![SENT.to_owned()],
-            ..gmail::ListQuery::default()
-        };
-        let page = self
-            .api
-            .call(Lane::Act, 2, |gmail| gmail.messages(&query))
-            .await?;
-        Ok(page.messages.into_iter().next())
+        self.mail.find_sent(rfc822_id).await
     }
 
     /// Deletes a discarded draft's Gmail draft, then the row (unless it was saved again since).
     async fn delete_gmail_draft(&self, row: DraftRow) -> Result<Result<(), Failure>> {
-        let gmail_id = match self.gmail_draft_id(&row).await {
-            Ok(gmail_id) => gmail_id,
+        let draft_id = match self.gmail_draft_id(&row).await {
+            Ok(draft_id) => draft_id,
             Err(failure) => return Ok(Err(failure)),
         };
-        if let Some(gmail_id) = &gmail_id {
-            match self
-                .api
-                .call(Lane::Act, 1, |gmail| gmail.delete_draft(gmail_id))
-                .await
-            {
+        if let Some(draft_id) = &draft_id {
+            match self.mail.delete_draft(draft_id).await {
                 Ok(()) => {}
                 Err(failure) if failure.is_not_found() => {}
                 Err(failure @ Failure::Permanent(_)) => log::warn!(
@@ -1026,7 +919,7 @@ impl Inner {
                 // older history id, which leaves the stored copy alone until history says it's
                 // gone.
                 if let (Some(message), Some(thread)) = (&current.message_id, &row.thread_id) {
-                    provider::delete_messages(write.exec(), std::slice::from_ref(message)).await?;
+                    truth::delete_messages(write.exec(), std::slice::from_ref(message)).await?;
                     reindex(write.exec(), thread, &self.router()).await?;
                 }
             }
@@ -1034,7 +927,7 @@ impl Inner {
             // creates it again.
             Some(_) => {
                 DraftRow::update_by_id(&row.id)
-                    .gmail_id(None)
+                    .draft_id(None)
                     .message_id(None)
                     .pushed(0)
                     .exec(write.exec())
@@ -1131,7 +1024,7 @@ impl Inner {
             .await?
             .into_iter()
             .collect();
-        let fetched = match fetch_rows(&self.api, Lane::Act, 2, thread, &stored).await {
+        let fetched = match self.mail.rows(thread, &stored, Lane::Act, 2).await {
             Ok(fetched) => fetched,
             Err(failure) => {
                 log::debug!(
@@ -1144,9 +1037,9 @@ impl Inner {
         let mut write = self.begin(&mut db).await?;
         match fetched {
             Some(fetched) => {
-                provider::save_rows(write.exec(), &fetched).await?;
+                truth::save_rows(write.exec(), fetched).await?;
             }
-            None => provider::delete_thread(write.exec(), thread).await?,
+            None => truth::delete_thread(write.exec(), thread).await?,
         }
         reindex(write.exec(), thread, &self.router()).await?;
         write.publish().await
@@ -1166,24 +1059,22 @@ impl Inner {
         message: &str,
         replaced: Option<&str>,
         full: bool,
-    ) -> Result<()> {
+    ) -> Result<Option<String>> {
         let mut db = self.db.clone();
-        // A thread that Gmail started for the message holds only that message, but the thread
-        // asked for may hold more. If that thread isn't stored, its rows bring the rest.
-        if requested == Some(thread)
+        // A thread that the provider started for the message holds only that message, but the
+        // thread asked for may hold more. If that thread isn't stored, its rows bring the rest.
+        if !thread.is_empty()
+            && requested == Some(thread)
             && ThreadRow::filter_by_id(thread)
                 .first()
                 .exec(&mut db)
                 .await?
                 .is_none()
         {
-            return self.refresh_thread(thread).await;
+            self.refresh_thread(thread).await?;
+            return Ok(None);
         }
-        let fetched = if full {
-            fetch_message(&self.api, Lane::Act, 2, message).await
-        } else {
-            fetch_row(&self.api, Lane::Act, 2, message).await
-        };
+        let fetched = self.mail.message(message, full, Lane::Act, 2).await;
         let fetched = match fetched {
             Ok(fetched) => fetched,
             Err(failure) => {
@@ -1191,24 +1082,37 @@ impl Inner {
                     "fetching message {message} after a draft change: {}",
                     failure.message()
                 );
-                return Ok(());
+                return Ok(None);
             }
         };
+        let actual_thread = fetched
+            .as_ref()
+            .map(|parsed| parsed.message.thread_id.clone());
+        let actual = actual_thread.as_deref().unwrap_or(thread);
         let mut write = self.begin(&mut db).await?;
-        let mut changed = vec![thread.to_owned()];
-        if let Some(replaced) = replaced.filter(|replaced| *replaced != message) {
-            if let Some(old) = MessageRow::filter_by_id(replaced)
+        let mut changed = Vec::new();
+        if !actual.is_empty() {
+            changed.push(actual.to_owned());
+        }
+        if !thread.is_empty() && thread != actual {
+            changed.push(thread.to_owned());
+        }
+        if let Some(replaced) = replaced {
+            let old = MessageRow::filter_by_id(replaced)
                 .first()
                 .exec(write.exec())
-                .await?
-                && old.thread_id != thread
-            {
-                changed.push(old.thread_id);
+                .await?;
+            // A message that keeps its id (an Outlook draft, sent) may still change thread.
+            let moved = old.as_ref().is_some_and(|old| old.thread_id != actual);
+            if replaced != message || moved {
+                if let Some(old) = old.filter(|old| !changed.contains(&old.thread_id)) {
+                    changed.push(old.thread_id);
+                }
+                truth::delete_messages(write.exec(), &[replaced.to_owned()]).await?;
             }
-            provider::delete_messages(write.exec(), &[replaced.to_owned()]).await?;
         }
-        if let Some(parsed) = fetched.as_ref().and_then(|fetched| parse(fetched, full)) {
-            provider::save_message(write.exec(), parsed).await?;
+        if let Some(parsed) = fetched {
+            truth::save_message(write.exec(), parsed).await?;
         }
         for thread in &changed {
             if MessageRow::filter_by_thread_id(thread)
@@ -1217,12 +1121,13 @@ impl Inner {
                 .await?
                 .is_none()
             {
-                provider::delete_thread(write.exec(), thread).await?;
+                truth::delete_thread(write.exec(), thread).await?;
             } else {
                 reindex(write.exec(), thread, &self.router()).await?;
             }
         }
-        write.publish().await
+        write.publish().await?;
+        Ok(actual_thread)
     }
 }
 
@@ -1237,9 +1142,14 @@ fn is_reply(later: &SendLater, id: &str, labels: &[String]) -> bool {
 /// What a Gmail failure means for a send, `due` or still held. Returns `None` to try again
 /// later, or why the send fails. While the send is held, only Gmail refusing its message fails
 /// it. Being offline never fails it, and the send goes once Gmail is back.
-fn verdict(failure: &Failure, due: bool, now: Timestamp) -> Option<SendFailure> {
+fn verdict(
+    mail: &dyn Provider,
+    failure: &Failure,
+    due: bool,
+    now: Timestamp,
+) -> Option<SendFailure> {
     match failure {
-        Failure::Permanent(error) => Some(send_failure(error)),
+        Failure::Permanent(error) => Some(mail.refusal(error)),
         _ if !due => None,
         Failure::Offline(_) => None,
         Failure::Unauthorized(_) => Some(SendFailure::LoggedOut),
@@ -1254,31 +1164,6 @@ fn verdict(failure: &Failure, due: bool, now: Timestamp) -> Option<SendFailure> 
                 None
             }
         }
-    }
-}
-
-/// The send failure Gmail's refusal stands for.
-fn send_failure(error: &gmail::Error) -> SendFailure {
-    // Google's upload front end may answer an oversized message with a page, not its JSON.
-    if error.status() == Some(413) {
-        return SendFailure::TooLarge;
-    }
-    let gmail::Error::Api(api) = error else {
-        return SendFailure::Other;
-    };
-    let reason = |wanted: &str| api.errors.iter().any(|e| e.reason == wanted);
-    if reason("dailyLimitExceeded") || reason("quotaExceeded") {
-        SendFailure::QuotaExceeded
-    } else if api.message.to_lowercase().contains("too large") {
-        SendFailure::TooLarge
-    } else if api.message.contains("Invalid To header")
-        || api.message.contains("Invalid Cc header")
-        || api.message.contains("Invalid Bcc header")
-        || api.message.contains("Recipient address required")
-    {
-        SendFailure::InvalidRecipients
-    } else {
-        SendFailure::Other
     }
 }
 
@@ -1324,8 +1209,10 @@ mod tests {
         let store = Store::open(
             &dir,
             "maya@brightmoor.co",
-            gmail::Endpoints::google(),
-            gmail::StaticToken("unused".into()),
+            crate::Remote::gmail(
+                gmail::Endpoints::google(),
+                gmail::StaticToken("unused".into()),
+            ),
         )
         .await
         .expect("opens");

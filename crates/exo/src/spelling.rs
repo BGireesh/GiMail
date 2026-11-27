@@ -55,6 +55,7 @@ pub(crate) enum EditorTarget {
     Compose(String),
     CalendarAbout,
     OutOfOfficeMessage,
+    OutOfOfficeExternalMessage,
 }
 
 /// Per-page spellcheck and editable-menu state shared across widgets via [`egui::Context`].
@@ -229,11 +230,13 @@ impl Mail {
         self.compose_assist_spelling();
         self.assist_editor_spelling(Self::calendar_about_editor_mut);
         self.assist_editor_spelling(Self::out_of_office_editor_mut);
+        self.assist_editor_spelling(Self::out_of_office_external_editor_mut);
 
         for link_editor in [
             Self::compose_body_editor_mut,
             Self::calendar_about_editor_mut,
             Self::out_of_office_editor_mut,
+            Self::out_of_office_external_editor_mut,
         ] {
             if self.link_input_menu(ctx, link_editor) {
                 return;
@@ -258,6 +261,13 @@ impl Mail {
                     choice,
                     Self::out_of_office_editor_mut,
                     Self::out_of_office_sync_message,
+                ),
+                EditorTarget::OutOfOfficeExternalMessage => self.apply_editor_choice(
+                    ctx,
+                    &menu,
+                    choice,
+                    Self::out_of_office_external_editor_mut,
+                    Self::out_of_office_sync_external_message,
                 ),
             }
             return;
@@ -580,7 +590,7 @@ mod tests {
             gmail::Endpoints::mock(&"http://127.0.0.1:9/".parse().expect("mock origin"));
         let account = crate::account::Account::open(
             &dir,
-            crate::account::Credentials {
+            crate::account::Credentials::Gmail {
                 email: "maya@brightmoor.co".into(),
                 endpoints,
                 tokens: Arc::new(gmail::StaticToken("dev".into())),

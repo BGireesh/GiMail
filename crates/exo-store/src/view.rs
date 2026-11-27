@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::db::{AttachmentRow, BodyRow, Mailbox, MessageRow, OutboxRow, ReminderRow};
 use crate::drafts::SendFailure;
+use crate::entities::unescape_html;
 use crate::ids::labels::*;
 use crate::ids::{ListId, ThreadId};
 use crate::model::{
@@ -17,7 +18,6 @@ use crate::model::{
     ThreadSummary,
 };
 use crate::mutation::{Mutation, Step, resolve};
-use crate::parse::unescape_html;
 use crate::split::{RoutedSplit, Splits};
 
 /// Who the user is, as far as routing cares.
@@ -1069,7 +1069,7 @@ pub(crate) mod tests {
         MessageRow {
             id: id.into(),
             thread_id: "t".into(),
-            history_id: 1,
+            version: 1,
             internal_date: date,
             label_ids: labels.iter().map(|label| (*label).to_owned()).collect(),
             subject: format!("Subject {id}"),

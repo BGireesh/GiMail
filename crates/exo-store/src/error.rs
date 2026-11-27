@@ -7,23 +7,38 @@ use crate::ids::ThreadId;
 /// Everything that can go wrong in the store.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    /// Gmail couldn't be reached (no network, DNS, TLS, timeouts). Reads and queued mutations
-    /// keep working. Sync again once the network is back.
-    #[error("Gmail is unreachable: {0}")]
-    Offline(#[source] gmail::Error),
+    /// The provider couldn't be reached (no network, DNS, TLS, timeouts). Reads and queued
+    /// mutations keep working. Sync again once the network is back.
+    #[error("{service} is unreachable: {0}", service = .0.service())]
+    Offline(#[source] ProviderError),
     /// Gmail is rate limiting the account, and Exo has paused calls until `until`.
     #[error("Gmail is rate limiting this account until {until}")]
     Throttled {
         /// When calls resume.
         until: jiff::Timestamp,
     },
-    /// Gmail rejected the access token even after the store asked the token provider for a new
-    /// one, so the account needs to sign in again.
-    #[error("Gmail rejected the credentials: {0}")]
-    Unauthorized(#[source] gmail::Error),
+    /// The provider rejected the access token even after the store asked the token provider for
+    /// a new one, so the account needs to sign in again.
+    #[error("{service} rejected the credentials: {0}", service = .0.service())]
+    Unauthorized(#[source] ProviderError),
     /// Gmail answered with an error that retrying won't fix, or retries ran out.
     #[error(transparent)]
     Gmail(gmail::Error),
+    /// Microsoft Graph answered with an error that retrying won't fix, or retries ran out.
+    #[error(transparent)]
+    Outlook(outlook::Error),
+    /// The account's store was made for another provider's account, so it isn't opened as this
+    /// one's.
+    #[error("{} holds a {found} account's mail", path.display())]
+    OtherProvider {
+        /// The database file.
+        path: PathBuf,
+        /// The provider it was made for.
+        found: String,
+    },
+    /// The account's provider has nothing for what was asked (Calendar on an Outlook account).
+    #[error("{0} isn't available for this account")]
+    Unsupported(&'static str),
     /// Calendar has the event that an answer is for, but it's cancelled
     /// (`Event has been deleted`).
     #[error("the event has been cancelled")]
@@ -99,6 +114,45 @@ pub enum Error {
     /// filter passes), because Gmail can't search for them.
     #[error("Gmail can't search for the {0} filter")]
     Unsearchable(&'static str),
+}
+
+/// What a provider said when one of its calls failed, or why it didn't answer.
+#[derive(Debug, thiserror::Error)]
+pub enum ProviderError {
+    /// Gmail's error.
+    #[error(transparent)]
+    Gmail(#[from] gmail::Error),
+    /// Microsoft Graph's error.
+    #[error(transparent)]
+    Outlook(#[from] outlook::Error),
+}
+
+impl ProviderError {
+    /// The HTTP status the provider answered with, if it answered.
+    #[must_use]
+    pub fn status(&self) -> Option<u16> {
+        match self {
+            Self::Gmail(error) => error.status(),
+            Self::Outlook(error) => error.status(),
+        }
+    }
+
+    /// The service, as messages name it.
+    fn service(&self) -> &'static str {
+        match self {
+            Self::Gmail(_) => "Gmail",
+            Self::Outlook(_) => "Outlook",
+        }
+    }
+}
+
+impl From<ProviderError> for Error {
+    fn from(error: ProviderError) -> Self {
+        match error {
+            ProviderError::Gmail(error) => Self::Gmail(error),
+            ProviderError::Outlook(error) => Self::Outlook(error),
+        }
+    }
 }
 
 /// Why a store can't be used, as the error screens tell them apart.

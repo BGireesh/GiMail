@@ -70,6 +70,11 @@ const GO_TO: &[Line] = &[
 
 /// The unified inbox's first row.
 const UNIFIED_INBOX: Line = Line::Shortcut("Inbox", "G then I");
+const OUTLOOK_FLAG: Line = Line::Shortcut("Flag", "S");
+const OUTLOOK_DELETE: Line = Line::Shortcut("Delete", "#");
+const OUTLOOK_JUNK: Line = Line::Shortcut("Mark as Junk Email", "!");
+const OUTLOOK_GO_JUNK: Line = Line::Shortcut("Junk Email", "G then !");
+const OUTLOOK_GO_DELETED: Line = Line::Shortcut("Deleted Items", "G then #");
 
 /// Which panel.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -79,11 +84,15 @@ pub enum Panel {
     MultiSelect {
         /// A select-all reaching rows not loaded, or over 50 rows.
         select_all: bool,
+        /// Whether the account is Outlook / Microsoft.
+        outlook: bool,
     },
     /// A `g` sequence is pending.
     GoTo {
         /// Whether the unified inbox is on (`unifiedInbox`).
         unified: bool,
+        /// Whether the account is Outlook / Microsoft.
+        outlook: bool,
     },
 }
 
@@ -91,23 +100,36 @@ pub enum Panel {
 pub fn show(painter: &Painter, pane: Rect, rem: f32, panel: Panel) {
     let palette = exo_ui::palette(painter.ctx());
     let (title, lines): (&str, Vec<&Line>) = match panel {
-        Panel::MultiSelect { select_all } => (
+        Panel::MultiSelect {
+            select_all,
+            outlook,
+        } => (
             "Shortcuts",
             MULTI_SELECT
                 .iter()
-                .filter(|line| {
-                    !select_all
-                        || !matches!(line, Line::Shortcut(name, _) if LOADED_ONLY.contains(name))
+                .filter_map(|line| match line {
+                    Line::Shortcut(name, _) if select_all && LOADED_ONLY.contains(name) => None,
+                    Line::Shortcut("Star", _) if outlook => Some(&OUTLOOK_FLAG),
+                    Line::Shortcut("Trash", _) if outlook => Some(&OUTLOOK_DELETE),
+                    Line::Shortcut("Mark as Spam", _) if outlook => Some(&OUTLOOK_JUNK),
+                    Line::Shortcut(
+                        "Mute" | "Add or Remove Label" | "Remove from Label" | "Remove All Labels",
+                        _,
+                    ) if outlook => None,
+                    line => Some(line),
                 })
                 .collect(),
         ),
-        Panel::GoTo { unified } => (
+        Panel::GoTo { unified, outlook } => (
             "Go to…",
             GO_TO
                 .iter()
                 .filter_map(|line| match line {
                     Line::Shortcut("Other", _) if unified => None,
                     Line::Shortcut("Important", _) if unified => Some(&UNIFIED_INBOX),
+                    Line::Shortcut("Starred" | "Muted", _) if outlook => None,
+                    Line::Shortcut("Spam", _) if outlook => Some(&OUTLOOK_GO_JUNK),
+                    Line::Shortcut("Trash", _) if outlook => Some(&OUTLOOK_GO_DELETED),
                     line => Some(line),
                 })
                 .collect(),

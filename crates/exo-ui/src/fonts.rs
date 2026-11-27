@@ -309,7 +309,7 @@ pub(crate) struct VerticalMetrics {
 /// Every face, loaded and measured, ready to hand to egui.
 pub(crate) struct FontBook {
     pub(crate) definitions: FontDefinitions,
-    pub(crate) metrics: HashMap<Face, VerticalMetrics>,
+    pub(crate) metrics: Arc<HashMap<Face, VerticalMetrics>>,
     /// The system emoji font's cell, where there is one.
     pub(crate) emoji: Option<crate::emoji::Cell>,
 }
@@ -406,7 +406,7 @@ impl FontBook {
         );
         Ok(Self {
             definitions,
-            metrics,
+            metrics: Arc::new(metrics),
             emoji,
         })
     }

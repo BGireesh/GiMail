@@ -89,7 +89,19 @@ fn list_messages(call: &Call, view: &View<'_>, scope: Option<Folder>) -> Result<
             ));
         }
     }
-    let mut needed: Vec<String> = filter.as_ref().map(Expr::properties).unwrap_or_default();
+    // Open extensions filter by their ids alone, which the rows carry for the filter.
+    let extensions = filter
+        .as_ref()
+        .map(super::extensions::filter_property)
+        .transpose()?
+        .flatten();
+    let mut needed: Vec<String> = filter
+        .as_ref()
+        .map(Expr::properties)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|name| extensions.as_deref() != Some(name.as_str()))
+        .collect();
     for (path, _) in &order {
         if !needed.contains(&path[0]) {
             needed.push(path[0].clone());
@@ -118,9 +130,16 @@ fn list_messages(call: &Call, view: &View<'_>, scope: Option<Folder>) -> Result<
                 continue;
             }
         }
-        let Ok(json) = view.message_json(key, Some(&needed)) else {
+        let Ok(mut json) = view.message_json(key, Some(&needed)) else {
             continue;
         };
+        if let Some(name) = &extensions {
+            let list = view.outlook.extensions.get(&key).map(Vec::as_slice);
+            json.insert(
+                name.clone(),
+                super::extensions::filter_values(list.unwrap_or_default()),
+            );
+        }
         if filter
             .as_ref()
             .is_none_or(|filter| filter.matches(&Value::Object(json.clone())))
@@ -256,6 +275,8 @@ pub struct Expand {
     attachments: Option<Option<Vec<String>>>,
     /// A meeting message's event (`microsoft.graph.eventMessage/event`), with its `$select`.
     event: Option<Option<Vec<String>>>,
+    /// The message's open extensions, all or those an inner `$filter` on `id` matches.
+    extensions: Option<super::extensions::Selection>,
     empty: Vec<String>,
 }
 
@@ -295,11 +316,21 @@ impl Expand {
                     key.trim().eq_ignore_ascii_case("$select").then(|| {
                         value
                             .split(',')
-                            .map(|v| v.trim().to_owned())
+                            .map(|v| {
+                                // A file attachment's own properties come with Graph's cast.
+                                let v = v.trim();
+                                v.strip_prefix("microsoft.graph.fileAttachment/")
+                                    .unwrap_or(v)
+                                    .to_owned()
+                            })
                             .collect::<Vec<_>>()
                     })
                 })
             });
+            if name.eq_ignore_ascii_case("extensions") {
+                expand.extensions = Some(super::extensions::Selection::parse(inner)?);
+                continue;
+            }
             match name.trim_start_matches("microsoft.graph.") {
                 "eventMessage/event"
                 | "eventMessageRequest/event"
@@ -319,7 +350,7 @@ impl Expand {
                     }
                     expand.attachments = Some(select);
                 }
-                "extensions" | "singleValueExtendedProperties" | "multiValueExtendedProperties" => {
+                "singleValueExtendedProperties" | "multiValueExtendedProperties" => {
                     expand.empty.push(name.to_owned());
                 }
                 other => return Err(GraphError::unknown_property(other, "message")),
@@ -357,6 +388,13 @@ impl Expand {
                 };
                 json.insert("event".into(), event);
             }
+        }
+        if let Some(selection) = &self.extensions {
+            let list = view.outlook.extensions.get(&key).map(Vec::as_slice);
+            json.insert(
+                "extensions".into(),
+                selection.render(list.unwrap_or_default()),
+            );
         }
         for name in &self.empty {
             json.insert(name.clone(), Value::Array(Vec::new()));
@@ -839,6 +877,10 @@ pub async fn copy_to(
             stored.insert(copied, value);
         }
     }
+    // The copy gets copies of the message's open extensions.
+    if let Some(list) = graph.extensions.get(&key).cloned() {
+        graph.extensions.insert(copied, list);
+    }
     let origin = origin(&world);
     let view = call.view(&world, &origin);
     let json = view.message_json(copied, None)?;
@@ -944,12 +986,10 @@ pub async fn delta(call: Call, Path(params): super::Params) -> Result<Response> 
     let options = odata::Options::parse(&token.q)?;
     let filter = delta_filter(options.filter.as_deref())?;
     let change_type = options.custom("changeType").map(str::to_ascii_lowercase);
-    let expand = Expand::parse(options.expand.as_deref())?;
     let select = options.select.as_deref();
     let size = call.prefer.max_page.unwrap_or(10).min(MAX_PAGE);
     let render = |key: u64| -> Result<Value> {
-        let mut json = view.message_json(key, select)?;
-        expand.apply(&view, key, &mut json)?;
+        let json = view.message_json(key, select)?;
         let mut out = Map::new();
         out.insert("@odata.type".into(), "#microsoft.graph.message".into());
         out.extend(json);
@@ -1100,6 +1140,11 @@ fn delta_options(call: &Call) -> Result<String> {
             "$search isn't supported in a delta query.",
         ));
     }
+    if options.expand.is_some() {
+        return Err(GraphError::bad_request(
+            "Parsing OData Select and Expand failed: $expand isn't supported in a delta query.",
+        ));
+    }
     delta_filter(options.filter.as_deref())?;
     if let Some(order) = &options.orderby
         && !order.trim().eq_ignore_ascii_case("receivedDateTime desc")
@@ -1118,7 +1163,6 @@ fn delta_options(call: &Call) -> Result<String> {
             "changeType must be created, updated or deleted.",
         ));
     }
-    Expand::parse(options.expand.as_deref())?;
     if let Some(select) = &options.select {
         odata::check_properties(select, project::MESSAGE_PROPERTIES, "message")?;
     }
@@ -1126,10 +1170,8 @@ fn delta_options(call: &Call) -> Result<String> {
     if let Some(select) = &options.select {
         params.push(("$select".into(), select.join(",")));
     }
-    for (name, value) in [("$expand", &options.expand), ("$filter", &options.filter)] {
-        if let Some(value) = value {
-            params.push((name.into(), value.clone()));
-        }
+    if let Some(filter) = &options.filter {
+        params.push(("$filter".into(), filter.clone()));
     }
     if let Some(change) = options.custom("changeType") {
         params.push(("changeType".into(), change.to_owned()));

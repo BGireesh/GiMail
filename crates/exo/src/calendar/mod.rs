@@ -37,7 +37,7 @@ mod week;
 mod when;
 mod when_edit;
 
-pub(crate) use event::{Rsvp, my_attendance, unique_key as event_key};
+pub(crate) use event::{Rsvp, unique_key as event_key};
 pub(crate) use invites::invite_event;
 pub(crate) use keys::{
     PICKER, PICKER_ROW, register, register_cache_keys, register_focus_cycle,
@@ -130,7 +130,7 @@ pub enum Action {
     FormAllDay,
     /// A formatting key in About.
     FormFormat(FormatCommand),
-    /// `Add Google Meet Link` / `Remove Google Meet Link`.
+    /// `Add Google Meet Link` / `Remove Google Meet Link`, or Teams on Outlook calendars.
     FormMeet,
     /// ⌘C on the event's own meeting link, which copies it.
     FormCopyLink,
@@ -564,6 +564,11 @@ impl crate::Mail {
         Some(self.calendar.form.as_ref()?.values.meeting == Meeting::NewMeet)
     }
 
+    /// Whether the open form asks for a new Teams link.
+    pub fn calendar_form_new_teams(&self) -> Option<bool> {
+        Some(self.calendar.form.as_ref()?.values.meeting == Meeting::NewTeams)
+    }
+
     /// The open form's calendar.
     pub fn calendar_form_calendar(&self) -> Option<&str> {
         Some(&self.calendar.form.as_ref()?.values.calendar)
@@ -836,12 +841,35 @@ impl crate::Mail {
                 }
             }
             Action::FormMeet => {
+                let calendars = self.calendar_writable();
+                let provider = self
+                    .calendar
+                    .form
+                    .as_ref()
+                    .map(|form| self.calendar_provider(&form.values.calendar));
                 if let Some(form) = &mut self.calendar.form {
-                    form.values.meeting = if form.values.meeting == Meeting::None {
-                        Meeting::NewMeet
-                    } else {
-                        Meeting::None
-                    };
+                    if form.values.meeting == Meeting::None {
+                        let meeting = calendars
+                            .iter()
+                            .find(|cal| cal.id == form.values.calendar)
+                            .map_or_else(
+                                || {
+                                    if provider == Some(exo_store::CalendarProviderKind::Microsoft)
+                                    {
+                                        Meeting::NewTeams
+                                    } else {
+                                        Meeting::NewMeet
+                                    }
+                                },
+                                form::CalendarOption::default_meeting,
+                            );
+                        if meeting != Meeting::None {
+                            form.values.meeting = meeting;
+                        }
+                    } else if form.meeting_removable(&calendars) {
+                        form.values.meeting = Meeting::None;
+                        form.auto_meeting = false;
+                    }
                 }
             }
             Action::FormCopyLink => {
@@ -1111,7 +1139,7 @@ impl crate::Mail {
             .calendars
             .iter()
             .flatten()
-            .filter_map(|calendar| Some((calendar.entry.id.as_deref()?, calendar)))
+            .map(|calendar| (calendar.calendar.id.as_str(), calendar))
             .collect();
         data.events
             .iter()
@@ -1120,9 +1148,9 @@ impl crate::Mail {
                 let list = lists.get(stored.calendar_id.as_str()).copied();
                 Event::new(
                     stored,
-                    list.map(|calendar| &calendar.entry),
+                    list.map(|calendar| &calendar.calendar),
                     &colors,
-                    list.map_or(email, |calendar| calendar.account.as_str()),
+                    list.map_or(email, |calendar| calendar.email.as_str()),
                     now.time_zone(),
                 )
             })

@@ -32,6 +32,28 @@ const FOCUS_HAZE: BoxShadow = BoxShadow::new(
 );
 
 impl Rsvp {
+    /// Converts from [`exo_store::RsvpStatus`].
+    #[must_use]
+    pub const fn from_store(status: exo_store::RsvpStatus) -> Self {
+        match status {
+            exo_store::RsvpStatus::NeedsAction => Self::NeedsAction,
+            exo_store::RsvpStatus::Accepted => Self::Accepted,
+            exo_store::RsvpStatus::Tentative => Self::Tentative,
+            exo_store::RsvpStatus::Declined => Self::Declined,
+        }
+    }
+
+    /// Converts into [`exo_store::RsvpStatus`].
+    #[must_use]
+    pub const fn to_store(self) -> exo_store::RsvpStatus {
+        match self {
+            Self::NeedsAction => exo_store::RsvpStatus::NeedsAction,
+            Self::Accepted => exo_store::RsvpStatus::Accepted,
+            Self::Tentative => exo_store::RsvpStatus::Tentative,
+            Self::Declined => exo_store::RsvpStatus::Declined,
+        }
+    }
+
     /// Google Calendar's `responseStatus` string for this answer.
     #[must_use]
     pub const fn status(self) -> &'static str {
@@ -119,9 +141,30 @@ pub(crate) fn show_rsvp_buttons(
     focused: Option<usize>,
     metrics: RsvpButtonMetrics,
 ) -> Option<Rsvp> {
+    show_rsvp_choices(
+        ui, palette, id_base, origin, &ANSWERS, current, focused, metrics,
+    )
+}
+
+/// Paints `choices` as an RSVP button strip starting at `origin` and returns the newly chosen
+/// [`Rsvp`] when a non-selected button is clicked.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "shared button row primitive parameterized by choices, metrics, and interaction state"
+)]
+pub(crate) fn show_rsvp_choices(
+    ui: &Ui,
+    palette: &Palette,
+    id_base: egui::Id,
+    origin: Pos2,
+    choices: &[Rsvp],
+    current: Option<Rsvp>,
+    focused: Option<usize>,
+    metrics: RsvpButtonMetrics,
+) -> Option<Rsvp> {
     let mut x = origin.x;
     let mut chosen = None;
-    for (index, answer) in ANSWERS.into_iter().enumerate() {
+    for (index, &answer) in choices.iter().enumerate() {
         let label = answer.button_label();
         let selected = current == Some(answer);
         let (button, clicked) = show_rsvp_button(

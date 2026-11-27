@@ -46,6 +46,8 @@ pub struct Outlook {
     pub external_reply: Option<String>,
     pub uploads: HashMap<u64, Upload>,
     pub next_upload: u64,
+    /// Open extensions on messages, by item: an app's own data, which Gmail has no place for.
+    pub extensions: HashMap<u64, Vec<super::extensions::OpenExtension>>,
     /// Properties Outlook keeps on an event that the calendar can't (`categories`, `importance`,
     /// a Teams meeting…), by calendar and event ID.
     pub events: HashMap<(String, String), Map<String, Value>>,
@@ -303,6 +305,7 @@ impl Outlook {
             }
             (None, Some(key)) => {
                 self.by_gmail.remove(gmail);
+                self.extensions.remove(&key);
                 if let Some(item) = self.items.remove(&key) {
                     self.seq += 1;
                     self.log.push(Change {

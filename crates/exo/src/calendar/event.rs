@@ -4,10 +4,12 @@
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
-use exo_store::{Settings, StoredEvent};
+use exo_store::{
+    AccessRole, Calendar, CalendarEvent, ConferenceKind, EventTime, EventType, RsvpStatus,
+    Settings, ShowAs, StoredEvent, Visibility,
+};
 use exo_ui::CalendarColor;
-use gmail::calendar::{CalendarListEntry, Event as ApiEvent, EventDateTime};
-use jiff::{Timestamp, Zoned, civil::Date, tz::TimeZone};
+use jiff::{Zoned, civil::Date, tz::TimeZone};
 use regex::Regex;
 
 pub use crate::rsvp::Rsvp;
@@ -115,77 +117,52 @@ pub fn extract_conference_text(description: &str) -> (String, Option<ConferenceC
     (text, call)
 }
 
-/// Returns the video entry-point URI on `source` (`hangoutLink` or `conferenceData` video entry).
+/// Returns the video entry-point URI on `source`, if a non-pending conference has one.
 #[must_use]
-pub fn video_uri_of(source: &ApiEvent) -> Option<String> {
-    source.hangout_link.clone().or_else(|| {
-        let entries = source
-            .conference_data
-            .as_ref()?
-            .get("entryPoints")?
-            .as_array()?;
-        entries
-            .iter()
-            .find(|entry| {
-                entry.get("entryPointType").and_then(|kind| kind.as_str()) == Some("video")
-            })?
-            .get("uri")?
-            .as_str()
-            .map(str::to_owned)
-    })
+pub fn video_uri_of(source: &CalendarEvent) -> Option<String> {
+    source
+        .conference
+        .as_ref()
+        .filter(|conf| !conf.pending)
+        .and_then(|conf| conf.join_url.clone())
 }
 
-/// Resolves an event's conference row from `conferenceData`, falling back to Meet/Zoom/Teams URLs
-/// embedded in `description` (such as `.ics` invites).
+/// Resolves an event's conference row from its typed [`exo_store::Conference`], falling back to
+/// Meet/Zoom/Teams URLs embedded in `description` (such as `.ics` invites).
 #[must_use]
-pub fn conference_of(source: &ApiEvent, me: &str) -> Option<ResolvedConference> {
-    if let Some(data) = source.conference_data.as_ref()
-        && let Some(entries) = data.get("entryPoints").and_then(|v| v.as_array())
-        && let Some(entry) = entries
-            .iter()
-            .find(|entry| {
-                entry.get("entryPointType").and_then(|kind| kind.as_str()) == Some("video")
-            })
-            .or_else(|| entries.first())
+pub fn conference_of(source: &CalendarEvent, me: &str) -> Option<ResolvedConference> {
+    if let Some(conf) = source.conference.as_ref().filter(|conf| !conf.pending)
+        && let Some(raw) = conf.join_url.as_deref()
+        && let Some(web) = crate::format::urls::web(raw)
     {
-        let kind = entry.get("entryPointType")?.as_str()?;
-        let raw = entry.get("uri")?.as_str()?.to_owned();
-        let label = entry
-            .get("label")
-            .and_then(|label| label.as_str())
-            .map_or_else(
-                || raw.trim_start_matches("https://").to_owned(),
-                str::to_owned,
-            );
-        let solution = data.get("conferenceSolution");
-        let name = solution
-            .and_then(|solution| solution.get("name"))
-            .and_then(|name| name.as_str())
-            .unwrap_or_default();
-        let meet = solution
-            .and_then(|solution| solution.get("key"))
-            .and_then(|key| key.get("type"))
-            .and_then(|kind| kind.as_str())
-            == Some("hangoutsMeet")
-            || matches!(name, "Google Meet" | "Hangouts Meet");
-        let join = match (kind, name) {
-            ("video", "Microsoft Teams") => "Join Teams Call",
-            ("video", "Zoom Meeting") => "Join Zoom Call",
-            ("video", _) if meet => "Join Google Meet",
-            _ => "Join Meeting",
+        let default_label = || {
+            conf.label
+                .clone()
+                .filter(|label| !label.is_empty())
+                .unwrap_or_else(|| raw.trim_start_matches("https://").to_owned())
         };
-        let web = crate::format::urls::web(&raw)?;
-        let (uri, copy) = if meet {
-            let mut link = url::Url::parse(&web).ok()?;
-            link.query_pairs_mut().append_pair("authuser", me);
-            (link.to_string(), label.clone())
-        } else {
-            (web.clone(), web)
+        let (label, uri, copy, join) = match &conf.kind {
+            ConferenceKind::GoogleMeet => {
+                let label = default_label();
+                let mut link = url::Url::parse(&web).ok()?;
+                link.query_pairs_mut().append_pair("authuser", me);
+                (label.clone(), link.to_string(), label, "Join Google Meet")
+            }
+            ConferenceKind::Teams => {
+                let label = if raw.contains("teams.microsoft.com/l/meetup-join/") {
+                    "teams.microsoft.com/l/meetup-join/…".to_owned()
+                } else {
+                    default_label()
+                };
+                (label, web.clone(), web, "Join Teams Call")
+            }
+            ConferenceKind::Zoom => (default_label(), web.clone(), web, "Join Zoom Call"),
+            ConferenceKind::Other(_) => (default_label(), web.clone(), web, "Join Meeting"),
         };
         return Some(ResolvedConference {
             label,
             uri,
-            raw,
+            raw: raw.to_owned(),
             copy,
             join,
         });
@@ -244,7 +221,7 @@ pub struct Event {
     pub title: String,
     pub start: Zoned,
     pub end: Zoned,
-    /// True date-only all-day event (`EventDateTime.date` or `VALUE=DATE`).
+    /// True date-only all-day event (`EventTime::AllDay` or `VALUE=DATE`).
     pub all_day: bool,
     /// Placed in the grid's all-day header band (`all_day || duration >= 24 hours`).
     pub span_row: bool,
@@ -284,25 +261,29 @@ impl Event {
     /// from the settings), its times in `tz`. `None` for an event without usable times.
     pub fn new(
         stored: &StoredEvent,
-        calendar: Option<&CalendarListEntry>,
+        calendar: Option<&Calendar>,
         colors: &BTreeMap<String, CalendarColor>,
         me: &str,
         tz: &TimeZone,
     ) -> Option<Self> {
         let event = &stored.event;
-        let (start, all_day_start) = time(event.start.as_ref()?, tz)?;
-        let (end, all_day_end) = time(event.end.as_ref()?, tz)?;
-        let all_day = all_day_start && all_day_end;
+        let start_time = event.start.as_ref()?;
+        let end_time = event.end.as_ref()?;
+        let start = start_time.zoned(tz)?;
+        let end = end_time.zoned(tz)?;
+        let all_day = start_time.is_all_day() && end_time.is_all_day();
         let span_row =
             all_day || end.timestamp().duration_since(start.timestamp()).as_hours() >= 24;
         let rsvp = my_attendance(event, me);
-        let access = calendar.and_then(|calendar| calendar.access_role.as_deref());
+        let access = calendar.map(|calendar| calendar.access_role);
         let private = matches!(
-            event.visibility.as_deref(),
-            Some("private" | "confidential")
+            event.visibility,
+            Visibility::Private | Visibility::Confidential
         );
-        let hidden = access == Some("freeBusyReader")
-            || (private && matches!(access, Some("reader" | "writerWithoutPrivateAccess")));
+        let hidden = access == Some(AccessRole::FreeBusyReader)
+            || (private
+                && matches!(access, Some(AccessRole::Reader | AccessRole::Writer))
+                && !calendar.is_some_and(|calendar| calendar.can_view_private_items));
         let title = match event
             .summary
             .as_deref()
@@ -316,50 +297,44 @@ impl Event {
             .color_id
             .as_deref()
             .and_then(google_color)
+            .or_else(|| {
+                event
+                    .categories
+                    .iter()
+                    .find_map(|category| category.preset.and_then(outlook_category_color))
+            })
             .or_else(|| colors.get(&stored.calendar_id).copied())
             .unwrap_or(CalendarColor::BLUE);
-        let organizer = event.organizer.as_ref().is_some_and(|organizer| {
-            organizer.is_self == Some(true)
-                || organizer
-                    .email
-                    .as_deref()
-                    .is_some_and(|email| email.eq_ignore_ascii_case(me))
+        let organizer = event.is_me_organizer(me);
+        let writable = calendar.is_some_and(|calendar| {
+            calendar.is_writable() && (!private || calendar.can_view_private_items)
         });
-        let writable = matches!(access, Some("owner" | "writer"))
-            || (access == Some("writerWithoutPrivateAccess") && !private);
         // A new event that Calendar hasn't got yet is editable too. The edit waits behind the new
         // event in its queue.
-        let editable = organizer && writable && event.event_type.as_deref() != Some("fromGmail");
+        let editable = organizer && writable && event.event_type != EventType::FromGmail;
         let creator = event
             .creator
             .as_ref()
-            .and_then(|creator| creator.email.as_deref())
-            .is_some_and(|email| email.eq_ignore_ascii_case(me));
-        let invitee = event
-            .attendees
-            .iter()
-            .any(|attendee| attendee.email.as_deref() == Some(me));
+            .is_some_and(|creator| creator.is_me(me));
+        let invitee = event.attendees.iter().any(|attendee| attendee.is_me(me));
         let busy = rsvp.unwrap_or(if creator || !invitee {
-            Rsvp::Accepted
+            if event.show_as == ShowAs::Tentative {
+                Rsvp::Tentative
+            } else {
+                Rsvp::Accepted
+            }
         } else {
             Rsvp::NeedsAction
         });
         let others: Vec<_> = event
             .attendees
             .iter()
-            .filter(|attendee| {
-                attendee.resource != Some(true)
-                    && attendee.is_self != Some(true)
-                    && !attendee
-                        .email
-                        .as_deref()
-                        .is_some_and(|email| email.eq_ignore_ascii_case(me))
-            })
+            .filter(|attendee| !attendee.resource && !attendee.is_me(me))
             .collect();
         let everyone_else_declined = !others.is_empty()
             && others
                 .iter()
-                .all(|attendee| attendee.response_status.as_deref() == Some("declined"));
+                .all(|attendee| attendee.response_status == RsvpStatus::Declined);
         Some(Self {
             key: unique_key(stored, event, &start),
             title,
@@ -478,34 +453,12 @@ impl Event {
     }
 }
 
-/// A start or end in `tz`, and whether it's an all-day date (which is local midnight).
-fn time(value: &EventDateTime, tz: &TimeZone) -> Option<(Zoned, bool)> {
-    if let Some(date) = &value.date {
-        let date: Date = date.parse().ok()?;
-        return Some((date.to_zoned(tz.clone()).ok()?, true));
-    }
-    let at: Timestamp = value.date_time.as_deref()?.parse().ok()?;
-    Some((at.to_zoned(tz.clone()), false))
+/// My answer to `event`, from my attendee entry or Outlook's `responseStatus`.
+pub(crate) fn my_attendance(event: &CalendarEvent, me: &str) -> Option<Rsvp> {
+    event.my_rsvp(me).map(Rsvp::from_store)
 }
 
-/// My answer to `event`, from my attendee entry.
-pub(crate) fn my_attendance(event: &ApiEvent, me: &str) -> Option<Rsvp> {
-    let mine = event
-        .attendees
-        .iter()
-        .find(|attendee| attendee.is_self == Some(true))
-        .or_else(|| {
-            event.attendees.iter().find(|attendee| {
-                attendee
-                    .email
-                    .as_deref()
-                    .is_some_and(|email| email.eq_ignore_ascii_case(me))
-            })
-        })?;
-    Rsvp::parse_opt(mine.response_status.as_deref())
-}
-
-/// An event's own colour, by Calendar's colour id.
+/// An event's own colour, by Google Calendar's colour id.
 fn google_color(id: &str) -> Option<CalendarColor> {
     let name = match id {
         "1" => "cobalt",
@@ -524,15 +477,46 @@ fn google_color(id: &str) -> Option<CalendarColor> {
     CalendarColor::from_name(name)
 }
 
+/// Maps Outlook's 25 category colour presets (`preset0`..=`preset24`) to [`CalendarColor`].
+pub(crate) fn outlook_category_color(preset: u8) -> Option<CalendarColor> {
+    let name = match preset {
+        0 => "red",
+        1 => "orange",
+        2 => "cinnamon",
+        3 => "yellow",
+        4 => "green",
+        5 => "storm",
+        6 => "olive",
+        7 => "blue",
+        8 => "violet",
+        9 => "pink",
+        10 => "steel",
+        11 => "slate",
+        12 => "pewter",
+        13 | 14 => "charcoal",
+        15 => "blush",
+        16 => "sienna",
+        17 | 18 => "ochre",
+        19 => "forest",
+        20 => "storm",
+        21 => "moss",
+        22 => "navy",
+        23 => "orchid",
+        24 => "magenta",
+        _ => return None,
+    };
+    CalendarColor::from_name(name)
+}
+
 /// An event's key: the calendar and the event, with an instance keyed by its series and original
 /// start.
-pub(crate) fn unique_key(stored: &StoredEvent, event: &ApiEvent, start: &Zoned) -> String {
+pub(crate) fn unique_key(stored: &StoredEvent, event: &CalendarEvent, start: &Zoned) -> String {
     let id = match &event.recurring_event_id {
         Some(series) => {
             let original = event
-                .original_start_time
+                .original_start
                 .as_ref()
-                .and_then(|original| original.timestamp(start.time_zone()))
+                .and_then(|original: &EventTime| original.timestamp(start.time_zone()))
                 .unwrap_or(start.timestamp());
             format!("{series}_{}", original.as_millisecond())
         }
@@ -565,27 +549,25 @@ pub fn colors(settings: &Settings) -> BTreeMap<String, CalendarColor> {
 
 #[cfg(test)]
 mod tests {
+    use exo_store::{Conference, EventAttendee, EventCategory, EventPerson};
+
     use super::*;
-    use gmail::calendar::{EventAttendee, EventPerson};
 
     fn tz() -> TimeZone {
         TimeZone::get("America/New_York").expect("zone")
     }
 
-    fn timed(start: &str, end: &str) -> ApiEvent {
-        let at = |text: &str| EventDateTime {
-            date_time: Some(text.into()),
-            ..EventDateTime::default()
-        };
-        ApiEvent {
+    fn timed(start: &str, end: &str) -> CalendarEvent {
+        let at = |text: &str| EventTime::timed(text.parse().expect("ts"), None);
+        CalendarEvent {
             id: Some("e1".into()),
             start: Some(at(start)),
             end: Some(at(end)),
-            ..ApiEvent::default()
+            ..CalendarEvent::default()
         }
     }
 
-    fn stored(event: ApiEvent) -> StoredEvent {
+    fn stored(event: CalendarEvent) -> StoredEvent {
         StoredEvent {
             calendar_id: "maya@brightmoor.co".into(),
             event,
@@ -599,13 +581,13 @@ mod tests {
         event.attendees = vec![
             EventAttendee {
                 email: Some("jordan@calloway.com".into()),
-                response_status: Some("accepted".into()),
+                response_status: RsvpStatus::Accepted,
                 ..EventAttendee::default()
             },
             EventAttendee {
                 email: Some("maya@brightmoor.co".into()),
-                is_self: Some(true),
-                response_status: Some("needsAction".into()),
+                is_self: true,
+                response_status: RsvpStatus::NeedsAction,
                 ..EventAttendee::default()
             },
         ];
@@ -621,7 +603,7 @@ mod tests {
             (invite.rsvp, invite.style(), invite.title.as_str()),
             (Some(Rsvp::NeedsAction), Style::Bordered, "(No title)")
         );
-        event.attendees[1].response_status = Some("declined".into());
+        event.attendees[1].response_status = RsvpStatus::Declined;
         let declined = Event::new(
             &stored(event),
             None,
@@ -684,9 +666,9 @@ mod tests {
                 url: "https://acme.zoom.us/j/91234567890".into(),
             })
         );
-        let from_desc = ApiEvent {
+        let from_desc = CalendarEvent {
             description: Some("Join with Google Meet: https://meet.google.com/abc-defg-hij".into()),
-            ..ApiEvent::default()
+            ..CalendarEvent::default()
         };
         let resolved = conference_of(&from_desc, "maya@brightmoor.co").expect("resolved");
         assert_eq!(resolved.join, "Join Google Meet");
@@ -694,10 +676,28 @@ mod tests {
             resolved.uri,
             "https://meet.google.com/abc-defg-hij?authuser=maya%40brightmoor.co"
         );
+
+        let teams_event = CalendarEvent {
+            conference: Some(Conference {
+                kind: ConferenceKind::Teams,
+                join_url: Some("https://teams.microsoft.com/l/meetup-join/abc123".into()),
+                label: Some("Microsoft Teams".into()),
+                pending: false,
+                dial_in: None,
+            }),
+            ..CalendarEvent::default()
+        };
+        let teams = conference_of(&teams_event, "maya@brightmoor.co").expect("teams");
+        assert_eq!(teams.join, "Join Teams Call");
+        assert_eq!(teams.label, "teams.microsoft.com/l/meetup-join/…");
+        assert_eq!(
+            teams.uri,
+            "https://teams.microsoft.com/l/meetup-join/abc123"
+        );
     }
 
     #[test]
-    fn colours_come_from_the_event_then_the_calendar() {
+    fn colours_come_from_the_event_or_category_then_the_calendar() {
         let mut event = timed("2026-11-19T14:00:00-05:00", "2026-11-19T15:00:00-05:00");
         let colors = BTreeMap::from([(
             "maya@brightmoor.co".to_owned(),
@@ -712,11 +712,30 @@ mod tests {
         );
         event.color_id = Some("11".into());
         assert_eq!(
-            Event::new(&stored(event), None, &colors, "me", &tz())
+            Event::new(&stored(event.clone()), None, &colors, "me", &tz())
                 .expect("event")
                 .color
                 .name(),
             "pink"
         );
+        event.color_id = None;
+        event.categories = vec![EventCategory {
+            name: "Red category".into(),
+            preset: Some(0),
+        }];
+        assert_eq!(
+            Event::new(&stored(event), None, &colors, "me", &tz())
+                .expect("event")
+                .color
+                .name(),
+            "red"
+        );
+        for preset in 0..=24 {
+            assert!(
+                outlook_category_color(preset).is_some(),
+                "preset{preset} maps to a calendar colour"
+            );
+        }
+        assert_eq!(outlook_category_color(25), None);
     }
 }

@@ -174,6 +174,9 @@ async fn inject_faults(State(app): State<Arc<App>>, request: Request, next: Next
     };
     let path = request.uri().path().to_owned();
     let query = request.uri().query().unwrap_or_default().to_owned();
+    if let Some(delay) = fault.delay_ms {
+        tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+    }
     if fault.after {
         let _ = next.run(request).await;
     }
@@ -307,6 +310,7 @@ mod tests {
             times: 1,
             after: false,
             retry_after: None,
+            delay_ms: None,
         });
         let wrong_method: Uri = "/common/oauth2/v2.0/token?slice=test".parse().unwrap();
         assert!(take_fault(&mut world, &Method::GET, &wrong_method).is_none());

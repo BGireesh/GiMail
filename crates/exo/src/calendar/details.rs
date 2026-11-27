@@ -9,8 +9,8 @@ use egui::{
     Color32, CornerRadius, Id, Order, Pos2, Rect, Sense, Stroke, Ui, UiBuilder, Vec2, pos2,
     text::LayoutJob, vec2,
 };
+use exo_store::{CalendarEvent, CalendarProviderKind, Visibility};
 use exo_ui::{BoxShadow, Family, Font, Menu, Scrollbar, TextStyle, motion};
-use gmail::calendar::{Event as ApiEvent, EventAttendee};
 use jiff::Zoned;
 
 use super::{
@@ -105,7 +105,7 @@ pub enum MenuItem {
     Delete,
     /// `Email guest` / `Email guests`.
     EmailGuests,
-    /// `Open in Google Calendar`.
+    /// `Open in Google Calendar` / `Open in Outlook Calendar`.
     OpenInCalendar,
 }
 
@@ -164,7 +164,7 @@ pub struct Details {
 /// The event and what the popover needs to know about it.
 pub struct Shown<'a> {
     pub event: &'a Event,
-    pub source: &'a ApiEvent,
+    pub source: &'a CalendarEvent,
     pub me: &'a str,
     /// The `Calendar` row (its name, when more than one calendar shows) or the `Label` row (`via
     /// {calendar}` for an event with its own colour).
@@ -494,7 +494,7 @@ impl Details {
             .source
             .attendees
             .iter()
-            .filter(|attendee| !is_me(attendee, shown.me))
+            .filter(|attendee| !attendee.is_me(shown.me))
             .count();
         let labels: Vec<&str> = shown
             .menu
@@ -504,7 +504,10 @@ impl Details {
                 MenuItem::Delete => "Delete",
                 MenuItem::EmailGuests if guests == 1 => "Email guest",
                 MenuItem::EmailGuests => "Email guests",
-                MenuItem::OpenInCalendar => "Open in Google Calendar",
+                MenuItem::OpenInCalendar => match shown.source.provider {
+                    CalendarProviderKind::Microsoft => "Open in Outlook Calendar",
+                    CalendarProviderKind::Google => "Open in Google Calendar",
+                },
             })
             .collect();
         let list = Menu {
@@ -608,6 +611,8 @@ enum Row {
     About(Vec<Line>),
     /// The attachments: their names and links.
     Files(Vec<(String, String)>),
+    /// Outlook event categories.
+    Category(String),
     Calendar(String),
     Organizer {
         name: String,
@@ -656,7 +661,11 @@ impl Row {
             Row::Who(_) => Some(Field::Guests),
             Row::About(_) => Some(Field::About),
             Row::Conference { .. } | Row::ConferencePending(_) => Some(Field::Meeting),
-            Row::Files(_) | Row::Calendar(_) | Row::Organizer { .. } | Row::Private => None,
+            Row::Files(_)
+            | Row::Category(_)
+            | Row::Calendar(_)
+            | Row::Organizer { .. }
+            | Row::Private => None,
         }
     }
 
@@ -666,6 +675,7 @@ impl Row {
             Row::Where(_) => "legacy/DEPRECATED_locationPin",
             Row::Who(_) | Row::Organizer { .. } => "legacy/DEPRECATED_guest",
             Row::About(_) => "legacy/DEPRECATED_description",
+            Row::Category(_) => "legacy/DEPRECATED_grayLabel",
             Row::Calendar(_) => "legacy/DEPRECATED_calendar",
             Row::Conference { .. } | Row::ConferencePending(_) => "legacy/DEPRECATED_conference",
             Row::Files(_) => "legacy/DEPRECATED_paperclip",
@@ -687,7 +697,7 @@ impl Row {
                     + RULE_TOP
                     + VALUE_PADDING_Y;
             }
-            Row::When(text, None) | Row::Calendar(text) => {
+            Row::When(text, None) | Row::Category(text) | Row::Calendar(text) => {
                 ROW_TEXT.wrap(ctx, text, VALUE_WIDTH).len()
             }
             Row::Where(runs) => layout_runs(
@@ -746,7 +756,7 @@ impl Row {
         // The values are Classic's black (Carbon's white) at `.75`.
         let color = palette.ink(0.75, 0.75);
         match self {
-            Row::When(value, _) | Row::Calendar(value) => {
+            Row::When(value, _) | Row::Category(value) | Row::Calendar(value) => {
                 let left = if matches!(self, Row::Calendar(_)) {
                     text.x + 1.0
                 } else {
@@ -1157,15 +1167,6 @@ pub(super) fn paint_avatar(
     );
 }
 
-/// Whether `attendee` is me.
-fn is_me(attendee: &EventAttendee, me: &str) -> bool {
-    attendee.is_self == Some(true)
-        || attendee
-            .email
-            .as_deref()
-            .is_some_and(|email| email.eq_ignore_ascii_case(me))
-}
-
 /// The body's rows, top to bottom.
 fn rows(shown: &Shown<'_>) -> Vec<Row> {
     let source = shown.source;
@@ -1183,21 +1184,24 @@ fn rows(shown: &Shown<'_>) -> Vec<Row> {
             copy: row.copy.clone(),
             join: row.join,
         });
-    } else if source.conference_data.as_ref().is_some_and(|data| {
-        data.get("createRequest").is_some() && data.get("entryPoints").is_none()
-    }) {
+    } else if source.conference.as_ref().is_some_and(|c| c.pending) {
         rows.push(Row::ConferencePending(if shown.online {
             "Link will be added momentarily"
         } else {
             "Link will be added when online"
         }));
     }
-    // A place that's only the call's link isn't said twice.
+    // A place that's only the call's link (or Graph's placeholder for a Teams call) isn't said
+    // twice.
     if let Some(location) = source.location.as_deref().filter(|location| {
-        !location.trim().is_empty()
-            && conference
-                .as_ref()
-                .is_none_or(|row| row.uri != *location && row.raw != *location)
+        let trimmed = location.trim();
+        !trimmed.is_empty()
+            && conference.as_ref().is_none_or(|row| {
+                row.uri != *location
+                    && row.raw != *location
+                    && !(row.join == "Join Teams Call"
+                        && trimmed.eq_ignore_ascii_case("microsoft teams meeting"))
+            })
     }) {
         rows.push(Row::Where(linkify(location)));
     }
@@ -1217,15 +1221,20 @@ fn rows(shown: &Shown<'_>) -> Vec<Row> {
     if !files.is_empty() {
         rows.push(Row::Files(files));
     }
+    if !source.categories.is_empty() {
+        let names: Vec<&str> = source
+            .categories
+            .iter()
+            .map(|cat| cat.name.as_str())
+            .collect();
+        rows.push(Row::Category(names.join(", ")));
+    }
     if let Some(calendar) = shown.calendar {
         rows.push(Row::Calendar(calendar.to_owned()));
     }
     if let Some(organizer) = &source.organizer
-        && organizer.is_self != Some(true)
-        && !source
-            .attendees
-            .iter()
-            .any(|attendee| attendee.organizer == Some(true))
+        && !organizer.is_self
+        && !source.attendees.iter().any(|attendee| attendee.organizer)
         && let Some(name) = organizer
             .display_name
             .clone()
@@ -1249,8 +1258,8 @@ fn rows(shown: &Shown<'_>) -> Vec<Row> {
         });
     }
     if matches!(
-        source.visibility.as_deref(),
-        Some("private" | "confidential")
+        source.visibility,
+        Visibility::Private | Visibility::Confidential
     ) {
         rows.push(Row::Private);
     }
@@ -1259,11 +1268,11 @@ fn rows(shown: &Shown<'_>) -> Vec<Row> {
 
 /// The guests: the organizer, then accepted, declined, tentative and unanswered, each group by
 /// name. Rooms aren't guests.
-fn guests(source: &ApiEvent) -> Vec<Guest> {
+fn guests(source: &CalendarEvent) -> Vec<Guest> {
     let mut guests: Vec<(u8, String, Guest)> = source
         .attendees
         .iter()
-        .filter(|attendee| attendee.resource != Some(true))
+        .filter(|attendee| !attendee.resource)
         .filter_map(|attendee| {
             let email = attendee.email.clone()?;
             let name = attendee
@@ -1276,9 +1285,9 @@ fn guests(source: &ApiEvent) -> Vec<Guest> {
             } else {
                 format!("{name} <{email}>")
             };
-            let answer = Rsvp::parse_opt(attendee.response_status.as_deref())
+            let answer = Some(Rsvp::from_store(attendee.response_status))
                 .filter(|a| *a != Rsvp::NeedsAction);
-            let organizer = attendee.organizer == Some(true);
+            let organizer = attendee.organizer;
             let rank = if organizer {
                 0
             } else {
@@ -1291,7 +1300,7 @@ fn guests(source: &ApiEvent) -> Vec<Guest> {
             };
             let note = if organizer {
                 Some("(organizer)")
-            } else if attendee.optional == Some(true) {
+            } else if attendee.optional {
                 Some("(optional)")
             } else {
                 None
@@ -1325,9 +1334,9 @@ fn when(event: &Event, recurring: bool, now: &Zoned) -> String {
     )
 }
 
-/// The event's call (a video entry point first), if it has `conferenceData` or a call URL in its
-/// description. Only links Exo would open count.
-fn conference(source: &ApiEvent, me: &str) -> Option<super::event::ResolvedConference> {
+/// The event's call (a video entry point first), if it has structured conference info or a call
+/// URL in its description. Only links Exo would open count.
+fn conference(source: &CalendarEvent, me: &str) -> Option<super::event::ResolvedConference> {
     conference_of(source, me)
 }
 
@@ -1420,13 +1429,16 @@ mod tests {
     }
 
     #[test]
-    fn a_meet_call_joins_as_this_account() {
-        let source = ApiEvent {
-            conference_data: Some(serde_json::json!({
-                "entryPoints": [{ "entryPointType": "phone", "uri": "tel:+1-555-0100" }, { "entryPointType": "video", "uri": "https://meet.google.com/abc-defg-hij", "label": "meet.google.com/abc-defg-hij" }],
-                "conferenceSolution": { "key": { "type": "hangoutsMeet" }, "name": "Google Meet" },
-            })),
-            ..ApiEvent::default()
+    fn a_meet_call_joins_as_this_account_and_teams_has_no_authuser() {
+        let source = CalendarEvent {
+            conference: Some(exo_store::Conference {
+                kind: exo_store::ConferenceKind::GoogleMeet,
+                join_url: Some("https://meet.google.com/abc-defg-hij".into()),
+                label: Some("meet.google.com/abc-defg-hij".into()),
+                pending: false,
+                dial_in: None,
+            }),
+            ..CalendarEvent::default()
         };
         let row = conference(&source, "maya@brightmoor.co").expect("a call");
         assert_eq!(
@@ -1437,16 +1449,22 @@ mod tests {
             row.uri,
             "https://meet.google.com/abc-defg-hij?authuser=maya%40brightmoor.co"
         );
-        assert!(
-            conference(
-                &ApiEvent {
-                    hangout_link: Some("https://meet.google.com/x".into()),
-                    ..ApiEvent::default()
-                },
-                "me"
-            )
-            .is_none(),
-            "a bare hangoutLink has no row"
+        let teams = CalendarEvent {
+            provider: CalendarProviderKind::Microsoft,
+            conference: Some(exo_store::Conference {
+                kind: exo_store::ConferenceKind::Teams,
+                join_url: Some("https://teams.microsoft.com/l/meetup-join/19%3ameeting/0".into()),
+                label: None,
+                pending: false,
+                dial_in: None,
+            }),
+            ..CalendarEvent::default()
+        };
+        let row = conference(&teams, "maya@brightmoor.co").expect("a Teams call");
+        assert_eq!(row.join, "Join Teams Call");
+        assert_eq!(
+            row.uri,
+            "https://teams.microsoft.com/l/meetup-join/19%3ameeting/0"
         );
     }
 
@@ -1457,6 +1475,75 @@ mod tests {
         assert_eq!(
             runs[1].link.as_deref(),
             Some("https://meet.example.com/abc")
+        );
+    }
+
+    #[test]
+    fn teams_placeholder_location_is_suppressed_when_teams_conference_shows() {
+        let ev = event("2026-11-17T10:00", "2026-11-17T10:30", false);
+        let now = ev.start.clone();
+        let built_rows = |source: &CalendarEvent| {
+            rows(&Shown {
+                event: &ev,
+                source,
+                me: "maya@brightmoor.co",
+                calendar: None,
+                now: &now,
+                can_respond: false,
+                menu: &[],
+                editable: false,
+                rule: None,
+                guest: false,
+                online: true,
+            })
+        };
+        let teams_conf = exo_store::Conference {
+            kind: exo_store::ConferenceKind::Teams,
+            join_url: Some("https://teams.microsoft.com/l/meetup-join/19%3ameeting/0".into()),
+            label: None,
+            pending: false,
+            dial_in: None,
+        };
+
+        // Graph's default "Microsoft Teams Meeting" location is hidden when Teams call row shows.
+        let with_placeholder = CalendarEvent {
+            provider: CalendarProviderKind::Microsoft,
+            location: Some("Microsoft Teams Meeting".into()),
+            conference: Some(teams_conf.clone()),
+            ..CalendarEvent::default()
+        };
+        let built = built_rows(&with_placeholder);
+        assert!(
+            built
+                .iter()
+                .any(|row| matches!(row, Row::Conference { .. }))
+        );
+        assert!(!built.iter().any(|row| matches!(row, Row::Where(_))));
+
+        // A real physical room alongside a Teams call still renders its Where row.
+        let with_room = CalendarEvent {
+            provider: CalendarProviderKind::Microsoft,
+            location: Some("Conference Room B".into()),
+            conference: Some(teams_conf),
+            ..CalendarEvent::default()
+        };
+        assert!(
+            built_rows(&with_room)
+                .iter()
+                .any(|row| matches!(row, Row::Where(_)))
+        );
+
+        // Without a Teams link, the location text itself is preserved.
+        let without_link = CalendarEvent {
+            provider: CalendarProviderKind::Microsoft,
+            location: Some("Microsoft Teams Meeting".into()),
+            conference: None,
+            ..CalendarEvent::default()
+        };
+        assert!(
+            built_rows(&without_link)
+                .iter()
+                .any(|row| matches!(row, Row::Where(_)))
         );
     }
 }

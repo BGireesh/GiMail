@@ -1,5 +1,5 @@
+use exo_store::{CalendarEvent, CalendarProviderKind};
 use exo_ui::CalendarColor;
-use gmail::calendar::Event as ApiEvent;
 use jiff::{Zoned, tz::TimeZone};
 
 use super::{
@@ -71,7 +71,7 @@ fn an_edit_knows_what_changed() {
     values.when = Some((at("2026-11-17T15:00"), at("2026-11-17T16:00")));
     let edited = Edited {
         key: "k".into(),
-        event: ApiEvent::default(),
+        event: CalendarEvent::default(),
         color: CalendarColor::BLUE,
     };
     let mut form = EventForm::edit(values, edited, true, Field::Title);
@@ -90,9 +90,13 @@ fn an_edit_knows_what_changed() {
 fn calendars() -> Vec<CalendarOption> {
     let option = |account: &str, id: &str, name: &str| CalendarOption {
         account: account.into(),
+        email: account.into(),
+        provider: CalendarProviderKind::Google,
         id: id.into(),
         name: name.into(),
         color: CalendarColor::BLUE,
+        supports_meet: true,
+        supports_teams: false,
     };
     vec![
         option(

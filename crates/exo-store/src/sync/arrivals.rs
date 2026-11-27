@@ -6,10 +6,10 @@ use std::collections::BTreeSet;
 
 use jiff::Timestamp;
 
+use crate::entities::unescape_html;
 use crate::error::Result;
 use crate::ids::labels::{INBOX, SH_IMPORTANT, UNREAD};
 use crate::model::Contact;
-use crate::parse::unescape_html;
 use crate::store::{Inner, Store, read_view, read_views};
 use crate::view::{Identity, ThreadView, ViewMessage};
 

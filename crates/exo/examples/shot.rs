@@ -1,6 +1,6 @@
 //! Renders Exo offscreen at 2× and saves a PNG, the same each run, for screenshot comparisons.
 //!
-//! usage: cargo run -p exo --example shot -- <out.png> [width height] [--keys KEYS] [--hover X,Y] [--theme snow|carbon|auto] [--settings FILE] [--device-settings FILE] [--pdf FILE]
+//! usage: cargo run -p exo --example shot -- <out.png> [width height] [--keys KEYS] [--hover X,Y] [--theme snow|carbon|auto] [--outlook] [--settings FILE] [--device-settings FILE] [--pdf FILE]
 //!        [--signed-out [--sign-in-error | --no-client] | --revoked] [--accounts LIST] [--calendar-accounts LIST] [--photo] [--contact-photos] [--eml FILE]...
 //!        [--connection offline|auth|gmail|throttled|disabled] [--fault JSON]...
 //!        [--teardown corrupt|full|locked|error] [--vacation JSON] [--calendar-event JSON]...
@@ -90,6 +90,7 @@ struct Options {
     keys: Vec<String>,
     hover: Option<Pos2>,
     theme: Option<exo_store::Theme>,
+    outlook: bool,
     signed_out: bool,
     sign_in_error: bool,
     no_client: bool,
@@ -198,9 +199,24 @@ impl gmail::TokenProvider for Refreshing {
     }
 }
 
+impl outlook::TokenProvider for Refreshing {
+    fn access_token(&self) -> outlook::TokenFuture<'_> {
+        Box::pin(async move {
+            if self.gone.load(Ordering::SeqCst) {
+                return Err(outlook::Error::Http(
+                    reqwest::get(self.token.clone())
+                        .await
+                        .expect_err("nothing listens"),
+                ));
+            }
+            Ok(mock_servers::DEV_ACCESS_TOKEN.to_owned())
+        })
+    }
+}
+
 fn options() -> anyhow::Result<Options> {
     let mut args = std::env::args().skip(1);
-    let usage = "usage: shot <out.png> [width height] [--keys \"j x e\"] [--hover X,Y] [--theme snow|carbon|auto] [--settings FILE] [--device-settings FILE] [--split-library FILE] [--signed-out [--sign-in-error | --no-client] | --revoked] [--accounts LIST] [--calendar-accounts LIST] [--photo] [--contact-photos] [--eml FILE]... [--connection offline|auth|gmail|throttled|disabled] [--fault JSON]... [--teardown corrupt|full|locked|error] [--vacation JSON] [--calendar-event JSON]... [--pdf FILE] [--places \"NAME|ADDRESS;…\"] [--joined TIMESTAMP] [--locale en_GB] [--first-run] [--account-setup] [--welcome-alert] [--first-get-me-to-zero]";
+    let usage = "usage: shot <out.png> [width height] [--keys \"j x e\"] [--hover X,Y] [--theme snow|carbon|auto] [--outlook] [--settings FILE] [--device-settings FILE] [--split-library FILE] [--signed-out [--sign-in-error | --no-client] | --revoked] [--accounts LIST] [--calendar-accounts LIST] [--photo] [--contact-photos] [--eml FILE]... [--connection offline|auth|gmail|throttled|disabled] [--fault JSON]... [--teardown corrupt|full|locked|error] [--vacation JSON] [--calendar-event JSON]... [--pdf FILE] [--places \"NAME|ADDRESS;…\"] [--joined TIMESTAMP] [--locale en_GB] [--first-run] [--account-setup] [--welcome-alert] [--first-get-me-to-zero]";
     let mut options = Options {
         out: args.next().context(usage)?,
         width: 1280.0,
@@ -208,6 +224,7 @@ fn options() -> anyhow::Result<Options> {
         keys: Vec::new(),
         hover: None,
         theme: None,
+        outlook: false,
         signed_out: false,
         sign_in_error: false,
         no_client: false,
@@ -245,6 +262,7 @@ fn options() -> anyhow::Result<Options> {
                     other => anyhow::bail!("unknown theme {other}: {usage}"),
                 });
             }
+            "--outlook" => options.outlook = true,
             "--signed-out" => options.signed_out = true,
             "--sign-in-error" => options.sign_in_error = true,
             "--no-client" => options.no_client = true,
@@ -528,13 +546,24 @@ fn main() -> anyhow::Result<()> {
         .port();
     endpoints.oauth.token = format!("http://127.0.0.1:{port}/token").parse()?;
     let sign_in_gone = Arc::new(AtomicBool::new(false));
-    let credentials = Credentials {
-        email,
-        tokens: Arc::new(Refreshing {
-            gone: sign_in_gone.clone(),
-            token: endpoints.oauth.token.clone(),
-        }),
-        endpoints,
+    let credentials = if options.outlook {
+        Credentials::Outlook {
+            email,
+            tokens: Arc::new(Refreshing {
+                gone: sign_in_gone.clone(),
+                token: endpoints.oauth.token.clone(),
+            }),
+            endpoints: outlook::Endpoints::mock(&endpoints.gmail),
+        }
+    } else {
+        Credentials::Gmail {
+            email,
+            tokens: Arc::new(Refreshing {
+                gone: sign_in_gone.clone(),
+                token: endpoints.oauth.token.clone(),
+            }),
+            endpoints,
+        }
     };
     let stores = std::env::temp_dir().join(format!("exo-shot-{}", std::process::id()));
     if (options.theme.is_some() || options.settings.is_some() || options.device_settings.is_some())
@@ -552,14 +581,19 @@ fn main() -> anyhow::Result<()> {
             Some(file) => Some(serde_json::from_str(&std::fs::read_to_string(file)?)?),
             None => None,
         };
-        runtime.block_on(async {
-            let store = exo_store::Store::open(
-                &stores,
-                &credentials.email,
+        let remote = if options.outlook {
+            exo_store::Remote::Outlook {
+                endpoints: outlook::Endpoints::mock(&server.endpoints().gmail),
+                tokens: Arc::new(outlook::StaticToken(mock_servers::DEV_ACCESS_TOKEN.into())),
+            }
+        } else {
+            exo_store::Remote::gmail(
                 server.endpoints(),
                 gmail::StaticToken(mock_servers::DEV_ACCESS_TOKEN.into()),
             )
-            .await?;
+        };
+        runtime.block_on(async {
+            let store = exo_store::Store::open(&stores, &credentials.key(), remote).await?;
             if let Some(device) = &device {
                 store.save_settings(device).await?;
             }
@@ -587,7 +621,7 @@ fn main() -> anyhow::Result<()> {
                     auth.mark_signed_out(email)?;
                 }
             }
-            auth.use_account(&credentials.email)?;
+            auth.use_account(credentials.email())?;
         }
         if !options.calendar_accounts.is_empty() {
             let auth = Auth::open(client.clone(), &state, secrets.clone())?;
@@ -596,7 +630,7 @@ fn main() -> anyhow::Result<()> {
             }
             for email in &options.calendar_accounts {
                 runtime.block_on(auth.sign_in_calendar(
-                    &credentials.email,
+                    credentials.email(),
                     Some(email),
                     |url| {
                         tokio::spawn(reqwest::get(url.clone()));

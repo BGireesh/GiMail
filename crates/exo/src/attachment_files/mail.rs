@@ -230,7 +230,7 @@ impl crate::Mail {
         if !super::has_copied(&message.attachments) {
             return;
         }
-        let copied = super::copy::Copied::new(self.account.email(), &message.attachments);
+        let copied = super::copy::Copied::new(self.account.key(), &message.attachments);
         crate::clipboard::write_attachments(
             &self.ctx,
             &serde_json::to_string(&copied).expect("copied attachments serialize"),

@@ -23,10 +23,10 @@ pub(super) struct InviteState {
     /// Where the invite photos are (`assets/images`).
     pub(super) images: PathBuf,
     /// The account's other calendar accounts, who may be the invited one
-    /// ([`invite::Invite::calendar_account`]), and those of them Google signed out, which sign
-    /// in before they answer.
+    /// ([`invite::Invite::calendar_account`]), those signed out, and emails backed by Outlook.
     pub(super) calendar_accounts: Vec<String>,
     pub(super) signed_out: Vec<String>,
+    pub(super) outlook_calendars: Vec<String>,
     /// The invite cards whose About shows every line (`Show Less`).
     pub(super) about_open: HashSet<String>,
     /// The invite's When the pointer is settling on, by message.
@@ -42,6 +42,7 @@ impl InviteState {
             images,
             calendar_accounts: Vec::new(),
             signed_out: Vec::new(),
+            outlook_calendars: Vec::new(),
             about_open: HashSet::new(),
             when_intent: exo_ui::HoverIntent::default(),
         }
@@ -80,13 +81,11 @@ impl ThreadView {
         id: &str,
         calendar: Option<&'a exo_mail::CalendarData>,
     ) -> Option<invite::Context<'a>> {
-        let me = self
-            .invite_state
-            .invites
-            .get(id)
-            .map_or(self.me.as_str(), |parsed| {
-                parsed.calendar_account(&self.me, &self.invite_state.calendar_accounts)
-            });
+        let invite = self.invite_state.invites.get(id);
+        let me = invite.map_or(self.me.as_str(), |parsed| {
+            parsed.calendar_account(&self.me, &self.invite_state.calendar_accounts)
+        });
+        let outlook = invite.is_some_and(|parsed| self.invite_is_outlook(parsed));
         Some(invite::Context {
             me,
             user: &self.me,
@@ -94,6 +93,7 @@ impl ThreadView {
             message: self.message(id)?,
             calendar,
             about_open: self.invite_state.about_open.contains(id),
+            outlook,
         })
     }
 
@@ -144,11 +144,40 @@ impl ThreadView {
         parsed.calendar_account(&self.me, &self.invite_state.calendar_accounts)
     }
 
-    /// The account's other calendar accounts, any of whom an invite may be to, and those of
-    /// them signed out.
-    pub fn set_calendar_accounts(&mut self, accounts: Vec<String>, signed_out: Vec<String>) {
+    /// The account's other calendar accounts, any of whom an invite may be to, those signed out,
+    /// and the emails whose calendar account is Microsoft/Outlook.
+    pub fn set_calendar_accounts(
+        &mut self,
+        accounts: Vec<String>,
+        signed_out: Vec<String>,
+        outlook_calendars: Vec<String>,
+    ) {
         self.invite_state.calendar_accounts = accounts;
         self.invite_state.signed_out = signed_out;
+        self.invite_state.outlook_calendars = outlook_calendars;
+    }
+
+    /// Whether `parsed`'s invited calendar account is Microsoft/Outlook.
+    pub(super) fn invite_is_outlook(&self, parsed: &invite::Invite) -> bool {
+        let me = self.invite_me(parsed);
+        (self.action.outlook && me.eq_ignore_ascii_case(&self.me))
+            || self
+                .invite_state
+                .outlook_calendars
+                .iter()
+                .any(|email| email.eq_ignore_ascii_case(me))
+    }
+
+    /// The RSVP buttons shown on `parsed` (once an Outlook invite is declined, only `No` stays).
+    fn invite_choices(&self, parsed: &invite::Invite) -> &'static [invite::Response] {
+        let me = self.invite_me(parsed);
+        if self.invite_is_outlook(parsed)
+            && parsed.answer_of(me) == Some(invite::Response::Declined)
+        {
+            &[invite::Response::Declined]
+        } else {
+            &invite::ANSWERS
+        }
     }
 
     /// Whether `parsed` is to a signed-out calendar account, whose answer waits for it to sign
@@ -183,11 +212,12 @@ impl ThreadView {
     /// → / ↓ / tab and ← / ↑ in the card: moves to the next or previous button, wrapping round.
     /// `Add To Calendar` is alone, so the keyboard stays on it.
     pub fn move_invite_focus(&mut self, delta: isize) {
-        let answerable = self
+        let count = self
             .focusable_invite()
-            .is_some_and(|parsed| parsed.can_respond(self.invite_me(parsed)));
-        if let Some(focus) = self.invite_state.focus.as_mut().filter(|_| answerable) {
-            *focus = (*focus as isize + delta).rem_euclid(invite::ANSWERS.len() as isize) as usize;
+            .filter(|parsed| parsed.can_respond(self.invite_me(parsed)))
+            .map(|parsed| self.invite_choices(parsed).len());
+        if let (Some(focus), Some(count)) = (self.invite_state.focus.as_mut(), count) {
+            *focus = (*focus as isize + delta).rem_euclid(count as isize) as usize;
         }
     }
 
@@ -204,8 +234,9 @@ impl ThreadView {
         let id = self.focus.clone()?;
         let parsed = self.focusable_invite()?;
         let me = self.invite_me(parsed).to_owned();
+        let choices = self.invite_choices(parsed);
         let response = if parsed.can_respond(&me) {
-            invite::ANSWERS[focus]
+            choices[focus.min(choices.len() - 1)]
         } else {
             invite::Response::NeedsAction
         };
@@ -332,6 +363,7 @@ impl ThreadView {
             message,
             calendar,
             about_open: self.invite_state.about_open.contains(item_id),
+            outlook: self.invite_is_outlook(&parsed),
         };
         let mut card_top = content_top;
         if let Some(note) = invite::note(&parsed, calendar) {

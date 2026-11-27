@@ -1,4 +1,5 @@
-//! The outbox, which persists the user's changes as per-thread FIFO queues of Gmail calls.
+//! The outbox, which persists the user's changes as per-thread FIFO queues of calls to the
+//! provider.
 //!
 //! [`Store::apply`] writes a row and the UI sees its effect at once, because every read
 //! applies the pending steps on top of Gmail's copy. [`Store::flush`] sends rows one step at a
@@ -8,7 +9,6 @@
 use std::collections::HashSet;
 
 use futures::{StreamExt, stream};
-use gmail::{BatchModifyMessagesRequest, ModifyMessageRequest, ModifyThreadRequest};
 use jiff::Timestamp;
 use toasty::Executor;
 
@@ -17,11 +17,11 @@ use crate::db::{DraftRow, MessageRow, OutboxRow, ReminderRow};
 use crate::error::{Error, Result};
 use crate::ids::ThreadId;
 use crate::mutation::{Mutation, Plan, Step, resolve};
-use crate::provider;
+use crate::provider::Fetched;
 use crate::queue::{self, Disposition};
 use crate::quota::Lane;
 use crate::store::{Inner, Store, load_view, reindex};
-use crate::sync::{Rows, fetch_rows};
+use crate::truth;
 use crate::view::{Identity, ThreadView};
 
 /// Counted failures after which a mutation is given up on.
@@ -117,7 +117,7 @@ enum Effect {
     /// The step's own label change.
     Labels,
     /// The thread as Gmail has it now.
-    Replace(Rows),
+    Replace(Fetched),
     /// Gmail no longer has the thread.
     Deleted,
 }
@@ -445,11 +445,11 @@ impl Inner {
                     .await?;
             }
             match effect {
-                Effect::Labels => provider::apply_step(write.exec(), &row.queue, &step).await?,
+                Effect::Labels => truth::apply_step(write.exec(), &row.queue, &step).await?,
                 Effect::Replace(rows) => {
-                    provider::save_rows(write.exec(), &rows).await?;
+                    truth::save_rows(write.exec(), rows).await?;
                 }
-                Effect::Deleted => provider::delete_thread(write.exec(), &row.queue).await?,
+                Effect::Deleted => truth::delete_thread(write.exec(), &row.queue).await?,
             }
             reindex(write.exec(), &row.queue, &self.router()).await?;
             write.publish().await?;
@@ -460,68 +460,22 @@ impl Inner {
         Ok(Outcome::Done)
     }
 
-    /// One Gmail call. For a refresh, that call fetches the rows of `thread`, without fetching
-    /// its `stored` messages in full again.
+    /// One call to the provider. For a refresh, that call fetches the rows of `thread`, without
+    /// fetching its `stored` messages in full again.
     async fn send(
         &self,
         thread: &str,
         step: &Step,
         stored: &HashSet<String>,
     ) -> Result<Effect, Failure> {
-        let sent = match step {
-            Step::RemoveFromMessages { ids, labels } => {
-                let request = BatchModifyMessagesRequest {
-                    ids: ids.clone(),
-                    remove_label_ids: labels.clone(),
-                    ..BatchModifyMessagesRequest::default()
-                };
-                self.api
-                    .call(Lane::Act, 1, |gmail| gmail.batch_modify_messages(&request))
-                    .await
-            }
-            Step::ModifyMessages { ids, add, remove } => {
-                let request = BatchModifyMessagesRequest {
-                    ids: ids.clone(),
-                    add_label_ids: add.clone(),
-                    remove_label_ids: remove.clone(),
-                    ..BatchModifyMessagesRequest::default()
-                };
-                self.api
-                    .call(Lane::Act, 1, |gmail| gmail.batch_modify_messages(&request))
-                    .await
-            }
-            Step::ModifyThread { add, remove } => {
-                let request = ModifyThreadRequest {
-                    add_label_ids: add.clone(),
-                    remove_label_ids: remove.clone(),
-                };
-                unless_gone(
-                    self.api
-                        .call(Lane::Act, 1, |gmail| gmail.modify_thread(thread, &request))
-                        .await,
-                )
-            }
-            Step::AddToMessage { id, label } => {
-                let request = ModifyMessageRequest {
-                    add_label_ids: vec![label.clone()],
-                    ..ModifyMessageRequest::default()
-                };
-                unless_gone(
-                    self.api
-                        .call(Lane::Act, 1, |gmail| gmail.modify_message(id, &request))
-                        .await,
-                )
-            }
-            Step::Refresh => {
-                return Ok(
-                    match fetch_rows(&self.api, Lane::Act, 1, thread, stored).await? {
-                        Some(rows) => Effect::Replace(rows),
-                        None => Effect::Deleted,
-                    },
-                );
-            }
-        };
-        sent.map(|()| Effect::Labels)
+        if *step == Step::Refresh {
+            return Ok(match self.mail.rows(thread, stored, Lane::Act, 1).await? {
+                Some(rows) => Effect::Replace(rows),
+                None => Effect::Deleted,
+            });
+        }
+        self.mail.apply(thread, step).await?;
+        Ok(Effect::Labels)
     }
 
     /// Backs off, or gives up and rolls the overlay back. Being offline, throttled or signed
@@ -531,7 +485,7 @@ impl Inner {
         let attempts = row.attempts + u32::from(counted);
         let failures = row.failures.saturating_add(1);
         let message = failure.message();
-        let not_before = match queue::dispose_failure(&self.api, failure, failures) {
+        let not_before = match queue::dispose_failure(self.backoff, failure, failures) {
             Disposition::Postponed(until) if attempts <= MAX_ATTEMPTS => until,
             Disposition::Postponed(_) | Disposition::Refused(_) => {
                 log::warn!(
@@ -578,17 +532,5 @@ impl Inner {
             .await?;
         reindex(write.exec(), &row.queue, &self.router()).await?;
         write.publish().await
-    }
-}
-
-/// A label change on a thread, message or label that no longer exists has nothing left to do.
-fn unless_gone<T>(sent: Result<T, Failure>) -> Result<(), Failure> {
-    match sent {
-        Err(failure)
-            if failure.is_not_found() || failure.message().contains("labelId not found") =>
-        {
-            Ok(())
-        }
-        sent => sent.map(drop),
     }
 }

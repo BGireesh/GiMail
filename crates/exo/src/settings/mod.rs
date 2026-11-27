@@ -387,7 +387,11 @@ impl Settings {
                         self.reminders = reminders::State::open(&account.settings().reminders, now);
                     }
                     Dialog::Signatures => {
-                        self.signatures = signatures::State::open(&account.snapshot().aliases)
+                        self.signatures = if account.is_outlook() {
+                            signatures::State::open_outlook(account.local_signature())
+                        } else {
+                            signatures::State::open(&account.snapshot().aliases)
+                        };
                     }
                     Dialog::Downloads => {
                         self.downloads = downloads::State::default();
@@ -494,6 +498,14 @@ impl Settings {
                     Some(signatures::Event::OpenGmail) => {
                         let url = gmail_settings_url(account.email());
                         self.ctx.open_url(egui::OpenUrl::new_tab(url));
+                    }
+                    Some(signatures::Event::Save) => {
+                        let html = self.signatures.cleaned_html();
+                        account.set_local_signature(html);
+                        self.dialog_open = false;
+                    }
+                    Some(signatures::Event::Cancel) => {
+                        self.dialog_open = false;
                     }
                     _ => {}
                 }
@@ -727,6 +739,7 @@ impl Settings {
         rem: f32,
         zero: bool,
         settings: &exo_store::Settings,
+        outlook: bool,
     ) -> Option<Action> {
         let quit_warning = self
             .quit_warning
@@ -743,6 +756,7 @@ impl Settings {
                 open_at_login: self.login_item.on(),
                 warn_before_quitting: quit_warning,
             },
+            outlook,
         )
     }
 
@@ -873,8 +887,14 @@ impl Settings {
             }
             Dialog::BlockedSenders => {
                 let senders = blocked_senders::senders(&account.settings().blocked_senders);
-                let response =
-                    blocked_senders::show(ctx, area, self.dialog_open, &self.blocked, &senders);
+                let response = blocked_senders::show(
+                    ctx,
+                    area,
+                    self.dialog_open,
+                    &self.blocked,
+                    &senders,
+                    account.is_outlook(),
+                );
                 self.finish_dialog(response, Action::Blocked)
             }
             Dialog::Autocorrect => {
@@ -1151,9 +1171,9 @@ fn calendar_holder(account: &Account, id: &str) -> String {
         .calendars
         .iter()
         .flatten()
-        .find(|calendar| calendar.entry.id.as_deref() == Some(id));
+        .find(|calendar| calendar.calendar.id == id);
     listed.map_or_else(
-        || account.email().to_owned(),
+        || account.key().to_owned(),
         |calendar| calendar.account.clone(),
     )
 }
@@ -1191,6 +1211,7 @@ pub fn register<A: Clone + 'static>(
     theme: Theme,
     email_notifications: bool,
     os: egui::os::OperatingSystem,
+    outlook: bool,
     wrap: impl Fn(Action) -> A,
 ) {
     let gear = |id: &'static str, title: &'static str, action: Action, score: f64| {
@@ -1335,7 +1356,7 @@ pub fn register<A: Clone + 'static>(
     commands.add(
         gear(
             "SIGNATURE_SETTINGS",
-            "Signatures",
+            if outlook { "Signature" } else { "Signatures" },
             Action::Open(Dialog::Signatures),
             0.98,
         )

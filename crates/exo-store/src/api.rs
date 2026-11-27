@@ -1,10 +1,12 @@
-//! Every Gmail call goes through [`Api::call`], which applies one retry policy for sync and the
-//! outbox. It backs off with jitter on network errors, 5xx, rate limits and
-//! `Precondition check failed`, honors Gmail's retry hints, and refreshes the token once on 401.
-//! Before it goes out, a call spends its quota units from the account's [`Budget`], which paces
-//! calls under Gmail's quota and holds them while Gmail is rate limiting the account. How each
-//! Gmail call ends tells the account's [`Network`] what's down and what's back.
+//! Every provider call goes through [`Calls::retry`], which applies one retry policy for sync
+//! and the outbox. It backs off with jitter on network errors, 5xx and rate limits, honors the
+//! provider's retry hints, and refreshes the token once on 401. Before it goes out, a call spends
+//! its quota units from the account's [`Budget`], which paces calls under the provider's quota and
+//! holds them while the provider is rate limiting the account. How each call ends tells the
+//! account's [`Network`] what's down and what's back. Gmail's calls are [`Api::call`], which reads
+//! Gmail's errors (`Precondition check failed` is worth retrying, for one).
 
+use std::future::IntoFuture;
 use std::path::Path;
 use std::time::Duration;
 
@@ -13,11 +15,19 @@ use jiff::{SignedDuration, Timestamp};
 use serde::de::DeserializeOwned;
 
 use crate::connection::{Connection, Debounce, Network, Outage};
-use crate::error::Error;
+use crate::error::{Error, ProviderError};
 use crate::quota::{Budget, Lane, MAX_WAIT, Quota};
 
 pub(crate) struct Api {
     client: Client,
+    calls: Calls,
+}
+
+/// An account's retry policy, quota and connection, which every call to its provider goes
+/// through.
+pub(crate) struct Calls {
+    /// The provider, as the log names it.
+    service: &'static str,
     /// The first retry's delay. Later ones double.
     base: Duration,
     budget: Budget,
@@ -28,36 +38,40 @@ pub(crate) struct Api {
 #[derive(Debug)]
 pub(crate) enum Failure {
     /// No response at all.
-    Offline(gmail::Error),
-    /// Gmail is rate limiting the account and takes calls again at this time, which is later
-    /// than a call waits.
+    Offline(ProviderError),
+    /// The provider is rate limiting the account and takes calls again at this time, which is
+    /// later than a call waits.
     Throttled(Timestamp),
     /// Gmail won't send mail for the account until this time (its sending limit,
     /// `(Mail sending)`), which is later than a call waits. Only sending is held, and the
     /// account's other calls go on.
     SendingLimited(Timestamp),
     /// 401 even with a fresh token.
-    Unauthorized(gmail::Error),
+    Unauthorized(ProviderError),
     /// Worth retrying later (5xx and the like), but retries ran out.
-    Transient(gmail::Error),
+    Transient(ProviderError),
     /// Retrying won't help (4xx).
-    Permanent(gmail::Error),
+    Permanent(ProviderError),
 }
 
 impl Failure {
-    /// Gmail said the resource doesn't exist (404, or 400 `Invalid id value`).
+    /// The provider said the resource doesn't exist (404; Gmail's 400 `Invalid id value`,
+    /// Graph's 400 `ErrorInvalidIdMalformed`).
     pub fn is_not_found(&self) -> bool {
         match self {
-            Self::Permanent(error) => {
+            Self::Permanent(ProviderError::Gmail(error)) => {
                 error.is_not_found()
                     || matches!(error, gmail::Error::Api(api) if api.message.contains("Invalid id value"))
+            }
+            Self::Permanent(ProviderError::Outlook(error)) => {
+                error.is_not_found() || error.code() == Some("ErrorInvalidIdMalformed")
             }
             _ => false,
         }
     }
 
-    /// Gmail refused the call in a way retrying won't change (a 4xx other than rate limits
-    /// and credentials).
+    /// The provider refused the call in a way retrying won't change (a 4xx other than rate
+    /// limits and credentials).
     pub fn is_permanent(&self) -> bool {
         matches!(self, Self::Permanent(_))
     }
@@ -65,10 +79,13 @@ impl Failure {
     /// Gmail won't send what was asked for in one answer (a thread too large for `threads.get`,
     /// 500 `responseTooLarge`).
     pub fn is_too_large(&self) -> bool {
-        matches!(self, Self::Permanent(gmail::Error::Api(api)) if too_large(api))
+        let Self::Permanent(ProviderError::Gmail(gmail::Error::Api(api))) = self else {
+            return false;
+        };
+        too_large(api)
     }
 
-    /// Gmail's error message, for logs and failure reports.
+    /// The provider's error message, for logs and failure reports.
     pub fn message(&self) -> String {
         match self {
             Self::Throttled(until) => format!("rate limited until {until}"),
@@ -87,17 +104,158 @@ impl From<Failure> for Error {
             Failure::Offline(error) => Self::Offline(error),
             Failure::Throttled(until) | Failure::SendingLimited(until) => Self::Throttled { until },
             Failure::Unauthorized(error) => Self::Unauthorized(error),
-            Failure::Transient(error) | Failure::Permanent(error) => Self::Gmail(error),
+            Failure::Transient(error) | Failure::Permanent(error) => error.into(),
         }
     }
 }
 
-enum Kind {
+/// What a provider's error says about retrying the call.
+pub(crate) enum Kind {
     Network,
-    RateLimited(Option<Duration>),
+    /// Rate limited, asked to wait `after`. A `sending` limit holds only sending.
+    RateLimited {
+        after: Option<Duration>,
+        sending: bool,
+    },
     Unauthorized,
     Transient,
     Permanent,
+}
+
+impl Calls {
+    /// The policy for `service`'s calls, paced by `budget`, for a store in `dir` whose outages
+    /// end as `debounce` says.
+    pub fn new(
+        service: &'static str,
+        base: Duration,
+        budget: Budget,
+        debounce: Debounce,
+        dir: &Path,
+    ) -> Self {
+        Self {
+            service,
+            base,
+            budget,
+            network: Network::new(debounce, dir),
+        }
+    }
+
+    /// The connection to the provider, as calls have found it.
+    pub fn connection(&self) -> tokio::sync::watch::Receiver<Connection> {
+        self.network.subscribe()
+    }
+
+    /// Something other than a call found `outage`.
+    pub fn down(&self, outage: Outage) {
+        self.network.down(outage);
+    }
+
+    /// A call got through: a mail call (`mail`) answers for every service, another for the
+    /// network and sign-in alone.
+    pub fn reached(&self, mail: bool) {
+        self.network.reached(mail);
+    }
+
+    /// Pauses the account's budget for `wait` after an inner batch item was rate limited.
+    pub fn pushback(&self, wait: Duration) -> Timestamp {
+        self.budget.pushback(wait)
+    }
+
+    /// Runs the call `make` builds, trying up to `attempts` times, each spending `units` of it
+    /// from the budget in `lane` (no lane spends nothing, for APIs whose quotas are their own).
+    /// `classify` reads the provider's errors.
+    pub async fn retry<C, T, E>(
+        &self,
+        lane: Option<Lane>,
+        attempts: u32,
+        mut make: impl FnMut() -> C,
+        units: impl Fn(&C) -> u32,
+        classify: impl Fn(&E) -> Kind,
+    ) -> Result<T, Failure>
+    where
+        C: IntoFuture<Output = Result<T, E>>,
+        E: Into<ProviderError> + std::fmt::Display,
+    {
+        let service = self.service;
+        let mut refreshed = false;
+        let mut attempt = 0;
+        loop {
+            let call = make();
+            // Held until the call ends, when the budget caps the calls in flight.
+            let _slot = match lane {
+                Some(lane) => Some(
+                    self.budget
+                        .spend(lane, units(&call))
+                        .await
+                        .map_err(Failure::Throttled)?,
+                ),
+                None => None,
+            };
+            attempt += 1;
+            let error = match call.await {
+                Ok(value) => {
+                    if lane.is_some() {
+                        self.budget.settled();
+                    }
+                    return Ok(value);
+                }
+                Err(error) => error,
+            };
+            let wait = match classify(&error) {
+                // The client has handed the rejected token back, so the retry gets a fresh one.
+                Kind::Unauthorized if !refreshed => {
+                    log::info!("{service} rejected the token; retrying once with a fresh one");
+                    refreshed = true;
+                    attempt -= 1;
+                    continue;
+                }
+                Kind::Unauthorized => return Err(Failure::Unauthorized(error.into())),
+                Kind::Permanent => return Err(Failure::Permanent(error.into())),
+                Kind::RateLimited { after, sending } => {
+                    let wait = after.unwrap_or_else(|| self.delay(attempt));
+                    // A sending limit holds only sending, for hours at a time, and pauses nothing
+                    // else.
+                    if lane.is_some() && !sending {
+                        // The retry, like every other call, waits for the pause in `spend`.
+                        let until = self.budget.pushback(wait);
+                        if attempt >= attempts {
+                            return Err(Failure::Throttled(until));
+                        }
+                        log::debug!(
+                            "{service} rate limited a call ({error}); retrying after {until}"
+                        );
+                        continue;
+                    }
+                    if wait > MAX_WAIT || attempt >= attempts {
+                        return Err(if sending {
+                            Failure::SendingLimited(from_now(wait))
+                        } else {
+                            Failure::Throttled(from_now(wait))
+                        });
+                    }
+                    wait
+                }
+                Kind::Network if attempt >= attempts => {
+                    return Err(Failure::Offline(error.into()));
+                }
+                Kind::Transient if attempt >= attempts => {
+                    return Err(Failure::Transient(error.into()));
+                }
+                Kind::Network | Kind::Transient => self.delay(attempt),
+            };
+            log::debug!("{service} call failed ({error}); retrying in {wait:?}");
+            tokio::time::sleep(wait).await;
+        }
+    }
+
+    /// `min(32 s, base × 2^(n−1) + jitter(0..base))`.
+    fn delay(&self, attempt: u32) -> Duration {
+        let exponential = self
+            .base
+            .saturating_mul(2u32.saturating_pow(attempt.saturating_sub(1).min(16)));
+        let jitter = self.base.mul_f64(random_unit());
+        (exponential + jitter).min(MAX_WAIT)
+    }
 }
 
 impl Api {
@@ -112,15 +270,13 @@ impl Api {
     ) -> Self {
         Self {
             client,
-            base,
-            budget: Budget::new(quota),
-            network: Network::new(debounce, dir),
+            calls: Calls::new("Gmail", base, Budget::new("Gmail", quota), debounce, dir),
         }
     }
 
     /// The connection to Gmail, as calls have found it.
     pub fn connection(&self) -> tokio::sync::watch::Receiver<Connection> {
-        self.network.subscribe()
+        self.calls.connection()
     }
 
     /// Asks for Gmail's profile, once (`users.getProfile`, 1 unit).
@@ -132,7 +288,12 @@ impl Api {
 
     /// Something other than a Gmail call found `outage`.
     pub fn down(&self, outage: Outage) {
-        self.network.down(outage);
+        self.calls.down(outage);
+    }
+
+    /// Another API on the same account answered (`mail == false`), clearing network/auth outages.
+    pub fn reached(&self, mail: bool) {
+        self.calls.reached(mail);
     }
 
     /// Runs the Gmail call `make` builds for `lane`, trying up to `attempts` times. Sync passes
@@ -159,22 +320,6 @@ impl Api {
         self.send(&self.client, None, attempts, make).await
     }
 
-    /// [`request`](Self::request) through `client`, which belongs to another account (a
-    /// calendar account), on this account's connection and retry policy.
-    pub async fn request_with<'a, T: DeserializeOwned + 'a>(
-        &'a self,
-        client: &'a Client,
-        attempts: u32,
-        make: impl FnMut(&'a Client) -> Call<'a, T>,
-    ) -> Result<T, Failure> {
-        self.send(client, None, attempts, make).await
-    }
-
-    /// The account's own client.
-    pub fn client(&self) -> &Client {
-        &self.client
-    }
-
     /// Runs the call through `client`, and tells the connection how it ended. A Gmail call
     /// (`lane` set) reports on every service, and another API's call reports only on the network
     /// and Google's sign-in.
@@ -183,15 +328,18 @@ impl Api {
         client: &'a Client,
         lane: Option<Lane>,
         attempts: u32,
-        make: impl FnMut(&'a Client) -> Call<'a, T>,
+        mut make: impl FnMut(&'a Client) -> Call<'a, T>,
     ) -> Result<T, Failure> {
         let gmail = lane.is_some();
-        let result = self.retry(client, lane, attempts, make).await;
+        let result = self
+            .calls
+            .retry(lane, attempts, || make(client), Call::units, classify)
+            .await;
         match &result {
-            Ok(_) => self.network.reached(gmail),
+            Ok(_) => self.calls.reached(gmail),
             Err(failure) => {
                 if let Some(outage) = self.outage(failure, gmail) {
-                    self.network.down(outage);
+                    self.calls.down(outage);
                 }
             }
         }
@@ -203,7 +351,7 @@ impl Api {
     /// down. Their rate limits are their own, not Gmail's throttling.
     fn outage(&self, failure: &Failure, gmail: bool) -> Option<Outage> {
         match failure {
-            Failure::Offline(gmail::Error::Http(http))
+            Failure::Offline(ProviderError::Gmail(gmail::Error::Http(http)))
                 if http.url() == Some(&self.client.endpoints().oauth.token) =>
             {
                 Some(Outage::Auth)
@@ -211,7 +359,7 @@ impl Api {
             Failure::Offline(_) if gmail => Some(Outage::Gmail),
             Failure::Offline(_) => Some(Outage::Offline),
             Failure::Throttled(_) if gmail => Some(Outage::Throttled),
-            Failure::Permanent(gmail::Error::Api(api))
+            Failure::Permanent(ProviderError::Gmail(gmail::Error::Api(api)))
                 if gmail && api.code == 400 && mentions(api, "Mail service not enabled") =>
             {
                 Some(Outage::GmailDisabled)
@@ -219,97 +367,9 @@ impl Api {
             _ => None,
         }
     }
-
-    async fn retry<'a, T: DeserializeOwned + 'a>(
-        &'a self,
-        client: &'a Client,
-        lane: Option<Lane>,
-        attempts: u32,
-        mut make: impl FnMut(&'a Client) -> Call<'a, T>,
-    ) -> Result<T, Failure> {
-        let mut refreshed = false;
-        let mut attempt = 0;
-        loop {
-            let call = make(client);
-            if let Some(lane) = lane {
-                self.budget
-                    .spend(lane, call.units())
-                    .await
-                    .map_err(Failure::Throttled)?;
-            }
-            attempt += 1;
-            let error = match call.await {
-                Ok(value) => {
-                    if lane.is_some() {
-                        self.budget.settled();
-                    }
-                    return Ok(value);
-                }
-                Err(error) => error,
-            };
-            let wait = match classify(&error) {
-                // The client has handed the rejected token back, so the retry gets a fresh one.
-                Kind::Unauthorized if !refreshed => {
-                    log::info!("Gmail rejected the token; retrying once with a fresh one");
-                    refreshed = true;
-                    attempt -= 1;
-                    continue;
-                }
-                Kind::Unauthorized => return Err(Failure::Unauthorized(error)),
-                Kind::Permanent => return Err(Failure::Permanent(error)),
-                Kind::RateLimited(after) => {
-                    let wait = after.unwrap_or_else(|| self.delay(attempt));
-                    // Gmail's sending limit holds only sending, for hours at a time, and pauses
-                    // nothing else.
-                    let sending = sending_limit(&error);
-                    if lane.is_some() && !sending {
-                        // The retry, like every other Gmail call, waits for the pause in `spend`.
-                        let until = self.budget.pushback(wait);
-                        if attempt >= attempts {
-                            return Err(Failure::Throttled(until));
-                        }
-                        log::debug!("Gmail rate limited a call ({error}); retrying after {until}");
-                        continue;
-                    }
-                    if wait > MAX_WAIT || attempt >= attempts {
-                        return Err(if sending {
-                            Failure::SendingLimited(from_now(wait))
-                        } else {
-                            Failure::Throttled(from_now(wait))
-                        });
-                    }
-                    wait
-                }
-                Kind::Network if attempt >= attempts => return Err(Failure::Offline(error)),
-                Kind::Transient if attempt >= attempts => return Err(Failure::Transient(error)),
-                Kind::Network | Kind::Transient => self.delay(attempt),
-            };
-            log::debug!("Gmail call failed ({error}); retrying in {wait:?}");
-            tokio::time::sleep(wait).await;
-        }
-    }
-
-    /// When the outbox retries after `failures` failures, which is
-    /// `min(120 s, base × 2^failures)` from now.
-    pub fn postpone(&self, failures: u32) -> Timestamp {
-        from_now(
-            self.base
-                .saturating_mul(2u32.saturating_pow(failures.min(16)))
-                .min(Duration::from_secs(120)),
-        )
-    }
-
-    /// `min(32 s, base × 2^(n−1) + jitter(0..base))`.
-    fn delay(&self, attempt: u32) -> Duration {
-        let exponential = self
-            .base
-            .saturating_mul(2u32.saturating_pow(attempt.saturating_sub(1).min(16)));
-        let jitter = self.base.mul_f64(random_unit());
-        (exponential + jitter).min(MAX_WAIT)
-    }
 }
 
-fn classify(error: &gmail::Error) -> Kind {
+pub(crate) fn classify(error: &gmail::Error) -> Kind {
     match error {
         gmail::Error::Http(http) => match http.status() {
             None => Kind::Network,
@@ -322,13 +382,9 @@ fn classify(error: &gmail::Error) -> Kind {
             let says = |needle: &str| mentions(api, needle);
             match api.code {
                 401 => Kind::Unauthorized,
-                429 => Kind::RateLimited(retry_after(api)),
-                403 if says("rateLimitExceeded") || says("Quota exceeded") => {
-                    Kind::RateLimited(retry_after(api))
-                }
-                503 if says("CommandConcurrencyLimitReached") => {
-                    Kind::RateLimited(retry_after(api))
-                }
+                429 => rate_limited(api),
+                403 if says("rateLimitExceeded") || says("Quota exceeded") => rate_limited(api),
+                503 if says("CommandConcurrencyLimitReached") => rate_limited(api),
                 // The thread is as large every time, so the caller asks for it another way.
                 _ if too_large(api) => Kind::Permanent,
                 500..=599 => Kind::Transient,
@@ -342,11 +398,14 @@ fn classify(error: &gmail::Error) -> Kind {
     }
 }
 
-/// Gmail's daily sending limit. For hours, Gmail answers sends with a rate limit "mentioning
-/// `(Mail sending)`" (the Gmail API's "Resolve errors", 429), while the account's other calls
-/// still go.
-fn sending_limit(error: &gmail::Error) -> bool {
-    matches!(error, gmail::Error::Api(api) if mentions(api, "(Mail sending)"))
+/// Gmail rate limiting a call, as long as it asks. Its daily sending limit holds only sending:
+/// for hours, Gmail answers sends with a rate limit "mentioning `(Mail sending)`" (the Gmail API's
+/// "Resolve errors", 429), while the account's other calls still go.
+fn rate_limited(api: &gmail::ApiError) -> Kind {
+    Kind::RateLimited {
+        after: retry_after(api),
+        sending: mentions(api, "(Mail sending)"),
+    }
 }
 
 /// Gmail's 500 for an answer too large to send (`responseTooLarge`).
@@ -389,7 +448,8 @@ fn retry_after(api: &gmail::ApiError) -> Option<Duration> {
     in_message().or_else(in_details)
 }
 
-fn from_now(wait: Duration) -> Timestamp {
+/// `wait` from now, or the end of time.
+pub(crate) fn from_now(wait: Duration) -> Timestamp {
     Timestamp::now()
         .checked_add(SignedDuration::try_from(wait).unwrap_or(SignedDuration::MAX))
         .unwrap_or(Timestamp::MAX)

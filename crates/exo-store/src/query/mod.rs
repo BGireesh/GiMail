@@ -14,6 +14,7 @@
 mod eval;
 mod fts;
 mod gmail;
+mod kql;
 mod parse;
 mod structure;
 
@@ -21,6 +22,7 @@ use std::collections::HashMap;
 
 pub(crate) use fts::{FTS_ANCHOR, Fts, Recheck, tokenize_email};
 pub(crate) use structure::{Cond, NoteTerm, Structure};
+pub(crate) use kql::participants as participants_kql;
 
 use self::eval::Matcher;
 use self::gmail::{GmailPart, gmail_part, gmail_query};
@@ -371,6 +373,20 @@ impl SearchQuery {
     pub fn to_gmail(&self, labels: &LabelIndex, me: &[String], important: &str) -> String {
         let body = gmail_query(&self.tree, false, labels, me, Some(important));
         format!("-in:{DRAFT} -in:{CHAT} {body}").trim().to_owned()
+    }
+
+    /// The query as KQL for Graph's `$search`, in its double quotes, or `None` when KQL can ask
+    /// nothing of it (labels, read state…) and every message is a candidate. What KQL can't ask
+    /// is checked with [`may_match`](Self::may_match).
+    pub(crate) fn to_kql(&self, me: &[String]) -> Option<String> {
+        kql::search(&self.tree, me)
+    }
+
+    /// Whether a message carrying `carried` (its label keys and lists) may match: the labels and
+    /// categories the query names are checked, and the rest is what [`to_kql`](Self::to_kql)
+    /// asked.
+    pub(crate) fn may_match(&self, carried: &[&str], labels: &LabelIndex) -> bool {
+        kql::may_match(&self.tree, carried, labels)
     }
 
     /// The words and subject phrases that show in bold in a result's subject and snippet.

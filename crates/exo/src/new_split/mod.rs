@@ -310,7 +310,7 @@ pub(crate) fn definitions(
 /// What a label is called. That's its Gmail name, except for Trash and Spam, which take the app's
 /// names for them.
 fn label_name(label: &Label) -> String {
-    crate::triage_copy::label_name(&label.id, std::slice::from_ref(label)).to_owned()
+    crate::triage_copy::label_name(&label.id, std::slice::from_ref(label), false).to_owned()
 }
 
 /// A definition with brackets outside quotes, which a definition can't be added to.

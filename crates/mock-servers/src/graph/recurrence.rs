@@ -29,7 +29,8 @@ const INDEXES: &[(i8, &str)] = &[
     (-1, "last"),
 ];
 
-fn day_name(weekday: Weekday) -> &'static str {
+/// A weekday as Outlook's `dayOfWeek` names it.
+pub fn day_name(weekday: Weekday) -> &'static str {
     DAYS.iter()
         .find(|(.., w)| *w == weekday)
         .map_or("sunday", |(_, name, _)| name)

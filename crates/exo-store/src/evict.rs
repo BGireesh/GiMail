@@ -477,7 +477,7 @@ async fn evict_rows(
                 .map(|row| (row.message_id, row.part_id)),
         );
     }
-    crate::provider::delete_messages(exec, &ids).await?;
+    crate::truth::delete_messages(exec, &ids).await?;
     ThreadRow::filter_by_id(&quiet.thread)
         .delete()
         .exec(exec)

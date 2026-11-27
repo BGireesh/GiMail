@@ -13,9 +13,12 @@ pub enum Error {
         /// Whether `path` came from `EXO_GOOGLE_OAUTH_CLIENT`.
         from_env: bool,
     },
-    /// The OAuth client file can't be read or isn't a Desktop app client.
-    #[error("the Google OAuth client file at {} {reason}", path.display())]
+    /// An OAuth client file can't be read or isn't a client Exo can use: Google's isn't a Desktop
+    /// app client, or Microsoft's names no client ID.
+    #[error("the OAuth client file at {} {reason}", path.display())]
     InvalidClient {
+        /// Which provider's client file was invalid.
+        provider: crate::Provider,
         /// The file.
         path: PathBuf,
         /// What's wrong with it.
@@ -24,40 +27,52 @@ pub enum Error {
     /// The system browser couldn't be opened.
     #[error("couldn't open the browser: {0}")]
     Browser(#[source] std::io::Error),
-    /// The loopback listener for Google's redirect failed.
-    #[error("waiting for Google's redirect: {0}")]
+    /// The loopback listener for the sign-in redirect failed.
+    #[error("waiting for the sign-in redirect: {0}")]
     Loopback(#[source] std::io::Error),
     /// The browser didn't come back within [`crate::TIMEOUT`].
     #[error("sign-in timed out")]
     TimedOut,
-    /// The user declined on Google's consent screen.
+    /// The user declined on the consent screen.
     #[error("access was denied")]
     AccessDenied,
-    /// Google redirected back with an error other than `access_denied`.
-    #[error("Google refused the sign-in: {error}")]
+    /// The sign-in redirected back with an error other than a declined consent.
+    #[error("the sign-in was refused: {error}")]
     Authorization {
-        /// Google's error code, e.g. `admin_policy_enforced`.
+        /// The provider's error code, e.g. Google's `admin_policy_enforced`.
         error: String,
     },
-    /// The user unticked some of [`crate::SCOPES`] on the consent screen.
-    #[error("Google granted only some permissions; missing {}", .0.join(", "))]
+    /// Microsoft wants consent for Exo that the user can't give, so an administrator of their
+    /// organization must approve it, or the user turned consent down
+    /// ([`outlook::identity::CONSENT_ERRORS`]). Nothing was saved.
+    #[error("Microsoft needs consent for Exo (AADSTS{code})")]
+    ConsentRequired {
+        /// The `AADSTS` code: 65001 and 90094 (an administrator must consent), 90093 (the user
+        /// may not), 65004 (the user declined).
+        code: u32,
+    },
+    /// The provider granted only some of the permissions asked for: the user unticked some of
+    /// [`crate::SCOPES`] or [`crate::CALENDAR_SCOPES`] on Google's consent screen, or Microsoft's
+    /// grant lacks some of [`crate::MICROSOFT_SCOPES`] or [`crate::MICROSOFT_CALENDAR_SCOPES`].
+    #[error("only some permissions were granted; missing {}", .0.join(", "))]
     MissingScopes(Vec<String>),
-    /// The Google account has no Gmail mailbox.
-    #[error("this Google account has no Gmail mailbox")]
+    /// The account has no mailbox: a Google account without Gmail, or a Microsoft account without
+    /// an Exchange Online one.
+    #[error("this account has no mailbox")]
     NoMailbox,
     /// The code exchange returned no refresh token.
-    #[error("Google returned no refresh token")]
+    #[error("the sign-in returned no refresh token")]
     NoRefreshToken,
-    /// Google's grant for this account was revoked or expired, so the user has to sign in again.
-    #[error("{email} needs to sign in again")]
+    /// The provider revoked or expired the account's grant, so the user has to sign in again.
+    #[error("{account} needs to sign in again")]
     SignInAgain {
-        /// The account.
-        email: String,
+        /// The account's [`Account::key`](crate::Account::key).
+        account: String,
     },
-    /// No account with this address has signed in.
+    /// No account with this key has signed in.
     #[error("no account {0}")]
     UnknownAccount(String),
-    /// A sign-in asked for one account and Google signed in another. Nothing was saved.
+    /// A sign-in asked for one account and the provider signed in another. Nothing was saved.
     #[error("signed in another account than {expected}")]
     WrongAccount {
         /// The account asked for.
@@ -66,6 +81,9 @@ pub enum Error {
     /// Talking to Google failed.
     #[error(transparent)]
     Google(#[from] gmail::Error),
+    /// Talking to Microsoft failed.
+    #[error(transparent)]
+    Microsoft(#[from] outlook::Error),
     /// The account list couldn't be read or written.
     #[error("account list at {}: {source}", path.display())]
     Accounts {

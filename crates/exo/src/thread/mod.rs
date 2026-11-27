@@ -1094,6 +1094,7 @@ impl ThreadView {
                     .as_ref()
                     .is_some_and(|drafts| drafts.has_form(&item.id)),
                 offline: !self.action.online,
+                outlook: self.action.outlook,
                 full_names: self.action.full_names,
                 reply_labels: is_focus && self.new_account(),
                 notes: if notes.placement() == NotesPlacement::Pane {
@@ -1285,7 +1286,9 @@ impl ThreadView {
             else {
                 continue;
             };
-            if let Some(url) = message::failed_tooltip(ui, &tooltips, layout, card, message) {
+            if let Some(url) =
+                message::failed_tooltip(ui, &tooltips, layout, card, message, self.action.outlook)
+            {
                 actions.push(Action::OpenUrl(url.to_owned()));
             }
         }

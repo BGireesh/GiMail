@@ -13,7 +13,7 @@ const DESCRIPTION: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 12.0
 const STACKED_BELOW: f32 = 280.0;
 
 /// The tips for a Gmail account, without `is:shared` (team accounts only).
-const TIPS: [(&str, &str); 15] = [
+const GMAIL_TIPS: &[(&str, &str)] = &[
     ("from:nicole", "from Nicole"),
     ("to:roman", "to Roman"),
     ("\"be brilliant\"", "contains \"be brilliant\""),
@@ -31,24 +31,47 @@ const TIPS: [(&str, &str); 15] = [
     ("newer_than:1m", "1 month ago or later"),
 ];
 
+/// The tips for an Outlook account: `in this folder`, `is:flagged`, and without Gmail's relative
+/// age operators.
+const OUTLOOK_TIPS: &[(&str, &str)] = &[
+    ("from:nicole", "from Nicole"),
+    ("to:roman", "to Roman"),
+    ("\"be brilliant\"", "contains \"be brilliant\""),
+    ("has:attachment", "with attachments"),
+    ("subject:lunch", "subject contains \"lunch\""),
+    ("in:sent", "in Sent"),
+    ("in:inbox", "in the Inbox"),
+    ("-in:inbox", "not in the Inbox"),
+    ("in:fundraising", "in this folder"),
+    ("is:unread", "unread conversations"),
+    ("is:flagged", "flagged conversations"),
+    ("before:2017/06/01", "before June 2017"),
+    ("after:2017/06/01", "June 2017 or later"),
+];
+
+fn tips(outlook: bool) -> &'static [(&'static str, &'static str)] {
+    if outlook { OUTLOOK_TIPS } else { GMAIL_TIPS }
+}
+
 /// The footer: `padding: 22px 2rem 12px` around 28px buttons.
 const FOOTER: f32 = 62.0;
 
 /// Whether Tips overflow `pane` above its footer, which turns on the line over the footer
 /// (set as Tips show and kept while searching).
-pub(crate) fn overflow(pane: Rect, rem: f32) -> bool {
+pub(crate) fn overflow(pane: Rect, rem: f32, outlook: bool) -> bool {
+    let tips = tips(outlook);
     let stacked = pane.width() - 4.0 * rem < STACKED_BELOW;
     let tip = if stacked {
         PROMPT.line_height + DESCRIPTION.line_height
     } else {
         PROMPT.line_height
     };
-    let height = 8.0 + TIPS.len() as f32 * tip + (TIPS.len() - 1) as f32 * 16.0;
+    let height = 8.0 + tips.len() as f32 * tip + (tips.len() - 1) as f32 * 16.0;
     height > pane.bottom() - FOOTER - (pane.top() + 32.0 + 24.0 + 24.0)
 }
 
 /// Paints Tips in `pane` (the right pane inside its border), the list cut off above the footer.
-pub(crate) fn show(painter: &Painter, pane: Rect, rem: f32) {
+pub(crate) fn show(painter: &Painter, pane: Rect, rem: f32, outlook: bool) {
     let bottom = pane.bottom() - FOOTER;
     let palette = exo_ui::palette(painter.ctx());
     // `padding: 32px 2rem`; the header's 24px line, `padding-bottom: 24px`, then the list's
@@ -71,7 +94,7 @@ pub(crate) fn show(painter: &Painter, pane: Rect, rem: f32) {
     let painter = painter.with_clip_rect(list.intersect(painter.clip_rect()));
     let stacked = width < STACKED_BELOW;
     let mut top = list.top() + 8.0;
-    for (at, (prompt, description)) in TIPS.iter().enumerate() {
+    for (at, (prompt, description)) in tips(outlook).iter().enumerate() {
         // `margin-top: 16px`, none for the first.
         if at > 0 {
             top += 16.0;
