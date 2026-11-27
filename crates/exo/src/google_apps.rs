@@ -1,17 +1,19 @@
-//! The palette's Google apps rows: Gmail, or the open message in Gmail, Google's other apps, and
-//! Gmail's filter, alias and label settings, each opened in the default browser as the account.
+//! The palette's provider app rows: Gmail, Google's other apps and Gmail settings on Google
+//! accounts, or `open Outlook` on Microsoft accounts.
 
 use exo_commands::{Command, Commands};
 
 use crate::{commands::Action, thread::ThreadView};
 
-/// What a Google apps row opens.
+/// What a provider app row opens.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum App {
     /// `open Gmail`.
     Gmail,
     /// `open in Gmail`: the message (or conversation) with this Gmail id.
     Message(String),
+    /// `open Outlook`.
+    Outlook,
     Docs,
     Drive,
     Sheets,
@@ -25,12 +27,30 @@ pub enum App {
     LabelSettings,
 }
 
+/// Outlook Web origin for `email`: personal Outlook domains open on `outlook.live.com`, and
+/// work/school accounts open on `outlook.office.com`.
+pub(crate) fn outlook_origin(email: &str) -> &'static str {
+    let domain = email
+        .rsplit_once('@')
+        .map_or("", |(_, domain)| domain)
+        .to_ascii_lowercase();
+    if matches!(
+        domain.as_str(),
+        "outlook.com" | "hotmail.com" | "live.com" | "msn.com"
+    ) {
+        "https://outlook.live.com"
+    } else {
+        "https://outlook.office.com"
+    }
+}
+
 impl App {
     /// Its row's id and title.
     fn row(&self) -> (&'static str, &'static str) {
         match self {
             Self::Gmail => ("OPEN_GMAIL", "open Gmail"),
             Self::Message(_) => ("OPEN_IN_GMAIL", "open in Gmail"),
+            Self::Outlook => ("OPEN_OUTLOOK", "open Outlook"),
             Self::Docs => ("OPEN_GOOGLE_DOCS", "open Google Docs"),
             Self::Drive => ("OPEN_GOOGLE_DRIVE", "open Google Drive"),
             Self::Sheets => ("OPEN_GOOGLE_SHEETS", "open Google Sheets"),
@@ -51,11 +71,15 @@ impl App {
     /// Where it opens for `email`'s account. `nonce` makes a message's link new each time
     /// (`_shn`, a UUID), so Gmail goes to it even when it's already open there.
     pub fn url(&self, email: &str, nonce: &str) -> String {
+        if matches!(self, Self::Outlook) {
+            return format!("{}/mail/?shxr=0", outlook_origin(email));
+        }
         let base = match self {
             Self::Gmail => "https://mail.google.com/mail/?shxr=0".to_owned(),
             Self::Message(id) => {
                 format!("https://mail.google.com/mail/?shxr=0&_shn={nonce}#all/{id}")
             }
+            Self::Outlook => unreachable!("handled above"),
             Self::Docs => "https://docs.google.com".to_owned(),
             Self::Drive => "https://drive.google.com/drive/".to_owned(),
             Self::Sheets => "https://docs.google.com/spreadsheets/".to_owned(),
@@ -106,9 +130,19 @@ pub fn target(thread: &ThreadView) -> Option<&str> {
     (!draft).then_some(id)
 }
 
-/// Registers the rows. `open` is what an open thread opens in Gmail ([`target`]). Without one,
-/// the first row opens Gmail.
-pub fn register(commands: &mut Commands<Action>, open: Option<&str>) {
+/// Registers the provider app rows. On Outlook accounts, only `open Outlook` is registered. On
+/// Google accounts, `open` is what an open thread opens in Gmail ([`target`]); without one, the
+/// first row opens Gmail.
+pub fn register(commands: &mut Commands<Action>, open: Option<&str>, outlook: bool) {
+    if outlook {
+        let (id, title) = App::Outlook.row();
+        commands.add(
+            Command::new(id, title, Action::GoogleApp(App::Outlook))
+                .aliases(["Outlook", "open Exchange"])
+                .icon("data/microsoft-logo"),
+        );
+        return;
+    }
     let first = open.map_or(App::Gmail, |id| App::Message(id.to_owned()));
     let apps = [
         first,

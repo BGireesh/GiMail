@@ -1,5 +1,6 @@
-//! Google's installed-app flow (RFC 8252 with PKCE): the system browser, a loopback redirect, the
-//! code exchange, and checks that the account can be used.
+//! The installed-app flow (RFC 8252 with PKCE) both providers use: the system browser and a
+//! loopback redirect. Then Google's code exchange, and checks that the account can be used.
+//! Microsoft's are in [`crate::microsoft`].
 
 use std::io;
 use std::net::Ipv4Addr;
@@ -13,6 +14,7 @@ use jiff::Timestamp;
 use tokio::net::TcpListener;
 use url::Url;
 
+use crate::accounts::Provider;
 use crate::tokens::Access;
 use crate::{Account, CALENDAR_SCOPES, Error, SCOPES, loopback};
 
@@ -23,17 +25,19 @@ pub const TIMEOUT: Duration = Duration::from_secs(10 * 60);
 /// What an account signs in for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Purpose {
-    /// Its mail, and everything else Exo does with it ([`SCOPES`]).
+    /// Its mail, and everything else Exo does with it.
     Mail,
-    /// Its calendars alone ([`CALENDAR_SCOPES`]), for another account's calendar.
+    /// Its calendars alone, for another account's calendar.
     Calendar,
 }
 
 impl Purpose {
-    fn scopes(self) -> &'static [&'static str] {
-        match self {
-            Self::Mail => SCOPES,
-            Self::Calendar => CALENDAR_SCOPES,
+    pub(crate) fn scopes(self, provider: Provider) -> &'static [&'static str] {
+        match (provider, self) {
+            (Provider::Google, Self::Mail) => SCOPES,
+            (Provider::Google, Self::Calendar) => CALENDAR_SCOPES,
+            (Provider::Microsoft, Self::Mail) => crate::MICROSOFT_SCOPES,
+            (Provider::Microsoft, Self::Calendar) => crate::MICROSOFT_CALENDAR_SCOPES,
         }
     }
 }
@@ -45,7 +49,47 @@ pub(crate) struct Grant {
     pub access: Access,
 }
 
-/// Runs the flow for `purpose`: opens the browser at Google's consent screen, waits for the
+/// A sign-in attempt's end of the redirect: a listener on a free loopback port, and the `state`
+/// only this attempt's redirect carries.
+pub(crate) struct Loopback {
+    listener: TcpListener,
+    redirect_uri: String,
+    state: String,
+}
+
+impl Loopback {
+    /// Listens on 127.0.0.1, for a redirect URI naming `host` (`127.0.0.1` or `localhost`) and
+    /// the port.
+    pub(crate) async fn bind(host: &str) -> Result<Self, Error> {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+            .await
+            .map_err(Error::Loopback)?;
+        let port = listener.local_addr().map_err(Error::Loopback)?.port();
+        Ok(Self {
+            listener,
+            redirect_uri: format!("http://{host}:{port}"),
+            state: random_state(),
+        })
+    }
+
+    pub(crate) fn redirect_uri(&self) -> &str {
+        &self.redirect_uri
+    }
+
+    pub(crate) fn state(&self) -> &str {
+        &self.state
+    }
+
+    /// Waits up to [`TIMEOUT`] for this attempt's redirect, returning it and its connection.
+    pub(crate) async fn redirect(&self) -> Result<(Url, tokio::net::TcpStream), Error> {
+        tokio::time::timeout(TIMEOUT, loopback::receive(&self.listener, &self.state))
+            .await
+            .map_err(|_| Error::TimedOut)?
+            .map_err(Error::Loopback)
+    }
+}
+
+/// Runs Google's flow for `purpose`: opens the browser at Google's consent screen, waits for the
 /// redirect, exchanges the code, hands the grant to `commit`, and tells the browser how it went.
 pub(crate) async fn authorize<T>(
     oauth: &OAuthClient,
@@ -55,16 +99,17 @@ pub(crate) async fn authorize<T>(
     open: impl FnOnce(&Url) -> io::Result<()>,
     commit: impl FnOnce(Grant) -> Result<T, Error>,
 ) -> Result<T, Error> {
-    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
-        .await
-        .map_err(Error::Loopback)?;
-    let port = listener.local_addr().map_err(Error::Loopback)?.port();
     // The loopback IP rather than `localhost` (RFC 8252, section 8.3), which Google accepts on
     // any port for Desktop app clients.
-    let redirect_uri = format!("http://127.0.0.1:{port}");
+    let loopback = Loopback::bind("127.0.0.1").await?;
+    let redirect_uri = loopback.redirect_uri();
     let pkce = Pkce::generate();
-    let state = random_state();
-    let mut url = oauth.authorization_url(&redirect_uri, purpose.scopes(), &state, &pkce);
+    let mut url = oauth.authorization_url(
+        redirect_uri,
+        purpose.scopes(Provider::Google),
+        loopback.state(),
+        &pkce,
+    );
     {
         let mut query = url.query_pairs_mut();
         query.append_pair("include_granted_scopes", "true");
@@ -74,15 +119,12 @@ pub(crate) async fn authorize<T>(
     }
     open(&url).map_err(Error::Browser)?;
 
-    let (redirect, stream) = tokio::time::timeout(TIMEOUT, loopback::receive(&listener, &state))
-        .await
-        .map_err(|_| Error::TimedOut)?
-        .map_err(Error::Loopback)?;
-    let result = match exchange(oauth, endpoints, purpose, &redirect, &pkce, &redirect_uri).await {
+    let (redirect, stream) = loopback.redirect().await?;
+    let result = match exchange(oauth, endpoints, purpose, &redirect, &pkce, redirect_uri).await {
         Ok(grant) => commit(grant),
         Err(error) => Err(error),
     };
-    loopback::respond(stream, &result).await;
+    loopback::respond(stream, Provider::Google, &result).await;
     result
 }
 
@@ -116,7 +158,7 @@ async fn exchange(
     if let Some(granted) = &tokens.scope {
         let granted: Vec<&str> = granted.split_whitespace().collect();
         let missing: Vec<String> = purpose
-            .scopes()
+            .scopes(Provider::Google)
             .iter()
             .filter(|scope| !granted.contains(scope))
             .map(|scope| (*scope).to_owned())
@@ -164,8 +206,8 @@ async fn exchange(
     })
 }
 
-/// 128 random bits, base64url.
-fn random_state() -> String {
+/// 128 random bits, base64url: a sign-in's `state`, and Microsoft's `nonce`.
+pub(crate) fn random_state() -> String {
     let mut bytes = [0u8; 16];
     getrandom::fill(&mut bytes).expect("the OS random source is available");
     URL_SAFE_NO_PAD.encode(bytes)

@@ -74,7 +74,7 @@ impl Notice {
 /// What a click on a notification opens, in the account it came from.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Click {
-    /// The account's address.
+    /// The account's canonical key (email for Google, `"microsoft {email}"` for Microsoft).
     pub account: String,
     /// What opens there.
     pub open: Open,

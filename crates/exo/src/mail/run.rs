@@ -23,7 +23,12 @@ impl Mail {
         if threads.is_empty() || self.thread.is_some() {
             return;
         }
-        let entries = row_menu::entries(&threads, self.inbox.is_exact(), &self.list);
+        let entries = row_menu::entries(
+            &threads,
+            self.inbox.is_exact(),
+            &self.list,
+            self.account.is_outlook(),
+        );
         let items: Vec<desktop::context_menu::MenuItem> =
             entries.iter().map(|entry| entry.item.clone()).collect();
         let chosen = (self.context_menu.borrow_mut())(&items, at)
@@ -40,6 +45,7 @@ impl Mail {
             &self.snapshot.labels,
             self.snapshot.muted,
             self.folders.all(),
+            self.account.is_outlook(),
         )
     }
 

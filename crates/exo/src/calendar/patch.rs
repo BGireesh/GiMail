@@ -1,22 +1,37 @@
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{
+    LazyLock,
+    atomic::{AtomicU64, Ordering},
+};
 
-use gmail::calendar::{Event as ApiEvent, EventAttendee, EventDateTime, EventPerson};
+use exo_store::{
+    CalendarEvent, CalendarProviderKind, Conference, ConferenceKind, ConferencePatch,
+    EventAttendee, EventPatch, EventPerson, EventTime, OnlineMeetingKind, RsvpStatus,
+};
 use jiff::{SignedDuration, ToSpan, Zoned};
+use regex::Regex;
 
 use super::{
     event::Event,
     form::{Field, Guest, Meeting, Values},
 };
 
-/// The 1:1 titles a new event without guests is asked about.
-pub(super) const ONE_ON_ONE: [&str; 6] = [
-    r"(?i)\b1\s*[:x-]\s*1\b",
-    r"(?i)\b1\s+on\s+1\b",
-    r"(?i)\b[a-z0-9][a-z0-9.'&-]*\s*<>\s*[a-z0-9][a-z0-9.'&-]*\b",
-    r"(?i)\b[a-z0-9][a-z0-9.'&-]*\s+\+\s+[a-z0-9][a-z0-9.'&-]*\b",
-    r"(?i)^[a-z0-9][a-z0-9.'&-]*\s+and\s+[a-z0-9][a-z0-9.'&-]*$",
-    r"(?i)^[a-z0-9][a-z0-9.'&-]*\s*:\s*[a-z0-9][a-z0-9.'&-]*(?:\s+[a-z0-9][a-z0-9.'&-]*)?$",
-];
+/// The 1:1 title patterns a new event without guests is asked about, compiled once.
+static ONE_ON_ONE: LazyLock<[Regex; 6]> = LazyLock::new(|| {
+    [
+        r"(?i)\b1\s*[:x-]\s*1\b",
+        r"(?i)\b1\s+on\s+1\b",
+        r"(?i)\b[a-z0-9][a-z0-9.'&-]*\s*<>\s*[a-z0-9][a-z0-9.'&-]*\b",
+        r"(?i)\b[a-z0-9][a-z0-9.'&-]*\s+\+\s+[a-z0-9][a-z0-9.'&-]*\b",
+        r"(?i)^[a-z0-9][a-z0-9.'&-]*\s+and\s+[a-z0-9][a-z0-9.'&-]*$",
+        r"(?i)^[a-z0-9][a-z0-9.'&-]*\s*:\s*[a-z0-9][a-z0-9.'&-]*(?:\s+[a-z0-9][a-z0-9.'&-]*)?$",
+    ]
+    .map(|pattern| Regex::new(pattern).expect("valid 1:1 pattern"))
+});
+
+/// Whether `title` looks like a 1:1 meeting (`1:1`, `A <> B`, `A and B`, ...).
+pub(super) fn is_one_on_one(title: &str) -> bool {
+    ONE_ON_ONE.iter().any(|pattern| pattern.is_match(title))
+}
 
 /// Counts ids, in case the system's randomness is out.
 static NEXT_ID: AtomicU64 = AtomicU64::new(0);
@@ -35,7 +50,7 @@ pub(super) fn new_id() -> String {
 
 /// The form's values for `event`, with its notes as HTML for About's editor and a plain-text
 /// description's lines kept as lines.
-pub(super) fn values_of(event: &Event, source: &ApiEvent, me: &str) -> Values {
+pub(super) fn values_of(event: &Event, source: &CalendarEvent, me: &str) -> Values {
     let description = source.description.clone().unwrap_or_default();
     let about = if looks_like_html(&description) {
         description
@@ -45,35 +60,38 @@ pub(super) fn values_of(event: &Event, source: &ApiEvent, me: &str) -> Values {
             .map(|line| format!("<div>{}</div>", exo_mail::escape_html_text(line)))
             .collect()
     };
-    let meet = super::event::video_uri_of(source);
+    let meeting = match &source.conference {
+        Some(conf) if conf.pending => match conf.kind {
+            ConferenceKind::Teams => Meeting::NewTeams,
+            _ => Meeting::NewMeet,
+        },
+        _ => super::event::video_uri_of(source).map_or(Meeting::None, Meeting::Existing),
+    };
     Values {
         title: source.summary.clone().unwrap_or_default(),
         when: Some((event.start.clone(), event.end.clone())),
-        all_day: source
-            .start
-            .as_ref()
-            .is_some_and(|start| start.date.is_some()),
+        all_day: source.start.as_ref().is_some_and(EventTime::is_all_day),
         guests: source
             .attendees
             .iter()
-            .filter(|attendee| attendee.resource != Some(true))
+            .filter(|attendee| !attendee.resource)
             .filter_map(|attendee| {
                 let email = attendee.email.clone()?;
                 Some(Guest {
-                    me: attendee.is_self == Some(true) || email.eq_ignore_ascii_case(me),
+                    me: attendee.is_me(me),
                     name: attendee.display_name.clone(),
-                    optional: attendee.optional == Some(true),
-                    response: attendee.response_status.clone(),
-                    organizer: attendee.organizer == Some(true),
+                    optional: attendee.optional,
+                    response: Some(attendee.response_status),
+                    organizer: attendee.organizer,
                     email,
                 })
             })
             .collect(),
         location: source.location.clone().unwrap_or_default(),
         about,
-        meeting: meet.map_or(Meeting::None, Meeting::Existing),
+        meeting,
         calendar: event.calendar_id.clone(),
-        repeat: None,
+        repeat: source.recurrence.clone(),
     }
 }
 
@@ -148,22 +166,6 @@ fn looks_like_html(text: &str) -> bool {
     false
 }
 
-/// A start or end as Calendar takes it: a date for an all-day event, else the time with its
-/// offset and zone.
-fn date_time(at: &Zoned, all_day: bool) -> EventDateTime {
-    if all_day {
-        return EventDateTime {
-            date: Some(at.date().to_string()),
-            ..EventDateTime::default()
-        };
-    }
-    EventDateTime {
-        date_time: Some(at.strftime("%Y-%m-%dT%H:%M:%S%:z").to_string()),
-        time_zone: at.time_zone().iana_name().map(str::to_owned),
-        ..EventDateTime::default()
-    }
-}
-
 /// The guests as Calendar's attendees. When there's anyone else (or a booked room), preserves
 /// `existing` room/resource attendees, `organizer` flags, `mine.email`, and untouched attendee
 /// metadata (`id`, `comment`, `additional_guests`).
@@ -175,7 +177,7 @@ fn attendees(values: &Values, me: &str, existing: &[EventAttendee]) -> Vec<Event
         .collect();
     let resources: Vec<EventAttendee> = existing
         .iter()
-        .filter(|attendee| attendee.resource == Some(true))
+        .filter(|attendee| attendee.resource)
         .cloned()
         .collect();
     if others.is_empty() && resources.is_empty() {
@@ -190,14 +192,9 @@ fn attendees(values: &Values, me: &str, existing: &[EventAttendee]) -> Vec<Event
     let mut list = Vec::new();
     if !others.is_empty() || mine.is_some() {
         let my_email = mine.map_or(me, |guest| guest.email.as_str());
-        let prior_mine = existing.iter().find(|attendee| {
-            attendee.resource != Some(true)
-                && (attendee.is_self == Some(true)
-                    || attendee
-                        .email
-                        .as_deref()
-                        .is_some_and(|email| email.eq_ignore_ascii_case(my_email)))
-        });
+        let prior_mine = existing
+            .iter()
+            .find(|attendee| !attendee.resource && attendee.is_me(my_email));
         list.push(EventAttendee {
             id: prior_mine.and_then(|attendee| attendee.id.clone()),
             email: Some(my_email.to_owned()),
@@ -205,24 +202,23 @@ fn attendees(values: &Values, me: &str, existing: &[EventAttendee]) -> Vec<Event
                 .and_then(|guest| guest.name.clone())
                 .or_else(|| prior_mine.and_then(|attendee| attendee.display_name.clone())),
             organizer: match mine {
-                Some(guest) if guest.organizer => Some(true),
-                Some(_) => prior_mine.and_then(|attendee| attendee.organizer),
-                None => Some(true),
+                Some(guest) if guest.organizer => true,
+                Some(_) => prior_mine.is_some_and(|attendee| attendee.organizer),
+                None => true,
             },
-            is_self: prior_mine.and_then(|attendee| attendee.is_self),
-            optional: mine.is_some_and(|guest| guest.optional).then_some(true),
-            response_status: Some(
-                mine.and_then(|guest| guest.response.clone())
-                    .unwrap_or_else(|| "accepted".to_owned()),
-            ),
+            is_self: prior_mine.is_some_and(|attendee| attendee.is_self),
+            resource: false,
+            optional: mine.is_some_and(|guest| guest.optional),
+            response_status: mine
+                .and_then(|guest| guest.response)
+                .unwrap_or(RsvpStatus::Accepted),
             comment: prior_mine.and_then(|attendee| attendee.comment.clone()),
             additional_guests: prior_mine.and_then(|attendee| attendee.additional_guests),
-            ..EventAttendee::default()
         });
     }
     list.extend(others.into_iter().map(|guest| {
         let prior = existing.iter().find(|attendee| {
-            attendee.resource != Some(true)
+            !attendee.resource
                 && attendee
                     .email
                     .as_deref()
@@ -232,37 +228,31 @@ fn attendees(values: &Values, me: &str, existing: &[EventAttendee]) -> Vec<Event
             id: prior.and_then(|attendee| attendee.id.clone()),
             email: Some(guest.email.clone()),
             display_name: guest.name.clone(),
-            organizer: guest
-                .organizer
-                .then_some(true)
-                .or_else(|| prior.and_then(|attendee| attendee.organizer)),
-            optional: guest.optional.then_some(true),
-            response_status: Some(
-                guest
-                    .response
-                    .clone()
-                    .unwrap_or_else(|| "needsAction".to_owned()),
-            ),
+            organizer: guest.organizer || prior.is_some_and(|attendee| attendee.organizer),
+            is_self: false,
+            resource: false,
+            optional: guest.optional,
+            response_status: guest.response.unwrap_or(RsvpStatus::NeedsAction),
             comment: prior.and_then(|attendee| attendee.comment.clone()),
             additional_guests: prior.and_then(|attendee| attendee.additional_guests),
-            ..EventAttendee::default()
         }
     }));
     list.extend(resources);
     list
 }
 
-/// A Google Meet link asked for (`conferenceData.createRequest`).
-fn meet_request() -> serde_json::Value {
-    serde_json::json!({ "createRequest": { "requestId": new_id(), "conferenceSolutionKey": { "type": "hangoutsMeet" } } })
-}
-
 /// A new event from the form, its id chosen here so it shows before Calendar has it.
-pub(super) fn new_event(values: &Values, start: &Zoned, end: &Zoned, me: &str) -> ApiEvent {
+pub(super) fn new_event(
+    values: &Values,
+    start: &Zoned,
+    end: &Zoned,
+    me: &str,
+    provider: CalendarProviderKind,
+) -> CalendarEvent {
     let me_person = EventPerson {
         email: Some(me.to_owned()),
-        is_self: Some(true),
-        ..EventPerson::default()
+        display_name: None,
+        is_self: true,
     };
     // A series starts on its rule's first day, with its end moved by as many days.
     let (start, end) = match values.repeat.as_ref().and_then(|rule| rule.first(start)) {
@@ -279,57 +269,72 @@ pub(super) fn new_event(values: &Values, start: &Zoned, end: &Zoned, me: &str) -
         }
         None => (start.clone(), end.clone()),
     };
-    let (start, end) = (&start, &end);
-    ApiEvent {
-        recurrence: values
-            .repeat
-            .iter()
-            .map(|rule| rule.rule(start, values.all_day))
-            .collect(),
-        id: Some(new_id()),
+    let id = new_id();
+    let conference = match values.meeting {
+        Meeting::NewMeet => Some(Conference::pending(OnlineMeetingKind::GoogleMeet)),
+        Meeting::NewTeams => Some(Conference::pending(OnlineMeetingKind::TeamsForBusiness)),
+        Meeting::None | Meeting::Existing(_) => None,
+    };
+    CalendarEvent {
+        id: Some(id.clone()),
+        provider,
         summary: Some(values.title.trim().to_owned()),
         description: (!values.about.trim().is_empty()).then(|| values.about.clone()),
         location: (!values.location.trim().is_empty()).then(|| values.location.trim().to_owned()),
-        start: Some(date_time(start, values.all_day)),
-        end: Some(date_time(end, values.all_day)),
+        start: Some(EventTime::from_zoned(&start, values.all_day)),
+        end: Some(EventTime::from_zoned(&end, values.all_day)),
         attendees: attendees(values, me, &[]),
-        conference_data: (values.meeting == Meeting::NewMeet).then(meet_request),
+        conference,
+        recurrence: values.repeat.clone(),
         organizer: Some(me_person.clone()),
         creator: Some(me_person),
-        ..ApiEvent::default()
+        transaction_id: (provider == CalendarProviderKind::Microsoft).then_some(id),
+        ..CalendarEvent::default()
     }
 }
 
-/// The changed fields as a patch. When `original` is given, untouched attendee metadata, room
-/// resources, and organizer flags are preserved across guest edits.
+/// The changed fields as an [`EventPatch`]. When `original` is given, untouched attendee metadata,
+/// room resources, and organizer flags are preserved across guest edits.
 pub(super) fn patch_of(
     values: &Values,
     dirty: &[Field],
     me: &str,
-    original: Option<&ApiEvent>,
-) -> ApiEvent {
+    original: Option<&CalendarEvent>,
+) -> EventPatch {
     let existing: &[EventAttendee] = original.map_or(&[], |event| event.attendees.as_slice());
-    let mut patch = ApiEvent::default();
+    let mut patch = EventPatch::default();
     for field in dirty {
         match field {
             Field::Title => patch.summary = Some(values.title.trim().to_owned()),
             Field::When => {
                 if let Some((start, end)) = &values.when {
-                    patch.start = Some(date_time(start, values.all_day));
-                    patch.end = Some(date_time(end, values.all_day));
+                    patch.start = Some(EventTime::from_zoned(start, values.all_day));
+                    patch.end = Some(EventTime::from_zoned(end, values.all_day));
                 }
             }
             Field::Location => patch.location = Some(values.location.trim().to_owned()),
             Field::About => patch.description = Some(values.about.clone()),
             Field::Guests => {
-                patch.attendees = attendees(values, me, existing);
-                patch.clear_attendees = patch.attendees.is_empty();
+                patch.attendees = Some(attendees(values, me, existing));
             }
             Field::Meeting => {
-                patch.conference_data = Some(match &values.meeting {
-                    Meeting::NewMeet => meet_request(),
-                    Meeting::None | Meeting::Existing(_) => serde_json::Value::Null,
-                });
+                patch.conference = match &values.meeting {
+                    Meeting::NewMeet => {
+                        Some(ConferencePatch::Create(OnlineMeetingKind::GoogleMeet))
+                    }
+                    Meeting::NewTeams => {
+                        Some(ConferencePatch::Create(OnlineMeetingKind::TeamsForBusiness))
+                    }
+                    Meeting::None => {
+                        // Microsoft Graph ignores `isOnlineMeeting` removal post-create.
+                        let outlook_existing = original.is_some_and(|event| {
+                            event.provider == CalendarProviderKind::Microsoft
+                                && event.conference.as_ref().is_some_and(|conf| !conf.pending)
+                        });
+                        (!outlook_existing).then_some(ConferencePatch::Remove)
+                    }
+                    Meeting::Existing(_) => None,
+                };
             }
             Field::Calendar | Field::Repeat => {}
         }
@@ -337,54 +342,16 @@ pub(super) fn patch_of(
     patch
 }
 
-/// `event` with what `patch` sets, as it'll look once Calendar has it.
-pub(super) fn merged(event: &ApiEvent, patch: &ApiEvent) -> ApiEvent {
-    let mut event = event.clone();
-    if let Some(summary) = &patch.summary {
-        event.summary = Some(summary.clone());
-    }
-    if let Some(start) = &patch.start {
-        event.start = Some(start.clone());
-    }
-    if let Some(end) = &patch.end {
-        event.end = Some(end.clone());
-    }
-    if let Some(location) = &patch.location {
-        event.location = Some(location.clone());
-    }
-    if let Some(description) = &patch.description {
-        event.description = Some(description.clone());
-    }
-    if !patch.attendees.is_empty() || patch.clear_attendees {
-        event.attendees = patch.attendees.clone();
-    }
-    if let Some(conference_data) = &patch.conference_data {
-        if conference_data.is_null() {
-            event.conference_data = None;
-            event.hangout_link = None;
-        } else {
-            event.conference_data = Some(conference_data.clone());
-        }
-    }
-    event
-}
-
 /// How far an instance's civil wall-clock start and end moved, for its series (`All events` and
 /// `Following`).
 pub(super) fn shift_of(
-    instance: &ApiEvent,
+    instance: &CalendarEvent,
     values: &Values,
 ) -> Option<(SignedDuration, SignedDuration)> {
     let (start, end) = values.when.as_ref()?;
     let tz = start.time_zone();
-    let civil = |time: &EventDateTime| -> Option<jiff::civil::DateTime> {
-        if let Some(date) = &time.date {
-            return Some(date.parse::<jiff::civil::Date>().ok()?.at(0, 0, 0, 0));
-        }
-        Some(time.timestamp(tz)?.to_zoned(tz.clone()).datetime())
-    };
-    let from = civil(instance.start.as_ref()?)?;
-    let to = civil(instance.end.as_ref()?)?;
+    let from = instance.start.as_ref()?.civil(tz)?;
+    let to = instance.end.as_ref()?.civil(tz)?;
     Some((
         start.datetime().duration_since(from),
         end.datetime().duration_since(to),
@@ -393,8 +360,7 @@ pub(super) fn shift_of(
 
 #[cfg(test)]
 mod tests {
-    use exo_store::CalendarChange;
-    use jiff::tz::TimeZone;
+    use jiff::{civil::Date, tz::TimeZone};
 
     use super::*;
 
@@ -423,11 +389,14 @@ mod tests {
     fn a_new_event_carries_its_times_and_guests() {
         let mut values = values();
         let (start, end) = values.when.clone().expect("a time");
-        let event = new_event(&values, &start, &end, "maya@brightmoor.co");
-        assert_eq!(
-            event.start.and_then(|start| start.date_time).as_deref(),
-            Some("2026-11-20T12:00:00-05:00")
+        let event = new_event(
+            &values,
+            &start,
+            &end,
+            "maya@brightmoor.co",
+            CalendarProviderKind::Google,
         );
+        assert_eq!(event.start, Some(EventTime::from_zoned(&start, false)));
         assert!(event.attendees.is_empty(), "alone, no attendee list");
         assert!(event.id.is_some_and(|id| {
             id.bytes()
@@ -442,28 +411,53 @@ mod tests {
             organizer: false,
         });
         values.all_day = true;
-        let event = new_event(&values, &start, &end, "maya@brightmoor.co");
+        let event = new_event(
+            &values,
+            &start,
+            &end,
+            "maya@brightmoor.co",
+            CalendarProviderKind::Google,
+        );
         let emails: Vec<_> = event
             .attendees
             .iter()
             .map(|attendee| {
                 (
                     attendee.email.clone().unwrap_or_default(),
-                    attendee.response_status.clone().unwrap_or_default(),
+                    attendee.response_status,
                 )
             })
             .collect();
         assert_eq!(
             emails,
             [
-                ("maya@brightmoor.co".to_owned(), "accepted".to_owned()),
-                ("lena@brightmoor.co".to_owned(), "needsAction".to_owned())
+                ("maya@brightmoor.co".to_owned(), RsvpStatus::Accepted),
+                ("lena@brightmoor.co".to_owned(), RsvpStatus::NeedsAction)
             ]
         );
         assert_eq!(
-            event.start.and_then(|start| start.date).as_deref(),
-            Some("2026-11-20")
+            event.start,
+            Some(EventTime::all_day(Date::constant(2026, 11, 20)))
         );
+    }
+
+    #[test]
+    fn outlook_new_event_sets_transaction_id_and_pending_teams() {
+        let mut values = values();
+        values.meeting = Meeting::NewTeams;
+        let (start, end) = values.when.clone().expect("a time");
+        let event = new_event(
+            &values,
+            &start,
+            &end,
+            "maya@brightmoor.co",
+            CalendarProviderKind::Microsoft,
+        );
+        assert_eq!(event.provider, CalendarProviderKind::Microsoft);
+        assert_eq!(event.transaction_id, event.id);
+        let conf = event.conference.expect("pending teams");
+        assert_eq!(conf.kind, ConferenceKind::Teams);
+        assert!(conf.pending);
     }
 
     #[test]
@@ -472,9 +466,9 @@ mod tests {
         let patch = patch_of(&values, &[Field::Title], "maya@brightmoor.co", None);
         assert_eq!(
             patch,
-            ApiEvent {
+            EventPatch {
                 summary: Some("Lunch".into()),
-                ..ApiEvent::default()
+                ..EventPatch::default()
             }
         );
         let removed = patch_of(
@@ -487,59 +481,54 @@ mod tests {
             None,
         );
         assert_eq!(
-            serde_json::to_value(&removed).expect("serializes"),
-            serde_json::json!({ "conferenceData": null }),
+            removed.conference,
+            Some(ConferencePatch::Remove),
             "a removed link is cleared"
         );
     }
 
     #[test]
     fn one_on_ones_are_recognized() {
-        let matches = |title: &str| {
-            ONE_ON_ONE
-                .iter()
-                .any(|pattern| regex::Regex::new(pattern).expect("pattern").is_match(title))
-        };
         assert!(
-            matches("Priya 1:1")
-                && matches("Maya <> Lena")
-                && matches("Maya and Lena")
-                && matches("Sync: Lena")
+            is_one_on_one("Priya 1:1")
+                && is_one_on_one("Maya <> Lena")
+                && is_one_on_one("Maya and Lena")
+                && is_one_on_one("Sync: Lena")
         );
-        assert!(!matches("Design crit"));
+        assert!(!is_one_on_one("Design crit"));
     }
 
     #[test]
-    fn removing_all_guests_clears_attendees_locally_and_marks_patch_for_clear() {
+    fn removing_all_guests_clears_attendees_locally() {
         let mut vals = values();
         vals.guests.clear();
         let patch = patch_of(&vals, &[Field::Guests], "maya@brightmoor.co", None);
-        assert!(patch.attendees.is_empty() && patch.clear_attendees);
+        assert_eq!(patch.attendees, Some(Vec::new()));
 
-        let before = ApiEvent {
+        let mut after = CalendarEvent {
             id: Some("e1".into()),
             attendees: vec![EventAttendee {
                 email: Some("lena@brightmoor.co".into()),
                 ..EventAttendee::default()
             }],
-            ..ApiEvent::default()
+            ..CalendarEvent::default()
         };
-        let after = merged(&before, &patch);
-        assert!(after.attendees.is_empty(), "cleared locally in merged()");
+        after.apply_patch(&patch);
+        assert!(after.attendees.is_empty(), "cleared locally in apply_patch");
     }
 
     #[test]
     fn patch_preserves_rooms_organizer_mine_email_and_attendee_metadata() {
-        let original = ApiEvent {
+        let original = CalendarEvent {
             id: Some("e1".into()),
             attendees: vec![
                 EventAttendee {
                     id: Some("p-self".into()),
                     email: Some("alias@brightmoor.co".into()),
                     display_name: Some("Maya Alias".into()),
-                    is_self: Some(true),
-                    organizer: Some(false),
-                    response_status: Some("accepted".into()),
+                    is_self: true,
+                    organizer: false,
+                    response_status: RsvpStatus::Accepted,
                     comment: Some("Joining remotely".into()),
                     additional_guests: Some(1),
                     ..EventAttendee::default()
@@ -548,8 +537,8 @@ mod tests {
                     id: Some("p-org".into()),
                     email: Some("boss@brightmoor.co".into()),
                     display_name: Some("Boss".into()),
-                    organizer: Some(true),
-                    response_status: Some("accepted".into()),
+                    organizer: true,
+                    response_status: RsvpStatus::Accepted,
                     comment: Some("Bringing deck".into()),
                     additional_guests: Some(2),
                     ..EventAttendee::default()
@@ -558,12 +547,12 @@ mod tests {
                     id: Some("p-room".into()),
                     email: Some("oak-room@resource.calendar.google.com".into()),
                     display_name: Some("Oak Room".into()),
-                    resource: Some(true),
-                    response_status: Some("accepted".into()),
+                    resource: true,
+                    response_status: RsvpStatus::Accepted,
                     ..EventAttendee::default()
                 },
             ],
-            ..ApiEvent::default()
+            ..CalendarEvent::default()
         };
         let event = Event::draft(
             "e1".into(),
@@ -588,37 +577,38 @@ mod tests {
             "maya@brightmoor.co",
             Some(&original),
         );
-        assert_eq!(patch.attendees.len(), 4);
+        let list = patch.attendees.expect("attendees");
+        assert_eq!(list.len(), 4);
 
-        let me_entry = &patch.attendees[0];
+        let me_entry = &list[0];
         assert_eq!(me_entry.email.as_deref(), Some("alias@brightmoor.co"));
         assert_eq!(me_entry.id.as_deref(), Some("p-self"));
-        assert_eq!(me_entry.is_self, Some(true));
-        assert_eq!(me_entry.organizer, Some(false));
+        assert!(me_entry.is_self);
+        assert!(!me_entry.organizer);
         assert_eq!(me_entry.comment.as_deref(), Some("Joining remotely"));
         assert_eq!(me_entry.additional_guests, Some(1));
 
-        let org_entry = &patch.attendees[1];
+        let org_entry = &list[1];
         assert_eq!(org_entry.email.as_deref(), Some("boss@brightmoor.co"));
         assert_eq!(org_entry.id.as_deref(), Some("p-org"));
-        assert_eq!(org_entry.organizer, Some(true));
+        assert!(org_entry.organizer);
         assert_eq!(org_entry.comment.as_deref(), Some("Bringing deck"));
         assert_eq!(org_entry.additional_guests, Some(2));
 
-        let added = &patch.attendees[2];
+        let added = &list[2];
         assert_eq!(added.email.as_deref(), Some("newguest@brightmoor.co"));
-        assert_eq!(added.optional, Some(true));
-        assert_eq!(added.response_status.as_deref(), Some("needsAction"));
+        assert!(added.optional);
+        assert_eq!(added.response_status, RsvpStatus::NeedsAction);
 
-        let room = &patch.attendees[3];
+        let room = &list[3];
         assert_eq!(
             room.email.as_deref(),
             Some("oak-room@resource.calendar.google.com")
         );
-        assert_eq!(room.resource, Some(true));
+        assert!(room.resource);
         assert_eq!(room.id.as_deref(), Some("p-room"));
 
-        // Removing all human guests still preserves booked rooms (and doesn't clear attendees).
+        // Removing all human guests still preserves booked rooms.
         vals.guests.retain(|guest| guest.me);
         let room_only_patch = patch_of(
             &vals,
@@ -626,12 +616,9 @@ mod tests {
             "maya@brightmoor.co",
             Some(&original),
         );
-        assert!(!room_only_patch.clear_attendees);
+        let list = room_only_patch.attendees.expect("attendees");
         assert!(
-            room_only_patch
-                .attendees
-                .iter()
-                .any(|attendee| attendee.resource == Some(true)),
+            list.iter().any(|attendee| attendee.resource),
             "room booking survives removing human guests"
         );
     }
@@ -646,9 +633,9 @@ mod tests {
             false,
             exo_ui::CalendarColor::BLUE,
         );
-        let plain = ApiEvent {
+        let plain = CalendarEvent {
             description: Some("Budget < $1000\nContact <alice@example.com> & team".into()),
-            ..ApiEvent::default()
+            ..CalendarEvent::default()
         };
         let vals = values_of(&event, &plain, "maya@brightmoor.co");
         assert_eq!(
@@ -656,9 +643,9 @@ mod tests {
             "<div>Budget &lt; $1000</div><div>Contact &lt;alice@example.com&gt; &amp; team</div>"
         );
 
-        let html = ApiEvent {
+        let html = CalendarEvent {
             description: Some("<p>Agenda</p><ul><li>Item 1</li></ul>".into()),
-            ..ApiEvent::default()
+            ..CalendarEvent::default()
         };
         assert_eq!(
             values_of(&event, &html, "maya@brightmoor.co").about,
@@ -674,17 +661,17 @@ mod tests {
     }
 
     #[test]
-    fn merged_applies_and_clears_conference_data_and_hangout_link() {
-        let before = ApiEvent {
+    fn apply_patch_sets_and_clears_conference() {
+        let before = CalendarEvent {
             id: Some("e1".into()),
-            hangout_link: Some("https://meet.google.com/abc-defg-hij".into()),
-            conference_data: Some(serde_json::json!({
-                "entryPoints": [{
-                    "entryPointType": "video",
-                    "uri": "https://meet.google.com/abc-defg-hij"
-                }]
-            })),
-            ..ApiEvent::default()
+            conference: Some(Conference {
+                kind: ConferenceKind::GoogleMeet,
+                join_url: Some("https://meet.google.com/abc-defg-hij".into()),
+                label: Some("meet.google.com/abc-defg-hij".into()),
+                pending: false,
+                dial_in: None,
+            }),
+            ..CalendarEvent::default()
         };
         let remove_patch = patch_of(
             &Values {
@@ -695,9 +682,9 @@ mod tests {
             "maya@brightmoor.co",
             Some(&before),
         );
-        let cleared = merged(&before, &remove_patch);
-        assert_eq!(cleared.conference_data, None);
-        assert_eq!(cleared.hangout_link, None);
+        let mut cleared = before.clone();
+        cleared.apply_patch(&remove_patch);
+        assert_eq!(cleared.conference, None);
         assert_eq!(super::super::event::video_uri_of(&cleared), None);
 
         let add_patch = patch_of(
@@ -709,31 +696,26 @@ mod tests {
             "maya@brightmoor.co",
             Some(&cleared),
         );
-        let added = merged(&cleared, &add_patch);
-        assert!(
-            added
-                .conference_data
-                .as_ref()
-                .is_some_and(|cd| cd.get("createRequest").is_some())
-        );
+        let mut added = cleared.clone();
+        added.apply_patch(&add_patch);
+        assert!(added.conference.as_ref().is_some_and(|c| c.pending));
     }
 
     #[test]
     fn shift_of_uses_wall_clock_across_dst_and_supports_all_day_and_toggles() {
+        let tz = TimeZone::get("America/New_York").expect("zone");
         // 25h fall-back day (2026-11-01 in America/New_York): moving 00:30 EDT -> 09:00 EST is an
         // 8h30m wall-clock move (not 9h30m elapsed), so an EDT instance lands at 09:00 EDT.
-        let instance = ApiEvent {
-            start: Some(EventDateTime {
-                date_time: Some("2026-11-01T00:30:00-04:00".into()),
-                time_zone: Some("America/New_York".into()),
-                ..EventDateTime::default()
-            }),
-            end: Some(EventDateTime {
-                date_time: Some("2026-11-01T01:00:00-04:00".into()),
-                time_zone: Some("America/New_York".into()),
-                ..EventDateTime::default()
-            }),
-            ..ApiEvent::default()
+        let instance = CalendarEvent {
+            start: Some(EventTime::timed(
+                "2026-11-01T00:30:00-04:00".parse().expect("ts"),
+                Some("America/New_York".into()),
+            )),
+            end: Some(EventTime::timed(
+                "2026-11-01T01:00:00-04:00".parse().expect("ts"),
+                Some("America/New_York".into()),
+            )),
+            ..CalendarEvent::default()
         };
         let mut vals = values();
         vals.when = Some((at("2026-11-01T09:00"), at("2026-11-01T09:30")));
@@ -741,53 +723,63 @@ mod tests {
         assert_eq!(ds, SignedDuration::from_mins(8 * 60 + 30));
         assert_eq!(de, SignedDuration::from_mins(8 * 60 + 30));
 
-        let oct_instance = EventDateTime {
-            date_time: Some("2026-10-25T00:30:00-04:00".into()),
-            time_zone: Some("America/New_York".into()),
-            ..EventDateTime::default()
-        };
+        let oct_instance = EventTime::timed(
+            "2026-10-25T00:30:00-04:00".parse().expect("ts"),
+            Some("America/New_York".into()),
+        );
+        let shifted = oct_instance
+            .shift_wall_clock(ds, None, None)
+            .expect("shifted");
         assert_eq!(
-            CalendarChange::shift_event_time(Some(&oct_instance), ds)
-                .and_then(|t| t.date_time)
-                .as_deref(),
-            Some("2026-10-25T09:00:00-04:00")
+            shifted
+                .zoned(&tz)
+                .expect("zoned")
+                .strftime("%Y-%m-%dT%H:%M:%S%:z")
+                .to_string(),
+            "2026-10-25T09:00:00-04:00"
         );
 
         // All-day instance toggling to timed 09:00–10:00 on Scope::All.
-        let all_day_inst = ApiEvent {
-            start: Some(EventDateTime {
-                date: Some("2026-11-17".into()),
-                ..EventDateTime::default()
-            }),
-            end: Some(EventDateTime {
-                date: Some("2026-11-18".into()),
-                ..EventDateTime::default()
-            }),
-            ..ApiEvent::default()
+        let all_day_inst = CalendarEvent {
+            start: Some(EventTime::all_day(Date::constant(2026, 11, 17))),
+            end: Some(EventTime::all_day(Date::constant(2026, 11, 18))),
+            ..CalendarEvent::default()
         };
         vals.all_day = false;
         vals.when = Some((at("2026-11-17T09:00"), at("2026-11-17T10:00")));
         let patch = patch_of(&vals, &[Field::When], "maya@brightmoor.co", None);
         let (ds, de) = shift_of(&all_day_inst, &vals).expect("all-day to timed shift");
-        let earlier = EventDateTime {
-            date: Some("2026-10-27".into()),
-            ..EventDateTime::default()
-        };
+        let earlier = EventTime::all_day(Date::constant(2026, 10, 27));
+        let shifted_start = earlier
+            .shift_wall_clock(
+                ds,
+                Some(false),
+                patch.start.as_ref().and_then(EventTime::time_zone),
+            )
+            .expect("start");
         assert_eq!(
-            CalendarChange::retime_event_time(Some(&earlier), ds, patch.start.as_ref())
-                .and_then(|t| t.date_time)
-                .as_deref(),
-            Some("2026-10-27T09:00:00-04:00")
+            shifted_start
+                .zoned(&tz)
+                .expect("zoned")
+                .strftime("%Y-%m-%dT%H:%M:%S%:z")
+                .to_string(),
+            "2026-10-27T09:00:00-04:00"
         );
-        let earlier_end = EventDateTime {
-            date: Some("2026-10-28".into()),
-            ..EventDateTime::default()
-        };
+        let earlier_end = EventTime::all_day(Date::constant(2026, 10, 28));
+        let shifted_end = earlier_end
+            .shift_wall_clock(
+                de,
+                Some(false),
+                patch.end.as_ref().and_then(EventTime::time_zone),
+            )
+            .expect("end");
         assert_eq!(
-            CalendarChange::retime_event_time(Some(&earlier_end), de, patch.end.as_ref())
-                .and_then(|t| t.date_time)
-                .as_deref(),
-            Some("2026-10-27T10:00:00-04:00")
+            shifted_end
+                .zoned(&tz)
+                .expect("zoned")
+                .strftime("%Y-%m-%dT%H:%M:%S%:z")
+                .to_string(),
+            "2026-10-27T10:00:00-04:00"
         );
     }
 }

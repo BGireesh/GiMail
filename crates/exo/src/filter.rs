@@ -99,13 +99,33 @@ pub(crate) fn for_list(
     }
 }
 
-/// Registers the filter keys and the palette's Filter Conversations for the list on screen.
-/// `filterable` is false in a thread.
-pub(crate) fn register(commands: &mut Commands<commands::Action>, filterable: bool) {
+/// Registers the filter keys and the palette's Filter Conversations (or `Filter Unread
+/// Conversations` on Outlook) for the list on screen. `filterable` is false in a thread.
+pub(crate) fn register(commands: &mut Commands<commands::Action>, filterable: bool, outlook: bool) {
     if !filterable {
         return;
     }
     let act = |action: Action| commands::Action::Filter(action);
+    if outlook {
+        commands.add(
+            Command::shortcut("shift+u", act(Action::Toggle(Filter::Unread)))
+                .key("shift+u")
+                .regions(KEYS),
+        );
+        commands.add(
+            Command::new(
+                "FILTER",
+                "Filter Unread Conversations",
+                act(Action::Toggle(Filter::Unread)),
+            )
+            .key_code(["shift", "U"])
+            .icon("data/filter")
+            .default_score(1.57)
+            .multiple()
+            .regions(KEYS),
+        );
+        return;
+    }
     for (filter, _, key, _) in FILTERS {
         commands.add(
             Command::shortcut(key, act(Action::Toggle(filter)))
@@ -159,14 +179,18 @@ pub(crate) fn picker(list: &ListId, current: Option<Filter>) -> SubPalette<comma
 impl crate::Mail {
     /// Carries out a filter command.
     pub(crate) fn filter_run(&mut self, action: Action, now: f64) {
+        let outlook = self.account.is_outlook();
         match action {
+            Action::Picker if outlook => self.filter_run(Action::Toggle(Filter::Unread), now),
             Action::Picker => {
                 let picker = picker(&self.list, self.filter);
                 self.commands.open_sub_palette(picker);
             }
             Action::Clear => self.filter_set(None),
             Action::Toggle(filter)
-                if self.thread.is_none() && applies(&self.list, filter, self.filter) =>
+                if self.thread.is_none()
+                    && (!outlook || filter == Filter::Unread)
+                    && applies(&self.list, filter, self.filter) =>
             {
                 self.folders.close();
                 if let Some(raw) = self

@@ -1,7 +1,8 @@
 use egui::{Rect, Ui};
 use exo_commands::Toast;
+use exo_store::{CalendarEvent, CalendarProviderKind};
 use exo_ui::CalendarColor;
-use jiff::{SignedDuration, Zoned, civil::Date};
+use jiff::{SignedDuration, Zoned};
 
 use super::{
     Action, accounts, day,
@@ -25,9 +26,9 @@ impl crate::Mail {
         if let Some(email) = self.calendar_takeover() {
             match provider::show_takeover(ui, pane, rem, &email, &mut self.calendar.takeover) {
                 // Calendar Settings opens over the sign-in.
-                Some(provider::TakeoverAction::SignIn) => {
+                Some(provider::TakeoverAction::SignIn(provider)) => {
                     self.calendar.options_open = true;
-                    self.calendar_sign_in(Some(&email), accounts::SignInFor::List);
+                    self.calendar_sign_in(provider, Some(&email), accounts::SignInFor::List);
                     self.account.update_settings(|settings| {
                         _ = settings.calendar_invite_hint.insert(email.clone(), true)
                     });
@@ -57,7 +58,12 @@ impl crate::Mail {
                 .any(|event| event.ical_uid.as_deref() == Some(invite.uid.as_str()))
         {
             let colors = event::colors(self.account.settings());
-            let color = colors.get(email).copied().unwrap_or(CalendarColor::BLUE);
+            let (target_cal, _) = self.calendar_invite_target(invite);
+            let color = colors
+                .get(&target_cal)
+                .or_else(|| colors.get(email))
+                .copied()
+                .unwrap_or(CalendarColor::BLUE);
             let event = Event::from_invite(invite, color, email, now.time_zone());
             if event.on(day.date) && event.rsvp != Some(event::Rsvp::Declined) {
                 events.push(event);
@@ -319,14 +325,17 @@ impl crate::Mail {
                 }
                 WeekAction::ToggleCalendar(id) => self.calendar_toggle(&id),
                 WeekAction::Recolor(id, color) => self.calendar_recolor(&id, color),
-                WeekAction::AddAccount => self.calendar_sign_in(None, accounts::SignInFor::List),
-                WeekAction::SignInAgain(email) => {
-                    self.calendar_sign_in(Some(&email), accounts::SignInFor::List)
+                WeekAction::AddAccount(provider) => {
+                    self.calendar_sign_in(provider, None, accounts::SignInFor::List)
                 }
-                WeekAction::RemoveAccount(email) => self.account.remove_calendar_account(&email),
-                WeekAction::Fold(email) => self.account.update_device_settings(|device| {
-                    if !device.folded_calendar_accounts.remove(&email) {
-                        device.folded_calendar_accounts.insert(email);
+                WeekAction::SignInAgain(key) => {
+                    let (provider, email) = exo_auth::Account::parse_key(&key);
+                    self.calendar_sign_in(provider, Some(email), accounts::SignInFor::List);
+                }
+                WeekAction::RemoveAccount(key) => self.account.remove_calendar_account(&key),
+                WeekAction::Fold(key) => self.account.update_device_settings(|device| {
+                    if !device.folded_calendar_accounts.remove(&key) {
+                        device.folded_calendar_accounts.insert(key);
                     }
                 }),
                 WeekAction::Grid(action) => {
@@ -371,7 +380,7 @@ impl crate::Mail {
             self.calendar.details = None;
             return;
         };
-        let email = self.account.email().to_owned();
+        let email = self.calendar_account(&event.calendar_id);
         let calendar = self.calendar_name(&event, &source);
         let writable = self
             .account
@@ -380,13 +389,8 @@ impl crate::Mail {
             .calendars
             .iter()
             .flatten()
-            .find(|calendar| calendar.entry.id.as_deref() == Some(event.calendar_id.as_str()))
-            .is_some_and(|calendar| {
-                matches!(
-                    calendar.entry.access_role.as_deref(),
-                    Some("owner" | "writer")
-                )
-            });
+            .find(|calendar| calendar.calendar.id == event.calendar_id)
+            .is_some_and(|calendar| calendar.calendar.is_writable());
         let mut menu = Vec::new();
         if event.editable {
             menu.push(MenuItem::Edit);
@@ -395,13 +399,7 @@ impl crate::Mail {
         if writable && event.id.is_some() {
             menu.push(MenuItem::Delete);
         }
-        if source.attendees.iter().any(|attendee| {
-            !attendee
-                .email
-                .as_deref()
-                .is_some_and(|address| address.eq_ignore_ascii_case(&email))
-                && attendee.is_self != Some(true)
-        }) {
+        if source.has_other_guests(&email) {
             menu.push(MenuItem::EmailGuests);
         }
         if source.html_link.is_some() && event.title != "Busy" && !guest {
@@ -444,14 +442,9 @@ impl crate::Mail {
                     let to = source
                         .attendees
                         .iter()
-                        .filter(|attendee| {
-                            attendee.is_self != Some(true) && attendee.resource != Some(true)
-                        })
+                        .filter(|attendee| !attendee.is_me(&email) && !attendee.resource)
                         .filter_map(|attendee| {
-                            let address = attendee
-                                .email
-                                .clone()
-                                .filter(|address| !address.eq_ignore_ascii_case(&email))?;
+                            let address = attendee.email.clone()?;
                             Some(exo_store::Address {
                                 name: attendee.display_name.clone(),
                                 email: address,
@@ -465,17 +458,22 @@ impl crate::Mail {
                     self.compose_new(fields, Some(crate::compose::Field::Body));
                 }
                 DetailsAction::Menu(MenuItem::OpenInCalendar) => {
-                    // The event's page, as this account.
-                    if let Some(mut link) = source
+                    if let Some(web) = source
                         .html_link
                         .as_deref()
                         .and_then(crate::format::urls::web)
-                        .and_then(|link| url::Url::parse(&link).ok())
                     {
-                        link.query_pairs_mut()
-                            .append_pair("authuser", &email)
-                            .append_pair("shxr", "0");
-                        self.open_url(link.as_str());
+                        match source.provider {
+                            CalendarProviderKind::Microsoft => self.open_url(&web),
+                            CalendarProviderKind::Google => {
+                                if let Ok(mut link) = url::Url::parse(&web) {
+                                    link.query_pairs_mut()
+                                        .append_pair("authuser", &email)
+                                        .append_pair("shxr", "0");
+                                    self.open_url(link.as_str());
+                                }
+                            }
+                        }
                     }
                 }
                 DetailsAction::Open(url) => self.open_url(&url),
@@ -527,7 +525,7 @@ impl crate::Mail {
         &self,
         key: &str,
         now: &Zoned,
-    ) -> Option<(Event, gmail::calendar::Event, bool)> {
+    ) -> Option<(Event, CalendarEvent, bool)> {
         let email = self.account.email();
         let invite_uid = self
             .calendar
@@ -552,24 +550,20 @@ impl crate::Mail {
                 .calendars
                 .iter()
                 .flatten()
-                .find(|calendar| calendar.entry.id.as_deref() == Some(event.calendar_id.as_str()))
-                .is_some_and(|calendar| {
-                    matches!(
-                        calendar.entry.access_role.as_deref(),
-                        Some("owner" | "writer")
-                    )
-                });
+                .find(|calendar| calendar.calendar.id == event.calendar_id)
+                .is_some_and(|calendar| calendar.calendar.is_writable());
             let can_respond = writable && event.rsvp.is_some();
             return Some((event, source, can_respond));
         }
         let invite = self.calendar.invite.as_ref()?;
         let colors = event::colors(self.account.settings());
-        let event = Event::from_invite(
-            invite,
-            colors.get(email).copied().unwrap_or(CalendarColor::BLUE),
-            email,
-            now.time_zone(),
-        );
+        let (target_cal, _) = self.calendar_invite_target(invite);
+        let color = colors
+            .get(&target_cal)
+            .or_else(|| colors.get(email))
+            .copied()
+            .unwrap_or(CalendarColor::BLUE);
+        let event = Event::from_invite(invite, color, email, now.time_zone());
         let can_respond = invite.request && event.rsvp.is_some();
         (event.key == key).then(|| (event, invite_event(invite), can_respond))
     }
@@ -579,34 +573,32 @@ impl crate::Mail {
     pub(super) fn calendar_rule_line(
         &self,
         event: &Event,
-        source: &gmail::calendar::Event,
+        source: &CalendarEvent,
     ) -> Option<String> {
         let series = source.recurring_event_id.as_deref()?;
-        let rules = if source.recurrence.is_empty() {
-            let data = self.account.calendar().data();
-            let known = data
-                .series
-                .get(&format!("{}/{series}", event.calendar_id))
-                .cloned();
-            if known.is_none() {
-                self.account
-                    .calendar()
-                    .load_series(&event.calendar_id, series);
+        let rule = match &source.recurrence {
+            Some(rule) => Some(rule.clone()),
+            None => {
+                let data = self.account.calendar().data();
+                let known = data
+                    .series
+                    .get(&format!("{}/{series}", event.calendar_id))
+                    .cloned();
+                if known.is_none() {
+                    self.account
+                        .calendar()
+                        .load_series(&event.calendar_id, series);
+                }
+                known.flatten()
             }
-            known.unwrap_or_default()
-        } else {
-            source.recurrence.clone()
         };
         // The instance's own start before any move.
         let tz = event.start.time_zone();
         let anchor = source
-            .original_start_time
+            .original_start
             .as_ref()
-            .and_then(|time| match &time.date {
-                Some(date) => date.parse::<Date>().ok(),
-                None => time.timestamp(tz).map(|at| at.to_zoned(tz.clone()).date()),
-            });
-        let rule = exo_store::Recurrence::from_rules(&rules, tz);
+            .and_then(|time| time.zoned(tz))
+            .map(|at| at.date());
         Some(repeat::details_line(
             rule.as_ref(),
             anchor.unwrap_or_else(|| event.start.date()),
@@ -615,18 +607,19 @@ impl crate::Mail {
 
     /// The `Label` row of an event with its own colour (`via {calendar}`), or the `Calendar` row:
     /// the event's calendar, when more than one shows.
-    fn calendar_name(&self, event: &Event, source: &gmail::calendar::Event) -> Option<String> {
+    fn calendar_name(&self, event: &Event, source: &CalendarEvent) -> Option<String> {
         let data = self.account.calendar().data();
         let calendar = &data
             .calendars
             .iter()
             .flatten()
-            .find(|calendar| calendar.entry.id.as_deref() == Some(event.calendar_id.as_str()))?
-            .entry;
-        let name = calendar
-            .summary_override
-            .clone()
-            .or_else(|| calendar.summary.clone())?;
+            .find(|calendar| calendar.calendar.id == event.calendar_id)?
+            .calendar;
+        let name = calendar.display_name();
+        if name.is_empty() {
+            return None;
+        }
+        let name = name.to_owned();
         if source.color_id.is_some() {
             return Some(format!("via {name}"));
         }

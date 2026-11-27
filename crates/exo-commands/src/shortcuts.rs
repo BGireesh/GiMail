@@ -219,6 +219,8 @@ pub(crate) struct Shortcuts {
     /// Whether the account's `Send + Mark Done` is on. Then `Send` goes, and `Send + Mark Done`
     /// is `⌘ enter`.
     send_and_done: bool,
+    /// Whether the account is Outlook / Microsoft, switching wording and hiding Gmail-only rows.
+    outlook: bool,
 }
 
 impl Shortcuts {
@@ -232,6 +234,7 @@ impl Shortcuts {
             open: true,
             focus: true,
             send_and_done: self.send_and_done,
+            outlook: self.outlook,
             ..Self::default()
         };
     }
@@ -240,21 +243,67 @@ impl Shortcuts {
         self.send_and_done = on;
     }
 
+    pub(crate) fn set_outlook(&mut self, outlook: bool) {
+        self.outlook = outlook;
+    }
+
     /// `section`'s rows as shown. With Send + Mark Done on, `Send` is hidden and `Send + Mark
-    /// Done` is on `⌘ enter`.
+    /// Done` is on `⌘ enter`. Outlook accounts swap Gmail wording (`Flag`, `Delete`, `Mark as
+    /// Junk Email`, `Open Folder Menu`, `Go to Junk Email`, `Go to Deleted Items`, `Go to Folder …`),
+    /// move `Move` and `[`/`]` into Conversations, and hide Gmail-only rows.
     fn rows(&self, section: &Section) -> Vec<(&'static str, &'static str)> {
-        section
-            .rows
-            .iter()
-            .filter(|(name, _)| !(self.send_and_done && *name == "Send"))
-            .map(|&(name, keys)| {
-                if self.send_and_done && name == "Send + Mark Done" {
-                    (name, "⌘ enter")
-                } else {
-                    (name, keys)
+        let mut out = Vec::with_capacity(section.rows.len() + 3);
+        for &(name, keys) in section.rows {
+            if self.send_and_done && name == "Send" {
+                continue;
+            }
+            if self.outlook {
+                match (section.title, name) {
+                    ("Navigation", "Open Label Menu") => {
+                        out.push(("Open Folder Menu", keys));
+                        continue;
+                    }
+                    ("Conversations", "Star") => {
+                        out.push(("Flag", keys));
+                        out.push(("Move", "V"));
+                        continue;
+                    }
+                    ("Conversations", "Mute") => continue,
+                    ("Conversations", "Trash") => {
+                        out.push(("Delete", keys));
+                        continue;
+                    }
+                    ("Conversations", "Mark as Spam") => {
+                        out.push(("Mark as Junk Email", keys));
+                        out.push(("Move to Archive, Next", "["));
+                        out.push(("Move to Archive, Previous", "]"));
+                        continue;
+                    }
+                    ("Folders", "Go to Starred" | "Go to Muted") => continue,
+                    ("Folders", "Go to Spam") => {
+                        out.push(("Go to Junk Email", keys));
+                        continue;
+                    }
+                    ("Folders", "Go to Trash") => {
+                        out.push(("Go to Deleted Items", keys));
+                        continue;
+                    }
+                    ("Folders", "Go to Label …") => {
+                        out.push(("Go to Folder …", "G then F"));
+                        continue;
+                    }
+                    ("Filters", "Starred" | "Important" | "No reply") => continue,
+                    _ => {}
                 }
-            })
-            .collect()
+            }
+            let keys = if self.send_and_done && name == "Send + Mark Done" {
+                "⌘ enter"
+            } else {
+                keys
+            };
+            out.push((name, keys));
+        }
+        out
     }
 
     pub(crate) fn close(&mut self) {
@@ -484,9 +533,13 @@ impl Shortcuts {
     fn visible_sections(&self) -> Vec<(&'static Section, Vec<bool>)> {
         SECTIONS
             .iter()
+            .filter(|section| !(self.outlook && section.title == "Labels"))
             .filter_map(|section| {
-                let matches: Vec<bool> = self
-                    .rows(section)
+                let rows = self.rows(section);
+                if rows.is_empty() {
+                    return None;
+                }
+                let matches: Vec<bool> = rows
                     .iter()
                     .map(|(name, _)| {
                         !self.query.is_empty() && command_score(name, &self.query) > 0.0
@@ -582,5 +635,47 @@ mod tests {
             "scrolled to {}",
             harness.state().scroll
         );
+    }
+
+    #[test]
+    fn outlook_shortcuts_use_outlook_copy_and_hide_gmail_rows() {
+        let mut sheet = Shortcuts::default();
+        sheet.set_outlook(true);
+        sheet.open();
+        let sections = sheet.visible_sections();
+        let titles: Vec<_> = sections.iter().map(|(section, _)| section.title).collect();
+        assert!(!titles.contains(&"Labels"));
+        let rows_of = |title: &str| {
+            let section = sections
+                .iter()
+                .find(|(section, _)| section.title == title)
+                .map(|(section, _)| *section)
+                .expect(title);
+            sheet.rows(section)
+        };
+        assert!(rows_of("Navigation").contains(&("Open Folder Menu", "←")));
+        assert!(!rows_of("Navigation").contains(&("Open Label Menu", "←")));
+        let conv = rows_of("Conversations");
+        assert!(conv.contains(&("Flag", "S")));
+        assert!(conv.contains(&("Move", "V")));
+        assert!(conv.contains(&("Delete", "#")));
+        assert!(conv.contains(&("Mark as Junk Email", "!")));
+        assert!(conv.contains(&("Move to Archive, Next", "[")));
+        assert!(conv.contains(&("Move to Archive, Previous", "]")));
+        assert!(
+            !conv
+                .iter()
+                .any(|(name, _)| *name == "Mute" || *name == "Star")
+        );
+        let folders = rows_of("Folders");
+        assert!(folders.contains(&("Go to Junk Email", "G then !")));
+        assert!(folders.contains(&("Go to Deleted Items", "G then #")));
+        assert!(folders.contains(&("Go to Folder …", "G then F")));
+        assert!(
+            !folders
+                .iter()
+                .any(|(name, _)| *name == "Go to Starred" || *name == "Go to Muted")
+        );
+        assert_eq!(rows_of("Filters"), [("Unread", "shift U")]);
     }
 }

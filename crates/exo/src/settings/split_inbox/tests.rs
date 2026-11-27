@@ -37,7 +37,7 @@ fn test_account(name: &str) -> (Account, std::path::PathBuf) {
     let endpoints = gmail::Endpoints::mock(&"http://127.0.0.1:9/".parse().expect("mock origin"));
     let account = Account::open(
         &dir,
-        crate::account::Credentials {
+        crate::account::Credentials::Gmail {
             email: "maya@brightmoor.co".into(),
             endpoints,
             tokens: Arc::new(gmail::StaticToken("dev".into())),

@@ -161,6 +161,7 @@ impl crate::Mail {
     ) {
         let aliases = self.snapshot.aliases.clone();
         let folder = self.account.draft_files().to_owned();
+        let outlook = self.account.is_outlook();
         let Some(open) = self.compose.get_mut(id) else {
             return;
         };
@@ -173,6 +174,7 @@ impl crate::Mail {
             &open.record.attachments,
             &outgoing::html(open, &aliases),
             &folder,
+            outlook,
         ) {
             Ok(attachment) => {
                 open.record.attachments.push(attachment);
@@ -222,6 +224,7 @@ impl crate::Mail {
         let now = ctx.input(|input| input.time);
         let aliases = self.snapshot.aliases.clone();
         let folder = self.account.draft_files().to_owned();
+        let outlook = self.account.is_outlook();
         let mut refused = None;
         for open in &mut self.compose.drafts {
             let uploads = open.editor.take_uploads();
@@ -235,6 +238,7 @@ impl crate::Mail {
                     &open.record.attachments,
                     &html,
                     &folder,
+                    outlook,
                 ) {
                     Ok(attachment) => open.record.attachments.push(attachment),
                     Err(notice) => {
@@ -336,11 +340,12 @@ impl crate::Mail {
         }
         let aliases = self.snapshot.aliases.clone();
         let folder = self.account.draft_files().to_owned();
+        let outlook = self.account.is_outlook();
         let Some(open) = self.compose.get_mut(&id) else {
             return;
         };
         let html = outgoing::html(open, &aliases);
-        let (added, notice) = files::add(paths, &open.record.attachments, &html, &folder);
+        let (added, notice) = files::add(paths, &open.record.attachments, &html, &folder, outlook);
         if !added.is_empty() {
             open.record.attachments.extend(added);
             open.touch(now);

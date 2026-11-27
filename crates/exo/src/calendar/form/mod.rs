@@ -117,6 +117,9 @@ pub struct EventForm {
     calendar_scrollbar: exo_ui::Scrollbar,
     /// Save takes the keyboard on the next frame (a calendar was picked).
     focus_save: bool,
+    /// Whether the default-meeting-link preference should update the pending link when switching
+    /// calendars during Create. Cleared if the user manually removes the link.
+    pub auto_meeting: bool,
     /// Repeat's Custom dialog, while it's up.
     pub custom: Option<Custom>,
 }
@@ -239,6 +242,7 @@ impl EventForm {
             calendar_scroll: 0.0,
             calendar_scrollbar: exo_ui::Scrollbar::default(),
             focus_save: false,
+            auto_meeting: false,
             custom: None,
         }
     }
@@ -771,6 +775,43 @@ impl EventForm {
         self.focused == Some(Field::Meeting) && matches!(self.values.meeting, Meeting::Existing(_))
     }
 
+    /// The online-meeting choices available for the form's selected calendar.
+    pub fn available_meetings(&self, calendars: &[CalendarOption]) -> Vec<(Meeting, &'static str)> {
+        if let Some(calendar) = calendars
+            .iter()
+            .find(|calendar| calendar.id == self.values.calendar)
+        {
+            return calendar.available_meetings();
+        }
+        if self.edited.as_ref().is_some_and(|edited| {
+            edited.event.provider == exo_store::CalendarProviderKind::Microsoft
+        }) {
+            vec![(Meeting::NewTeams, "Microsoft Teams")]
+        } else {
+            vec![(Meeting::NewMeet, "Google Meet")]
+        }
+    }
+
+    /// Whether the current meeting link can be removed. Microsoft Graph ignores `isOnlineMeeting`
+    /// removal after event creation, so existing Outlook meeting links are kept read-only.
+    pub fn meeting_removable(&self, calendars: &[CalendarOption]) -> bool {
+        if self.mode != Mode::Edit || !matches!(self.values.meeting, Meeting::Existing(_)) {
+            return true;
+        }
+        let is_outlook = self
+            .edited
+            .as_ref()
+            .map(|edited| edited.event.provider)
+            .or_else(|| {
+                calendars
+                    .iter()
+                    .find(|calendar| calendar.id == self.values.calendar)
+                    .map(|calendar| calendar.provider)
+            })
+            == Some(exo_store::CalendarProviderKind::Microsoft);
+        !is_outlook
+    }
+
     /// The event's own meeting link as it opens and copies: a Meet link as the account of the
     /// event's calendar among `calendars` (`authuser`), else as `me`.
     pub fn meeting_link(&self, calendars: &[CalendarOption], me: &str) -> Option<String> {
@@ -784,7 +825,7 @@ impl EventForm {
             let account = calendars
                 .iter()
                 .find(|calendar| calendar.id == self.values.calendar)
-                .map_or(me, |calendar| calendar.account.as_str());
+                .map_or(me, |calendar| calendar.email.as_str());
             url.query_pairs_mut().append_pair("authuser", account);
         }
         Some(url.to_string())

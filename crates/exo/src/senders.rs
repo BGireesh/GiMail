@@ -1,10 +1,11 @@
-//! What triage does to everything from a sender or domain. A Gmail filter carries the choice to
-//! future mail (from them, adding Trash or a category), and the mail already there is relabelled.
-//! Both are undone together.
+//! What triage does to everything from a sender or domain. A provider rule carries the choice to
+//! future mail (a Gmail filter, or an Outlook Inbox rule / Focused Inbox override), and the mail
+//! already there is relabelled. Both are undone together.
 
+use std::collections::HashSet;
 use std::sync::LazyLock;
 
-use exo_store::{Store, ThreadId};
+use exo_store::{SenderRule, SenderRuleUndo, Store, ThreadId};
 use regex::Regex;
 
 /// An address made only of characters that mean nothing to Gmail's search or filter criteria.
@@ -32,7 +33,7 @@ const NOT_IMPORTANT: [&str; 4] = [
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SenderJob {
     /// Block them. Their mail goes to Trash from now on, and so does the mail already there,
-    /// `thread` included.
+    /// except `thread`, which moves on its own.
     Block {
         /// The address or domain.
         from: String,
@@ -54,9 +55,8 @@ pub enum SenderJob {
 /// What a job changed, to undo it.
 #[derive(Debug)]
 pub struct Done {
-    /// The filter made, none when Gmail already had it.
-    filter: Option<String>,
-    replaced: Option<gmail::Filter>,
+    /// The provider rule created or updated, to reverse on undo.
+    rule: SenderRuleUndo,
     /// Relabels to undo: threads, the labels added, the labels removed.
     relabels: Vec<(Vec<ThreadId>, Vec<String>, Vec<String>)>,
 }
@@ -64,7 +64,7 @@ pub struct Done {
 /// Runs `job`.
 ///
 /// # Errors
-/// When Gmail can't be reached or refuses the filter. What was done by then stays done.
+/// When the provider can't be reached or refuses the rule. What was done by then stays done.
 pub async fn run(store: &Store, job: &SenderJob) -> exo_store::Result<Done> {
     let strings = |labels: &[&str]| {
         labels
@@ -74,68 +74,79 @@ pub async fn run(store: &Store, job: &SenderJob) -> exo_store::Result<Done> {
     };
     match job {
         SenderJob::Block { from, thread } => {
-            let (filter, replaced) = store.create_sender_filter(from, "TRASH").await?;
+            let rule = store.set_sender_rule(from, SenderRule::Block).await?;
             let query = format!("from:\"{from}\"");
-            let thread = ThreadId::new(thread.clone());
-            let mut all = store.find_threads(&query).await?;
-            let in_inbox = store.find_threads(&format!("{query} in:inbox")).await?;
-            if !all.contains(&thread) {
-                all.push(thread);
+            let all: Vec<ThreadId> = store
+                .find_threads(&query)
+                .await?
+                .into_iter()
+                .filter(|found| found.as_str() != thread)
+                .collect();
+            let mut relabels = Vec::new();
+            if !all.is_empty() {
+                let in_inbox: HashSet<ThreadId> = store
+                    .find_threads(&format!("{query} in:inbox"))
+                    .await?
+                    .into_iter()
+                    .filter(|found| found.as_str() != thread)
+                    .collect();
+                let (add, remove) = (strings(&["TRASH"]), strings(&["INBOX", "SPAM"]));
+                let trashed = store.relabel(&all, &add, &remove).await?;
+                // Undo must remove Trash and restore Inbox in one relabel for threads that came
+                // from the inbox; on single-folder providers (Outlook), adding Inbox while Trash is
+                // still set is a no-op and removing Trash afterward would leave them in Archive.
+                let (trashed_inbox, trashed_other): (Vec<_>, Vec<_>) =
+                    trashed.into_iter().partition(|id| in_inbox.contains(id));
+                if !trashed_other.is_empty() {
+                    relabels.push((trashed_other, add.clone(), Vec::new()));
+                }
+                if !trashed_inbox.is_empty() {
+                    relabels.push((trashed_inbox, add, strings(&["INBOX"])));
+                }
             }
-            let (add, remove) = (strings(&["TRASH"]), strings(&["INBOX", "SPAM"]));
-            let trashed = store.relabel(&all, &add, &remove).await?;
-            // Trash removed Inbox from every message, so putting it back is per thread.
-            let relabels = vec![
-                (trashed, add, Vec::new()),
-                (in_inbox, Vec::new(), strings(&["INBOX"])),
-            ];
-            Ok(Done {
-                filter,
-                replaced,
-                relabels,
-            })
+            Ok(Done { rule, relabels })
         }
         SenderJob::Importance {
             from,
             other,
             thread,
         } => {
-            let category = if *other {
-                "CATEGORY_SOCIAL"
+            let (sender_rule, category) = if *other {
+                (SenderRule::Other, "CATEGORY_SOCIAL")
             } else {
-                "CATEGORY_PERSONAL"
+                (SenderRule::Important, "CATEGORY_PERSONAL")
             };
-            let (filter, replaced) = store.create_sender_filter(from, category).await?;
+            let rule = store.set_sender_rule(from, sender_rule).await?;
             let threads: Vec<ThreadId> = store
                 .find_threads(&format!("in:inbox from:\"{from}\""))
                 .await?
                 .into_iter()
                 .filter(|found| found.as_str() != thread)
                 .collect();
-            let (add, remove) = if *other {
-                (strings(&[category]), strings(&["CATEGORY_PERSONAL"]))
-            } else {
-                (strings(&[category]), strings(&NOT_IMPORTANT))
-            };
-            let moved = store.relabel(&threads, &add, &remove).await?;
-            Ok(Done {
-                filter,
-                replaced,
-                relabels: vec![(moved, add, remove)],
-            })
+            let mut relabels = Vec::new();
+            if !threads.is_empty() {
+                let (add, remove) = if *other {
+                    (strings(&[category]), strings(&["CATEGORY_PERSONAL"]))
+                } else {
+                    (strings(&[category]), strings(&NOT_IMPORTANT))
+                };
+                let moved = store.relabel(&threads, &add, &remove).await?;
+                if !moved.is_empty() {
+                    relabels.push((moved, add, remove));
+                }
+            }
+            Ok(Done { rule, relabels })
         }
     }
 }
 
-/// Undoes what `done` changed: the filter goes (the one it replaced comes back), and the
-/// relabelled conversations get their labels back, in reverse.
+/// Undoes what `done` changed: the rule is reversed, and the relabelled conversations get their
+/// labels back, in reverse.
 ///
 /// # Errors
-/// When Gmail can't be reached.
+/// When the provider can't be reached.
 pub async fn undo(store: &Store, done: Done) -> exo_store::Result<()> {
-    store
-        .delete_sender_filter(done.filter.as_deref(), done.replaced.as_ref())
-        .await?;
+    store.undo_sender_rule(&done.rule).await?;
     for (threads, added, removed) in done.relabels.into_iter().rev() {
         store.relabel(&threads, &removed, &added).await?;
     }

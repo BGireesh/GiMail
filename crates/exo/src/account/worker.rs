@@ -9,8 +9,9 @@ use std::{
 };
 
 use exo_store::{
-    Connection, DeviceSettings, Draft, DraftFailure, Filter, GmailPage, GoogleContacts, ListId,
-    Mutation, ScoredContact, Search, SendFailure, Settings, Store, ThreadId, Undo,
+    Connection, DeviceSettings, Draft, DraftFailure, Filter, GmailPage, ListId, Mutation,
+    ProviderContact, ProviderContacts, ScoredContact, Search, SendFailure, Settings, Store,
+    ThreadId, Undo,
 };
 use futures::FutureExt as _;
 use tokio::sync::{mpsc, watch};
@@ -60,11 +61,11 @@ const EVICT_EVERY: Duration = Duration::from_secs(24 * 60 * 60);
 const PRERENDER: usize = 100;
 const PRERENDER_AFTER: Duration = Duration::from_secs(60);
 const PRERENDER_EVERY: Duration = Duration::from_secs(10 * 60);
-/// How long a listing of Google contacts is used before it's listed again.
-const GOOGLE_CONTACTS_FRESH: jiff::SignedDuration = jiff::SignedDuration::from_hours(1);
-/// A listing counts as work under way for this long at most, so screenshots and tests wait for a
-/// quick answer without hanging on a People that doesn't answer.
-const GOOGLE_CONTACTS_BUSY: Duration = Duration::from_secs(5);
+/// How long a listing of provider contacts is used before it's synced again.
+const CONTACTS_FRESH: jiff::SignedDuration = jiff::SignedDuration::from_hours(1);
+/// A contact sync counts as work under way for this long at most, so screenshots and tests wait
+/// for a quick answer without hanging on an unresponsive contacts endpoint.
+const CONTACTS_BUSY: Duration = Duration::from_secs(5);
 /// Failures that may pass, in a row, after which the store counts as corrupt.
 const PASSING_FAILURES: usize = 5;
 
@@ -172,17 +173,19 @@ pub(super) enum Request {
     /// Write every draft Gmail lacks now, then count what it still doesn't have, for
     /// [`Event::Unsent`].
     Unsent,
-    /// Read the address book, from stored mail now and from Google contacts in the background when
-    /// those are missing or stale.
+    /// Read the address book, from stored mail now and from provider contacts in the background
+    /// when those are missing or stale.
     LoadAddressBook,
-    /// Read the Google contacts listed last, and list them again in the background when they're
-    /// missing or stale.
-    LoadGoogleContacts,
+    /// Read the cached provider contacts and sync them in the background when missing or stale.
+    LoadContacts,
     /// From the task that scored stored mail.
     MailContacts(Arc<Vec<ScoredContact>>),
-    /// From the task that listed Google contacts, colleagues and "other contacts", and whether it
-    /// listed them all.
-    GoogleContacts(GoogleContacts, bool),
+    /// From the task that synced provider contacts, directory colleagues, and relevant/other
+    /// contacts (`None` on fatal failure), plus an optional self photo locator when the provider
+    /// exposes one via `/me/photo`.
+    Contacts(Option<(ProviderContacts, bool)>, Option<String>),
+    /// From a lightweight `/me/photo` metadata check when cached contacts are already fresh.
+    MePhoto(Option<String>),
     /// On quitting, send every draft held for undo now, write the drafts saved on the way out, and
     /// say when done.
     SendHeldNow(tokio::sync::oneshot::Sender<()>),
@@ -256,15 +259,21 @@ pub(super) struct SenderJobState {
 /// The task that owns what's on screen. It handles requests in order and publishes snapshots.
 pub(super) struct Worker {
     pub(super) store: Store,
-    /// What compose suggests from (mail's contacts with Google's merged in).
+    /// What compose suggests from (mail's contacts with provider contacts merged in).
     pub(super) address_book: Option<Arc<Vec<ScoredContact>>>,
     /// Stored mail's contacts, as last scored.
     pub(super) mail_contacts: Option<Arc<Vec<ScoredContact>>>,
-    /// Google contacts and when they were listed, once they have been.
-    pub(super) google_contacts: Option<Arc<GoogleContacts>>,
-    /// A Google listing is under way.
-    pub(super) listing_google: bool,
-    /// Where the photos of the Google contacts come from.
+    /// Provider contacts (Google People or Microsoft Graph) and when they were last synced.
+    pub(super) contacts: Option<Arc<ProviderContacts>>,
+    /// Signed-in account's own photo locator from `/me/photo`, if exposed and not already in
+    /// `contacts`.
+    pub(super) me_photo: Option<String>,
+    /// Whether `/me/photo` metadata has been checked this session (so fresh cached contacts on
+    /// relaunch still restore the self photo without repeated metadata lookups).
+    pub(super) me_photo_checked: bool,
+    /// A provider contact sync is under way.
+    pub(super) listing_contacts: bool,
+    /// Where the photos of the provider contacts come from.
     pub(super) photos: crate::people::Photos,
     /// The senders' brands, whose logos the contact pane shows.
     pub(super) brands: crate::brands::Brands,
@@ -351,48 +360,143 @@ impl Worker {
         }
     }
 
-    /// Brings Google contacts up to date in the background, unless that's under way or the last
-    /// listing is fresh. Google is slow and changes little, so they're listed once a session and
-    /// again when stale (only what changed, `people::listing`), and never waited for. Each listing
-    /// counts as busy only for its first moments, so the UI's quiet doesn't hang on it.
-    fn list_google_contacts(&mut self) {
-        let stale = self.google_contacts.as_ref().is_none_or(|google| {
-            jiff::Timestamp::now().duration_since(google.listed) > GOOGLE_CONTACTS_FRESH
-        });
-        if !stale || self.listing_google {
+    /// The signed-in account's email address, without any provider prefix.
+    fn account_email(&self) -> String {
+        let account = self.photos.account();
+        if account
+            .as_bytes()
+            .get(..10)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case(b"microsoft "))
+        {
+            account[10..].to_owned()
+        } else {
+            account.to_owned()
+        }
+    }
+
+    /// Whether cached contacts already carry a photo locator for this account's own address.
+    fn contacts_have_me_photo(&self) -> bool {
+        let me = self.account_email();
+        self.contacts.as_ref().is_some_and(|contacts| {
+            contacts
+                .contacts()
+                .any(|contact| contact.email.eq_ignore_ascii_case(&me) && contact.photo.is_some())
+        })
+    }
+
+    /// Synthetic contact entry carrying the account's own `/me/photo` locator, when known.
+    fn me_photo_entry(&self) -> Option<ProviderContact> {
+        let locator = self.me_photo.as_ref()?;
+        Some(ProviderContact {
+            person: "me".to_owned(),
+            email: self.account_email(),
+            name: None,
+            photo: Some(locator.clone()),
+            company: None,
+            title: None,
+        })
+    }
+
+    /// Publishes cached provider contacts and any `/me/photo` entry to the shared photo registry.
+    fn publish_photos(&self) {
+        let me_entry = self.me_photo_entry();
+        self.photos.publish(
+            self.contacts
+                .iter()
+                .flat_map(|contacts| contacts.contacts())
+                .chain(me_entry.as_ref()),
+        );
+    }
+
+    /// Reads `/me/photo` metadata once when cached contacts are fresh (`< 1h`) on relaunch and
+    /// don't already include the signed-in account's own photo.
+    fn ensure_me_photo(&mut self) {
+        if self.me_photo_checked || self.me_photo.is_some() || self.contacts_have_me_photo() {
             return;
         }
-        self.listing_google = true;
+        self.me_photo_checked = true;
+        let (store, requests) = (self.store.clone(), self.requests.clone());
+        self.restarts
+            .spawn_task(&tokio::runtime::Handle::current(), async move {
+                let locator = fetch_me_photo_locator(&store).await;
+                requests.post(Request::MePhoto(locator));
+            });
+    }
+
+    /// Brings provider contacts up to date in the background, unless that's under way or the last
+    /// listing is fresh. Contacts change little, so they're synced once a session and again when
+    /// stale (incrementally via sync/delta tokens in [`Store::sync_contacts`]), and never waited
+    /// for. Each sync counts as busy only for its first moments, so the UI's quiet doesn't hang on
+    /// an unresponsive endpoint.
+    fn list_contacts(&mut self) {
+        let stale = self.contacts.as_ref().is_none_or(|contacts| {
+            jiff::Timestamp::now().duration_since(contacts.listed) > CONTACTS_FRESH
+        });
+        if !stale {
+            self.ensure_me_photo();
+            return;
+        }
+        if self.listing_contacts {
+            return;
+        }
+        self.listing_contacts = true;
+        self.me_photo_checked = true;
         let (store, requests, busy) = (
             self.store.clone(),
             self.requests.clone(),
             self.requests.busy(),
         );
-        let (account, kept) = (
-            self.photos.account().to_owned(),
-            self.google_contacts.clone(),
-        );
+        let prev_listed = self.contacts.as_ref().map(|contacts| contacts.listed);
+        let me = self.account_email();
         self.restarts
             .spawn_task(&tokio::runtime::Handle::current(), async move {
-                let listed = jiff::Timestamp::now();
-                let listing =
-                    crate::people::listing::list(&store, &account, kept.as_deref(), listed);
+                let listing = async {
+                    let synced = match store.sync_contacts().await {
+                        Ok((mut contacts, complete)) => {
+                            if !complete {
+                                // `Store::sync_contacts` writes `listed = now`; roll `listed` back
+                                // so a partial sync isn't treated as fresh for an hour.
+                                contacts.listed =
+                                    prev_listed.unwrap_or(jiff::Timestamp::UNIX_EPOCH);
+                                if let Err(error) = store.save_contacts(&contacts).await {
+                                    log::warn!("updating incomplete contacts timestamp: {error}");
+                                }
+                            }
+                            Some((contacts, complete))
+                        }
+                        Err(error) => {
+                            log::warn!("syncing contacts: {error}");
+                            None
+                        }
+                    };
+                    let has_me_photo = synced.as_ref().is_some_and(|(contacts, _)| {
+                        contacts.contacts().any(|contact| {
+                            contact.email.eq_ignore_ascii_case(&me) && contact.photo.is_some()
+                        })
+                    });
+                    let me_photo = if has_me_photo {
+                        None
+                    } else {
+                        fetch_me_photo_locator(&store).await
+                    };
+                    (synced, me_photo)
+                };
                 tokio::pin!(listing);
-                let (contacts, complete) = tokio::select! {
-                    listing = &mut listing => listing,
-                    () = tokio::time::sleep(GOOGLE_CONTACTS_BUSY) => {
+                let (synced, me_photo) = tokio::select! {
+                    result = &mut listing => result,
+                    () = tokio::time::sleep(CONTACTS_BUSY) => {
                         drop(busy);
                         listing.await
                     }
                 };
-                requests.post(Request::GoogleContacts(contacts, complete));
+                requests.post(Request::Contacts(synced, me_photo));
             });
     }
 
-    /// Suggests `contacts` in compose, and shows their photos and companies.
-    fn show_google_contacts(&mut self, contacts: GoogleContacts) {
-        self.photos.publish(contacts.contacts());
-        self.google_contacts = Some(Arc::new(contacts));
+    /// Suggests `contacts` in compose, and shows their photos, companies, and titles.
+    fn show_contacts(&mut self, contacts: ProviderContacts) {
+        self.contacts = Some(Arc::new(contacts));
+        self.publish_photos();
         self.merge_address_book();
     }
 
@@ -401,8 +505,8 @@ impl Worker {
         let Some(mail) = &self.mail_contacts else {
             return;
         };
-        let book = match &self.google_contacts {
-            Some(google) => merge_contacts(mail, google.contacts()),
+        let book = match &self.contacts {
+            Some(contacts) => merge_contacts(mail, contacts.contacts()),
             None => mail.to_vec(),
         };
         self.address_book = Some(Arc::new(book));
@@ -900,22 +1004,22 @@ impl Worker {
                         }
                         drop(busy);
                     });
-                self.list_google_contacts();
+                self.list_contacts();
                 false
             }
-            Request::LoadGoogleContacts => {
+            Request::LoadContacts => {
                 let mut changed = false;
-                if self.google_contacts.is_none() {
-                    match self.store.google_contacts().await {
+                if self.contacts.is_none() {
+                    match self.store.contacts().await {
                         Ok(Some(saved)) => {
-                            self.show_google_contacts(saved);
+                            self.show_contacts(saved);
                             changed = self.mail_contacts.is_some();
                         }
                         Ok(None) => {}
-                        Err(error) => log::warn!("reading the Google contacts: {error}"),
+                        Err(error) => log::warn!("reading cached contacts: {error}"),
                     }
                 }
-                self.list_google_contacts();
+                self.list_contacts();
                 changed
             }
             Request::MailContacts(contacts) => {
@@ -923,25 +1027,38 @@ impl Worker {
                 self.merge_address_book();
                 true
             }
-            Request::GoogleContacts(contacts, complete) => {
-                self.listing_google = false;
-                if complete {
-                    if let Err(error) = self.store.save_google_contacts(&contacts).await {
-                        log::warn!("saving the Google contacts: {error}");
+            Request::Contacts(synced, me_photo) => {
+                self.listing_contacts = false;
+                let Some((contacts, complete)) = synced else {
+                    if self.me_photo.is_none() && me_photo.is_some() {
+                        self.me_photo = me_photo;
+                        self.publish_photos();
                     }
-                    self.show_google_contacts(contacts);
-                    self.mail_contacts.is_some()
-                } else if self.google_contacts.is_none() {
-                    // A listing that failed part way shows what it got, but isn't kept and doesn't
-                    // replace a whole one, and the next read of the address book lists again.
-                    self.show_google_contacts(GoogleContacts {
-                        listed: jiff::Timestamp::UNIX_EPOCH,
-                        ..contacts
-                    });
-                    self.mail_contacts.is_some()
+                    return false;
+                };
+                let me_photo_updated = if complete || self.me_photo.is_none() {
+                    let changed = self.me_photo != me_photo;
+                    self.me_photo = me_photo;
+                    changed
                 } else {
                     false
+                };
+                if complete || self.contacts.is_none() {
+                    self.show_contacts(contacts);
+                    self.mail_contacts.is_some()
+                } else {
+                    if me_photo_updated {
+                        self.publish_photos();
+                    }
+                    false
                 }
+            }
+            Request::MePhoto(me_photo) => {
+                if self.me_photo != me_photo {
+                    self.me_photo = me_photo;
+                    self.publish_photos();
+                }
+                false
             }
             Request::SendHeldNow(done) => {
                 self.send_held_now(done).await;
@@ -1206,16 +1323,35 @@ impl Worker {
     }
 }
 
-/// How long after a sync the next one is due. While the window shows the account, that's about 25 s
-/// when focused, else a minute on either power source, even hidden or minimized, because a hidden
-/// window still shows the account. Off screen, it's a minute on mains and five on battery.
-fn sync_every(presence: Presence, power: Power) -> Duration {
-    match (presence, power) {
-        (Presence::Focused, _) => FOCUSED,
-        (Presence::Visible | Presence::Background, _) | (Presence::OffScreen, Power::Plugged) => {
-            FAST
+/// Intervals for [`Pace`], defaulting to production sync cadence ([`FOCUSED`], [`FAST`], [`MEDIUM`]).
+/// While the window shows the account, that's about 25 s when focused, else a minute on either
+/// power source, even hidden or minimized, because a hidden window still shows the account. Off
+/// screen, it's a minute on mains and five on battery.
+#[derive(Clone, Copy)]
+pub(crate) struct PaceIntervals {
+    pub(crate) focused: Duration,
+    pub(crate) fast: Duration,
+    pub(crate) medium: Duration,
+}
+
+impl Default for PaceIntervals {
+    fn default() -> Self {
+        Self {
+            focused: FOCUSED,
+            fast: FAST,
+            medium: MEDIUM,
         }
-        (Presence::OffScreen, Power::Battery) => MEDIUM,
+    }
+}
+
+impl PaceIntervals {
+    fn every(self, presence: Presence, power: Power) -> Duration {
+        match (presence, power) {
+            (Presence::Focused, _) => self.focused,
+            (Presence::Visible | Presence::Background, _)
+            | (Presence::OffScreen, Power::Plugged) => self.fast,
+            (Presence::OffScreen, Power::Battery) => self.medium,
+        }
     }
 }
 
@@ -1232,6 +1368,7 @@ pub(super) fn check_every(presence: Presence) -> Duration {
 pub(super) struct Pace {
     pub(super) presence: watch::Receiver<Presence>,
     pub(super) power: watch::Receiver<Power>,
+    pub(super) intervals: PaceIntervals,
 }
 
 impl Pace {
@@ -1240,7 +1377,7 @@ impl Pace {
     /// battery syncs at once.
     pub(super) async fn due(&mut self, ended: tokio::time::Instant) {
         loop {
-            let every = sync_every(
+            let every = self.intervals.every(
                 *self.presence.borrow_and_update(),
                 *self.power.borrow_and_update(),
             );
@@ -1433,7 +1570,13 @@ async fn mail_notice(
     let Some(from) = &arrival.from else {
         return notice;
     };
-    notice.image = crate::people::notification_photo(brands.ctx(), &from.email, &notice.key).await;
+    notice.image = crate::people::notification_photo_for(
+        brands.ctx(),
+        brands.account(),
+        &from.email,
+        &notice.key,
+    )
+    .await;
     if notice.image.is_none() {
         let logo = async {
             let headers = store.headers(&arrival.message).await.ok()??;
@@ -1621,11 +1764,29 @@ async fn drive_connection_loop<NetFut, CheckFut>(
     }
 }
 
-/// Mail's contacts with Google's added (unscored, unless mail scored them) and lending their
-/// names to addresses mail has none for.
+/// Mail's contacts with provider contacts added (unscored, unless mail scored them) and lending
+/// their names to addresses mail has none for.
+/// Resolves the provider's `/me/photo` locator when exposed (Outlook); returns `None` on Gmail or
+/// when no photo is set.
+async fn fetch_me_photo_locator(store: &Store) -> Option<String> {
+    match store.my_photo_metadata().await {
+        Ok(Some(meta)) => Some(match meta.id.as_deref() {
+            Some(id) if !id.is_empty() && !id.contains('/') => {
+                format!("outlook://me/photo/{id}")
+            }
+            _ => "outlook://me/photo".to_owned(),
+        }),
+        Ok(None) => None,
+        Err(error) => {
+            log::debug!("reading account photo metadata: {error}");
+            None
+        }
+    }
+}
+
 fn merge_contacts<'a>(
     mail: &[ScoredContact],
-    google: impl IntoIterator<Item = &'a exo_store::GoogleContact>,
+    provider: impl IntoIterator<Item = &'a ProviderContact>,
 ) -> Vec<ScoredContact> {
     let mut book = mail.to_vec();
     let mut known: HashMap<String, usize> = book
@@ -1633,7 +1794,7 @@ fn merge_contacts<'a>(
         .enumerate()
         .map(|(at, contact)| (contact.email.to_lowercase(), at))
         .collect();
-    for contact in google {
+    for contact in provider {
         match known.get(&contact.email.to_lowercase()) {
             Some(&at) => {
                 if book[at].name.is_none() {

@@ -24,18 +24,30 @@ pub(crate) fn of(from: Option<&Address>, aliases: &[Alias]) -> Option<String> {
     (!signature.is_empty()).then_some(signature)
 }
 
+/// The signature for `open`: on Outlook accounts, the account's locally edited signature; on
+/// Google accounts, the From alias's Gmail `sendAs` signature.
+pub(crate) fn of_open(open: &Open, aliases: &[Alias]) -> Option<String> {
+    if open.body.outlook {
+        let raw = open.body.local_signature.as_deref()?;
+        let signature = exo_mail::sanitize_fragment(raw).trim().to_owned();
+        (!signature.is_empty()).then_some(signature)
+    } else {
+        of(open.record.from.as_ref(), aliases)
+    }
+}
+
 /// Whether `open` carries its signature's content. New mail always does, and a reply or forward
 /// does while the setting is on.
 pub(crate) fn includes_content(open: &Open) -> bool {
     open.is_new_email() || open.body.signature_on_replies
 }
 
-/// The block that `…` reveals into the body under what's written. It holds the alias's
-/// signature, with its content as [`includes_content`] says, or is an empty block for an alias
-/// without one, which choosing another From fills ([`switch`]).
+/// The block that `…` reveals into the body under what's written. It holds the alias's (or
+/// Outlook's local) signature, with its content as [`includes_content`] says, or is an empty block
+/// for an alias without one, which choosing another From fills ([`switch`]).
 pub(crate) fn revealed(open: &Open, aliases: &[Alias]) -> String {
     exo_editor::outgoing::signature(
-        of(open.record.from.as_ref(), aliases).as_deref(),
+        of_open(open, aliases).as_deref(),
         includes_content(open),
         Some(&open.id),
     )
@@ -47,6 +59,9 @@ pub(crate) fn revealed(open: &Open, aliases: &[Alias]) -> String {
 /// their content whatever the setting, so a block revealed empty takes the new alias's whole
 /// signature.
 pub(crate) fn switch(open: &mut Open, aliases: &[Alias], old: Option<&Address>) {
+    if open.body.outlook {
+        return;
+    }
     let block = |from: Option<&Address>| {
         exo_editor::outgoing::signature(of(from, aliases).as_deref(), true, Some(&open.id))
     };
@@ -199,5 +214,33 @@ mod tests {
             "{}",
             reply.editor.html()
         );
+    }
+
+    #[test]
+    fn outlook_uses_local_signature_and_respects_on_replies_setting() {
+        let mut new = open(DraftAction::Compose, "maya@brightmoor.co");
+        new.body.outlook = true;
+        new.body.local_signature = Some("<div><b>Maya</b> — Outlook</div>".into());
+        new.body.signature_on_replies = false;
+        assert_eq!(
+            of_open(&new, &aliases()).as_deref(),
+            Some("<div><b>Maya</b> — Outlook</div>")
+        );
+        assert!(revealed(&new, &aliases()).contains("Maya"));
+
+        let mut reply = open(DraftAction::Reply, "maya@brightmoor.co");
+        reply.body.outlook = true;
+        reply.body.local_signature = Some("<div><b>Maya</b> — Outlook</div>".into());
+        reply.body.signature_on_replies = false;
+        assert!(
+            !revealed(&reply, &aliases()).contains("Outlook"),
+            "reply omits local signature content when include_signature_on_replies is off"
+        );
+        reply.body.signature_on_replies = true;
+        assert!(revealed(&reply, &aliases()).contains("Outlook"));
+
+        // Empty local signature on Outlook never falls back to Gmail aliases.
+        reply.body.local_signature = None;
+        assert_eq!(of_open(&reply, &aliases()), None);
     }
 }

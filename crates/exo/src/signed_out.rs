@@ -1,4 +1,4 @@
-//! The "Almost there…" teardown alert, for an account Google signed out.
+//! The "Almost there…" teardown alert, for an account whose provider signed it out.
 //!
 //! It's the full-screen alert ([`teardown::paint`]), and Sign In, Enter, Escape or five seconds
 //! lead to the sign-in screen.
@@ -14,15 +14,18 @@ use crate::{backdrop::Backdrop, log_in::LogIn, teardown};
 /// The sign-in screen follows by itself after 5 s.
 const RELOAD_AFTER: f64 = 5.0;
 
-/// The alert's copy. "Google" is long enough for a space before the second sentence rather than
-/// a line break.
+/// The alert's copy.
 const TITLE: &str = "Almost there…";
-const TEXT: &str = "It looks like you've been signed out of Google. Please sign in again.";
+const GOOGLE_TEXT: &str = "It looks like you've been signed out of Google. Please sign in again.";
+const MICROSOFT_TEXT: &str =
+    "It looks like you've been signed out of Microsoft. Please sign in again.";
 const ACTION: &str = "Sign In";
 
-/// The screen for an account whose grant Google refused.
+/// The screen for an account whose grant its provider refused.
 pub struct SignedOut {
+    key: String,
     email: String,
+    provider: exo_auth::Provider,
     backdrop: Backdrop,
     /// The sign-in screen it leads to, its photo decoding meanwhile.
     log_in: Option<LogIn>,
@@ -31,23 +34,43 @@ pub struct SignedOut {
 }
 
 impl SignedOut {
-    /// The screen for `email`, over the photo for `now`, leading to the sign-in screen with its
-    /// photo from `images`. It's ready to draw.
-    pub(crate) fn new(ctx: &egui::Context, images: &Path, now: &Zoned, email: String) -> Self {
+    /// The screen for the account keyed `key` (display address `email`, `provider`), over the
+    /// photo for `now`, leading to the sign-in screen with its photo from `images`. It's ready to
+    /// draw.
+    pub(crate) fn new(
+        ctx: &egui::Context,
+        images: &Path,
+        now: &Zoned,
+        key: String,
+        email: String,
+        provider: exo_auth::Provider,
+    ) -> Self {
         let mut backdrop = Backdrop::new(ctx, now);
         let log_in = LogIn::new(ctx, images, None);
         backdrop.wait();
         Self {
+            key,
             email,
+            provider,
             backdrop,
             log_in: Some(log_in),
             since: None,
         }
     }
 
-    /// The account that was signed out.
+    /// The signed-out account's display address.
     pub fn email(&self) -> &str {
         &self.email
+    }
+
+    /// The signed-out account's key (`email` for Google, `microsoft {email}` for Microsoft).
+    pub(crate) fn key(&self) -> &str {
+        &self.key
+    }
+
+    /// The provider whose copy the alert shows.
+    pub fn provider(&self) -> exo_auth::Provider {
+        self.provider
     }
 
     /// Whether the photo is decoded. For screenshots and tests.
@@ -69,12 +92,16 @@ impl SignedOut {
                 | input.consume_key(Modifiers::NONE, Key::Escape)
         });
 
+        let text = match self.provider {
+            exo_auth::Provider::Google => GOOGLE_TEXT,
+            exo_auth::Provider::Microsoft => MICROSOFT_TEXT,
+        };
         let clicked = teardown::paint(
             ui,
             &self.backdrop,
             exo_ui::Alert {
                 title: TITLE,
-                text: TEXT,
+                text,
                 actions: &[ACTION],
                 selected: 0,
             },

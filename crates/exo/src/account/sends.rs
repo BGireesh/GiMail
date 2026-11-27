@@ -47,7 +47,7 @@ impl QuitFlush<'_> {
 }
 
 /// Drains queued local draft saves on `View ▸ Reload` without expiring Undo-Send holds or
-/// blocking on Gmail writes, then stops the account's tasks.
+/// blocking on remote writes, then stops the account's tasks.
 pub(super) fn drain_before_reload(runtime: &Runtime, requests: &Requests, restarts: &Restarts) {
     let requests = requests.clone();
     let _ = block_on_runtime(runtime, async move {
@@ -389,14 +389,16 @@ async fn file_bytes(store: &Store, attachment: &DraftAttachment) -> Result<Vec<u
     }
 }
 
-/// Whether Gmail couldn't hand a part over for a reason that passes: it was out of reach, rate
-/// limiting the account or signing it out, or failing (5xx). Not when it said the part is gone.
+/// Whether the provider couldn't hand a part over for a reason that passes: it was out of reach,
+/// rate limiting the account or signing it out, or failing (5xx). Not when it said the part is
+/// gone.
 fn passes(error: &exo_store::Error) -> bool {
     match error {
         exo_store::Error::Offline(_)
         | exo_store::Error::Throttled { .. }
         | exo_store::Error::Unauthorized(_) => true,
         exo_store::Error::Gmail(error) => error.status().is_none_or(|status| status >= 500),
+        exo_store::Error::Outlook(error) => error.status().is_none_or(|status| status >= 500),
         _ => false,
     }
 }

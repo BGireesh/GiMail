@@ -1,7 +1,7 @@
 //! The calendar's data off the UI thread: a task on the account's runtime lists the user's
 //! calendars, reads the events of the days on screen from the store, fetches those days from
-//! Google Calendar, sends the changes made to events, and publishes what it has for the UI to
-//! read each frame.
+//! Google Calendar or Microsoft Graph, sends the changes made to events, and publishes what it
+//! has for the UI to read each frame.
 //!
 //! Exo has no server for Calendar to push changes through, so it polls. It reads the days on
 //! screen every minute while the window is focused and every five minutes otherwise, and the
@@ -24,10 +24,9 @@ use std::{
 };
 
 use exo_store::{
-    AccountCalendar, CalendarChange, CalendarOutcome, Connection, InviteLinks, Outage, Refusal,
-    Store, StoredEvent,
+    AccountCalendar, CalendarChange, CalendarEvent, CalendarOutcome, CalendarRemote, Connection,
+    InviteLinks, Outage, Recurrence, Refusal, RsvpStatus, Store, StoredEvent,
 };
-use gmail::calendar::Event;
 use jiff::{SignedDuration, Timestamp, civil::Date, tz::TimeZone};
 use tokio::sync::{mpsc, oneshot, watch};
 
@@ -39,7 +38,7 @@ const FOCUSED: Duration = Duration::from_secs(60);
 const UNFOCUSED: Duration = Duration::from_secs(300);
 /// How long the calendar list stays fresh.
 const LIST_FRESH: Duration = Duration::from_secs(600);
-/// How soon to try again when Google can't be reached.
+/// How soon to try again when the calendar provider can't be reached.
 const RETRY: Duration = Duration::from_secs(15);
 /// How long a change waits for Undo before it's sent.
 const HOLD: SignedDuration = SignedDuration::from_secs(10);
@@ -77,8 +76,8 @@ pub struct Data {
     /// spans, or `None` when Calendar won't say, and the time it covers.
     pub busy: BTreeMap<String, Option<Vec<(Timestamp, Timestamp)>>>,
     pub busy_range: Option<(Timestamp, Timestamp)>,
-    /// Series' `recurrence` lines, by `{calendar}/{series}`, as asked for this session.
-    pub series: BTreeMap<String, Vec<String>>,
+    /// Series' recurrence rules, by `{calendar}/{series}`, as asked for this session.
+    pub series: BTreeMap<String, Option<Recurrence>>,
     /// Guests' calendars as last read, by address.
     pub guests: BTreeMap<String, GuestCalendar>,
 }
@@ -99,7 +98,7 @@ pub enum GuestEvents {
     /// Nothing yet.
     Pending,
     /// Their events (instances) over the range.
-    Shown(Vec<Event>),
+    Shown(Vec<CalendarEvent>),
     /// Calendar won't show them.
     Hidden,
     /// Calendar couldn't be reached. It's asked again once the connection is back.
@@ -116,7 +115,7 @@ pub enum Failure {
     RespondToInvite {
         uid: String,
         thread: Option<String>,
-        status: String,
+        status: RsvpStatus,
         refusal: Refusal,
         links: Option<InviteLinks>,
     },
@@ -124,7 +123,7 @@ pub enum Failure {
     Create {
         token: u64,
         calendar: String,
-        event: Box<Event>,
+        event: Box<CalendarEvent>,
     },
     /// An edit.
     Edit,
@@ -194,7 +193,11 @@ enum Request {
     Guests(Vec<String>, Timestamp, Timestamp),
     /// From the task fetching it: a guest's calendar over a time, `None` when it couldn't be
     /// reached.
-    GuestLoaded(String, (Timestamp, Timestamp), Option<Option<Vec<Event>>>),
+    GuestLoaded(
+        String,
+        (Timestamp, Timestamp),
+        Option<Option<Vec<CalendarEvent>>>,
+    ),
     /// From the task fetching it: a thread's invite, tagged with its request sequence number.
     InviteLoaded(u64, String, Option<Vec<u8>>),
     /// Panics the task, as a bug would.
@@ -420,24 +423,20 @@ impl CalendarSync {
         self.post(Request::Invite(id.to_owned()));
     }
 
-    /// Reads calendar account `email`'s calendars with `tokens` from now on, because it signed in
-    /// (`added`), which shows `Loading calendars` until its list comes, or the account opened.
-    pub fn read_account(
-        &self,
-        email: &str,
-        tokens: impl gmail::TokenProvider + 'static,
-        added: bool,
-    ) {
-        self.store.add_calendar_account(email, tokens);
+    /// Reads calendar account `account_key`'s calendars with `remote` from now on, because it
+    /// signed in (`added`), which shows `Loading calendars` until its list comes, or the account
+    /// opened.
+    pub fn read_account(&self, account_key: &str, remote: CalendarRemote, added: bool) {
+        self.store.add_calendar_account(account_key, remote);
         if added {
             self.shared.data.send_modify(|data| {
                 Arc::make_mut(data)
                     .loading_accounts
-                    .insert(email.to_owned());
+                    .insert(account_key.to_owned());
             });
         }
         self.post(Request::Accounts {
-            added: added.then(|| email.to_owned()),
+            added: added.then(|| account_key.to_owned()),
         });
     }
 
@@ -650,7 +649,17 @@ impl Task {
                 match self.store.free_busy(&calendars, from, to).await {
                     Ok(found) => {
                         let mut data = Data::clone(&self.shared.data.borrow());
-                        data.busy = found.into_iter().collect();
+                        data.busy = found
+                            .into_iter()
+                            .map(|(id, slots)| {
+                                (
+                                    id,
+                                    slots.map(|slots| {
+                                        slots.into_iter().map(|slot| slot.span()).collect()
+                                    }),
+                                )
+                            })
+                            .collect();
                         data.busy_range = Some((from, to));
                         self.shared.data.send_replace(Arc::new(data));
                         self.repaint.request();
@@ -689,23 +698,25 @@ impl Task {
                 }
                 self.read().await;
             }
-            Request::Series(calendar, id) => match self.store.series_rules(&calendar, &id).await {
-                Ok(rules) => {
-                    let mut data = Data::clone(&self.shared.data.borrow());
-                    data.series.insert(format!("{calendar}/{id}"), rules);
-                    self.shared.data.send_replace(Arc::new(data));
-                    self.repaint.request();
+            Request::Series(calendar, id) => {
+                match self.store.series_recurrence(&calendar, &id).await {
+                    Ok(rule) => {
+                        let mut data = Data::clone(&self.shared.data.borrow());
+                        data.series.insert(format!("{calendar}/{id}"), rule);
+                        self.shared.data.send_replace(Arc::new(data));
+                        self.repaint.request();
+                    }
+                    Err(error) => {
+                        // Asked again next time the details open.
+                        self.shared
+                            .series_asked
+                            .lock()
+                            .unwrap_or_else(PoisonError::into_inner)
+                            .remove(&format!("{calendar}/{id}"));
+                        log::warn!("reading a series' rule: {error}");
+                    }
                 }
-                Err(error) => {
-                    // Asked again next time the details open.
-                    self.shared
-                        .series_asked
-                        .lock()
-                        .unwrap_or_else(PoisonError::into_inner)
-                        .remove(&format!("{calendar}/{id}"));
-                    log::warn!("reading a series' rule: {error}");
-                }
-            },
+            }
             Request::Guests(guests, from, to) => self.load_guests(guests, (from, to)),
             Request::GuestLoaded(email, range, found) => {
                 let mut data = Data::clone(&self.shared.data.borrow());
@@ -1063,8 +1074,7 @@ impl Task {
 
 #[cfg(test)]
 mod tests {
-    use exo_store::Cut;
-    use gmail::calendar::EventDateTime;
+    use exo_store::{Cut, EventTime};
 
     use super::*;
 
@@ -1076,7 +1086,6 @@ mod tests {
     ) -> (
         tokio::runtime::Runtime,
         mock_servers::MockServer,
-        gmail::Client,
         std::path::PathBuf,
         crate::account::Account,
     ) {
@@ -1087,17 +1096,16 @@ mod tests {
             ))
             .expect("mock starts");
         let tokens = Arc::new(gmail::StaticToken(mock_servers::DEV_ACCESS_TOKEN.into()));
-        let gmail = gmail::Client::new(server.endpoints(), tokens.as_ref().clone());
         let dir = std::env::temp_dir().join(format!("exo-calendar-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let credentials = crate::account::Credentials {
+        let credentials = crate::account::Credentials::Gmail {
             email: ME.into(),
             endpoints: server.endpoints(),
             tokens,
         };
         let account = crate::account::Account::open(&dir, credentials, egui::Context::default())
             .expect("opens");
-        (runtime, server, gmail, dir, account)
+        (runtime, server, dir, account)
     }
 
     /// Waits until the task is idle and `done` holds, for a few seconds at most.
@@ -1114,28 +1122,31 @@ mod tests {
 
     #[test]
     fn this_and_following_ends_an_all_day_series_on_the_day_before() {
-        let (runtime, _server, gmail, dir, account) = account("truncate-all-day");
-        let day = |date: &str| EventDateTime {
-            date: Some(date.into()),
-            ..EventDateTime::default()
-        };
-        let series = Event {
-            summary: Some("Recycling out".into()),
-            start: Some(day("2026-11-03")),
-            end: Some(day("2026-11-04")),
-            recurrence: vec!["RRULE:FREQ=WEEKLY".into()],
-            ..Event::default()
-        };
-        let series = runtime
-            .block_on(
-                gmail
-                    .calendar()
-                    .insert_event(ME, &series, None)
-                    .into_future(),
-            )
-            .expect("inserts")
-            .id
-            .expect("an id");
+        let (runtime, server, dir, account) = account("truncate-all-day");
+        let http = reqwest::Client::new();
+        let events_url = server
+            .url()
+            .join(&format!("/calendar/v3/calendars/{ME}/events"))
+            .expect("url");
+        let created: serde_json::Value = runtime.block_on(async {
+            http.post(events_url)
+                .bearer_auth(mock_servers::DEV_ACCESS_TOKEN)
+                .json(&serde_json::json!({
+                    "summary": "Recycling out",
+                    "start": { "date": "2026-11-03" },
+                    "end": { "date": "2026-11-04" },
+                    "recurrence": ["RRULE:FREQ=WEEKLY"],
+                }))
+                .send()
+                .await
+                .expect("inserts")
+                .error_for_status()
+                .expect("ok")
+                .json()
+                .await
+                .expect("json")
+        });
+        let series = created["id"].as_str().expect("an id").to_owned();
         // Deleting the third, on the 17th, and the ones after.
         account.calendar().hold(CalendarChange::Truncate {
             calendar: ME.into(),
@@ -1145,18 +1156,29 @@ mod tests {
         });
         // Quitting sends what's held.
         drop(account);
-        let instances = runtime
-            .block_on(
-                gmail
-                    .calendar()
-                    .instances(ME, &series, None, Some("2027-01-01T00:00:00Z"))
-                    .into_future(),
-            )
-            .expect("instances");
-        let days: Vec<String> = instances
-            .items
+        let instances_url = server
+            .url()
+            .join(&format!(
+                "/calendar/v3/calendars/{ME}/events/{series}/instances?timeMax=2027-01-01T00:00:00Z"
+            ))
+            .expect("url");
+        let instances: serde_json::Value = runtime.block_on(async {
+            http.get(instances_url)
+                .bearer_auth(mock_servers::DEV_ACCESS_TOKEN)
+                .send()
+                .await
+                .expect("instances")
+                .error_for_status()
+                .expect("ok")
+                .json()
+                .await
+                .expect("json")
+        });
+        let days: Vec<String> = instances["items"]
+            .as_array()
+            .expect("items")
             .iter()
-            .filter_map(|event| event.start.as_ref()?.date.clone())
+            .filter_map(|event| event["start"]["date"].as_str().map(str::to_owned))
             .collect();
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(days, ["2026-11-03", "2026-11-10"]);
@@ -1164,7 +1186,7 @@ mod tests {
 
     #[test]
     fn the_task_runs_again_after_a_panic_and_keeps_its_window_and_held_changes() {
-        let (runtime, _server, gmail, dir, account) = account("calendar-panic");
+        let (runtime, server, dir, account) = account("calendar-panic");
         let calendar = account.calendar();
         let tz = TimeZone::get("America/New_York").expect("zone");
         let friday = Date::constant(2026, 11, 20);
@@ -1174,23 +1196,19 @@ mod tests {
             synced: vec![ME.into()],
             tz: tz.clone(),
         });
-        let at = |hour: i8| EventDateTime {
-            date_time: Some(
-                friday
-                    .at(hour, 0, 0, 0)
-                    .to_zoned(tz.clone())
-                    .expect("exists")
-                    .strftime("%Y-%m-%dT%H:%M:%S%:z")
-                    .to_string(),
-            ),
-            ..EventDateTime::default()
+        let at = |hour: i8| {
+            let zoned = friday
+                .at(hour, 0, 0, 0)
+                .to_zoned(tz.clone())
+                .expect("exists");
+            EventTime::from_zoned(&zoned, false)
         };
-        let lunch = Event {
+        let lunch = CalendarEvent {
             id: Some("e0lunch0009".into()),
             summary: Some("Lunch".into()),
             start: Some(at(12)),
             end: Some(at(13)),
-            ..Event::default()
+            ..CalendarEvent::default()
         };
         let token = calendar.hold(CalendarChange::Create {
             calendar: ME.into(),
@@ -1211,15 +1229,28 @@ mod tests {
             "the run after the panic took it back"
         );
         drop(account);
-        let query = gmail::calendar::EventsQuery {
-            q: Some("Lunch".into()),
-            ..Default::default()
-        };
-        let found = runtime
-            .block_on(gmail.calendar().events(ME, &query).into_future())
-            .expect("lists");
+        let events_url = server
+            .url()
+            .join(&format!("/calendar/v3/calendars/{ME}/events?q=Lunch"))
+            .expect("url");
+        let found: serde_json::Value = runtime.block_on(async {
+            reqwest::Client::new()
+                .get(events_url)
+                .bearer_auth(mock_servers::DEV_ACCESS_TOKEN)
+                .send()
+                .await
+                .expect("lists")
+                .error_for_status()
+                .expect("ok")
+                .json()
+                .await
+                .expect("json")
+        });
         let _ = std::fs::remove_dir_all(&dir);
-        assert!(found.items.is_empty(), "Calendar never heard of it");
+        assert!(
+            found["items"].as_array().is_some_and(Vec::is_empty),
+            "Calendar never heard of it"
+        );
     }
 
     #[test]

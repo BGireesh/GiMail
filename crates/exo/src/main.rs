@@ -14,6 +14,7 @@ const DIRS: fastframe_dirs::App = fastframe_dirs::App::new("exo", "", "", "Exo")
 /// mock-servers takes any OAuth client.
 const MOCK_CLIENT_ID: &str = "exo-dev.apps.googleusercontent.com";
 const MOCK_CLIENT_SECRET: &str = "GOCSPX-mock-servers";
+const MOCK_MICROSOFT_CLIENT_ID: &str = "exo-dev-microsoft";
 
 fn main() -> anyhow::Result<()> {
     // This goes first. An update's helper runs here and exits, and a relaunch's update flags
@@ -170,7 +171,11 @@ fn main() -> anyhow::Result<()> {
                             MOCK_CLIENT_ID,
                             MOCK_CLIENT_SECRET,
                             gmail::Endpoints::mock(&origin),
-                        );
+                        )
+                        .with_microsoft(exo_auth::MicrosoftClient::new(
+                            MOCK_MICROSOFT_CLIENT_ID,
+                            outlook::Endpoints::mock(&origin),
+                        ));
                         Auth::open(client, &state, MemorySecrets::default())
                     }),
                     None => Box::new(move || {

@@ -32,10 +32,10 @@ use crate::ids::labels::{INBOX, SH_ALL};
 use crate::migrations;
 use crate::model::Header;
 
-/// Where the history cursor is kept in `kv`.
-pub(crate) const HISTORY_ID: &str = "history_id";
 /// Where the account's identity is kept in `kv`.
 pub(crate) const IDENTITY: &str = "identity";
+/// Where `kv` keeps which provider's account the store holds (`"gmail"`, `"outlook"`).
+pub(crate) const PROVIDER: &str = "provider";
 /// Where the account's send-as aliases are kept in `kv`.
 pub(crate) const ALIASES: &str = "aliases";
 /// A JSON map in `kv` from each held send whose reminder is already on its thread to that
@@ -57,9 +57,9 @@ pub(crate) const EVICTED_BEFORE: &str = "evicted_before";
 pub(crate) struct ThreadRow {
     #[key]
     pub id: String,
-    /// The newest `historyId` stored for this thread. A listed `historyId` above it means the
-    /// thread is stale.
-    pub history_id: u64,
+    /// The newest version stored for this thread (Gmail's `historyId`). A listed version above it
+    /// means the thread is stale.
+    pub version: u64,
 }
 
 /// A Gmail message as Gmail last reported it (drafts included).
@@ -70,7 +70,9 @@ pub(crate) struct MessageRow {
     pub id: String,
     #[index]
     pub thread_id: String,
-    pub history_id: u64,
+    /// The version of the message's labels stored (Gmail's `historyId`), which only moves
+    /// forward.
+    pub version: u64,
     /// `internalDate` in epoch milliseconds, the message's date for sorting.
     pub internal_date: i64,
     pub label_ids: Vec<String>,
@@ -240,8 +242,8 @@ pub(crate) struct DraftRow {
     /// The Gmail thread, once there is one.
     #[index]
     pub thread_id: Option<String>,
-    /// The Gmail draft, once created.
-    pub gmail_id: Option<String>,
+    /// The provider's draft, once created.
+    pub draft_id: Option<String>,
     /// The Gmail message of the latest version Gmail has.
     pub message_id: Option<String>,
     #[column(type = text)]
@@ -288,26 +290,31 @@ pub(crate) struct ReminderRow {
     pub aborted: bool,
 }
 
-/// A calendar on the Google Calendar list of one of the account's calendar accounts (the mail
-/// account's own among them), as Calendar last listed it.
+/// A calendar on the list of one of the account's calendar accounts (the mail account's own among
+/// them), as the provider last listed it.
 #[derive(Debug, toasty::Model)]
 #[table = "calendars"]
 #[key(account, id)]
 pub(crate) struct CalendarRow {
-    /// The calendar account whose list it's on.
+    /// Canonical account key (`email` for Google, `"microsoft {email}"` for Microsoft).
     pub account: String,
     pub id: String,
     /// Its place in the list.
     pub position: u32,
     #[column(type = text)]
-    pub entry: Json<gmail::calendar::CalendarListEntry>,
+    pub entry: Json<crate::calendar::serde_compat::Compat<crate::calendar::model::Calendar>>,
 }
 
-/// An event (or one instance of a recurring event) as Calendar last listed it.
+/// An event (or one instance of a recurring event) as the provider last listed it.
 #[derive(Debug, toasty::Model)]
 #[table = "events"]
 #[key(calendar_id, id)]
+#[allow(
+    clippy::duplicated_attributes,
+    reason = "Clippy 1.99 flags shared leading columns across toasty::Model composite #[index] attributes"
+)]
 #[index(calendar_id, start)]
+#[index(calendar_id, series_id)]
 pub(crate) struct EventRow {
     pub calendar_id: String,
     pub id: String,
@@ -317,11 +324,14 @@ pub(crate) struct EventRow {
     #[index]
     pub end: i64,
     pub all_day: bool,
+    /// Series master ID for recurring occurrences/exceptions (`recurringEventId` / `seriesMasterId`).
+    pub series_id: Option<String>,
     #[column(type = text)]
-    pub event: Json<gmail::calendar::Event>,
+    pub event: Json<crate::calendar::serde_compat::Compat<crate::calendar::model::CalendarEvent>>,
 }
 
-/// A change to the calendar that Calendar doesn't have yet. Not provider truth, like the outbox.
+/// A change to the calendar that the provider doesn't have yet. Not provider truth, like the
+/// outbox.
 #[derive(Debug, toasty::Model)]
 #[table = "calendar_changes"]
 pub(crate) struct CalendarChangeRow {
@@ -336,7 +346,7 @@ pub(crate) struct CalendarChangeRow {
     #[index]
     pub queue: String,
     #[column(type = text)]
-    pub change: Json<crate::CalendarChange>,
+    pub change: Json<crate::calendar::serde_compat::Compat<crate::CalendarChange>>,
     /// Consecutive postponements, for the backoff.
     pub failures: u32,
     /// Held for Undo, or backing off, until then.
@@ -361,7 +371,18 @@ pub(crate) struct BulkRow {
     pub changed: Json<crate::Relabelled>,
 }
 
-/// Small persistent values: the history cursor, the account's identity.
+/// Where sync has read the provider's changes up to, one row per scope
+/// ([`crate::provider::Cursors`]).
+#[derive(Debug, toasty::Model)]
+#[table = "sync_cursors"]
+pub(crate) struct CursorRow {
+    #[key]
+    pub scope: String,
+    /// What only the provider reads (Gmail's `historyId`).
+    pub token: String,
+}
+
+/// Small persistent values: the account's identity, its aliases, Exo's own records.
 #[derive(Debug, toasty::Model)]
 #[table = "kv"]
 pub(crate) struct KvRow {
@@ -570,17 +591,22 @@ impl toasty_core::driver::Driver for BusySqlite {
     {
         Box::pin(async move {
             let mut conn = self.inner.connect(cx).await?;
-            conn.exec(
-                &self.schema,
-                toasty_core::driver::operation::Operation::RawSql(
-                    toasty_core::driver::operation::RawSql {
-                        sql: format!("PRAGMA busy_timeout = {BUSY_TIMEOUT_MS}"),
-                        params: Vec::new(),
-                        ret: toasty_core::driver::operation::RawSqlRet::Infer,
-                    },
-                ),
-            )
-            .await?;
+            for sql in [
+                format!("PRAGMA busy_timeout = {BUSY_TIMEOUT_MS}"),
+                "PRAGMA synchronous = NORMAL".to_owned(),
+            ] {
+                conn.exec(
+                    &self.schema,
+                    toasty_core::driver::operation::Operation::RawSql(
+                        toasty_core::driver::operation::RawSql {
+                            sql,
+                            params: Vec::new(),
+                            ret: toasty_core::driver::operation::RawSqlRet::Infer,
+                        },
+                    ),
+                )
+                .await?;
+            }
             Ok(conn)
         })
     }

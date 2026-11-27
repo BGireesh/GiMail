@@ -82,6 +82,7 @@ impl ThreadView {
                     collapsible: false,
                     composing: false,
                     offline: !self.action.online,
+                    outlook: self.action.outlook,
                     full_names: self.action.full_names,
                     reply_labels: false,
                 };
@@ -157,7 +158,7 @@ impl ThreadView {
         let from = message::participants(message, detail, false, self.action.full_names);
         let (when, date_width) = match Status::of(message, state) {
             Some(status) => {
-                let text = status.collapsed_title(&self.action.now);
+                let text = status.collapsed_title(&self.action.now, self.action.outlook);
                 let measured = width(&STATUS, &text);
                 (
                     When::Status {
@@ -238,7 +239,7 @@ impl ThreadView {
         } else {
             let when = match status {
                 Some(status) => When::Status {
-                    text: status.title(&self.action.now),
+                    text: status.title(&self.action.now, self.action.outlook),
                     color: status.ink(),
                 },
                 None => When::Date(dates::row(message.date, &self.action.now)),

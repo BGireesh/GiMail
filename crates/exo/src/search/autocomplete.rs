@@ -10,8 +10,8 @@ use regex::Regex;
 
 /// Most suggestions shown, and people looked up per word.
 pub(crate) const LIMIT: usize = 5;
-/// The operators a word completes to.
-const KEYWORDS: [&str; 16] = [
+/// The operators a word completes to across both providers.
+const COMMON_KEYWORDS: [&str; 13] = [
     "in",
     "is",
     "label",
@@ -25,10 +25,9 @@ const KEYWORDS: [&str; 16] = [
     "replyto",
     "filename",
     "subject",
-    "category",
-    "list",
-    "rfc822msgid",
 ];
+/// Additional Gmail-only operators.
+const GMAIL_KEYWORDS: [&str; 3] = ["category", "list", "rfc822msgid"];
 /// Gmail's categories as `in:category_…` names them.
 const CATEGORIES: [&str; 5] = ["personal", "social", "promotions", "forums", "updates"];
 
@@ -94,9 +93,9 @@ pub(crate) struct LabelChoice {
     pub name: String,
 }
 
-/// The labels `in:` suggests: Exo's own lists, then the account's labels and Gmail's categories, by
-/// the names the app gives them.
-pub(crate) fn label_choices(labels: &[Label]) -> Vec<LabelChoice> {
+/// The labels `in:` suggests: Exo's own lists, then the account's labels and (on Gmail)
+/// categories, by the names the app gives them.
+pub(crate) fn label_choices(labels: &[Label], outlook: bool) -> Vec<LabelChoice> {
     let choice = |slug: &str, name: &str| LabelChoice {
         slug: slug.into(),
         name: name.into(),
@@ -106,28 +105,36 @@ pub(crate) fn label_choices(labels: &[Label]) -> Vec<LabelChoice> {
         choice("done", "Done"),
         choice("scheduled", "Scheduled"),
         choice("reminders", "Reminders"),
-        choice("muted", "Muted"),
-        choice("snippets", "Snippets"),
     ];
+    if !outlook {
+        choices.push(choice("muted", "Muted"));
+    }
+    choices.push(choice("snippets", "Snippets"));
     for label in labels {
         let system = |slug: &str, name: &str| Some(choice(slug, name));
         let found = match (label.kind, label.id.as_str()) {
             (LabelKind::System, "INBOX") => system("inbox", "Inbox"),
             (LabelKind::System, "SENT") => system("sent", "Sent"),
+            (LabelKind::System, "STARRED") if outlook => system("flagged", "Flagged"),
             (LabelKind::System, "STARRED") => system("starred", "Starred"),
             (LabelKind::System, "UNREAD") => system("unread", "Unread"),
             (LabelKind::System, "DRAFT") => system("draft", "Drafts"),
+            (LabelKind::System, "TRASH") if outlook => system("trash", "Deleted Items"),
             (LabelKind::System, "TRASH") => system("trash", "Trash"),
+            (LabelKind::System, "SPAM") if outlook => system("spam", "Junk Email"),
             (LabelKind::System, "SPAM") => system("spam", "Spam"),
-            (LabelKind::System, id) if id.starts_with("CATEGORY_") => Some(LabelChoice {
-                slug: exo_store::label_slug(id),
-                name: id.to_owned(),
-            }),
+            (LabelKind::System, id) if !outlook && id.starts_with("CATEGORY_") => {
+                Some(LabelChoice {
+                    slug: exo_store::label_slug(id),
+                    name: id.to_owned(),
+                })
+            }
             (LabelKind::System, _) => None,
             (LabelKind::User, _)
-                if crate::lists::user_labels(std::slice::from_ref(label))
-                    .next()
-                    .is_some() =>
+                if !(outlook && label.name.starts_with("Deleted Items/"))
+                    && crate::lists::user_labels(std::slice::from_ref(label))
+                        .next()
+                        .is_some() =>
             {
                 Some(LabelChoice {
                     slug: exo_store::label_slug(&label.name),
@@ -198,6 +205,7 @@ pub(crate) fn suggest(
     raw: &str,
     labels: &[LabelChoice],
     contacts: &[Vec<(String, Option<String>)>],
+    outlook: bool,
 ) -> Vec<Suggestion> {
     let Some((kind, value, field)) = last_word(raw) else {
         return Vec::new();
@@ -211,7 +219,7 @@ pub(crate) fn suggest(
     } else {
         Vec::new()
     };
-    let syntax = syntax_suggestions(kind, &field, &value, labels, !people.is_empty());
+    let syntax = syntax_suggestions(kind, &field, &value, labels, !people.is_empty(), outlook);
     let mut merged: Vec<Suggestion> = match (syntax.is_empty(), people.is_empty()) {
         (false, false) if people.len() >= 3 => syntax
             .into_iter()
@@ -244,13 +252,22 @@ fn syntax_suggestions(
     value: &str,
     labels: &[LabelChoice],
     has_people: bool,
+    outlook: bool,
 ) -> Vec<Suggestion> {
     let mut found = match kind {
-        TokenKind::Label => label_suggestions(field, value, labels),
-        TokenKind::Category => category_suggestions(field, value),
+        TokenKind::Label => label_suggestions(field, value, labels, outlook),
+        TokenKind::Category if !outlook => category_suggestions(field, value),
         TokenKind::Text => {
             let lower = value.to_lowercase();
-            match KEYWORDS.iter().find(|keyword| keyword.starts_with(&lower)) {
+            let keyword = COMMON_KEYWORDS
+                .iter()
+                .chain(if outlook {
+                    &[][..]
+                } else {
+                    &GMAIL_KEYWORDS[..]
+                })
+                .find(|keyword| keyword.starts_with(&lower));
+            match keyword {
                 Some(keyword) if !value.is_empty() => {
                     let replacement = match *keyword {
                         "has:attachment" | "attachment" => "has:attachment".to_owned(),
@@ -258,7 +275,9 @@ fn syntax_suggestions(
                     };
                     vec![Suggestion::new(Kind::Operator, replacement, value)]
                 }
-                _ if !value.is_empty() && !has_people => label_suggestions("in", value, labels),
+                _ if !value.is_empty() && !has_people => {
+                    label_suggestions("in", value, labels, outlook)
+                }
                 _ => Vec::new(),
             }
         }
@@ -270,7 +289,12 @@ fn syntax_suggestions(
 
 /// Labels whose slug or name contains the value, plus `all` and `read`, best match first, then by
 /// the system labels' priority.
-fn label_suggestions(field: &str, value: &str, labels: &[LabelChoice]) -> Vec<Suggestion> {
+fn label_suggestions(
+    field: &str,
+    value: &str,
+    labels: &[LabelChoice],
+    outlook: bool,
+) -> Vec<Suggestion> {
     const PRIORITY: [(&str, i32); 10] = [
         ("sent", 100),
         ("inbox", 99),
@@ -289,12 +313,12 @@ fn label_suggestions(field: &str, value: &str, labels: &[LabelChoice]) -> Vec<Su
     for label in labels {
         if wanted.is_empty() || label.slug.contains(&wanted) {
             items.push((
-                label_item(field, value, &label.slug, &original),
+                label_item(field, value, &label.slug, &original, outlook),
                 label.slug.clone(),
             ));
         } else if label.name.to_lowercase().contains(&wanted) {
             items.push((
-                label_item(field, value, &label.name, &original),
+                label_item(field, value, &label.name, &original, outlook),
                 label.slug.clone(),
             ));
         }
@@ -303,7 +327,10 @@ fn label_suggestions(field: &str, value: &str, labels: &[LabelChoice]) -> Vec<Su
         if (wanted.is_empty() || extra.starts_with(&wanted))
             && !items.iter().any(|(_, slug)| slug == extra)
         {
-            items.push((label_item(field, value, extra, &original), extra.to_owned()));
+            items.push((
+                label_item(field, value, extra, &original, outlook),
+                extra.to_owned(),
+            ));
         }
     }
     let priority = |slug: &str| {
@@ -333,8 +360,8 @@ fn label_suggestions(field: &str, value: &str, labels: &[LabelChoice]) -> Vec<Su
 }
 
 /// A label suggestion, with a name that has spaces or punctuation in quotes, and
-/// `in:category_…` as `category:…`.
-fn label_item(field: &str, value: &str, name: &str, original: &str) -> Suggestion {
+/// `in:category_…` as `category:…` on Gmail.
+fn label_item(field: &str, value: &str, name: &str, original: &str, outlook: bool) -> Suggestion {
     let name = if name
         .chars()
         .any(|c| "!(){}-".contains(c) || c.is_whitespace())
@@ -349,7 +376,8 @@ fn label_item(field: &str, value: &str, name: &str, original: &str) -> Suggestio
     } else {
         &value[..value.find(trimmed).unwrap_or_default()]
     };
-    if field == "in"
+    if !outlook
+        && field == "in"
         && let Some(category) = name
             .strip_prefix("category_")
             .filter(|category| CATEGORIES.contains(category))
@@ -521,15 +549,23 @@ mod tests {
             "newsletter@freightsignals.com".to_owned(),
             Some("Freight Signals".to_owned()),
         )]];
-        let suggestions = suggest("fr", &labels(), &freight);
+        let suggestions = suggest("fr", &labels(), &freight, false);
         assert_eq!(
             replacements(&suggestions),
             ["from:", "newsletter@freightsignals.com"]
         );
         assert_eq!(suggestions[0].kind, Kind::Operator);
         assert_eq!(
-            replacements(&suggest("att", &labels(), &[vec![]])),
+            replacements(&suggest("att", &labels(), &[vec![]], false)),
             ["has:attachment"]
+        );
+        assert!(
+            suggest("category:soc", &labels(), &[], true).is_empty(),
+            "Outlook hides Gmail categories"
+        );
+        assert!(
+            suggest("rfc", &labels(), &[vec![]], true).is_empty(),
+            "Outlook hides Gmail-only operators"
         );
     }
 
@@ -539,46 +575,57 @@ mod tests {
             "ana@letters.anaruiz.com".to_owned(),
             Some("Ana Ruiz".to_owned()),
         )]];
-        let by_address = suggest("an", &labels(), &ana);
+        let by_address = suggest("an", &labels(), &ana, false);
         assert_eq!(replacements(&by_address), ["ana@letters.anaruiz.com"]);
         assert!(matches!(
             &by_address[0].kind,
             Kind::Contact { by_name: false, .. }
         ));
         let words = contact_words("ruiz");
-        let by_name = suggest("ruiz", &labels(), &[ana[0].clone(); 1][..words.len()]);
+        let by_name = suggest(
+            "ruiz",
+            &labels(),
+            &[ana[0].clone(); 1][..words.len()],
+            false,
+        );
         assert_eq!(replacements(&by_name), ["Ana Ruiz"]);
         assert!(matches!(
             &by_name[0].kind,
             Kind::Contact { by_name: true, .. }
         ));
         assert_eq!(contact_words("budget from:ana ruiz"), ["ana ruiz", "ruiz"]);
-        assert_eq!(replacements(&suggest("me", &labels(), &[vec![]])), ["me"]);
+        assert_eq!(
+            replacements(&suggest("me", &labels(), &[vec![]], false)),
+            ["me"]
+        );
     }
 
     #[test]
     fn labels_follow_in_is_and_label() {
-        assert_eq!(replacements(&suggest("in:se", &labels(), &[])), ["in:sent"]);
-        let all = suggest("in:", &labels(), &[]);
+        assert_eq!(
+            replacements(&suggest("in:se", &labels(), &[], false)),
+            ["in:sent"]
+        );
+        let all = suggest("in:", &labels(), &[], false);
         assert_eq!(all.len(), 5);
         assert_eq!(all[0].replacement, "in:sent", "priority breaks score ties");
         assert_eq!(
-            replacements(&suggest("is:unr", &labels(), &[])),
+            replacements(&suggest("is:unr", &labels(), &[], false)),
             ["is:unread"]
         );
         // A word nobody answers to suggests labels instead.
         assert_eq!(
-            replacements(&suggest("fam", &labels(), &[vec![]])),
+            replacements(&suggest("fam", &labels(), &[vec![]], false)),
             ["in:family"]
         );
-        assert!(suggest("filename:pd", &labels(), &[]).is_empty());
+        assert!(suggest("filename:pd", &labels(), &[], false).is_empty());
     }
 
     #[test]
     fn in_suggests_exos_own_lists() {
-        let choices = label_choices(&[]);
+        let choices = label_choices(&[], false);
         let suggested = |typed: &str| {
-            replacements(&suggest(typed, &choices, &[]))
+            replacements(&suggest(typed, &choices, &[], false))
                 .into_iter()
                 .map(str::to_owned)
                 .collect::<Vec<_>>()
@@ -604,8 +651,8 @@ mod tests {
             background_color: None,
             hidden: false,
         };
-        let with_read = label_choices(&[read_label]);
-        let read_suggestions = suggest("in:rea", &with_read, &[]);
+        let with_read = label_choices(&[read_label], false);
+        let read_suggestions = suggest("in:rea", &with_read, &[], false);
         let read_hits: Vec<_> = replacements(&read_suggestions)
             .into_iter()
             .filter(|s| *s == "in:read")

@@ -31,7 +31,7 @@ use crate::format::{
     names::{NameFormat, Person, display_name},
 };
 pub use crate::rsvp::{ANSWERS, Rsvp as Response};
-use crate::rsvp::{RsvpButtonMetrics, show_rsvp_button, show_rsvp_buttons};
+use crate::rsvp::{RsvpButtonMetrics, show_rsvp_button, show_rsvp_choices};
 
 /// The card's text is 14px/24px, and the row names are bold with `min-width: 92px`.
 const TEXT: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 14.0, 24.0);
@@ -633,6 +633,7 @@ pub(super) struct Context<'a> {
     pub message: &'a MessageDetail,
     pub calendar: Option<&'a exo_mail::CalendarData>,
     pub about_open: bool,
+    pub outlook: bool,
 }
 
 /// The status over the photo: a cancellation or an update, else a guest's answer.
@@ -1394,11 +1395,18 @@ pub(super) fn show(
                     text_top: 4.0,
                     animated: false,
                 };
-                if let Some(response) = show_rsvp_buttons(
+                let choices: &[Response] = if context.outlook && *answer == Some(Response::Declined)
+                {
+                    &[Response::Declined]
+                } else {
+                    &ANSWERS
+                };
+                if let Some(response) = show_rsvp_choices(
                     ui,
                     palette,
                     id,
                     pos2(card.left() + ROWS_SIDE + QUESTION, row_top - 3.0),
+                    choices,
                     *answer,
                     focused,
                     metrics,
@@ -1518,6 +1526,7 @@ mod tests {
             message,
             calendar: None,
             about_open: false,
+            outlook: false,
         }
     }
 

@@ -1,35 +1,35 @@
-//! The calendar's changes until Calendar has them: new events, edits, deletions and answers,
-//! queued in the store, so they're made offline, outlast a quit and go when the connection is
+//! The calendar's changes until the provider has them: new events, edits, deletions and answers,
+//! queued in the store so they work offline, outlast a quit, and flush once the connection is
 //! back.
 //!
-//! [`Store::queue_calendar_change`] writes a row, and [`Store::events`] shows it at once, because
-//! every read lays the queued changes over Calendar's copy. A change can be held first, for
-//! Undo's ten seconds, and [`Store::unqueue_calendar_change`] takes back one that hasn't gone.
-//! The caller sends the changes whose turn it is ([`Store::due_calendar_changes`],
-//! [`Store::send_calendar_change`]). There's one queue per event and its series, so a change
-//! waits for the changes before it to the same event and for no other. Being offline, signed out
-//! or rate limited postpones a change. An answer from Calendar that retrying won't change gives
-//! the change up, and the calendar shows Calendar's copy again.
+//! [`Store::queue_calendar_change`] writes a row and [`Store::events`] shows it at once by
+//! overlaying queued changes over the cached events. A change can be held for Undo, and
+//! [`Store::unqueue_calendar_change`] takes back one that hasn't gone (or queues a compensating
+//! deletion if a `Create` was already in flight, using the provider's server-assigned ID on
+//! Outlook).
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError};
 
-use gmail::calendar::{Event, EventDateTime};
 use jiff::tz::TimeZone;
 use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
 use toasty::{Executor, Json};
 
-use super::{StoredEvent, put};
-use crate::db::{CalendarChangeRow, EventRow};
-use crate::error::{Error, Result};
+use super::model::{
+    CalendarEvent, CalendarProviderKind, EventPatch, EventTime, RsvpStatus, StoredEvent,
+};
+use super::serde_compat::Compat;
+use super::{delete_cached_event, put};
+use crate::db::{self, CalendarChangeRow, EventRow, IN_LIST_CHUNK};
+use crate::error::{Error, ProviderError, Result};
 use crate::queue::{self, Disposition, FlushGate};
 use crate::store::Store;
 
 /// Per-store flush and in-flight row tracking for the calendar outbox, so a concurrent Undo or
 /// Delete of an in-flight `Create` waits for the send to finish and queues a compensating
-/// `Delete` instead of leaving a live event on Calendar.
+/// `Delete` using the server-assigned event ID instead of leaving a live event on the server.
 #[derive(Default)]
 pub(crate) struct CalendarOutboxSync {
     flush: FlushGate,
@@ -39,7 +39,9 @@ pub(crate) struct CalendarOutboxSync {
 #[derive(Default)]
 struct InFlight {
     sending: Option<u64>,
-    watched_creates: HashMap<u64, bool>,
+    /// Row ID of a watched in-flight `Create` -> `Some(server_id)` once committed on the server,
+    /// `None` if it has not committed.
+    watched_creates: HashMap<u64, Option<String>>,
 }
 
 /// Clears `in_flight.sending` if `send_calendar_change` exits early on an error or cancellation.
@@ -61,36 +63,47 @@ impl Drop for SendingGuard<'_> {
     }
 }
 
-fn fresh_event_id() -> String {
+pub(crate) fn fresh_event_id() -> String {
     static NEXT: AtomicU64 = AtomicU64::new(1);
     let nanos = u128::try_from(Timestamp::now().as_nanosecond()).unwrap_or(0);
     let seq = NEXT.fetch_add(1, Ordering::Relaxed);
     format!("e{:016x}{:08x}", nanos as u64, seq as u32)
 }
 
-/// A change to the calendar, as queued for Calendar.
+/// A change to the calendar, queued for the provider.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CalendarChange {
-    /// Adds `event`, whose id is chosen, to `calendar`, inviting its guests.
-    Create { calendar: String, event: Event },
-    /// Sets the fields `patch` has on event `id` of `calendar` (an instance, or a series),
-    /// telling the guests when `notify`. For a series, `shift` moves its start and end as far as
-    /// the instance's moved. `shown` is how the cached events it changes look meanwhile.
+    /// Adds `event` (with a client-chosen local ID) to `calendar`, inviting its guests.
+    Create {
+        calendar: String,
+        event: CalendarEvent,
+    },
+    /// Applies `patch` to event `id` on `calendar` (an instance or series master), telling guests
+    /// when `notify`. For a series, `shift` moves its start and end by the instance's civil
+    /// wall-clock delta. `shown` holds how affected cached events look optimistically.
     Edit {
         calendar: String,
         id: String,
-        patch: Event,
-        #[serde(default)]
-        clear_attendees: bool,
+        /// Series master ID when editing a recurring occurrence/exception, so it shares its
+        /// series' queue without parsing provider ID strings.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        series_id: Option<String>,
+        patch: EventPatch,
         notify: bool,
         shift: Option<(SignedDuration, SignedDuration)>,
-        shown: Vec<Event>,
+        shown: Vec<CalendarEvent>,
     },
-    /// Deletes event `id` of `calendar` (an instance, or a series and all its instances).
+    /// Deletes (or cancels, when `comment` is set on Outlook) event `id` of `calendar`.
     Delete {
         calendar: String,
         id: String,
+        /// Series master ID when deleting a single recurring occurrence.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        series_id: Option<String>,
         notify: bool,
+        /// Optional cancellation note for attendees (Outlook `POST .../cancel`).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        comment: Option<String>,
     },
     /// Ends series `series` before its instance at `from`.
     Truncate {
@@ -99,45 +112,42 @@ pub enum CalendarChange {
         from: Cut,
         notify: bool,
     },
-    /// Edits series `series` from its instance at `from` on. The series ends before that
-    /// instance, and a new series (with `patch`'s id) takes over with the old series' rule and
-    /// what `patch` sets. The new series starts at `patch`'s start, or else at the instance's
-    /// (`start` and `end`). From the series' first instance, the series itself is edited. `shown`
-    /// is how the instances it changes look meanwhile.
+    /// Edits series `series` from its instance at `from` onward. The series ends before `from`
+    /// and a new series (with `patch.id`) takes over with the remaining rule and `patch` overlaid,
+    /// starting at `patch.start`/`start` and ending at `patch.end`/`end`.
     Split {
         calendar: String,
         series: String,
         from: Cut,
-        patch: Event,
-        #[serde(default)]
-        clear_attendees: bool,
-        start: EventDateTime,
-        end: EventDateTime,
+        patch: EventPatch,
+        start: EventTime,
+        end: EventTime,
         notify: bool,
-        shown: Vec<Event>,
+        shown: Vec<CalendarEvent>,
     },
-    /// Sets my answer (`accepted`, `tentative`, `declined`) to `event` on `calendar`, whose id is
-    /// my address. The answer goes to the instance, or to its whole series when `all`.
+    /// Sets the user's RSVP `status` on `event` in `calendar` (or its whole series when `all`).
     Respond {
         calendar: String,
-        event: Event,
-        status: String,
+        event: CalendarEvent,
+        status: RsvpStatus,
         all: bool,
     },
-    /// Answers an invite on `calendar` from conversation `thread`. `invite` is its event as the
-    /// `.ics` describes it. The answer goes to the calendar's event with the invite's UID, which
-    /// is imported first when there's none, unless the invitation mail has `links` for a sender
-    /// Calendar doesn't know.
+    /// Answers an email invitation on `calendar` (or `account`'s primary calendar) from
+    /// conversation `thread`.
     RespondToInvite {
         calendar: String,
-        invite: Event,
-        status: String,
+        /// Canonical account key owning the invite's calendar, when known (avoids assuming
+        /// `calendar == email` on Outlook).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        account: Option<String>,
+        invite: CalendarEvent,
+        status: RsvpStatus,
         thread: Option<String>,
         links: Option<InviteLinks>,
     },
 }
 
-/// The links of an invitation from a sender Calendar doesn't know, which it keeps off the
+/// The links of an invitation from a sender Google Calendar doesn't know, which it keeps off the
 /// calendar: the one that marks the sender as known, and the answers' own.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InviteLinks {
@@ -148,26 +158,27 @@ pub struct InviteLinks {
 }
 
 impl InviteLinks {
-    /// The link that answers `status` (`accepted`, `declined`, `tentative`).
-    pub fn answer(&self, status: &str) -> Option<&str> {
+    /// The link that answers `status`.
+    #[must_use]
+    pub fn answer(&self, status: RsvpStatus) -> Option<&str> {
         match status {
-            "accepted" => self.accepted.as_deref(),
-            "declined" => self.declined.as_deref(),
-            "tentative" => self.tentative.as_deref(),
-            _ => None,
+            RsvpStatus::Accepted => self.accepted.as_deref(),
+            RsvpStatus::Declined => self.declined.as_deref(),
+            RsvpStatus::Tentative => self.tentative.as_deref(),
+            RsvpStatus::NeedsAction => None,
         }
     }
 }
 
-/// Why Calendar refused a change.
+/// Why the provider refused a change.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Refusal {
     /// The event it's for has been deleted or cancelled.
     Gone,
-    /// An answer to an invite from a sender Calendar doesn't know, whose event it doesn't have
-    /// ([`InviteLinks`]).
+    /// An answer to an invite from a sender Google Calendar doesn't know, whose event it doesn't
+    /// have ([`InviteLinks`]).
     UnknownSender,
-    /// Only the event's organizer can make it (`forbiddenForNonOrganizer`).
+    /// Only the event's organizer can make it.
     NonOrganizer,
     /// Anything else.
     Other,
@@ -195,35 +206,29 @@ pub struct QueuedCalendarChange {
 /// How sending a queued change went.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CalendarOutcome {
-    /// Calendar has it, and the cache has Calendar's answer.
+    /// The provider has it, and the cache has the updated state.
     Sent,
-    /// Offline, signed out or rate limited, so the change waits and goes again later.
+    /// Offline, signed out, or rate limited, so the change waits and goes again later.
     Postponed,
-    /// Calendar refused it with this error, so it's given up and its overlay is gone.
+    /// The provider refused it with this error, so it's given up and its overlay is gone.
     Refused { error: String, refusal: Refusal },
 }
 
 impl Cut {
-    /// Whether an instance starting at `start` stays, which it does when it comes before the cut
-    /// (or its start can't be read).
+    /// Whether an instance starting at `start` stays (falls strictly before the cut).
     #[must_use]
-    pub fn keeps(self, start: &EventDateTime) -> bool {
+    pub fn keeps(self, start: &EventTime) -> bool {
         match self {
-            Cut::Day(day) => start
-                .date
-                .as_deref()
-                .and_then(|date| date.parse::<jiff::civil::Date>().ok())
-                .is_none_or(|date| date < day),
+            Cut::Day(day) => start.date().is_none_or(|date| date < day),
             Cut::At(at) => start
                 .timestamp(&TimeZone::UTC)
                 .is_none_or(|start| start < at),
         }
     }
 
-    /// The rule's `UNTIL`. For an all-day series it's the day before, as a date (RFC 5545
-    /// §3.3.10 has `UNTIL` take the start's type, and Calendar's own all-day example ends
-    /// `UNTIL=20150628`). For any other series it's the second before, in UTC.
-    fn until(self) -> String {
+    /// The RFC 5545 `UNTIL` value ending before this cut: the day before (`YYYYMMDD`) for all-day,
+    /// or the second before in UTC (`YYYYMMDDTHHMMSSZ`) for timed series.
+    pub(crate) fn until(self) -> String {
         match self {
             Cut::Day(day) => day
                 .yesterday()
@@ -239,89 +244,27 @@ impl Cut {
     }
 }
 
-/// Shifts a date-only or timed [`EventDateTime`] by civil wall-clock delta `by`, preserving local
-/// wall-clock time across DST transitions.
-#[must_use]
-pub fn shift_event_time(time: Option<&EventDateTime>, by: SignedDuration) -> Option<EventDateTime> {
-    retime_event_time(time, by, None)
-}
-
-/// Shifts `time` by civil wall-clock delta `by`, adopting `template`'s all-day/timed representation
-/// (and zone, when given) when toggling `all_day` on a series.
-#[must_use]
-pub fn retime_event_time(
-    time: Option<&EventDateTime>,
-    by: SignedDuration,
-    template: Option<&EventDateTime>,
-) -> Option<EventDateTime> {
-    let time = time?;
-    let wall = civil_time(time)?.checked_add(by).ok()?;
-    let all_day = template.map_or(time.date.is_some(), |target| target.date.is_some());
-    if all_day {
-        return Some(EventDateTime {
-            date: Some(wall.date().to_string()),
-            ..EventDateTime::default()
-        });
+/// Extracts the base series ID from a Google instance ID (`{series}_YYYYMMDD` or
+/// `{series}_YYYYMMDDTHHMMSSZ`), leaving opaque Graph IDs (which may contain `_`) untouched.
+fn google_instance_base(id: &str) -> &str {
+    let Some((prefix, suffix)) = id.rsplit_once('_') else {
+        return id;
+    };
+    let bytes = suffix.as_bytes();
+    let is_date = bytes.len() == 8 && bytes.iter().all(u8::is_ascii_digit);
+    let is_utc_datetime = bytes.len() == 16
+        && bytes[8] == b'T'
+        && bytes[15] == b'Z'
+        && bytes[..8].iter().all(u8::is_ascii_digit)
+        && bytes[9..15].iter().all(u8::is_ascii_digit);
+    if !prefix.is_empty() && (is_date || is_utc_datetime) {
+        prefix
+    } else {
+        id
     }
-    let zone_name = template
-        .and_then(|target| target.time_zone.as_deref())
-        .or(time.time_zone.as_deref());
-    let zone = zone_name
-        .and_then(|name| TimeZone::get(name).ok())
-        .or_else(|| {
-            template
-                .and_then(|target| target.date_time.as_deref())
-                .and_then(super::recurrence::rfc3339_zone)
-        })
-        .or_else(|| {
-            time.date_time
-                .as_deref()
-                .and_then(super::recurrence::rfc3339_zone)
-        })
-        .unwrap_or(TimeZone::UTC);
-    let zoned = wall.to_zoned(zone).ok()?;
-    Some(EventDateTime {
-        date: None,
-        date_time: Some(zoned.strftime("%Y-%m-%dT%H:%M:%S%:z").to_string()),
-        time_zone: zone_name.map(str::to_owned),
-    })
-}
-
-fn civil_time(time: &EventDateTime) -> Option<jiff::civil::DateTime> {
-    if let Some(date) = &time.date {
-        return Some(date.parse::<jiff::civil::Date>().ok()?.at(0, 0, 0, 0));
-    }
-    let date_time = time.date_time.as_deref()?;
-    let at: Timestamp = date_time.parse().ok()?;
-    let zone = time
-        .time_zone
-        .as_deref()
-        .and_then(|name| TimeZone::get(name).ok())
-        .or_else(|| super::recurrence::rfc3339_zone(date_time))
-        .unwrap_or(TimeZone::UTC);
-    Some(at.to_zoned(zone).datetime())
 }
 
 impl CalendarChange {
-    /// Shifts `time` by civil wall-clock delta `by`, preserving local wall-clock time across DST.
-    #[must_use]
-    pub fn shift_event_time(
-        time: Option<&EventDateTime>,
-        by: SignedDuration,
-    ) -> Option<EventDateTime> {
-        shift_event_time(time, by)
-    }
-
-    /// Shifts `time` by civil wall-clock delta `by`, adopting `template`'s all-day/timed kind.
-    #[must_use]
-    pub fn retime_event_time(
-        time: Option<&EventDateTime>,
-        by: SignedDuration,
-        template: Option<&EventDateTime>,
-    ) -> Option<EventDateTime> {
-        retime_event_time(time, by, template)
-    }
-
     /// The calendar it changes.
     #[must_use]
     pub fn calendar(&self) -> &str {
@@ -336,15 +279,21 @@ impl CalendarChange {
         }
     }
 
-    /// Its queue, which is the event's. An instance (`{series}_{start}`) shares its series' queue.
-    fn queue(&self) -> String {
-        let id = match self {
+    /// Its FIFO queue key: `{calendar}/{series_or_id}` (or `{calendar}/{ical_uid}` for invites),
+    /// using explicit `series_id`/`recurring_event_id` so Outlook occurrences share their
+    /// `seriesMasterId` queue without splitting opaque Graph IDs on `_`.
+    pub(crate) fn queue(&self) -> String {
+        let key = match self {
             Self::Create { event, .. } => event.id.as_deref().unwrap_or_default(),
-            Self::Edit { id, .. }
-            | Self::Delete { id, .. }
-            | Self::Truncate { series: id, .. }
-            | Self::Split { series: id, .. } => id,
-            Self::Respond { event, .. } => event.id.as_deref().unwrap_or_default(),
+            Self::Edit { id, series_id, .. } | Self::Delete { id, series_id, .. } => series_id
+                .as_deref()
+                .unwrap_or_else(|| google_instance_base(id)),
+            Self::Truncate { series, .. } | Self::Split { series, .. } => series.as_str(),
+            Self::Respond { event, .. } => event
+                .recurring_event_id
+                .as_deref()
+                .or_else(|| event.id.as_deref().map(google_instance_base))
+                .unwrap_or_default(),
             Self::RespondToInvite { invite, .. } => {
                 return format!(
                     "{}/{}",
@@ -353,21 +302,70 @@ impl CalendarChange {
                 );
             }
         };
-        format!("{}/{}", self.calendar(), id.split('_').next().unwrap_or(id))
+        format!("{}/{key}", self.calendar())
     }
 
-    /// `events` as they are once this change is made. A new event, or one an edit moves, joins
-    /// them when `shown` says it belongs. For a new series, its instances starting in `window`
-    /// do.
-    pub(crate) fn apply(
+    /// Rewrites references to optimistic `old_id` with server-assigned `new_id` after an Outlook
+    /// `Create` succeeds.
+    fn rewrite_id(&mut self, old_id: &str, new_id: &str) {
+        let replace = |slot: &mut String| {
+            if slot == old_id {
+                *slot = new_id.to_owned();
+            }
+        };
+        let replace_opt = |slot: &mut Option<String>| {
+            if slot.as_deref() == Some(old_id) {
+                *slot = Some(new_id.to_owned());
+            }
+        };
+        let rewrite_event = |event: &mut CalendarEvent| {
+            replace_opt(&mut event.id);
+            replace_opt(&mut event.recurring_event_id);
+        };
+        match self {
+            Self::Create { event, .. } => rewrite_event(event),
+            Self::Edit {
+                id,
+                series_id,
+                shown,
+                ..
+            } => {
+                replace(id);
+                replace_opt(series_id);
+                for ev in shown {
+                    rewrite_event(ev);
+                }
+            }
+            Self::Delete { id, series_id, .. } => {
+                replace(id);
+                replace_opt(series_id);
+            }
+            Self::Truncate { series, .. } => replace(series),
+            Self::Split { series, shown, .. } => {
+                replace(series);
+                for ev in shown {
+                    rewrite_event(ev);
+                }
+            }
+            Self::Respond { event, .. } => rewrite_event(event),
+            Self::RespondToInvite { invite, .. } => rewrite_event(invite),
+        }
+    }
+
+    /// Overlays this change onto `events`. A new event, or one an edit moves, joins them when
+    /// `shown` says it belongs. For a new series, its instances starting in `window` join.
+    /// `me_for` returns the email address for a given `calendar_id` (so RSVP matching works even
+    /// when `calendar_id` is an opaque Outlook ID).
+    pub(crate) fn apply<'a>(
         &self,
         events: &mut Vec<StoredEvent>,
-        shown: &dyn Fn(&str, &Event) -> bool,
+        shown: &dyn Fn(&str, &CalendarEvent) -> bool,
         window: Option<(Timestamp, Timestamp)>,
+        me_for: &'a dyn Fn(&str) -> &'a str,
     ) {
         let on = |stored: &StoredEvent, calendar: &str| stored.calendar_id == calendar;
         match self {
-            Self::Create { calendar, event } if !event.recurrence.is_empty() => {
+            Self::Create { calendar, event } if event.is_series_master() => {
                 if let Some((from, to)) = window {
                     for instance in super::recurrence::instances(event, from, to) {
                         upsert(events, calendar, &instance, true, shown);
@@ -414,34 +412,40 @@ impl CalendarChange {
                 all,
             } => {
                 let series = event.recurring_event_id.as_deref().filter(|_| *all);
+                let me = me_for(calendar);
                 for stored in events.iter_mut().filter(|stored| on(stored, calendar)) {
                     if stored.event.id == event.id
                         || (series.is_some()
                             && stored.event.recurring_event_id.as_deref() == series)
                     {
-                        answer(&mut stored.event, calendar, status);
+                        stored.event.set_my_rsvp(me, *status);
                     }
                 }
             }
             Self::RespondToInvite {
                 calendar,
+                account,
                 invite,
                 status,
                 ..
             } => {
+                let me = account
+                    .as_deref()
+                    .map(|key| CalendarProviderKind::parse_account_key(key).1)
+                    .unwrap_or_else(|| me_for(calendar));
                 for stored in events.iter_mut().filter(|stored| {
                     on(stored, calendar)
                         && stored.event.ical_uid.is_some()
                         && stored.event.ical_uid == invite.ical_uid
                 }) {
-                    answer(&mut stored.event, calendar, status);
+                    stored.event.set_my_rsvp(me, *status);
                 }
             }
         }
     }
 }
 
-/// `events` without the instances of series `series` on `calendar` from `from` on.
+/// `events` without the instances of series `series` on `calendar` from `from` onward.
 fn truncate(events: &mut Vec<StoredEvent>, calendar: &str, series: &str, from: Cut) {
     events.retain(|stored| {
         stored.calendar_id != calendar
@@ -454,13 +458,13 @@ fn truncate(events: &mut Vec<StoredEvent>, calendar: &str, series: &str, from: C
     });
 }
 
-/// `event` in place of its copy in `events`, or added to them when `shown` says so.
+/// `event` in place of its copy in `events`, or added when `shown` says so.
 fn upsert(
     events: &mut Vec<StoredEvent>,
     calendar: &str,
-    event: &Event,
+    event: &CalendarEvent,
     unsynced: bool,
-    shown: &dyn Fn(&str, &Event) -> bool,
+    shown: &dyn Fn(&str, &CalendarEvent) -> bool,
 ) {
     match events
         .iter_mut()
@@ -476,34 +480,29 @@ fn upsert(
     }
 }
 
-/// Sets my answer to `event` on the attendee that's me or has my calendar's address.
-fn answer(event: &mut Event, calendar: &str, status: &str) {
-    for attendee in &mut event.attendees {
-        if attendee.is_self == Some(true)
-            || attendee
-                .email
-                .as_deref()
-                .is_some_and(|email| email.eq_ignore_ascii_case(calendar))
-        {
-            attendee.response_status = Some(status.to_owned());
-        }
-    }
-}
-
 /// Every queued change, oldest first.
 pub(crate) async fn queued(exec: &mut dyn Executor) -> Result<Vec<CalendarChange>> {
     let rows = CalendarChangeRow::all()
         .order_by(CalendarChangeRow::fields().id().asc())
         .exec(exec)
         .await?;
-    Ok(rows.into_iter().map(|row| row.change.0).collect())
+    Ok(rows.into_iter().map(|row| row.change.0.0).collect())
+}
+
+enum MakeResult {
+    Done,
+    Created {
+        calendar: String,
+        local_id: Option<String>,
+        created: Box<CalendarEvent>,
+    },
 }
 
 impl Store {
-    /// Queues `change` under `token` for Calendar, shown by [`events`](Self::events) at once and
-    /// sent once `hold` has passed. A deletion of a new event still queued takes it back
-    /// instead, so Calendar and its guests never hear of it; if that new event is already in
-    /// flight to Calendar, it waits for the send and queues a compensating deletion if needed.
+    /// Queues `change` under `token` for the calendar provider, shown by [`events`](Self::events)
+    /// at once and sent once `hold` has passed. Deleting a new event still queued takes it back
+    /// instead; if that new event is already in flight, it waits for the send and queues a
+    /// compensating deletion using the server-assigned ID if needed.
     ///
     /// # Errors
     /// On database failures.
@@ -529,7 +528,7 @@ impl Store {
                     .lock()
                     .unwrap_or_else(PoisonError::into_inner);
                 if state.sending == Some(row_id) {
-                    state.watched_creates.entry(row_id).or_insert(false);
+                    state.watched_creates.entry(row_id).or_insert(None);
                     true
                 } else {
                     false
@@ -544,23 +543,34 @@ impl Store {
             }
             drop(write);
             let _flush = sync.flush.lock().await;
-            let sent = sync
+            let server_id = sync
                 .in_flight
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .watched_creates
                 .remove(&row_id)
-                == Some(true);
+                .flatten();
             let mut write = self.inner.begin(&mut db).await?;
             CalendarChangeRow::filter(CalendarChangeRow::fields().queue().eq(&queue))
                 .delete()
                 .exec(write.exec())
                 .await?;
-            if sent {
+            if let Some(actual_id) = server_id {
+                if let CalendarChange::Delete { id, .. } = &change {
+                    let old_id = id.clone();
+                    change.rewrite_id(&old_id, &actual_id);
+                }
+                let new_queue = change.queue();
+                if new_queue != queue {
+                    CalendarChangeRow::filter(CalendarChangeRow::fields().queue().eq(&new_queue))
+                        .delete()
+                        .exec(write.exec())
+                        .await?;
+                }
                 CalendarChangeRow::create()
                     .token(token)
-                    .queue(queue)
-                    .change(Json(change))
+                    .queue(new_queue)
+                    .change(Json(Compat(change)))
                     .failures(0)
                     .not_before(hold)
                     .exec(write.exec())
@@ -571,7 +581,7 @@ impl Store {
         CalendarChangeRow::create()
             .token(token)
             .queue(queue)
-            .change(Json(change))
+            .change(Json(Compat(change)))
             .failures(0)
             .not_before(hold)
             .exec(write.exec())
@@ -580,9 +590,9 @@ impl Store {
     }
 
     /// Takes back the change queued under `token`, unless it's gone. For a new event, it also
-    /// takes back what was queued for the event since (its edits); if the new event's creation is
-    /// already in flight to Calendar and lands, a compensating deletion is queued in its place.
-    /// Returns whether the change was taken back.
+    /// takes back follow-up changes queued for it; if the creation is already in flight and lands
+    /// on the provider, a compensating deletion is queued using the server-assigned ID. Returns
+    /// whether the change was taken back.
     ///
     /// # Errors
     /// On database failures.
@@ -605,47 +615,50 @@ impl Store {
                 if state.sending != Some(row.id) {
                     return None;
                 }
-                if matches!(row.change.0, CalendarChange::Create { .. }) {
-                    state.watched_creates.entry(row.id).or_insert(false);
+                if matches!(row.change.0.0, CalendarChange::Create { .. }) {
+                    state.watched_creates.entry(row.id).or_insert(None);
                 }
-                Some((row.id, row.queue.clone(), row.change.0.clone()))
+                Some((row.id, row.queue.clone(), row.change.0.0.clone()))
             })
         };
         if let Some((row_id, queue_key, in_flight_change)) = in_flight {
             drop(write);
             let _flush = sync.flush.lock().await;
-            let sent_create = sync
+            let server_id = sync
                 .in_flight
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .watched_creates
                 .remove(&row_id)
-                == Some(true);
-            let mut write = self.inner.begin(&mut db).await?;
-            if sent_create
+                .flatten();
+            if let Some(actual_id) = server_id
                 && let CalendarChange::Create { calendar, event } = in_flight_change
-                && let Some(event_id) = event.id
             {
+                let me = self.email_for_calendar(&calendar).await?;
+                let notify = event.has_other_guests(&me);
+                let compensating = CalendarChange::Delete {
+                    calendar,
+                    id: actual_id,
+                    series_id: None,
+                    notify,
+                    comment: None,
+                };
+                let new_queue = compensating.queue();
+                let mut write = self.inner.begin(&mut db).await?;
                 CalendarChangeRow::filter(CalendarChangeRow::fields().queue().eq(&queue_key))
                     .delete()
                     .exec(write.exec())
                     .await?;
-                let notify = event.attendees.iter().any(|attendee| {
-                    attendee.is_self != Some(true)
-                        && !attendee
-                            .email
-                            .as_deref()
-                            .is_some_and(|email| email.eq_ignore_ascii_case(&calendar))
-                });
-                let compensating = CalendarChange::Delete {
-                    calendar,
-                    id: event_id,
-                    notify,
-                };
+                if new_queue != queue_key {
+                    CalendarChangeRow::filter(CalendarChangeRow::fields().queue().eq(&new_queue))
+                        .delete()
+                        .exec(write.exec())
+                        .await?;
+                }
                 CalendarChangeRow::create()
                     .token(0)
-                    .queue(queue_key)
-                    .change(Json(compensating))
+                    .queue(new_queue)
+                    .change(Json(Compat(compensating)))
                     .failures(0)
                     .not_before(None)
                     .exec(write.exec())
@@ -653,6 +666,7 @@ impl Store {
                 write.publish().await?;
                 return Ok(true);
             }
+            let mut write = self.inner.begin(&mut db).await?;
             let remaining =
                 CalendarChangeRow::filter(CalendarChangeRow::fields().token().eq(token))
                     .exec(write.exec())
@@ -669,9 +683,8 @@ impl Store {
         Ok(true)
     }
 
-    /// The queued changes whose turn it is, oldest first. That's each queue's first change,
-    /// unless it's held or backing off. With `held_too`, it's each queue's first change, whatever
-    /// it waits for. Also returns when the next waiting change is due.
+    /// The queued changes whose turn it is, oldest first: each queue's first change unless it's
+    /// held or backing off. With `held_too`, returns each queue's first change regardless of hold.
     ///
     /// # Errors
     /// On database failures.
@@ -697,13 +710,13 @@ impl Store {
             .map(|row| QueuedCalendarChange {
                 id: row.id,
                 token: row.token,
-                change: row.change.0,
+                change: row.change.0.0,
             })
             .collect();
         Ok((due, batch.retry_at))
     }
 
-    /// How many queued changes Calendar doesn't have yet.
+    /// How many queued calendar changes haven't reached the provider yet.
     ///
     /// # Errors
     /// On database failures.
@@ -715,8 +728,9 @@ impl Store {
         )
     }
 
-    /// Sends `queued` to Calendar, caches Calendar's answer, and drops the change from the queue.
-    /// Otherwise it postpones the change, or gives it up.
+    /// Sends `queued` to the calendar provider, updates the cache (including atomic local-to-server
+    /// ID rewriting when Outlook assigns a new event ID on `Create`), and drops the change from
+    /// the queue. Otherwise postpones or gives up on refusal.
     ///
     /// # Errors
     /// On database failures.
@@ -743,39 +757,74 @@ impl Store {
             row.failures
         };
         let mut guard = SendingGuard { sync, active: true };
-        let is_create = matches!(queued.change, CalendarChange::Create { .. });
-        let finish = |sent_create: bool, guard: &mut SendingGuard<'_>| {
+        let finish = |created_id: Option<String>, guard: &mut SendingGuard<'_>| {
             guard.active = false;
             let mut state = sync
                 .in_flight
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner);
             state.sending = None;
-            if sent_create && let Some(flag) = state.watched_creates.get_mut(&queued.id) {
-                *flag = true;
+            if let Some(id) = created_id
+                && let Some(slot) = state.watched_creates.get_mut(&queued.id)
+            {
+                *slot = Some(id);
             }
         };
         let failure = match self.make(&queued.change).await {
-            Ok(()) => {
+            Ok(MakeResult::Done) => {
                 let outcome = self.dequeue(queued.id, CalendarOutcome::Sent).await?;
-                finish(is_create, &mut guard);
+                finish(None, &mut guard);
                 return Ok(outcome);
+            }
+            Ok(MakeResult::Created {
+                calendar,
+                local_id,
+                created,
+            }) => {
+                let server_id = created.id.clone().or_else(|| local_id.clone());
+                let old_queue = queued.change.queue();
+                let mut db = self.inner.db.clone();
+                let mut write = self.inner.begin(&mut db).await?;
+                CalendarChangeRow::filter_by_id(queued.id)
+                    .delete()
+                    .exec(write.exec())
+                    .await?;
+                if let (Some(old_id), Some(new_id)) = (local_id.as_deref(), server_id.as_deref())
+                    && old_id != new_id
+                {
+                    delete_cached_event(write.exec(), &calendar, old_id).await?;
+                    let followups = CalendarChangeRow::filter(
+                        CalendarChangeRow::fields().queue().eq(&old_queue),
+                    )
+                    .order_by(CalendarChangeRow::fields().id().asc())
+                    .exec(write.exec())
+                    .await?;
+                    for row in followups {
+                        let mut updated_change = row.change.0.0;
+                        updated_change.rewrite_id(old_id, new_id);
+                        let new_queue = updated_change.queue();
+                        CalendarChangeRow::update_by_id(row.id)
+                            .queue(new_queue)
+                            .change(Json(Compat(updated_change)))
+                            .exec(write.exec())
+                            .await?;
+                    }
+                }
+                if !created.is_series_master() {
+                    put(write.exec(), &calendar, &created).await?;
+                }
+                write.publish().await?;
+                finish(server_id, &mut guard);
+                return Ok(CalendarOutcome::Sent);
             }
             Err(failure) => failure,
         };
         let failures = current_failures.saturating_add(1);
-        let not_before = match queue::dispose_error(&self.inner.api, failure, failures) {
-            // Calendar's quota is its own, so only Calendar's own pushback holds a change.
+        let not_before = match queue::dispose_error(self.inner.backoff, failure, failures) {
             Ok(Disposition::Postponed(until)) => until,
             Ok(Disposition::Refused(error)) => {
                 log::warn!("Calendar refused a change, giving it up: {error}");
-                let organizer_only = matches!(&error, gmail::Error::Api(api)
-                    if api.errors.iter().any(|item| item.reason == "forbiddenForNonOrganizer"));
-                let refusal = match error.status() {
-                    Some(404 | 410) => Refusal::Gone,
-                    Some(403) if organizer_only => Refusal::NonOrganizer,
-                    _ => Refusal::Other,
-                };
+                let refusal = classify_refusal(&error);
                 let outcome = self
                     .dequeue(
                         queued.id,
@@ -785,7 +834,7 @@ impl Store {
                         },
                     )
                     .await?;
-                finish(false, &mut guard);
+                finish(None, &mut guard);
                 return Ok(outcome);
             }
             Err(error @ (Error::EventCancelled | Error::UnknownSender)) => {
@@ -804,7 +853,7 @@ impl Store {
                         },
                     )
                     .await?;
-                finish(false, &mut guard);
+                finish(None, &mut guard);
                 return Ok(outcome);
             }
             Err(error) => return Err(error),
@@ -817,7 +866,7 @@ impl Store {
             .exec(write.exec())
             .await?;
         write.commit().await?;
-        finish(false, &mut guard);
+        finish(None, &mut guard);
         Ok(CalendarOutcome::Postponed)
     }
 
@@ -833,104 +882,88 @@ impl Store {
         Ok(outcome)
     }
 
-    /// Makes `change` at Calendar, and caches what it changed. That's Calendar's answer, or for a
-    /// series, its instances as they were shown, until the next fetch brings Calendar's.
-    async fn make(&self, change: &CalendarChange) -> Result<()> {
+    /// Sends `change` through the owning [`CalendarProvider`] and updates the cache.
+    async fn make(&self, change: &CalendarChange) -> Result<MakeResult> {
         match change {
             CalendarChange::Create { calendar, event } => {
-                self.insert_event(calendar, event, true).await.map(drop)
+                let provider = self.provider_for_calendar(calendar).await?;
+                let created = provider.create_event(calendar, event, true).await?;
+                Ok(MakeResult::Created {
+                    calendar: calendar.clone(),
+                    local_id: event.id.clone(),
+                    created: Box::new(created),
+                })
             }
             CalendarChange::Edit {
                 calendar,
                 id,
                 patch,
-                clear_attendees,
                 notify,
                 shift,
                 ..
             } => {
-                let mut patch = patch.clone();
-                patch.clear_attendees = *clear_attendees;
-                if let Some(shift) = shift {
-                    shifted(&mut patch, &self.fetch_event(calendar, id).await?, *shift);
-                }
-                let answer = self.patch_event(calendar, id, &patch, *notify).await?;
-                if answer.recurrence.is_empty() {
-                    Ok(())
+                let provider = self.provider_for_calendar(calendar).await?;
+                let answer = provider
+                    .patch_event(calendar, id, patch, *shift, *notify)
+                    .await?;
+                if answer.is_series_master() {
+                    self.fold_into_cache(change).await?;
                 } else {
-                    self.fold_into_cache(change).await
+                    let mut db = self.inner.db.clone();
+                    let mut write = self.inner.begin(&mut db).await?;
+                    put(write.exec(), calendar, &answer).await?;
+                    write.publish().await?;
                 }
+                Ok(MakeResult::Done)
             }
             CalendarChange::Delete {
                 calendar,
                 id,
                 notify,
-            } => self.delete_event(calendar, id, *notify).await,
+                comment,
+                ..
+            } => {
+                let provider = self.provider_for_calendar(calendar).await?;
+                provider
+                    .delete_event(calendar, id, *notify, comment.as_deref())
+                    .await?;
+                let mut db = self.inner.db.clone();
+                let mut write = self.inner.begin(&mut db).await?;
+                delete_cached_event(write.exec(), calendar, id).await?;
+                write.publish().await?;
+                Ok(MakeResult::Done)
+            }
             CalendarChange::Split {
                 calendar,
                 series,
                 from,
                 patch,
-                clear_attendees,
                 start,
                 end,
                 notify,
                 ..
             } => {
-                let master = self.fetch_event(calendar, series).await?;
-                let mut patch = patch.clone();
-                patch.clear_attendees = *clear_attendees;
-                let (start, end) = (
-                    patch.start.clone().unwrap_or_else(|| start.clone()),
-                    patch.end.clone().unwrap_or_else(|| end.clone()),
-                );
-                if master
-                    .start
-                    .as_ref()
-                    .is_none_or(|first| !from.keeps(first) || first == &start)
-                {
-                    // From the first instance, the series itself changes.
-                    let mut first_patch = Event {
-                        id: None,
-                        start: Some(start.clone()),
-                        end: Some(end),
-                        ..patch
-                    };
-                    if let Some(old_start) = &master.start
-                        && old_start.date.is_some() != start.date.is_some()
-                        && first_patch.recurrence.is_empty()
-                        && !master.recurrence.is_empty()
-                        && let Some((old_zoned, _)) =
-                            super::recurrence::zoned(old_start, &TimeZone::UTC)
-                        && let Some((target_zoned, all_day)) =
-                            super::recurrence::zoned(&start, old_zoned.time_zone())
-                    {
-                        first_patch.recurrence = super::recurrence::retime_until(
-                            &master.recurrence,
-                            &target_zoned,
-                            all_day,
-                            old_zoned.time_zone(),
-                        );
-                    }
-                    self.patch_event(calendar, series, &first_patch, *notify)
-                        .await?;
-                    return self.fold_into_cache(change).await;
-                }
-                // Insert the new series first (with its chosen `patch.id`) so a retry after a
-                // partial failure gets 409 Conflict instead of copying the truncated `UNTIL` from
-                // `master`.
-                let mut new_series = remainder(&master, &patch, start, end, *from);
-                if new_series.id.is_none() {
-                    new_series.id = Some(fresh_event_id());
-                }
-                self.insert_event(calendar, &new_series, *notify).await?;
-                let truncated = Event {
-                    recurrence: ended(&master.recurrence, *from),
-                    ..Event::default()
-                };
-                self.patch_event(calendar, series, &truncated, *notify)
+                let provider = self.provider_for_calendar(calendar).await?;
+                let created = provider
+                    .split_series(calendar, series, *from, patch, start, end, *notify)
                     .await?;
-                self.fold_into_cache(change).await
+                // Only persist optimistic `shown` rows when the provider honored our client ID
+                // (Google true-split). When Graph assigns opaque server IDs or split patched the
+                // master in place, fold only the truncation of `series` so fake-ID ghost rows are
+                // never left behind in SQLite under delta sync.
+                if patch.id.is_some() && created.id.as_deref() == patch.id.as_deref() {
+                    self.fold_into_cache_for(change, calendar, true).await?;
+                } else {
+                    let truncate_only = CalendarChange::Truncate {
+                        calendar: calendar.clone(),
+                        series: series.clone(),
+                        from: *from,
+                        notify: *notify,
+                    };
+                    self.fold_into_cache_for(&truncate_only, calendar, false)
+                        .await?;
+                }
+                Ok(MakeResult::Done)
             }
             CalendarChange::Truncate {
                 calendar,
@@ -938,16 +971,19 @@ impl Store {
                 from,
                 notify,
             } => {
-                let master = self.fetch_event(calendar, series).await?;
-                if master.start.as_ref().is_none_or(|first| !from.keeps(first)) {
-                    return self.delete_event(calendar, series, *notify).await;
+                let provider = self.provider_for_calendar(calendar).await?;
+                let deleted_all = provider
+                    .truncate_series(calendar, series, *from, *notify)
+                    .await?;
+                if deleted_all {
+                    let mut db = self.inner.db.clone();
+                    let mut write = self.inner.begin(&mut db).await?;
+                    delete_cached_event(write.exec(), calendar, series).await?;
+                    write.publish().await?;
+                } else {
+                    self.fold_into_cache(change).await?;
                 }
-                let patch = Event {
-                    recurrence: ended(&master.recurrence, *from),
-                    ..Event::default()
-                };
-                self.patch_event(calendar, series, &patch, *notify).await?;
-                self.fold_into_cache(change).await
+                Ok(MakeResult::Done)
             }
             CalendarChange::Respond {
                 calendar,
@@ -955,60 +991,95 @@ impl Store {
                 status,
                 all,
             } => {
-                let series = event.recurring_event_id.as_deref().filter(|_| *all);
-                self.respond(
-                    calendar,
-                    series.or(event.id.as_deref()).unwrap_or_default(),
-                    status,
-                )
-                .await?;
-                if series.is_some() {
-                    self.fold_into_cache(change).await
-                } else {
-                    Ok(())
+                let provider = self.provider_for_calendar(calendar).await?;
+                match provider.respond(calendar, event, *status, *all).await? {
+                    Some(updated) => {
+                        let mut db = self.inner.db.clone();
+                        let mut write = self.inner.begin(&mut db).await?;
+                        put(write.exec(), calendar, &updated).await?;
+                        write.publish().await?;
+                    }
+                    None => self.fold_into_cache(change).await?,
                 }
+                Ok(MakeResult::Done)
             }
             CalendarChange::RespondToInvite {
                 calendar,
+                account,
                 invite,
                 status,
+                thread,
                 links,
-                ..
             } => {
-                let uid = invite.ical_uid.clone().unwrap_or_default();
-                let event = match self.event_by_uid(calendar, &uid).await? {
-                    Some(event) if event.status.as_deref() == Some("cancelled") => {
-                        return Err(Error::EventCancelled);
+                let (provider, resolved_cal) = match account.as_deref() {
+                    Some(key) => {
+                        let provider = self.provider_for_account(key)?;
+                        let cal = if calendar == "primary"
+                            || (provider.kind() == CalendarProviderKind::Microsoft
+                                && calendar.eq_ignore_ascii_case(provider.email()))
+                        {
+                            self.primary_calendar_id(key)
+                                .await?
+                                .unwrap_or_else(|| "primary".to_owned())
+                        } else {
+                            calendar.clone()
+                        };
+                        (provider, cal)
                     }
-                    Some(event) => event,
-                    // Calendar won't take an unknown sender's event, which the mail answers.
-                    None if links.is_some() => return Err(Error::UnknownSender),
-                    None => self.import_event(calendar, invite).await?,
+                    None => (
+                        self.provider_for_calendar(calendar).await?,
+                        calendar.clone(),
+                    ),
                 };
-                self.respond(
-                    calendar,
-                    event
-                        .recurring_event_id
-                        .as_deref()
-                        .or(event.id.as_deref())
-                        .unwrap_or_default(),
-                    status,
-                )
-                .await?;
-                self.fold_into_cache(change).await
+                match provider
+                    .respond_to_invite(&resolved_cal, invite, *status, links.as_ref())
+                    .await?
+                {
+                    Some(created) if !created.is_series_master() => {
+                        let mut db = self.inner.db.clone();
+                        let mut write = self.inner.begin(&mut db).await?;
+                        put(write.exec(), &resolved_cal, &created).await?;
+                        write.publish().await?;
+                    }
+                    _ => {
+                        let resolved_change = CalendarChange::RespondToInvite {
+                            calendar: resolved_cal.clone(),
+                            account: account.clone(),
+                            invite: invite.clone(),
+                            status: *status,
+                            thread: thread.clone(),
+                            links: links.clone(),
+                        };
+                        self.fold_into_cache_for(&resolved_change, &resolved_cal, false)
+                            .await?;
+                    }
+                }
+                Ok(MakeResult::Done)
             }
         }
     }
 
-    /// Makes `change` to the cached events, as Calendar now has it.
+    /// Folds `change` into the cached events using indexed queries (`(calendar_id, id)` and
+    /// `(calendar_id, series_id)`) without deserializing unrelated events on the calendar.
     async fn fold_into_cache(&self, change: &CalendarChange) -> Result<()> {
-        let calendar = change.calendar();
+        let include_new = matches!(change, CalendarChange::Split { .. });
+        self.fold_into_cache_for(change, change.calendar(), include_new)
+            .await
+    }
+
+    async fn fold_into_cache_for(
+        &self,
+        change: &CalendarChange,
+        calendar: &str,
+        include_new: bool,
+    ) -> Result<()> {
+        let me = self.email_for_calendar(calendar).await?;
         let mut db = self.inner.db.clone();
-        let rows = EventRow::filter(EventRow::fields().calendar_id().eq(calendar))
-            .exec(&mut db)
-            .await?;
-        let before: HashMap<String, Event> =
-            rows.into_iter().map(|row| (row.id, row.event.0)).collect();
+        let rows = affected_rows(&mut db, calendar, change).await?;
+        let before: HashMap<String, CalendarEvent> = rows
+            .into_iter()
+            .map(|row| (row.id, row.event.0.0))
+            .collect();
         let mut after: Vec<StoredEvent> = before
             .values()
             .map(|event| StoredEvent {
@@ -1017,10 +1088,7 @@ impl Store {
                 unsynced: false,
             })
             .collect();
-        // A split truncates the old series' future instances and replaces them with `shown`
-        // instances carrying new ids, so those replacements must be inserted into the cache.
-        let include_new = matches!(change, CalendarChange::Split { .. });
-        change.apply(&mut after, &|_, _| include_new, None);
+        change.apply(&mut after, &|_, _| include_new, None, &|_| me.as_str());
         let kept: HashSet<&str> = after
             .iter()
             .filter_map(|stored| stored.event.id.as_deref())
@@ -1031,7 +1099,7 @@ impl Store {
             .cloned()
             .collect();
         let mut write = self.inner.begin(&mut db).await?;
-        for ids in gone.chunks(500) {
+        for ids in gone.chunks(IN_LIST_CHUNK) {
             EventRow::filter(
                 EventRow::fields()
                     .calendar_id()
@@ -1051,6 +1119,136 @@ impl Store {
     }
 }
 
+/// Loads only the cached [`EventRow`]s that `change` could read or mutate on `calendar`, avoiding
+/// full-calendar deserialization.
+async fn affected_rows(
+    exec: &mut dyn Executor,
+    calendar: &str,
+    change: &CalendarChange,
+) -> Result<Vec<EventRow>> {
+    let fields = EventRow::fields();
+    let mut by_id: HashMap<String, EventRow> = HashMap::new();
+    let mut ids: Vec<String> = Vec::new();
+    let mut series_keys: Vec<String> = Vec::new();
+
+    match change {
+        CalendarChange::Create { event, .. } => {
+            if let Some(id) = &event.id {
+                ids.push(id.clone());
+            }
+        }
+        CalendarChange::Edit {
+            id,
+            series_id,
+            shown,
+            ..
+        } => {
+            ids.push(id.clone());
+            series_keys.push(series_id.clone().unwrap_or_else(|| id.clone()));
+            for ev in shown {
+                if let Some(ev_id) = &ev.id {
+                    ids.push(ev_id.clone());
+                }
+                if let Some(series) = &ev.recurring_event_id {
+                    series_keys.push(series.clone());
+                }
+            }
+        }
+        CalendarChange::Delete { id, .. } => {
+            ids.push(id.clone());
+            series_keys.push(id.clone());
+        }
+        CalendarChange::Truncate { series, .. } => {
+            ids.push(series.clone());
+            series_keys.push(series.clone());
+        }
+        CalendarChange::Split { series, shown, .. } => {
+            ids.push(series.clone());
+            series_keys.push(series.clone());
+            for ev in shown {
+                if let Some(ev_id) = &ev.id {
+                    ids.push(ev_id.clone());
+                }
+            }
+        }
+        CalendarChange::Respond { event, all, .. } => {
+            if let Some(id) = &event.id {
+                ids.push(id.clone());
+            }
+            if *all && let Some(series) = &event.recurring_event_id {
+                ids.push(series.clone());
+                series_keys.push(series.clone());
+            }
+        }
+        CalendarChange::RespondToInvite { invite, .. } => {
+            if let Some(uid) = &invite.ical_uid {
+                let matched = db::query_col::<String>(
+                    exec,
+                    toasty::sql::query(
+                        "SELECT id FROM events WHERE calendar_id = ?1 AND (json_extract(event, '$.data.icalUid') = ?2 OR json_extract(event, '$.iCalUID') = ?2)",
+                    )
+                    .bind(calendar)
+                    .bind(uid.as_str()),
+                )
+                .await?;
+                ids.extend(matched);
+            }
+        }
+    }
+
+    ids.sort();
+    ids.dedup();
+    for chunk in ids.chunks(IN_LIST_CHUNK) {
+        for row in EventRow::filter(
+            fields
+                .calendar_id()
+                .eq(calendar)
+                .and(fields.id().in_list(chunk)),
+        )
+        .exec(&mut *exec)
+        .await?
+        {
+            by_id.insert(row.id.clone(), row);
+        }
+    }
+
+    series_keys.sort();
+    series_keys.dedup();
+    for series in &series_keys {
+        for row in EventRow::filter(
+            fields
+                .calendar_id()
+                .eq(calendar)
+                .and(fields.series_id().eq(series.as_str())),
+        )
+        .exec(&mut *exec)
+        .await?
+        {
+            by_id.insert(row.id.clone(), row);
+        }
+    }
+
+    Ok(by_id.into_values().collect())
+}
+
+fn classify_refusal(error: &ProviderError) -> Refusal {
+    let organizer_only = match error {
+        ProviderError::Gmail(gmail::Error::Api(api)) => api
+            .errors
+            .iter()
+            .any(|item| item.reason == "forbiddenForNonOrganizer"),
+        ProviderError::Outlook(outlook::Error::Api(api)) => {
+            api.error.message.to_ascii_lowercase().contains("organizer")
+        }
+        _ => false,
+    };
+    match error.status() {
+        Some(404 | 410) => Refusal::Gone,
+        Some(400 | 403) if organizer_only => Refusal::NonOrganizer,
+        _ => Refusal::Other,
+    }
+}
+
 /// Returns the row ID of a queued `Create` in `queue` matching a `Delete` `change`, if any.
 async fn find_queued_create(
     exec: &mut dyn Executor,
@@ -1063,7 +1261,7 @@ async fn find_queued_create(
     let rows = CalendarChangeRow::filter(CalendarChangeRow::fields().queue().eq(queue))
         .exec(&mut *exec)
         .await?;
-    Ok(rows.into_iter().find_map(|row| match &row.change.0 {
+    Ok(rows.into_iter().find_map(|row| match &row.change.0.0 {
         CalendarChange::Create {
             calendar: on,
             event,
@@ -1079,7 +1277,7 @@ async fn delete_unstarted_rows(
 ) -> Result<()> {
     for row in rows
         .iter()
-        .filter(|row| matches!(row.change.0, CalendarChange::Create { .. }))
+        .filter(|row| matches!(row.change.0.0, CalendarChange::Create { .. }))
     {
         let queue = CalendarChangeRow::fields().queue().eq(&row.queue);
         CalendarChangeRow::filter(queue.and(CalendarChangeRow::fields().id().gt(row.id)))
@@ -1094,208 +1292,67 @@ async fn delete_unstarted_rows(
     Ok(())
 }
 
-/// `recurrence` with each rule ending before `from` (`UNTIL`, in place of a count or an
-/// earlier end).
-fn ended(recurrence: &[String], from: Cut) -> Vec<String> {
-    let until = from.until();
-    recurrence
-        .iter()
-        .map(|line| match line.strip_prefix("RRULE:") {
-            Some(rule) => {
-                let mut parts: Vec<String> = rule
-                    .split(';')
-                    .filter(|part| !part.starts_with("COUNT=") && !part.starts_with("UNTIL="))
-                    .map(str::to_owned)
-                    .collect();
-                parts.push(format!("UNTIL={until}"));
-                format!("RRULE:{}", parts.join(";"))
-            }
-            None => line.clone(),
-        })
-        .collect()
-}
-
-/// The new series that takes over series `master` from `from`. It has the master's fields with
-/// `patch`'s laid over them, a new id (`patch`'s), and Calendar's own fields left to Calendar.
-/// It starts at `start`, and its rule counts only what's left.
-fn remainder(
-    master: &Event,
-    patch: &Event,
-    start: EventDateTime,
-    end: EventDateTime,
-    from: Cut,
-) -> Event {
-    let mut event = Event {
-        id: patch.id.clone(),
-        summary: patch.summary.clone().or_else(|| master.summary.clone()),
-        description: patch
-            .description
-            .clone()
-            .or_else(|| master.description.clone()),
-        location: patch.location.clone().or_else(|| master.location.clone()),
-        attendees: if patch.attendees.is_empty() && !patch.clear_attendees {
-            master.attendees.clone()
-        } else {
-            patch.attendees.clone()
-        },
-        conference_data: match &patch.conference_data {
-            Some(serde_json::Value::Null) => None,
-            Some(data) => Some(data.clone()),
-            None => master.conference_data.clone(),
-        },
-        color_id: patch.color_id.clone().or_else(|| master.color_id.clone()),
-        transparency: patch
-            .transparency
-            .clone()
-            .or_else(|| master.transparency.clone()),
-        visibility: patch
-            .visibility
-            .clone()
-            .or_else(|| master.visibility.clone()),
-        reminders: patch.reminders.clone().or_else(|| master.reminders.clone()),
-        guests_can_invite_others: patch
-            .guests_can_invite_others
-            .or(master.guests_can_invite_others),
-        guests_can_modify: patch.guests_can_modify.or(master.guests_can_modify),
-        guests_can_see_other_guests: patch
-            .guests_can_see_other_guests
-            .or(master.guests_can_see_other_guests),
-        recurrence: if patch.recurrence.is_empty() {
-            master.recurrence.clone()
-        } else {
-            patch.recurrence.clone()
-        },
-        ..Event::default()
-    };
-    let all_day = start.date.is_some();
-    if patch.recurrence.is_empty() {
-        let first = master
-            .start
-            .as_ref()
-            .and_then(|time| super::recurrence::zoned(time, &TimeZone::UTC));
-        let new_start = super::recurrence::zoned(&start, &TimeZone::UTC);
-        if let (Some((first, _)), Some((new_start, _))) = (first, new_start)
-            && let Some(rule) =
-                super::recurrence::Recurrence::from_rules_for(&master.recurrence, &first)
-        {
-            let day = match from {
-                Cut::Day(day) => day,
-                Cut::At(at) => at.to_zoned(first.time_zone().clone()).date(),
-            };
-            let line = rule.from_day(&first, day).rule(&new_start, all_day);
-            event.recurrence = master
-                .recurrence
-                .iter()
-                .filter(|line| !line.starts_with("RRULE"))
-                .cloned()
-                .chain([line])
-                .collect();
-        }
-    }
-    event.start = Some(start);
-    event.end = Some(end);
-    event
-}
-
-/// Sets `patch`'s start and end to series `master`'s, moved by `shift` (an instance's civil
-/// wall-clock move, applied to every instance), in the master's own time zone, and rewrites
-/// `UNTIL` when `all_day` toggles.
-fn shifted(patch: &mut Event, master: &Event, (start, end): (SignedDuration, SignedDuration)) {
-    let start_template = patch.start.clone();
-    let end_template = patch.end.clone();
-    let new_start = retime_event_time(master.start.as_ref(), start, start_template.as_ref());
-    let new_end = retime_event_time(master.end.as_ref(), end, end_template.as_ref());
-    if let (Some(old_start), Some(target_start)) = (&master.start, &new_start)
-        && old_start.date.is_some() != target_start.date.is_some()
-        && patch.recurrence.is_empty()
-        && !master.recurrence.is_empty()
-        && let Some((old_zoned, _)) = super::recurrence::zoned(old_start, &TimeZone::UTC)
-        && let Some((target_zoned, all_day)) =
-            super::recurrence::zoned(target_start, old_zoned.time_zone())
-    {
-        patch.recurrence = super::recurrence::retime_until(
-            &master.recurrence,
-            &target_zoned,
-            all_day,
-            old_zoned.time_zone(),
-        );
-    }
-    patch.start = new_start.or(start_template);
-    patch.end = new_end.or(end_template);
-}
-
 #[cfg(test)]
 mod tests {
-    use gmail::calendar::EventAttendee;
-    use jiff::civil::Date;
+    use jiff::civil::{Date, date};
 
     use super::*;
+    use crate::calendar::google::{apply_shift, ended, remainder};
+    use crate::calendar::model::{EventAttendee, EventReminders, ShowAs, Visibility};
+    use crate::calendar::recurrence::{End, Frequency, Recurrence};
 
-    fn at(text: &str) -> EventDateTime {
-        EventDateTime {
-            date_time: Some(text.into()),
+    fn at(text: &str) -> EventTime {
+        EventTime::Timed {
+            at: text.parse().expect("time"),
             time_zone: Some("America/New_York".into()),
-            ..EventDateTime::default()
         }
     }
 
-    fn on_date(text: &str) -> EventDateTime {
-        EventDateTime {
-            date: Some(text.into()),
-            ..EventDateTime::default()
-        }
+    fn on_date(d: Date) -> EventTime {
+        EventTime::AllDay(d)
     }
 
     #[test]
     fn a_series_moves_by_its_instance() {
-        let master = Event {
+        let master = CalendarEvent {
             start: Some(at("2026-11-03T11:00:00-05:00")),
             end: Some(at("2026-11-03T11:30:00-05:00")),
-            ..Event::default()
+            ..CalendarEvent::default()
         };
-        let mut patch = Event::default();
-        shifted(
+        let mut patch = EventPatch::default();
+        apply_shift(
             &mut patch,
             &master,
             (SignedDuration::from_mins(60), SignedDuration::from_mins(90)),
         );
-        assert_eq!(
-            patch.start.and_then(|start| start.date_time).as_deref(),
-            Some("2026-11-03T12:00:00-05:00")
-        );
-        assert_eq!(
-            patch.end.and_then(|end| end.date_time).as_deref(),
-            Some("2026-11-03T13:00:00-05:00")
-        );
+        assert_eq!(patch.start, Some(at("2026-11-03T12:00:00-05:00")));
+        assert_eq!(patch.end, Some(at("2026-11-03T13:00:00-05:00")));
     }
 
     #[test]
     fn series_shifts_preserve_wall_clock_across_dst_and_support_all_day_and_toggles() {
         // Master starts before fall-back (EDT, -04:00); shifting wall-clock +1h keeps 11:00 EDT.
-        let master = Event {
+        let master = CalendarEvent {
             start: Some(at("2026-10-27T10:00:00-04:00")),
             end: Some(at("2026-10-27T10:30:00-04:00")),
-            recurrence: vec!["RRULE:FREQ=WEEKLY;UNTIL=20261202T045959Z".into()],
-            ..Event::default()
+            raw_recurrence: vec!["RRULE:FREQ=WEEKLY;UNTIL=20261202T045959Z".into()],
+            ..CalendarEvent::default()
         };
-        let mut patch = Event::default();
-        shifted(
+        let mut patch = EventPatch::default();
+        apply_shift(
             &mut patch,
             &master,
             (SignedDuration::from_hours(1), SignedDuration::from_hours(1)),
         );
-        assert_eq!(
-            patch.start.and_then(|start| start.date_time).as_deref(),
-            Some("2026-10-27T11:00:00-04:00")
-        );
+        assert_eq!(patch.start, Some(at("2026-10-27T11:00:00-04:00")));
 
         // Toggling timed -> all-day on `Scope::All` converts master to date and rewrites `UNTIL`.
-        let mut to_all_day = Event {
-            start: Some(on_date("2026-11-17")),
-            end: Some(on_date("2026-11-18")),
-            ..Event::default()
+        let mut to_all_day = EventPatch {
+            start: Some(on_date(date(2026, 11, 17))),
+            end: Some(on_date(date(2026, 11, 18))),
+            ..EventPatch::default()
         };
-        shifted(
+        apply_shift(
             &mut to_all_day,
             &master,
             (
@@ -1303,31 +1360,22 @@ mod tests {
                 SignedDuration::from_mins(13 * 60 + 30),
             ),
         );
+        assert_eq!(to_all_day.start, Some(on_date(date(2026, 10, 27))));
+        assert_eq!(to_all_day.end, Some(on_date(date(2026, 10, 28))));
         assert_eq!(
-            to_all_day.start.and_then(|start| start.date).as_deref(),
-            Some("2026-10-27")
-        );
-        assert_eq!(
-            to_all_day.end.and_then(|end| end.date).as_deref(),
-            Some("2026-10-28")
-        );
-        assert_eq!(
-            to_all_day.recurrence,
-            ["RRULE:FREQ=WEEKLY;UNTIL=20261201"],
+            to_all_day.raw_recurrence.as_deref(),
+            Some(["RRULE:FREQ=WEEKLY;UNTIL=20261201".to_owned()].as_slice()),
             "rewrites UNTIL in America/New_York without +1 day UTC drift"
         );
 
         // All-day series shifts civil dates.
-        let all_day_master = Event {
-            start: Some(on_date("2026-10-27")),
-            end: Some(on_date("2026-10-28")),
-            ..Event::default()
-        };
         assert_eq!(
-            shift_event_time(all_day_master.end.as_ref(), SignedDuration::from_hours(24))
-                .and_then(|end| end.date)
-                .as_deref(),
-            Some("2026-10-29")
+            on_date(date(2026, 10, 28)).shift_wall_clock(
+                SignedDuration::from_hours(24),
+                None,
+                None
+            ),
+            Some(on_date(date(2026, 10, 29)))
         );
     }
 
@@ -1337,22 +1385,22 @@ mod tests {
             email: Some("lena@brightmoor.co".into()),
             ..EventAttendee::default()
         };
-        let master = Event {
+        let master = CalendarEvent {
             id: Some("series1".into()),
             summary: Some("Sync".into()),
             start: Some(at("2026-11-10T10:00:00-05:00")),
             end: Some(at("2026-11-10T10:30:00-05:00")),
             attendees: vec![guest.clone()],
-            recurrence: vec!["RRULE:FREQ=WEEKLY;BYDAY=TU;UNTIL=20261209T045959Z".into()],
-            ..Event::default()
+            raw_recurrence: vec!["RRULE:FREQ=WEEKLY;BYDAY=TU;UNTIL=20261209T045959Z".into()],
+            ..CalendarEvent::default()
         };
         let cut = Cut::At("2026-11-17T15:00:00Z".parse().expect("time"));
         let untouched = remainder(
             &master,
-            &Event {
+            &EventPatch {
                 id: Some("series2".into()),
                 summary: Some("Sync, renamed".into()),
-                ..Event::default()
+                ..EventPatch::default()
             },
             at("2026-11-17T10:00:00-05:00"),
             at("2026-11-17T10:30:00-05:00"),
@@ -1360,17 +1408,17 @@ mod tests {
         );
         assert_eq!(untouched.attendees, vec![guest]);
         assert_eq!(
-            untouched.recurrence,
+            untouched.raw_recurrence,
             ["RRULE:FREQ=WEEKLY;BYDAY=TU;WKST=SU;UNTIL=20261209T045959Z"],
             "UNTIL stays Dec 8 in America/New_York rather than drifting +1 day"
         );
 
         let cleared = remainder(
             &master,
-            &Event {
+            &EventPatch {
                 id: Some("series3".into()),
-                clear_attendees: true,
-                ..Event::default()
+                attendees: Some(Vec::new()),
+                ..EventPatch::default()
             },
             at("2026-11-17T10:00:00-05:00"),
             at("2026-11-17T10:30:00-05:00"),
@@ -1410,14 +1458,15 @@ mod tests {
     fn queued_changes_show_on_the_calendar() {
         let event = |id: &str, series: Option<&str>| StoredEvent {
             calendar_id: "me".into(),
-            event: Event {
+            event: CalendarEvent {
                 id: Some(id.into()),
                 recurring_event_id: series.map(Into::into),
-                ..Event::default()
+                ..CalendarEvent::default()
             },
             unsynced: false,
         };
-        let everywhere = |_: &str, _: &Event| true;
+        let everywhere = |_: &str, _: &CalendarEvent| true;
+        let me_for = |_: &str| "me@example.com";
         let mut events = vec![
             event("a", None),
             event("s_1", Some("s")),
@@ -1426,36 +1475,38 @@ mod tests {
         CalendarChange::Delete {
             calendar: "me".into(),
             id: "s".into(),
+            series_id: None,
             notify: false,
+            comment: None,
         }
-        .apply(&mut events, &everywhere, None);
+        .apply(&mut events, &everywhere, None, &me_for);
         assert_eq!(events.len(), 1, "a series takes its instances");
-        let renamed = Event {
+        let renamed = CalendarEvent {
             id: Some("a".into()),
             summary: Some("Renamed".into()),
-            ..Event::default()
+            ..CalendarEvent::default()
         };
         CalendarChange::Edit {
             calendar: "me".into(),
             id: "a".into(),
-            patch: Event::default(),
-            clear_attendees: false,
+            series_id: None,
+            patch: EventPatch::default(),
             notify: false,
             shift: None,
             shown: vec![renamed.clone()],
         }
-        .apply(&mut events, &everywhere, None);
+        .apply(&mut events, &everywhere, None, &me_for);
         assert_eq!(events[0].event, renamed);
         let new = CalendarChange::Create {
             calendar: "me".into(),
-            event: Event {
+            event: CalendarEvent {
                 id: Some("b".into()),
-                ..Event::default()
+                ..CalendarEvent::default()
             },
         };
-        new.apply(&mut events, &|_, _| false, None);
+        new.apply(&mut events, &|_, _| false, None, &me_for);
         assert_eq!(events.len(), 1, "a new event off the days shown isn't");
-        new.apply(&mut events, &everywhere, None);
+        new.apply(&mut events, &everywhere, None, &me_for);
         assert_eq!(
             (events.len(), events[1].unsynced),
             (2, true),
@@ -1464,27 +1515,58 @@ mod tests {
     }
 
     #[test]
-    fn an_instance_shares_its_series_queue() {
-        let respond = |id: &str| CalendarChange::Respond {
-            calendar: "me".into(),
-            event: Event {
+    fn an_instance_shares_its_series_queue_without_splitting_opaque_ids() {
+        let respond = |id: &str, series: Option<&str>| CalendarChange::Respond {
+            calendar: "cal".into(),
+            event: CalendarEvent {
                 id: Some(id.into()),
-                ..Event::default()
+                recurring_event_id: series.map(Into::into),
+                ..CalendarEvent::default()
             },
-            status: "accepted".into(),
+            status: RsvpStatus::Accepted,
             all: false,
         };
         let delete = CalendarChange::Delete {
-            calendar: "me".into(),
+            calendar: "cal".into(),
             id: "s".into(),
+            series_id: None,
             notify: false,
+            comment: None,
         };
-        assert_eq!(respond("s_20261117T150000Z").queue(), delete.queue());
-        assert_ne!(respond("t").queue(), delete.queue());
+        assert_eq!(respond("s_20261117T150000Z", None).queue(), delete.queue());
+        assert_ne!(respond("t", None).queue(), delete.queue());
+
+        // Outlook occurrences share their `seriesMasterId` queue via `series_id`, while
+        // distinct opaque IDs containing `_` do not collide.
+        let outlook_del_series = CalendarChange::Delete {
+            calendar: "AAMkCal".into(),
+            id: "AAMk_master".into(),
+            series_id: None,
+            notify: false,
+            comment: None,
+        };
+        let outlook_edit_occ = CalendarChange::Edit {
+            calendar: "AAMkCal".into(),
+            id: "AAMk_occ_1".into(),
+            series_id: Some("AAMk_master".into()),
+            patch: EventPatch::default(),
+            notify: false,
+            shift: None,
+            shown: Vec::new(),
+        };
+        let outlook_other = CalendarChange::Delete {
+            calendar: "AAMkCal".into(),
+            id: "AAMk_other".into(),
+            series_id: None,
+            notify: false,
+            comment: None,
+        };
+        assert_eq!(outlook_edit_occ.queue(), outlook_del_series.queue());
+        assert_ne!(outlook_other.queue(), outlook_del_series.queue());
     }
 
     #[tokio::test]
-    async fn in_flight_creates_wait_and_queue_compensating_deletes_and_splits_get_deterministic_ids()
+    async fn in_flight_creates_wait_and_queue_compensating_deletes_with_server_id_and_splits_get_deterministic_ids()
      {
         let dir = std::env::temp_dir().join(format!(
             "exo-cal-outbox-test-{}-{}",
@@ -1496,8 +1578,10 @@ mod tests {
         let store = Store::open(
             &dir,
             "maya@brightmoor.co",
-            gmail::Endpoints::google(),
-            gmail::StaticToken("token".into()),
+            crate::Remote::gmail(
+                gmail::Endpoints::google(),
+                gmail::StaticToken("token".into()),
+            ),
         )
         .await
         .expect("opens store");
@@ -1510,10 +1594,9 @@ mod tests {
                     calendar: "maya@brightmoor.co".into(),
                     series: "series1".into(),
                     from: Cut::Day(Date::constant(2026, 11, 17)),
-                    patch: Event::default(),
-                    clear_attendees: false,
-                    start: on_date("2026-11-17"),
-                    end: on_date("2026-11-18"),
+                    patch: EventPatch::default(),
+                    start: on_date(date(2026, 11, 17)),
+                    end: on_date(date(2026, 11, 18)),
                     notify: false,
                     shown: Vec::new(),
                 },
@@ -1544,18 +1627,19 @@ mod tests {
         );
         assert_eq!(once, twice);
 
-        // 2. Simulate an in-flight `Create` when `unqueue_calendar_change` runs concurrently.
+        // 2. Simulate an in-flight `Create` where the server returns a distinct ID (`server-id-99`)
+        // when `unqueue_calendar_change` runs concurrently.
         store
             .queue_calendar_change(
                 2,
                 CalendarChange::Create {
                     calendar: "maya@brightmoor.co".into(),
-                    event: Event {
+                    event: CalendarEvent {
                         id: Some("e0inflight1".into()),
                         summary: Some("Sync".into()),
                         start: Some(at("2026-11-20T09:00:00-05:00")),
                         end: Some(at("2026-11-20T10:00:00-05:00")),
-                        ..Event::default()
+                        ..CalendarEvent::default()
                     },
                 },
                 None,
@@ -1581,7 +1665,7 @@ mod tests {
         tokio::task::yield_now().await;
         tokio::time::sleep(std::time::Duration::from_millis(15)).await;
 
-        // Finish the simulated in-flight `Create` (dequeue + mark watched create as sent).
+        // Finish the simulated in-flight `Create` with a server-assigned ID.
         store
             .dequeue(row_id, CalendarOutcome::Sent)
             .await
@@ -1592,8 +1676,8 @@ mod tests {
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner);
             state.sending = None;
-            if let Some(flag) = state.watched_creates.get_mut(&row_id) {
-                *flag = true;
+            if let Some(slot) = state.watched_creates.get_mut(&row_id) {
+                *slot = Some("server-id-99".to_owned());
             }
         }
         drop(flush_guard);
@@ -1609,8 +1693,10 @@ mod tests {
             compensating[0].change,
             CalendarChange::Delete {
                 calendar: "maya@brightmoor.co".into(),
-                id: "e0inflight1".into(),
+                id: "server-id-99".into(),
+                series_id: None,
                 notify: false,
+                comment: None,
             }
         );
 
@@ -1619,38 +1705,37 @@ mod tests {
 
     #[test]
     fn remainder_overlays_patch_metadata_and_recurrence() {
-        let master = Event {
+        let master = CalendarEvent {
             id: Some("series1".into()),
             summary: Some("Weekly".into()),
             start: Some(at("2026-11-10T10:00:00-05:00")),
             end: Some(at("2026-11-10T10:30:00-05:00")),
             color_id: Some("1".into()),
-            transparency: Some("opaque".into()),
-            visibility: Some("default".into()),
-            reminders: Some(gmail::calendar::EventReminders {
-                use_default: Some(true),
-                overrides: Vec::new(),
-            }),
+            show_as: ShowAs::Busy,
+            visibility: Visibility::Default,
+            reminders: EventReminders::Default,
             guests_can_invite_others: Some(true),
-            guests_can_modify: Some(false),
+            guests_can_modify: false,
             guests_can_see_other_guests: Some(true),
-            recurrence: vec!["RRULE:FREQ=WEEKLY;BYDAY=TU;COUNT=6".into()],
-            ..Event::default()
+            raw_recurrence: vec!["RRULE:FREQ=WEEKLY;BYDAY=TU;COUNT=6".into()],
+            ..CalendarEvent::default()
         };
-        let patch = Event {
+        let patch = EventPatch {
             id: Some("series2".into()),
             color_id: Some("5".into()),
-            transparency: Some("transparent".into()),
-            visibility: Some("private".into()),
-            reminders: Some(gmail::calendar::EventReminders {
-                use_default: Some(false),
-                overrides: Vec::new(),
-            }),
+            show_as: Some(ShowAs::Free),
+            visibility: Some(Visibility::Private),
+            reminders: Some(EventReminders::None),
             guests_can_invite_others: Some(false),
             guests_can_modify: Some(true),
             guests_can_see_other_guests: Some(false),
-            recurrence: vec!["RRULE:FREQ=DAILY;COUNT=3".into()],
-            ..Event::default()
+            recurrence: Some(Some(Recurrence {
+                frequency: Frequency::Daily,
+                interval: 1,
+                end: End::After(3),
+            })),
+            raw_recurrence: Some(vec!["RRULE:FREQ=DAILY;COUNT=3".into()]),
+            ..EventPatch::default()
         };
         let cut = Cut::At("2026-11-17T15:00:00Z".parse().expect("time"));
         let built = remainder(
@@ -1661,46 +1746,40 @@ mod tests {
             cut,
         );
         assert_eq!(built.color_id.as_deref(), Some("5"));
-        assert_eq!(built.transparency.as_deref(), Some("transparent"));
-        assert_eq!(built.visibility.as_deref(), Some("private"));
-        assert_eq!(
-            built.reminders,
-            Some(gmail::calendar::EventReminders {
-                use_default: Some(false),
-                overrides: Vec::new(),
-            })
-        );
+        assert_eq!(built.show_as, ShowAs::Free);
+        assert_eq!(built.visibility, Visibility::Private);
+        assert_eq!(built.reminders, EventReminders::None);
         assert_eq!(built.guests_can_invite_others, Some(false));
-        assert_eq!(built.guests_can_modify, Some(true));
+        assert!(built.guests_can_modify);
         assert_eq!(built.guests_can_see_other_guests, Some(false));
-        assert_eq!(built.recurrence, ["RRULE:FREQ=DAILY;COUNT=3"]);
+        assert_eq!(built.raw_recurrence, ["RRULE:FREQ=DAILY;COUNT=3"]);
 
         // Omitted patch metadata falls back to master.
         let fallback = remainder(
             &master,
-            &Event {
+            &EventPatch {
                 id: Some("series3".into()),
-                ..Event::default()
+                ..EventPatch::default()
             },
             at("2026-11-17T10:00:00-05:00"),
             at("2026-11-17T10:30:00-05:00"),
             cut,
         );
         assert_eq!(fallback.color_id.as_deref(), Some("1"));
-        assert_eq!(fallback.transparency.as_deref(), Some("opaque"));
-        assert_eq!(fallback.visibility.as_deref(), Some("default"));
-        assert_eq!(fallback.reminders, master.reminders);
+        assert_eq!(fallback.show_as, ShowAs::Busy);
+        assert_eq!(fallback.visibility, Visibility::Default);
+        assert_eq!(fallback.reminders, EventReminders::Default);
         assert_eq!(fallback.guests_can_invite_others, Some(true));
-        assert_eq!(fallback.guests_can_modify, Some(false));
+        assert!(!fallback.guests_can_modify);
         assert_eq!(fallback.guests_can_see_other_guests, Some(true));
         assert_eq!(
-            fallback.recurrence,
+            fallback.raw_recurrence,
             ["RRULE:FREQ=WEEKLY;BYDAY=TU;WKST=SU;COUNT=5"]
         );
     }
 
     #[tokio::test]
-    async fn fold_into_cache_persists_split_replacements() {
+    async fn fold_into_cache_persists_split_replacements_using_indexed_series_id() {
         let dir = std::env::temp_dir().join(format!(
             "exo-cal-split-fold-{}-{}",
             std::process::id(),
@@ -1711,76 +1790,84 @@ mod tests {
         let store = Store::open(
             &dir,
             "maya@brightmoor.co",
-            gmail::Endpoints::google(),
-            gmail::StaticToken("token".into()),
+            crate::Remote::gmail(
+                gmail::Endpoints::google(),
+                gmail::StaticToken("token".into()),
+            ),
         )
         .await
         .expect("opens store");
         let cal = "maya@brightmoor.co";
 
-        let inst1 = Event {
+        let inst1 = CalendarEvent {
             id: Some("s1_20261110T150000Z".into()),
             recurring_event_id: Some("s1".into()),
             summary: Some("Standup".into()),
             start: Some(at("2026-11-10T10:00:00-05:00")),
             end: Some(at("2026-11-10T10:30:00-05:00")),
-            ..Event::default()
+            ..CalendarEvent::default()
         };
-        let inst2 = Event {
+        let inst2 = CalendarEvent {
             id: Some("s1_20261117T150000Z".into()),
             recurring_event_id: Some("s1".into()),
             summary: Some("Standup".into()),
             start: Some(at("2026-11-17T10:00:00-05:00")),
             end: Some(at("2026-11-17T10:30:00-05:00")),
-            ..Event::default()
+            ..CalendarEvent::default()
         };
-        let inst3 = Event {
+        let inst3 = CalendarEvent {
             id: Some("s1_20261124T150000Z".into()),
             recurring_event_id: Some("s1".into()),
             summary: Some("Standup".into()),
             start: Some(at("2026-11-24T10:00:00-05:00")),
             end: Some(at("2026-11-24T10:30:00-05:00")),
-            ..Event::default()
+            ..CalendarEvent::default()
+        };
+        let unrelated = CalendarEvent {
+            id: Some("other1".into()),
+            summary: Some("Unrelated".into()),
+            start: Some(at("2026-11-17T14:00:00-05:00")),
+            end: Some(at("2026-11-17T15:00:00-05:00")),
+            ..CalendarEvent::default()
         };
         {
             let mut db = store.inner.db.clone();
             let mut write = store.inner.begin(&mut db).await.expect("tx");
-            for ev in [&inst1, &inst2, &inst3] {
+            for ev in [&inst1, &inst2, &inst3, &unrelated] {
                 put(write.exec(), cal, ev).await.expect("puts");
             }
             write.commit().await.expect("commits");
         }
 
-        let repl2 = Event {
+        let repl2 = CalendarEvent {
             id: Some("s2_20261117T160000Z".into()),
             recurring_event_id: Some("s2".into()),
             summary: Some("Standup (moved)".into()),
             start: Some(at("2026-11-17T11:00:00-05:00")),
             end: Some(at("2026-11-17T11:30:00-05:00")),
-            ..Event::default()
+            ..CalendarEvent::default()
         };
-        let repl3 = Event {
+        let repl3 = CalendarEvent {
             id: Some("s2_20261124T160000Z".into()),
             recurring_event_id: Some("s2".into()),
             summary: Some("Standup (moved)".into()),
             start: Some(at("2026-11-24T11:00:00-05:00")),
             end: Some(at("2026-11-24T11:30:00-05:00")),
-            ..Event::default()
+            ..CalendarEvent::default()
         };
         let split = CalendarChange::Split {
             calendar: cal.into(),
             series: "s1".into(),
             from: Cut::At("2026-11-17T15:00:00Z".parse().expect("time")),
-            patch: Event {
+            patch: EventPatch {
                 id: Some("s2".into()),
                 summary: Some("Standup (moved)".into()),
-                ..Event::default()
+                ..EventPatch::default()
             },
-            clear_attendees: false,
             start: at("2026-11-17T11:00:00-05:00"),
             end: at("2026-11-17T11:30:00-05:00"),
             notify: false,
-            shown: vec![repl2.clone(), repl3.clone()],
+            shown: vec![repl2, repl3],
         };
         store.fold_into_cache(&split).await.expect("folds");
 
@@ -1796,6 +1883,7 @@ mod tests {
         assert_eq!(
             cached,
             vec![
+                "other1".to_owned(),
                 "s1_20261110T150000Z".to_owned(),
                 "s2_20261117T160000Z".to_owned(),
                 "s2_20261124T160000Z".to_owned(),

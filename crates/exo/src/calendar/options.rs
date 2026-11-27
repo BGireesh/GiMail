@@ -37,6 +37,7 @@ const ACCOUNT_ROW: f32 = 24.0;
 const ACCOUNT_PITCH: f32 = 28.0;
 const ACCOUNTS_LIST: f32 = 28.0;
 const SIGN_IN_GAP: f32 = 8.0;
+const SIGN_IN_BUTTON_GAP: f32 = 16.0;
 const SIGN_IN: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 12.0, 16.0);
 /// The avatar's initial: 10px, white.
 const INITIAL: TextStyle = TextStyle::new(Font::new(Family::Sans, 400), 10.0, 12.0);
@@ -61,8 +62,8 @@ const ZONES: usize = 5;
 const LINK_INK: Color32 = Color32::from_rgb(0x54, 0xac, 0xdc);
 const NUDGE: f32 = 3.0;
 
-/// The default meeting links Exo offers: Meet for Google events, or none (Zoom links need a
-/// server Exo doesn't have).
+/// The default meeting links Exo offers: Meet/Teams for Google/Outlook events, or none (Zoom
+/// links need a server Exo doesn't have).
 const MEETING_LINKS: [(Option<&str>, &str); 2] = [
     (
         Some("google"),
@@ -99,15 +100,17 @@ pub enum OptionsAction {
     MeetingLink(Option<String>),
     /// `Manage notification settings`, which puts the Notifications dialog in this one's place.
     Notifications,
-    /// `Sign in with Google`, for another calendar account.
-    SignIn,
-    /// `Remove Account`.
+    /// `Sign in with Google` / `Sign in with Microsoft`, for another calendar account.
+    SignIn(exo_auth::Provider),
+    /// `Remove Account`, by canonical account key.
     Remove(String),
     Close,
 }
 
 /// A calendar account the dialog lists.
 pub struct ShownAccount<'a> {
+    /// Canonical account key (`email` for Google, `microsoft {email}` for Microsoft).
+    pub key: &'a str,
     pub email: &'a str,
     /// Its avatar's colour.
     pub color: Color32,
@@ -243,6 +246,10 @@ fn body_ui(ui: &mut Ui, body: Rect, shown: &Shown<'_>, zone: &mut ZoneInput) -> 
     );
     let mut top = links + RADIOS_BELOW;
     for (value, label) in MEETING_LINKS {
+        let is_selected = match value {
+            Some(_) => matches!(shown.meeting_link, Some("google" | "teamsForBusiness")),
+            None => shown.meeting_link.is_none(),
+        };
         let row = Rect::from_min_size(pos2(left, top), vec2(body.width(), TEXT.line_height));
         if ui
             .interact(
@@ -252,16 +259,12 @@ fn body_ui(ui: &mut Ui, body: Rect, shown: &Shown<'_>, zone: &mut ZoneInput) -> 
             )
             .on_hover_cursor(egui::CursorIcon::PointingHand)
             .clicked()
-            && shown.meeting_link != value
+            && !is_selected
         {
             actions.push(OptionsAction::MeetingLink(value.map(str::to_owned)));
         }
         // Classic's radio.
-        exo_ui::paint_radio(
-            ui.painter(),
-            pos2(left + 1.0, top + 3.0),
-            shown.meeting_link == value,
-        );
+        exo_ui::paint_radio(ui.painter(), pos2(left + 1.0, top + 3.0), is_selected);
         TEXT.paint_line(
             ui.painter(),
             pos2(left + RADIO_LABEL_LEFT, top),
@@ -360,7 +363,7 @@ fn body_ui(ui: &mut Ui, body: Rect, shown: &Shown<'_>, zone: &mut ZoneInput) -> 
             let hit = ui
                 .interact(
                     button,
-                    exo_ui::id(ui.ctx(), ("calendar-settings-remove", account.email)),
+                    exo_ui::id(ui.ctx(), ("calendar-settings-remove", account.key)),
                     Sense::click(),
                 )
                 .on_hover_cursor(egui::CursorIcon::PointingHand);
@@ -368,39 +371,69 @@ fn body_ui(ui: &mut Ui, body: Rect, shown: &Shown<'_>, zone: &mut ZoneInput) -> 
                 ACCOUNT.paint_line(ui.painter(), button.min, label, REMOVE_INK, None);
             }
             if hit.clicked() {
-                actions.push(OptionsAction::Remove(account.email.to_owned()));
+                actions.push(OptionsAction::Remove(account.key.to_owned()));
             }
         }
         row_top += ACCOUNT_PITCH;
     }
-    // Signing another account in, with Google only because Exo is Gmail-only.
+    // Signing another calendar account in, with Google or Microsoft (icon + label, 16px apart).
     let sign_in = pos2(left, row_top - (ACCOUNT_PITCH - ACCOUNT_ROW) + SIGN_IN_GAP);
-    // The logo keeps its own blue.
+    let (google_width, google_clicked) = sign_in_button(
+        ui,
+        sign_in,
+        "legacy/DEPRECATED_google",
+        "Sign in with Google",
+        "calendar-settings-sign-in-google",
+    );
+    if google_clicked {
+        actions.push(OptionsAction::SignIn(exo_auth::Provider::Google));
+    }
+    let (_, microsoft_clicked) = sign_in_button(
+        ui,
+        pos2(sign_in.x + google_width + SIGN_IN_BUTTON_GAP, sign_in.y),
+        "legacy/DEPRECATED_microsoft",
+        "Sign in with Microsoft",
+        "calendar-settings-sign-in-microsoft",
+    );
+    if microsoft_clicked {
+        actions.push(OptionsAction::SignIn(exo_auth::Provider::Microsoft));
+    }
+    actions
+}
+
+/// Paints a `Sign in with …` button (16px icon slot + label) at `origin` and returns
+/// `(total_width, clicked)`.
+fn sign_in_button(
+    ui: &mut Ui,
+    origin: egui::Pos2,
+    icon: &str,
+    label: &str,
+    id_salt: &str,
+) -> (f32, bool) {
+    let icon_box = Rect::from_min_size(origin, Vec2::splat(16.0));
     exo_ui::paint_icon(
         ui,
-        "legacy/DEPRECATED_google",
-        Rect::from_min_size(sign_in, Vec2::splat(16.0)),
+        icon,
+        exo_ui::icon_rect(ui.ctx(), icon, icon_box),
         Color32::WHITE,
     );
-    let width = SIGN_IN.paint_line(
+    let text_width = SIGN_IN.paint_line(
         ui.painter(),
-        pos2(left + LABEL_LEFT, sign_in.y + 1.0),
-        "Sign in with Google",
+        pos2(origin.x + LABEL_LEFT, origin.y + 1.0),
+        label,
         LINK_INK,
         None,
     );
-    if ui
+    let total = LABEL_LEFT + text_width;
+    let clicked = ui
         .interact(
-            Rect::from_min_size(sign_in, vec2(LABEL_LEFT + width, SIGN_IN.line_height)),
-            exo_ui::id(ui.ctx(), "calendar-settings-sign-in"),
+            Rect::from_min_size(origin, vec2(total, SIGN_IN.line_height)),
+            exo_ui::id(ui.ctx(), id_salt),
             Sense::click(),
         )
         .on_hover_cursor(egui::CursorIcon::PointingHand)
-        .clicked()
-    {
-        actions.push(OptionsAction::SignIn);
-    }
-    actions
+        .clicked();
+    (total, clicked)
 }
 
 /// The secondary time zone's input at `origin`, with its rule always showing. Returns the zone

@@ -1,32 +1,87 @@
-//! A recurring event's rule as the event form makes it (a pattern and a range), read from and
-//! written as Calendar's `RRULE` lines, and the starts the rule gives. With the starts, a new
-//! series that Calendar hasn't got yet shows its instances, and a series cut for "this and
-//! following" counts the ones before the cut.
+//! A recurring event's rule as the event form makes it (a pattern and a range), converted to and
+//! from both RFC 5545 `RRULE` lines (Google Calendar) and Microsoft Graph's
+//! [`PatternedRecurrence`], plus instance expansion and series-split arithmetic.
 
-use gmail::calendar::{Event, EventDateTime};
 use jiff::civil::{Date, Weekday};
 use jiff::tz::TimeZone;
 use jiff::{Timestamp, ToSpan, Zoned};
+use outlook::calendar::{
+    DayOfWeek, PatternedRecurrence, RecurrencePattern, RecurrencePatternType, RecurrenceRange,
+    RecurrenceRangeType, WeekIndex,
+};
+use serde::{Deserialize, Serialize};
+
+use super::model::{CalendarEvent, EventPatch, EventTime};
 
 /// Most days one expansion walks through (about 30 years), so an open-ended rule stays bounded.
 const MAX_DAYS: i32 = 366 * 30;
 
 /// How a series repeats.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub enum Frequency {
     Daily,
-    /// On these days, in this order. None means the start's day.
-    Weekly(Vec<Weekday>),
+    /// On these days, in this order. Empty means the start's day.
+    Weekly(#[serde(with = "serde_weekdays")] Vec<Weekday>),
     /// On the start's day of the month.
     MonthlyOnDay,
-    /// On the start's weekday in this week of the month. None means the start's week.
+    /// On the start's weekday in this week of the month. `None` means the start's week.
     MonthlyOnWeekday(Option<Nth>),
     /// On the start's day of the year.
     Yearly,
 }
 
+mod serde_weekdays {
+    use jiff::civil::Weekday;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    fn code(day: Weekday) -> &'static str {
+        match day {
+            Weekday::Monday => "MO",
+            Weekday::Tuesday => "TU",
+            Weekday::Wednesday => "WE",
+            Weekday::Thursday => "TH",
+            Weekday::Friday => "FR",
+            Weekday::Saturday => "SA",
+            Weekday::Sunday => "SU",
+        }
+    }
+
+    fn parse(text: &str) -> Option<Weekday> {
+        match text {
+            "MO" | "monday" | "Monday" => Some(Weekday::Monday),
+            "TU" | "tuesday" | "Tuesday" => Some(Weekday::Tuesday),
+            "WE" | "wednesday" | "Wednesday" => Some(Weekday::Wednesday),
+            "TH" | "thursday" | "Thursday" => Some(Weekday::Thursday),
+            "FR" | "friday" | "Friday" => Some(Weekday::Friday),
+            "SA" | "saturday" | "Saturday" => Some(Weekday::Saturday),
+            "SU" | "sunday" | "Sunday" => Some(Weekday::Sunday),
+            _ => None,
+        }
+    }
+
+    pub fn serialize<S: Serializer>(days: &[Weekday], serializer: S) -> Result<S::Ok, S::Error> {
+        let codes: Vec<&str> = days.iter().copied().map(code).collect();
+        codes.serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Vec<Weekday>, D::Error> {
+        let codes = Vec::<String>::deserialize(deserializer)?;
+        codes
+            .into_iter()
+            .map(|text| {
+                parse(&text)
+                    .ok_or_else(|| serde::de::Error::custom(format!("unknown weekday: {text}")))
+            })
+            .collect()
+    }
+}
+
 /// A week of the month.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub enum Nth {
     First,
     Second,
@@ -36,7 +91,8 @@ pub enum Nth {
 }
 
 /// When a series ends.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub enum End {
     Never,
     /// Its last start may fall on this day.
@@ -46,7 +102,8 @@ pub enum End {
 }
 
 /// A series' rule: how it repeats, every how many days, weeks, months or years, and until when.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Recurrence {
     pub frequency: Frequency,
     /// 1 to 999.
@@ -100,6 +157,31 @@ impl Nth {
         ]
         .into_iter()
         .find(|nth| nth.ordinal() == ordinal)
+    }
+
+    /// Converts to Microsoft Graph's [`WeekIndex`].
+    #[must_use]
+    pub const fn to_graph(self) -> WeekIndex {
+        match self {
+            Self::First => WeekIndex::First,
+            Self::Second => WeekIndex::Second,
+            Self::Third => WeekIndex::Third,
+            Self::Fourth => WeekIndex::Fourth,
+            Self::Last => WeekIndex::Last,
+        }
+    }
+
+    /// Converts from Microsoft Graph's [`WeekIndex`].
+    #[must_use]
+    pub const fn from_graph(index: WeekIndex) -> Option<Self> {
+        match index {
+            WeekIndex::First => Some(Self::First),
+            WeekIndex::Second => Some(Self::Second),
+            WeekIndex::Third => Some(Self::Third),
+            WeekIndex::Fourth => Some(Self::Fourth),
+            WeekIndex::Last => Some(Self::Last),
+            WeekIndex::UnknownFutureValue => None,
+        }
     }
 
     /// Whether `date` is in this week of its month.
@@ -246,6 +328,162 @@ impl Recurrence {
             interval,
             end: end.unwrap_or(End::Never),
         })
+    }
+
+    /// Converts a Microsoft Graph [`PatternedRecurrence`] into a [`Recurrence`], when it fits the
+    /// supported frequencies and ranges and aligns with `range.start_date`.
+    #[must_use]
+    pub fn from_graph(recurrence: &PatternedRecurrence) -> Option<Self> {
+        let pattern = recurrence.pattern.as_ref()?;
+        let range = recurrence.range.as_ref()?;
+        let interval = pattern.interval.unwrap_or(1).max(1);
+        let start_date = range.start_date;
+        let frequency = match pattern.kind? {
+            RecurrencePatternType::Daily => Frequency::Daily,
+            RecurrencePatternType::Weekly => {
+                if interval > 1
+                    && matches!(
+                        pattern.first_day_of_week,
+                        Some(day) if day != DayOfWeek::Sunday
+                    )
+                {
+                    return None;
+                }
+                Frequency::Weekly(
+                    pattern
+                        .days_of_week
+                        .iter()
+                        .copied()
+                        .map(Weekday::from)
+                        .collect(),
+                )
+            }
+            RecurrencePatternType::AbsoluteMonthly => {
+                if let (Some(start), Some(day)) = (start_date, pattern.day_of_month)
+                    && i8::try_from(day).ok() != Some(start.day())
+                {
+                    return None;
+                }
+                Frequency::MonthlyOnDay
+            }
+            RecurrencePatternType::RelativeMonthly => {
+                if pattern.days_of_week.len() != 1 {
+                    return None;
+                }
+                if let Some(start) = start_date
+                    && Weekday::from(pattern.days_of_week[0]) != start.weekday()
+                {
+                    return None;
+                }
+                let index = match pattern.index {
+                    Some(idx) => Some(Nth::from_graph(idx)?),
+                    None => None,
+                };
+                Frequency::MonthlyOnWeekday(index)
+            }
+            RecurrencePatternType::AbsoluteYearly => {
+                if let Some(start) = start_date {
+                    if let Some(month) = pattern.month
+                        && i8::try_from(month).ok() != Some(start.month())
+                    {
+                        return None;
+                    }
+                    if let Some(day) = pattern.day_of_month
+                        && i8::try_from(day).ok() != Some(start.day())
+                    {
+                        return None;
+                    }
+                }
+                Frequency::Yearly
+            }
+            RecurrencePatternType::RelativeYearly | RecurrencePatternType::UnknownFutureValue => {
+                return None;
+            }
+        };
+        let end = match range.kind? {
+            RecurrenceRangeType::NoEnd => End::Never,
+            RecurrenceRangeType::EndDate => End::On(range.effective_end_date()?),
+            RecurrenceRangeType::Numbered => {
+                End::After(range.number_of_occurrences.filter(|&n| n > 0)?)
+            }
+            RecurrenceRangeType::UnknownFutureValue => return None,
+        };
+        Some(Self {
+            frequency,
+            interval,
+            end,
+        })
+    }
+
+    /// Converts this rule to a Microsoft Graph [`PatternedRecurrence`] starting on `start_date`
+    /// in `zone_name` (IANA or Windows time zone name).
+    #[must_use]
+    pub fn to_graph(&self, start_date: Date, zone_name: &str) -> PatternedRecurrence {
+        let interval = self.interval.max(1);
+        let mut pattern = RecurrencePattern {
+            interval: Some(interval),
+            ..RecurrencePattern::default()
+        };
+        match &self.frequency {
+            Frequency::Daily => {
+                pattern.kind = Some(RecurrencePatternType::Daily);
+            }
+            Frequency::Weekly(days) => {
+                let order = [
+                    Weekday::Sunday,
+                    Weekday::Monday,
+                    Weekday::Tuesday,
+                    Weekday::Wednesday,
+                    Weekday::Thursday,
+                    Weekday::Friday,
+                    Weekday::Saturday,
+                ];
+                let chosen = self.weekdays(days, start_date);
+                pattern.kind = Some(RecurrencePatternType::Weekly);
+                pattern.days_of_week = order
+                    .into_iter()
+                    .filter(|day| chosen.contains(day))
+                    .map(DayOfWeek::from)
+                    .collect();
+                pattern.first_day_of_week = Some(DayOfWeek::Sunday);
+            }
+            Frequency::MonthlyOnDay => {
+                pattern.kind = Some(RecurrencePatternType::AbsoluteMonthly);
+                pattern.day_of_month = Some(u32::from(start_date.day().unsigned_abs()));
+            }
+            Frequency::MonthlyOnWeekday(nth) => {
+                pattern.kind = Some(RecurrencePatternType::RelativeMonthly);
+                pattern.days_of_week = vec![DayOfWeek::from(start_date.weekday())];
+                pattern.index = Some(nth.unwrap_or_else(|| Nth::of(start_date)).to_graph());
+            }
+            Frequency::Yearly => {
+                pattern.kind = Some(RecurrencePatternType::AbsoluteYearly);
+                pattern.month = Some(u32::from(start_date.month().unsigned_abs()));
+                pattern.day_of_month = Some(u32::from(start_date.day().unsigned_abs()));
+            }
+        }
+        let tz_name = gmail::ics::iana_to_windows(zone_name)
+            .unwrap_or(zone_name)
+            .to_owned();
+        let mut range = RecurrenceRange {
+            start_date: Some(start_date),
+            recurrence_time_zone: Some(tz_name),
+            ..RecurrenceRange::default()
+        };
+        match self.end {
+            End::Never => {
+                range.kind = Some(RecurrenceRangeType::NoEnd);
+            }
+            End::On(end_date) => {
+                range.kind = Some(RecurrenceRangeType::EndDate);
+                range.end_date = Some(end_date);
+            }
+            End::After(count) => {
+                range.kind = Some(RecurrenceRangeType::Numbered);
+                range.number_of_occurrences = Some(count.max(1));
+            }
+        }
+        PatternedRecurrence::new(pattern, range)
     }
 
     /// The `RRULE` line for a series starting at `start`. An all-day series ends on a date. Any
@@ -410,30 +648,6 @@ impl Recurrence {
     }
 }
 
-/// A series' start or end as a time in its zone, and whether it's all-day. The zone is
-/// `calendar_tz` for an all-day time or when none is given (falling back to an RFC 3339 offset
-/// when `calendar_tz` is UTC).
-pub(crate) fn zoned(time: &EventDateTime, calendar_tz: &TimeZone) -> Option<(Zoned, bool)> {
-    if let Some(date) = &time.date {
-        return Some((
-            date.parse::<Date>()
-                .ok()?
-                .to_zoned(calendar_tz.clone())
-                .ok()?,
-            true,
-        ));
-    }
-    let date_time = time.date_time.as_deref()?;
-    let tz = time
-        .time_zone
-        .as_deref()
-        .and_then(|name| TimeZone::get(name).ok())
-        .or_else(|| (calendar_tz != &TimeZone::UTC).then(|| calendar_tz.clone()))
-        .or_else(|| rfc3339_zone(date_time))
-        .unwrap_or_else(|| calendar_tz.clone());
-    Some((date_time.parse::<Timestamp>().ok()?.to_zoned(tz), false))
-}
-
 /// Fixed-offset [`TimeZone`] parsed from an RFC 3339 timestamp's trailing `Z` or `±HH:MM`.
 pub(crate) fn rfc3339_zone(text: &str) -> Option<TimeZone> {
     let trimmed = text.trim();
@@ -497,25 +711,46 @@ pub(crate) fn retime_until(
         .collect()
 }
 
-/// An instance's start in Calendar's form, which is `2026-11-17` for all-day, else the time with
-/// its offset.
-fn instance_time(at: &Zoned, all_day: bool, like: &EventDateTime) -> EventDateTime {
-    if all_day {
-        return EventDateTime {
-            date: Some(at.date().to_string()),
-            ..EventDateTime::default()
-        };
+/// When `target_start` toggles `all_day` relative to `master.start` and `patch` leaves recurrence
+/// untouched, rewrites `UNTIL` in `master.raw_recurrence` (or re-emits `master.recurrence`) into
+/// `patch.raw_recurrence`.
+pub(crate) fn retime_until_if_toggled(
+    master: &CalendarEvent,
+    target_start: &EventTime,
+    patch: &mut EventPatch,
+) {
+    let Some(old_start) = &master.start else {
+        return;
+    };
+    if old_start.is_all_day() == target_start.is_all_day()
+        || patch.recurrence.is_some()
+        || patch.raw_recurrence.is_some()
+        || master.raw_recurrence.is_empty()
+    {
+        return;
     }
-    EventDateTime {
-        date_time: Some(at.strftime("%Y-%m-%dT%H:%M:%S%:z").to_string()),
-        ..like.clone()
-    }
+    let Some(old_zoned) = old_start.own_zoned(&TimeZone::UTC) else {
+        return;
+    };
+    let Some(target_zoned) = target_start.own_zoned(old_zoned.time_zone()) else {
+        return;
+    };
+    patch.raw_recurrence = Some(retime_until(
+        &master.raw_recurrence,
+        &target_zoned,
+        target_start.is_all_day(),
+        old_zoned.time_zone(),
+    ));
 }
 
-/// The instances of series `event` (which Calendar hasn't got) starting from `from` to `to`, as
-/// Calendar would list them. Each has the id `{series}_{start}` and the series' id as its
-/// `recurringEventId`, and keeps the series' rule so it can be described.
-pub(crate) fn instances(event: &Event, from: Timestamp, to: Timestamp) -> Vec<Event> {
+/// The instances of series `event` (which the provider hasn't received yet) starting from `from`
+/// to `to`. Each has the id `{series}_{start}`, `recurring_event_id = Some(series)`, and keeps
+/// the series' rule so details can describe it.
+pub(crate) fn instances(
+    event: &CalendarEvent,
+    from: Timestamp,
+    to: Timestamp,
+) -> Vec<CalendarEvent> {
     let (Some(start), Some(end), Some(id)) = (
         event.start.as_ref(),
         event.end.as_ref(),
@@ -523,16 +758,24 @@ pub(crate) fn instances(event: &Event, from: Timestamp, to: Timestamp) -> Vec<Ev
     ) else {
         return vec![event.clone()];
     };
-    let (Some((first, all_day)), Some((last, _))) =
-        (zoned(start, &TimeZone::UTC), zoned(end, &TimeZone::UTC))
-    else {
+    let all_day = start.is_all_day();
+    let (Some(first), Some(last)) = (
+        start.own_zoned(&TimeZone::UTC),
+        end.own_zoned(&TimeZone::UTC),
+    ) else {
         return vec![event.clone()];
     };
-    let Some(rule) = Recurrence::from_rules_for(&event.recurrence, &first) else {
+    let Some(rule) = event
+        .recurrence
+        .clone()
+        .or_else(|| Recurrence::from_rules_for(&event.raw_recurrence, &first))
+    else {
         return vec![event.clone()];
     };
     let length = last.timestamp().duration_since(first.timestamp());
     let days = (last.date() - first.date()).get_days();
+    let start_zone = start.time_zone().map(str::to_owned);
+    let end_zone = end.time_zone().map(str::to_owned);
     // An instance starting before `from` still shows if it lasts into it.
     let from = from
         .checked_sub(length)
@@ -547,18 +790,33 @@ pub(crate) fn instances(event: &Event, from: Timestamp, to: Timestamp) -> Vec<Ev
             } else {
                 at.checked_add(length).ok()?
             };
-            let original = instance_time(&at, all_day, start);
+            let instance_start = if all_day {
+                EventTime::AllDay(at.date())
+            } else {
+                EventTime::Timed {
+                    at: at.timestamp(),
+                    time_zone: start_zone.clone(),
+                }
+            };
+            let instance_end = if all_day {
+                EventTime::AllDay(until.date())
+            } else {
+                EventTime::Timed {
+                    at: until.timestamp(),
+                    time_zone: end_zone.clone(),
+                }
+            };
             let suffix = if all_day {
                 at.strftime("%Y%m%d").to_string()
             } else {
                 at.timestamp().strftime("%Y%m%dT%H%M%SZ").to_string()
             };
-            Some(Event {
+            Some(CalendarEvent {
                 id: Some(format!("{id}_{suffix}")),
                 recurring_event_id: Some(id.to_owned()),
-                start: Some(original.clone()),
-                end: Some(instance_time(&until, all_day, end)),
-                original_start_time: Some(original),
+                start: Some(instance_start.clone()),
+                end: Some(instance_end),
+                original_start: Some(instance_start),
                 ..event.clone()
             })
         })
@@ -639,6 +897,33 @@ mod tests {
     }
 
     #[test]
+    fn rules_round_trip_with_microsoft_graph_patterned_recurrence() {
+        let start = date(2026, 11, 17);
+        let cases = [
+            rule(Frequency::Daily, 2, End::Never),
+            rule(
+                Frequency::Weekly(vec![Weekday::Tuesday, Weekday::Thursday]),
+                1,
+                End::After(8),
+            ),
+            rule(Frequency::MonthlyOnDay, 1, End::On(date(2027, 5, 17))),
+            rule(Frequency::MonthlyOnWeekday(Some(Nth::Third)), 1, End::Never),
+            rule(Frequency::Yearly, 1, End::On(date(2030, 11, 17))),
+        ];
+        for expected in cases {
+            let graph = expected.to_graph(start, "America/New_York");
+            assert_eq!(
+                graph
+                    .range
+                    .as_ref()
+                    .and_then(|r| r.recurrence_time_zone.as_deref()),
+                Some("Eastern Standard Time")
+            );
+            assert_eq!(Recurrence::from_graph(&graph), Some(expected));
+        }
+    }
+
+    #[test]
     fn rules_read_back_when_the_form_could_make_them() {
         let ny = TimeZone::get("America/New_York").expect("zone");
         let read = |line: &str| Recurrence::from_rules(&[line.to_owned()], &ny);
@@ -676,20 +961,18 @@ mod tests {
             Recurrence::from_rules(std::slice::from_ref(&rrule), &la),
             Some(rule(Frequency::Daily, 1, End::On(date(2026, 11, 20))))
         );
-        let series = Event {
+        let series = CalendarEvent {
             id: Some("s1".into()),
-            start: Some(EventDateTime {
-                date_time: Some("2026-11-18T09:00:00-08:00".into()),
+            start: Some(EventTime::Timed {
+                at: "2026-11-18T17:00:00Z".parse().expect("ts"),
                 time_zone: Some("America/Los_Angeles".into()),
-                ..EventDateTime::default()
             }),
-            end: Some(EventDateTime {
-                date_time: Some("2026-11-18T09:30:00-08:00".into()),
+            end: Some(EventTime::Timed {
+                at: "2026-11-18T17:30:00Z".parse().expect("ts"),
                 time_zone: Some("America/Los_Angeles".into()),
-                ..EventDateTime::default()
             }),
-            recurrence: vec![rrule],
-            ..Event::default()
+            raw_recurrence: vec![rrule],
+            ..CalendarEvent::default()
         };
         let expanded = instances(&series, Timestamp::MIN, Timestamp::MAX);
         assert_eq!(
@@ -798,31 +1081,125 @@ mod tests {
 
         // Unrecognized/unrepresentable RRULE clauses and EXDATE/RDATE are rejected.
         assert_eq!(read("RRULE:FREQ=MONTHLY;BYMONTHDAY=15"), None);
-        assert_eq!(read("RRULE:FREQ=YEARLY;BYMONTH=11;BYDAY=4TH"), None);
-        assert_eq!(read("RRULE:FREQ=MONTHLY;BYDAY=TU;BYSETPOS=2"), None);
+        assert_eq!(read("RRULE:FREQ=YEARLY;BYMONTH=6"), None);
         assert_eq!(read("RRULE:FREQ=WEEKLY;BYDAY=MO;WKST=MO"), None);
+        assert_eq!(read("RRULE:FREQ=DAILY;COUNT=2;UNTIL=20261231"), None);
         assert_eq!(
             Recurrence::from_rules(
                 &[
                     "RRULE:FREQ=WEEKLY;BYDAY=TU".to_owned(),
-                    "EXDATE:20261117T150000Z".to_owned(),
+                    "EXDATE:20261124T150000Z".to_owned(),
                 ],
-                &ny,
+                &ny
             ),
             None
         );
 
-        // Monthly BYDAY weekday must match start's weekday in `from_rules_for`.
+        // `from_rules_for` rejects a monthly BYDAY weekday that disagrees with the start date.
         let tuesday = at("2026-11-17T09:00");
-        let friday = at("2026-11-27T09:00");
-        let last_friday = ["RRULE:FREQ=MONTHLY;BYDAY=-1FR;COUNT=4".to_owned()];
-        assert_eq!(Recurrence::from_rules_for(&last_friday, &tuesday), None);
         assert_eq!(
-            Recurrence::from_rules_for(&last_friday, &friday),
+            Recurrence::from_rules_for(&["RRULE:FREQ=MONTHLY;BYDAY=3FR".to_owned()], &tuesday),
+            None
+        );
+        assert_eq!(
+            Recurrence::from_rules_for(&["RRULE:FREQ=MONTHLY;BYDAY=3TU".to_owned()], &tuesday),
             Some(rule(
-                Frequency::MonthlyOnWeekday(Some(Nth::Last)),
+                Frequency::MonthlyOnWeekday(Some(Nth::Third)),
                 1,
-                End::After(4),
+                End::Never
+            ))
+        );
+    }
+
+    #[test]
+    fn from_graph_rejects_unaligned_and_unknown_patterns() {
+        let range = |start: Date| RecurrenceRange {
+            kind: Some(RecurrenceRangeType::NoEnd),
+            start_date: Some(start),
+            ..RecurrenceRange::default()
+        };
+
+        // UnknownFutureValue WeekIndex must return None (not Some(MonthlyOnWeekday(None))).
+        let unknown_idx = PatternedRecurrence {
+            pattern: Some(RecurrencePattern {
+                kind: Some(RecurrencePatternType::RelativeMonthly),
+                interval: Some(1),
+                days_of_week: vec![DayOfWeek::Tuesday],
+                index: Some(WeekIndex::UnknownFutureValue),
+                ..RecurrencePattern::default()
+            }),
+            range: Some(range(date(2026, 11, 17))),
+        };
+        assert_eq!(Recurrence::from_graph(&unknown_idx), None);
+
+        // RelativeMonthly weekday mismatch against start_date is rejected.
+        let unaligned_rel = PatternedRecurrence {
+            pattern: Some(RecurrencePattern {
+                kind: Some(RecurrencePatternType::RelativeMonthly),
+                interval: Some(1),
+                days_of_week: vec![DayOfWeek::Friday],
+                index: Some(WeekIndex::Third),
+                ..RecurrencePattern::default()
+            }),
+            range: Some(range(date(2026, 11, 17))), // Tuesday
+        };
+        assert_eq!(Recurrence::from_graph(&unaligned_rel), None);
+
+        // AbsoluteMonthly day_of_month mismatch against start_date is rejected.
+        let unaligned_month = PatternedRecurrence {
+            pattern: Some(RecurrencePattern {
+                kind: Some(RecurrencePatternType::AbsoluteMonthly),
+                interval: Some(1),
+                day_of_month: Some(15),
+                ..RecurrencePattern::default()
+            }),
+            range: Some(range(date(2026, 11, 17))),
+        };
+        assert_eq!(Recurrence::from_graph(&unaligned_month), None);
+
+        // AbsoluteYearly month/day mismatch against start_date is rejected.
+        let unaligned_year = PatternedRecurrence {
+            pattern: Some(RecurrencePattern {
+                kind: Some(RecurrencePatternType::AbsoluteYearly),
+                interval: Some(1),
+                month: Some(12),
+                day_of_month: Some(17),
+                ..RecurrencePattern::default()
+            }),
+            range: Some(range(date(2026, 11, 17))),
+        };
+        assert_eq!(Recurrence::from_graph(&unaligned_year), None);
+
+        // Multi-week Weekly with non-Sunday first_day_of_week is rejected.
+        let non_sunday_biweekly = PatternedRecurrence {
+            pattern: Some(RecurrencePattern {
+                kind: Some(RecurrencePatternType::Weekly),
+                interval: Some(2),
+                days_of_week: vec![DayOfWeek::Monday],
+                first_day_of_week: Some(DayOfWeek::Monday),
+                ..RecurrencePattern::default()
+            }),
+            range: Some(range(date(2026, 11, 16))),
+        };
+        assert_eq!(Recurrence::from_graph(&non_sunday_biweekly), None);
+
+        // Single-week Weekly with Monday first_day_of_week still parses cleanly.
+        let weekly_monday_wkst = PatternedRecurrence {
+            pattern: Some(RecurrencePattern {
+                kind: Some(RecurrencePatternType::Weekly),
+                interval: Some(1),
+                days_of_week: vec![DayOfWeek::Monday],
+                first_day_of_week: Some(DayOfWeek::Monday),
+                ..RecurrencePattern::default()
+            }),
+            range: Some(range(date(2026, 11, 16))),
+        };
+        assert_eq!(
+            Recurrence::from_graph(&weekly_monday_wkst),
+            Some(rule(
+                Frequency::Weekly(vec![Weekday::Monday]),
+                1,
+                End::Never
             ))
         );
     }

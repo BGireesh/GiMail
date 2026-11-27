@@ -39,7 +39,25 @@ pub fn photo(ctx: &egui::Context, email: &str) -> Option<AvatarPhoto> {
 
 /// The file `email`'s profile photo was decoded from, once there's one to show.
 pub(crate) fn saved(ctx: &egui::Context, email: &str) -> Option<Arc<[u8]>> {
-    AvatarCache::<String, Arc<[u8]>>::of(ctx, CACHE_ID).extra(email)
+    let normalized = email.to_ascii_lowercase();
+    let cache = AvatarCache::<String, Arc<[u8]>>::of(ctx, CACHE_ID);
+    cache.extra(&normalized).or_else(|| {
+        cache.extra(&exo_auth::Account::key_for(
+            exo_auth::Provider::Microsoft,
+            &normalized,
+        ))
+    })
+}
+
+/// Like [`saved`], returning only the active provider's cached photo when `email` matches
+/// `account`'s address so dual Google+Microsoft accounts never leak across providers.
+pub(crate) fn saved_for(ctx: &egui::Context, account: &str, email: &str) -> Option<Arc<[u8]>> {
+    let (provider, account_email) = exo_auth::Account::parse_key(account);
+    if account_email.eq_ignore_ascii_case(email) {
+        let key = exo_auth::Account::key_for(provider, &account_email.to_ascii_lowercase());
+        return AvatarCache::<String, Arc<[u8]>>::of(ctx, CACHE_ID).extra(&key);
+    }
+    saved(ctx, email)
 }
 
 /// Shows saved photos, refreshes them from Google and lets them go.
@@ -84,6 +102,8 @@ impl Drop for Busy {
 enum Error {
     #[error("asking People for it: {0}")]
     People(#[from] gmail::Error),
+    #[error("reading photo from store: {0}")]
+    Store(#[from] exo_store::Error),
     #[error("downloading it: {0}")]
     Download(#[from] crate::remote_content::Error),
     #[error("it isn't an image: {0}")]
@@ -137,10 +157,18 @@ impl ProfilePictures {
         self.show_saved(auth, email);
     }
 
-    /// Asks Google for `email`'s photo, off the UI thread, and saves and shows what it gets, which
-    /// is the People API's primary photo, or none when that's Google's generated default.
-    /// Meanwhile, and when Google can't be reached, the saved one shows.
-    pub(crate) fn refresh(&mut self, auth: &Auth, email: &str, tokens: exo_auth::Tokens) {
+    /// Asks the provider for `email`'s photo, off the UI thread, and saves and shows what it gets.
+    /// On Outlook, uses [`exo_store::Store::my_photo_metadata`] and
+    /// [`exo_store::Store::contact_photo`] through `account_loader`; on Google, reads People's
+    /// primary photo (skipping Google's generated default). Meanwhile, and when unreachable, the
+    /// saved one shows.
+    pub(crate) fn refresh(
+        &mut self,
+        auth: &Auth,
+        email: &str,
+        tokens: exo_auth::Tokens,
+        account_loader: crate::account::Loader,
+    ) {
         self.load(auth, [email]);
         let runtime = match &self.runtime {
             Some(runtime) => runtime.clone(),
@@ -164,7 +192,7 @@ impl ProfilePictures {
         let (loader, busy) = (self.loader().clone(), Busy::new(&self.busy));
         let (auth, email) = (auth.clone(), email.to_owned());
         runtime.spawn(async move {
-            if fetch_and_save(&auth, &email, tokens, &http, &busy.0).await {
+            if fetch_and_save(&auth, &email, tokens, account_loader, &http, &busy.0).await {
                 // Busy until it shows.
                 let _ = loader.send(Load {
                     _busy: Busy::new(&busy.0),
@@ -219,23 +247,36 @@ impl ProfilePictures {
     }
 }
 
-/// Fetches `email`'s photo and saves it. Returns whether that changed the saved one.
+/// Fetches the account keyed `key`'s photo and saves it. Returns whether that changed the saved
+/// one.
 async fn fetch_and_save(
     auth: &Auth,
-    email: &str,
+    key: &str,
     tokens: exo_auth::Tokens,
+    account_loader: crate::account::Loader,
     http: &crate::remote_content::Client,
     busy: &Arc<AtomicUsize>,
 ) -> bool {
-    let google = gmail::Client::new(auth.endpoints().clone(), tokens);
-    let photo = match fetch(&google, http, busy).await {
+    let provider = auth
+        .accounts()
+        .into_iter()
+        .find(|account| account.key() == key)
+        .map_or(exo_auth::Provider::Google, |account| account.provider);
+    let photo = match provider {
+        exo_auth::Provider::Google => {
+            let google = gmail::Client::new(auth.endpoints().clone(), tokens);
+            fetch(&google, http, busy).await
+        }
+        exo_auth::Provider::Microsoft => account_loader.my_photo().await.map_err(Error::Store),
+    };
+    let photo = match photo {
         Ok(photo) => photo,
         Err(error) => {
             log::warn!("fetching a profile photo: {error}");
             return false;
         }
     };
-    let (auth, email) = (auth.clone(), email.to_owned());
+    let (auth, key) = (auth.clone(), key.to_owned());
     tokio::task::spawn_blocking(move || {
         if let Some(bytes) = &photo
             && let Err(error) = image::load_from_memory(bytes)
@@ -243,13 +284,10 @@ async fn fetch_and_save(
             log::warn!("fetching a profile photo: {}", Error::Image(error));
             return false;
         }
-        if auth
-            .profile_picture(&email)
-            .is_ok_and(|saved| saved == photo)
-        {
+        if auth.profile_picture(&key).is_ok_and(|saved| saved == photo) {
             return false;
         }
-        match auth.set_profile_picture(&email, photo.as_deref()) {
+        match auth.set_profile_picture(&key, photo.as_deref()) {
             Ok(()) => true,
             // It signed out meanwhile.
             Err(exo_auth::Error::UnknownAccount(_)) => false,
@@ -314,5 +352,46 @@ async fn people_photos(
             }
             result => return result,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tiny_png() -> Arc<[u8]> {
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::RgbaImage::from_pixel(2, 2, image::Rgba([20, 40, 80, 255]))
+            .write_to(&mut png, image::ImageFormat::Png)
+            .expect("png");
+        Arc::from(png.into_inner())
+    }
+
+    #[test]
+    fn saved_for_isolates_dual_provider_accounts_case_insensitively() {
+        let ctx = egui::Context::default();
+        let cache = AvatarCache::<String, Arc<[u8]>>::of(&ctx, CACHE_ID);
+        let google_bytes = tiny_png();
+        let texture = avatar_cache::try_decode(&ctx, "test", &google_bytes).expect("decode");
+        cache.set(
+            "alice@example.com".to_owned(),
+            Some((texture, google_bytes.clone())),
+        );
+
+        assert_eq!(
+            saved_for(&ctx, "alice@example.com", "Alice@Example.com").as_deref(),
+            Some(google_bytes.as_ref()),
+            "Google account resolves its own cached photo"
+        );
+        assert_eq!(
+            saved_for(&ctx, "Microsoft Alice@Example.com", "alice@example.com"),
+            None,
+            "Microsoft account with same email must not leak Google photo when absent"
+        );
+        assert_eq!(
+            saved_for(&ctx, "microsoft bob@example.com", "alice@example.com").as_deref(),
+            Some(google_bytes.as_ref()),
+            "other senders still fall back to saved()"
+        );
     }
 }

@@ -4,9 +4,8 @@
 
 use std::collections::BTreeMap;
 
-use exo_store::StoredEvent;
+use exo_store::{CalendarEvent, EventTime, ShowAs, StoredEvent};
 use exo_ui::CalendarColor;
-use gmail::calendar::Event as ApiEvent;
 use jiff::{Timestamp, ToSpan, Zoned, civil::Date, tz::TimeZone};
 
 use super::{
@@ -209,19 +208,19 @@ pub fn busy_status(
 
 /// The busy status one of a guest's events gives them across `start`–`end`.
 fn status(
-    event: &ApiEvent,
+    event: &CalendarEvent,
     email: &str,
     start: Timestamp,
     end: Timestamp,
     tz: &TimeZone,
 ) -> Option<&'static str> {
     let (from, to, _) = span(event, tz)?;
-    if event.transparency.as_deref() == Some("transparent")
+    if event.show_as == ShowAs::Free
         || super::event::my_attendance(event, email) == Some(Rsvp::NeedsAction)
     {
         return None;
     }
-    (from < end && to > start).then_some(if event.event_type.as_deref() == Some("outOfOffice") {
+    (from < end && to > start).then_some(if event.is_out_of_office() {
         "OOO"
     } else {
         "busy"
@@ -229,7 +228,7 @@ fn status(
 }
 
 /// A guest's events as listed, without those they declined or that leave them free.
-fn events_of<'a>(data: &'a Data, email: &str) -> Option<Vec<&'a ApiEvent>> {
+fn events_of<'a>(data: &'a Data, email: &str) -> Option<Vec<&'a CalendarEvent>> {
     let GuestEvents::Shown(events) = &data.guests.get(email)?.events else {
         return None;
     };
@@ -238,33 +237,21 @@ fn events_of<'a>(data: &'a Data, email: &str) -> Option<Vec<&'a ApiEvent>> {
             .iter()
             .filter(|event| {
                 super::event::my_attendance(event, email) != Some(Rsvp::Declined)
-                    && (is_all_day(event) || event.transparency.as_deref() != Some("transparent"))
+                    && (is_all_day(event) || event.show_as != ShowAs::Free)
             })
             .collect(),
     )
 }
 
-fn is_all_day(event: &ApiEvent) -> bool {
-    event
-        .start
-        .as_ref()
-        .is_some_and(|start| start.date.is_some())
+fn is_all_day(event: &CalendarEvent) -> bool {
+    event.start.as_ref().is_some_and(EventTime::is_all_day)
 }
 
 /// An event's start and end, and whether it's all-day.
-fn span(event: &ApiEvent, tz: &TimeZone) -> Option<(Timestamp, Timestamp, bool)> {
-    let at = |value: &gmail::calendar::EventDateTime| match &value.date {
-        Some(date) => date
-            .parse::<Date>()
-            .ok()?
-            .to_zoned(tz.clone())
-            .ok()
-            .map(|at| at.timestamp()),
-        None => value.date_time.as_deref()?.parse().ok(),
-    };
+fn span(event: &CalendarEvent, tz: &TimeZone) -> Option<(Timestamp, Timestamp, bool)> {
     Some((
-        at(event.start.as_ref()?)?,
-        at(event.end.as_ref()?)?,
+        event.start.as_ref()?.timestamp(tz)?,
+        event.end.as_ref()?.timestamp(tz)?,
         is_all_day(event),
     ))
 }
@@ -312,9 +299,7 @@ pub fn guest_events(
                 }
                 // An all-day or day-spanning event that keeps them busy fills each of its days to
                 // the next civil midnight.
-                if event.event_type.as_deref() != Some("outOfOffice")
-                    && event.transparency.as_deref() == Some("transparent")
-                {
+                if !event.is_out_of_office() && event.show_as == ShowAs::Free {
                     blocks.push(block);
                     continue;
                 }
@@ -556,7 +541,7 @@ pub fn busy(data: &Data, email: &str, tz: &TimeZone) -> Vec<(Timestamp, Timestam
     events_of(data, email)
         .unwrap_or_default()
         .into_iter()
-        .filter(|event| event.transparency.as_deref() != Some("transparent"))
+        .filter(|event| event.show_as != ShowAs::Free)
         .filter_map(|event| span(event, tz))
         .map(|(start, end, _)| (start, end))
         .collect()
@@ -615,7 +600,7 @@ impl crate::Mail {
         &self,
         key: &str,
         now: &Zoned,
-    ) -> Option<(Event, ApiEvent)> {
+    ) -> Option<(Event, CalendarEvent)> {
         let (surface, guests, _) = self.calendar_overlaid(now, false)?;
         let colors = match surface {
             Surface::Form => &self.calendar.form.as_ref()?.guest_colors,
@@ -866,25 +851,35 @@ mod tests {
     fn event(
         start: &str,
         end: &str,
-        response: &str,
-        kind: Option<&str>,
-        transparent: bool,
-    ) -> ApiEvent {
+        response: exo_store::RsvpStatus,
+        out_of_office: bool,
+        free: bool,
+    ) -> CalendarEvent {
         let at = |time: &str| {
-            Some(gmail::calendar::EventDateTime {
-                date_time: Some(format!("2026-11-17T{time}:00Z")),
-                ..Default::default()
-            })
+            Some(EventTime::timed(
+                format!("2026-11-17T{time}:00Z").parse().expect("ts"),
+                None,
+            ))
         };
-        ApiEvent {
+        CalendarEvent {
             start: at(start),
             end: at(end),
-            event_type: kind.map(str::to_owned),
-            transparency: transparent.then(|| "transparent".to_owned()),
-            attendees: vec![gmail::calendar::EventAttendee {
+            event_type: if out_of_office {
+                exo_store::EventType::OutOfOffice
+            } else {
+                exo_store::EventType::Default
+            },
+            show_as: if free {
+                ShowAs::Free
+            } else if out_of_office {
+                ShowAs::OutOfOffice
+            } else {
+                ShowAs::Busy
+            },
+            attendees: vec![exo_store::EventAttendee {
                 email: Some("a@x.co".into()),
-                response_status: Some(response.into()),
-                is_self: Some(true),
+                response_status: response,
+                is_self: true,
                 ..Default::default()
             }],
             ..Default::default()
@@ -895,10 +890,34 @@ mod tests {
     fn a_chip_says_busy_over_out_of_office_and_ignores_free_and_unanswered_time() {
         let mut data = Data::default();
         let events = vec![
-            event("11:00", "12:00", "accepted", None, true),
-            event("11:00", "12:00", "needsAction", None, false),
-            event("13:00", "18:00", "accepted", Some("outOfOffice"), false),
-            event("15:00", "16:00", "accepted", None, false),
+            event(
+                "11:00",
+                "12:00",
+                exo_store::RsvpStatus::Accepted,
+                false,
+                true,
+            ),
+            event(
+                "11:00",
+                "12:00",
+                exo_store::RsvpStatus::NeedsAction,
+                false,
+                false,
+            ),
+            event(
+                "13:00",
+                "18:00",
+                exo_store::RsvpStatus::Accepted,
+                true,
+                false,
+            ),
+            event(
+                "15:00",
+                "16:00",
+                exo_store::RsvpStatus::Accepted,
+                false,
+                false,
+            ),
         ];
         data.guests.insert(
             "a@x.co".into(),
@@ -960,18 +979,13 @@ mod tests {
     #[test]
     fn a_guest_s_free_all_day_event_goes_to_the_all_day_row_and_a_busy_one_fills_the_day() {
         let tz = TimeZone::UTC;
-        let day = |date: &str| {
-            Some(gmail::calendar::EventDateTime {
-                date: Some(date.to_owned()),
-                ..Default::default()
-            })
-        };
-        let all_day = |id: &str, transparent: bool| ApiEvent {
+        let day = |date: &str| Some(EventTime::all_day(date.parse().expect("date")));
+        let all_day = |id: &str, free: bool| CalendarEvent {
             id: Some(id.into()),
             summary: Some(id.into()),
             start: day("2026-11-17"),
             end: day("2026-11-18"),
-            transparency: transparent.then(|| "transparent".to_owned()),
+            show_as: if free { ShowAs::Free } else { ShowAs::Busy },
             ..Default::default()
         };
         let mut data = loaded(&["a@x.co", "b@x.co"]);
@@ -1033,17 +1047,17 @@ mod tests {
         };
         let mut data = loaded(&["lena@brightmoor.co"]);
         if let Some(cal) = data.guests.get_mut("lena@brightmoor.co") {
-            cal.events = GuestEvents::Shown(vec![ApiEvent {
+            cal.events = GuestEvents::Shown(vec![CalendarEvent {
                 id: Some("after-midnight".into()),
                 summary: Some("Deploy".into()),
-                start: Some(gmail::calendar::EventDateTime {
-                    date_time: Some("2026-11-18T00:00:00-05:00".into()),
-                    ..Default::default()
-                }),
-                end: Some(gmail::calendar::EventDateTime {
-                    date_time: Some("2026-11-18T01:00:00-05:00".into()),
-                    ..Default::default()
-                }),
+                start: Some(EventTime::timed(
+                    "2026-11-18T00:00:00-05:00".parse().expect("ts"),
+                    None,
+                )),
+                end: Some(EventTime::timed(
+                    "2026-11-18T01:00:00-05:00".parse().expect("ts"),
+                    None,
+                )),
                 ..Default::default()
             }]);
         }
@@ -1075,17 +1089,11 @@ mod tests {
             ),
         ] {
             if let Some(cal) = data.guests.get_mut("lena@brightmoor.co") {
-                cal.events = GuestEvents::Shown(vec![ApiEvent {
+                cal.events = GuestEvents::Shown(vec![CalendarEvent {
                     id: Some("offsite".into()),
                     summary: Some("Offsite".into()),
-                    start: Some(gmail::calendar::EventDateTime {
-                        date: Some(start_day.to_string()),
-                        ..Default::default()
-                    }),
-                    end: Some(gmail::calendar::EventDateTime {
-                        date: Some(end_day.to_string()),
-                        ..Default::default()
-                    }),
+                    start: Some(EventTime::all_day(start_day)),
+                    end: Some(EventTime::all_day(end_day)),
                     ..Default::default()
                 }]);
             }

@@ -1,7 +1,8 @@
 //! Expansion of the RRULE subset that fixtures and clients use: `FREQ=DAILY|WEEKLY|MONTHLY|YEARLY`
 //! with `INTERVAL`, `COUNT`, `UNTIL`, `WKST`, `BYDAY` (including ordinals `1..=5` / `-5..=-1`),
-//! `BYMONTHDAY`, `BYMONTH`, and `EXDATE`. Wall-clock times are kept across DST changes by stepping
-//! in the event's own time zone, and an all-day series' instances are all-day.
+//! `BYMONTHDAY`, `BYMONTH`, (monthly and yearly) `BYSETPOS`, and `EXDATE`. Wall-clock times are kept
+//! across DST changes by stepping in the event's own time zone, and an all-day series' instances
+//! are all-day.
 
 use gmail::calendar::{Event, EventDateTime};
 use jiff::civil::{Date, DateTime, Weekday};
@@ -43,12 +44,15 @@ struct Rule {
     by_day: Vec<(Option<i8>, Weekday)>,
     by_month_day: Vec<i8>,
     by_month: Vec<i8>,
+    /// `BYSETPOS`: which of a monthly or yearly rule's dates in each month or year it keeps, from
+    /// 1 (negative from the end), as in "the second Thursday or Friday".
+    by_set_pos: Vec<i16>,
     wkst: Weekday,
 }
 
 /// Whether every rule's `UNTIL` takes the type of its series' start (a date for an all-day series
 /// and a date-time otherwise, as RFC 5545 §3.3.10 requires) and its `BYDAY`/`WKST`/`BYMONTHDAY`/
-/// `BYMONTH` parts are well-formed.
+/// `BYMONTH`/`BYSETPOS` parts are well-formed.
 pub fn valid(event: &Event) -> bool {
     let all_day = event
         .start
@@ -72,6 +76,7 @@ pub fn valid(event: &Event) -> bool {
                     "WKST" => parse_weekday(value).is_some(),
                     "BYMONTHDAY" => parse_by_month_day(value).is_some(),
                     "BYMONTH" => parse_by_month(value).is_some(),
+                    "BYSETPOS" => parse_by_set_pos(value).is_some(),
                     _ => true,
                 }
             })
@@ -153,6 +158,9 @@ fn instances(
     };
 
     let exdates = parse_exdates(&event.recurrence, &tz);
+    // With `BYSETPOS`, the dates a monthly or yearly rule keeps in the period being stepped through,
+    // by the period's first day.
+    let mut period: Option<(Date, Vec<Date>)> = None;
     let mut out = Vec::new();
     let mut generated = 0usize;
     let mut day = first.clone();
@@ -202,59 +210,12 @@ fn instances(
             Freq::Monthly => {
                 let months = i64::from(date.year() - first.year()) * 12
                     + i64::from(date.month() - first.month());
-                let on_day = match (rule.by_day.is_empty(), rule.by_month_day.is_empty()) {
-                    (false, false) => {
-                        month_day_ok
-                            && rule
-                                .by_day
-                                .iter()
-                                .any(|item| matches_by_day_in_month(date, *item))
-                    }
-                    (false, true) => rule
-                        .by_day
-                        .iter()
-                        .any(|item| matches_by_day_in_month(date, *item)),
-                    (true, false) => month_day_ok,
-                    (true, true) => date.day() == first.day(),
-                };
-                month_ok && on_day && months % rule.interval == 0
+                months % rule.interval == 0
+                    && rule.selects(date, first.date(), date.first_of_month(), &mut period)
             }
             Freq::Yearly => {
-                let in_month = if !rule.by_month.is_empty() {
-                    rule.by_month.contains(&date.month())
-                } else if rule.by_day.is_empty() {
-                    date.month() == first.month()
-                } else {
-                    true
-                };
-                let on_day = match (rule.by_day.is_empty(), rule.by_month_day.is_empty()) {
-                    (false, false) => {
-                        let by_day_ok = if !rule.by_month.is_empty() {
-                            rule.by_day
-                                .iter()
-                                .any(|item| matches_by_day_in_month(date, *item))
-                        } else {
-                            rule.by_day
-                                .iter()
-                                .any(|item| matches_by_day_in_year(date, *item))
-                        };
-                        month_day_ok && by_day_ok
-                    }
-                    (false, true) => {
-                        if !rule.by_month.is_empty() {
-                            rule.by_day
-                                .iter()
-                                .any(|item| matches_by_day_in_month(date, *item))
-                        } else {
-                            rule.by_day
-                                .iter()
-                                .any(|item| matches_by_day_in_year(date, *item))
-                        }
-                    }
-                    (true, false) => month_day_ok,
-                    (true, true) => date.day() == first.day(),
-                };
-                in_month && on_day && i64::from(date.year() - first.year()) % rule.interval == 0
+                i64::from(date.year() - first.year()) % rule.interval == 0
+                    && rule.selects(date, first.date(), date.first_of_year(), &mut period)
             }
         };
         if matches {
@@ -271,6 +232,103 @@ fn instances(
         day = day.checked_add(1.day()).ok()?;
     }
     Some(out)
+}
+
+impl Rule {
+    /// Whether a monthly or yearly rule's `BYMONTH`, `BYMONTHDAY` and `BYDAY` (or, without them,
+    /// the series' own day) take `date`, for a series that started on `first`.
+    fn falls_on(&self, date: Date, first: Date) -> bool {
+        let month_ok = self.by_month.is_empty() || self.by_month.contains(&date.month());
+        let month_day_ok =
+            self.by_month_day.is_empty() || matches_month_day(date, &self.by_month_day);
+        if self.freq == Freq::Monthly {
+            let on_day = match (self.by_day.is_empty(), self.by_month_day.is_empty()) {
+                (false, false) => {
+                    month_day_ok
+                        && self
+                            .by_day
+                            .iter()
+                            .any(|item| matches_by_day_in_month(date, *item))
+                }
+                (false, true) => self
+                    .by_day
+                    .iter()
+                    .any(|item| matches_by_day_in_month(date, *item)),
+                (true, false) => month_day_ok,
+                (true, true) => date.day() == first.day(),
+            };
+            return month_ok && on_day;
+        }
+        let in_month = if !self.by_month.is_empty() {
+            self.by_month.contains(&date.month())
+        } else if self.by_day.is_empty() {
+            date.month() == first.month()
+        } else {
+            true
+        };
+        let by_day_ok = || {
+            if self.by_month.is_empty() {
+                self.by_day
+                    .iter()
+                    .any(|item| matches_by_day_in_year(date, *item))
+            } else {
+                self.by_day
+                    .iter()
+                    .any(|item| matches_by_day_in_month(date, *item))
+            }
+        };
+        let on_day = match (self.by_day.is_empty(), self.by_month_day.is_empty()) {
+            (false, false) => month_day_ok && by_day_ok(),
+            (false, true) => by_day_ok(),
+            (true, false) => month_day_ok,
+            (true, true) => date.day() == first.day(),
+        };
+        in_month && on_day
+    }
+
+    /// Whether a monthly or yearly rule keeps `date`: the dates it [falls on](Self::falls_on),
+    /// narrowed by `BYSETPOS` to those positions among the period's (the month or year starting
+    /// on `start`), which `period` caches as the period is stepped through.
+    fn selects(
+        &self,
+        date: Date,
+        first: Date,
+        start: Date,
+        period: &mut Option<(Date, Vec<Date>)>,
+    ) -> bool {
+        if self.by_set_pos.is_empty() {
+            return self.falls_on(date, first);
+        }
+        if period.as_ref().is_none_or(|(at, _)| *at != start) {
+            let end = if self.freq == Freq::Monthly {
+                start.last_of_month()
+            } else {
+                start.last_of_year()
+            };
+            let dates: Vec<Date> = start
+                .series(1.day())
+                .take_while(|day| *day <= end)
+                .filter(|day| self.falls_on(*day, first))
+                .collect();
+            let count = i16::try_from(dates.len()).unwrap_or(i16::MAX);
+            let mut kept: Vec<Date> = self
+                .by_set_pos
+                .iter()
+                .filter_map(|&pos| {
+                    let at = if pos > 0 { pos - 1 } else { count + pos };
+                    usize::try_from(at)
+                        .ok()
+                        .and_then(|at| dates.get(at).copied())
+                })
+                .collect();
+            kept.sort();
+            kept.dedup();
+            *period = Some((start, kept));
+        }
+        period
+            .as_ref()
+            .is_some_and(|(_, kept)| kept.contains(&date))
+    }
 }
 
 fn matches_month_day(date: Date, by_month_day: &[i8]) -> bool {
@@ -352,6 +410,7 @@ fn parse(rule: &str) -> Option<Rule> {
         by_day: Vec::new(),
         by_month_day: Vec::new(),
         by_month: Vec::new(),
+        by_set_pos: Vec::new(),
         wkst: Weekday::Monday,
     };
     let mut freq = None;
@@ -373,6 +432,7 @@ fn parse(rule: &str) -> Option<Rule> {
             "BYDAY" => parsed.by_day = parse_by_day(value)?,
             "BYMONTHDAY" => parsed.by_month_day = parse_by_month_day(value)?,
             "BYMONTH" => parsed.by_month = parse_by_month(value)?,
+            "BYSETPOS" => parsed.by_set_pos = parse_by_set_pos(value)?,
             "WKST" => parsed.wkst = parse_weekday(value)?,
             _ => {}
         }
@@ -444,6 +504,23 @@ fn parse_by_month(value: &str) -> Option<Vec<i8>> {
     value
         .split(',')
         .map(|token| token.parse::<i8>().ok().filter(|&m| (1..=12).contains(&m)))
+        .collect()
+}
+
+/// `BYSETPOS`'s positions: 1 to 366, or -366 to -1 from the end.
+fn parse_by_set_pos(value: &str) -> Option<Vec<i16>> {
+    if value.is_empty() {
+        return None;
+    }
+    value
+        .split(',')
+        .map(|token| {
+            token
+                .trim_start_matches('+')
+                .parse::<i16>()
+                .ok()
+                .filter(|&n| matches!(n, 1..=366 | -366..=-1))
+        })
         .collect()
 }
 
@@ -676,6 +753,121 @@ mod tests {
             .map(|e| e.start.unwrap().date.unwrap())
             .collect();
         assert_eq!(all_day_dates, ["2026-11-01", "2026-11-04"]);
+    }
+
+    /// The local start dates of `rule`'s first `n` instances, for a series starting at 09:00 on
+    /// `start`.
+    fn dates(rule: &str, start: &str, n: usize) -> Vec<String> {
+        let tz = TimeZone::get("America/New_York").unwrap();
+        let at = |hour: i8| {
+            let time = start
+                .parse::<Date>()
+                .unwrap()
+                .at(hour, 0, 0, 0)
+                .to_zoned(tz.clone())
+                .unwrap();
+            EventDateTime {
+                date_time: Some(time.strftime("%Y-%m-%dT%H:%M:%S%:z").to_string()),
+                time_zone: Some("America/New_York".into()),
+                ..EventDateTime::default()
+            }
+        };
+        let series = Event {
+            id: Some("abc".into()),
+            start: Some(at(9)),
+            end: Some(at(10)),
+            recurrence: vec![rule.into()],
+            ..Event::default()
+        };
+        expand(&series, &tz, Timestamp::MAX)
+            .take(n)
+            .map(|e| e.start.unwrap().date_time.unwrap()[..10].to_owned())
+            .collect()
+    }
+
+    #[test]
+    fn set_positions_pick_among_several_weekdays() {
+        assert_eq!(
+            dates(
+                "RRULE:FREQ=MONTHLY;BYDAY=TH,FR;BYSETPOS=2;COUNT=3",
+                "2026-11-06",
+                9
+            ),
+            ["2026-11-06", "2026-12-04", "2027-01-07"],
+            "the second Thursday or Friday"
+        );
+        assert_eq!(
+            dates(
+                "RRULE:FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1",
+                "2026-11-30",
+                2
+            ),
+            ["2026-11-30", "2026-12-31"],
+            "the last weekday"
+        );
+        assert_eq!(
+            dates(
+                "RRULE:FREQ=YEARLY;BYMONTH=11;BYDAY=TH,FR;BYSETPOS=-1",
+                "2026-11-27",
+                2
+            ),
+            ["2026-11-27", "2027-11-26"],
+            "the last Thursday or Friday of November"
+        );
+        assert!(!valid(&weekly("RRULE:FREQ=MONTHLY;BYDAY=MO;BYSETPOS=0")));
+    }
+
+    #[test]
+    fn relative_yearly_and_several_ordinals() {
+        assert_eq!(
+            dates("RRULE:FREQ=YEARLY;BYMONTH=5;BYDAY=-1MO", "2026-05-25", 2),
+            ["2026-05-25", "2027-05-31"],
+            "the last Monday of May"
+        );
+        assert_eq!(
+            dates(
+                "RRULE:FREQ=YEARLY;BYMONTH=3;BYMONTHDAY=15;INTERVAL=2",
+                "2026-03-15",
+                2
+            ),
+            ["2026-03-15", "2028-03-15"]
+        );
+        assert_eq!(
+            dates("RRULE:FREQ=YEARLY;BYDAY=MO;BYMONTH=1", "2027-01-04", 5),
+            [
+                "2027-01-04",
+                "2027-01-11",
+                "2027-01-18",
+                "2027-01-25",
+                "2028-01-03"
+            ],
+            "every Monday of January"
+        );
+        assert_eq!(
+            dates("RRULE:FREQ=MONTHLY;BYDAY=1MO,3WE", "2026-11-02", 4),
+            ["2026-11-02", "2026-11-18", "2026-12-07", "2026-12-16"]
+        );
+    }
+
+    #[test]
+    fn rules_without_set_positions_expand_as_before() {
+        assert_eq!(
+            dates("RRULE:FREQ=MONTHLY;BYDAY=-1FR", "2026-11-27", 2),
+            ["2026-11-27", "2026-12-25"]
+        );
+        assert_eq!(
+            dates("RRULE:FREQ=MONTHLY", "2026-10-31", 3),
+            ["2026-10-31", "2026-12-31", "2027-01-31"],
+            "months without the day are skipped"
+        );
+        assert_eq!(
+            dates("RRULE:FREQ=YEARLY", "2028-02-29", 2),
+            ["2028-02-29", "2032-02-29"]
+        );
+        assert_eq!(
+            dates("RRULE:FREQ=WEEKLY;BYDAY=WE,FR;INTERVAL=2", "2026-11-18", 4),
+            ["2026-11-18", "2026-11-20", "2026-12-02", "2026-12-04"]
+        );
     }
 
     #[test]

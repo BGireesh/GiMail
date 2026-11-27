@@ -261,6 +261,11 @@ pub async fn user(call: Call, Path(params): super::Params) -> Result<Response> {
     ))
 }
 
+/// Whether `id` (an object ID or address) is someone in the directory.
+pub fn is_user(world: &World, id: &str) -> bool {
+    find_user(world, id).is_ok()
+}
+
 fn find_user<'a>(world: &'a World, id: &str) -> Result<&'a Person> {
     directory(world)
         .into_iter()

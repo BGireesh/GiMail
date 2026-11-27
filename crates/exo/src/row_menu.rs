@@ -22,7 +22,12 @@ pub(crate) struct Entry {
 /// The menu for `threads`, the conversations it acts on, which are the selection when the row
 /// clicked is in it, or else that row. `exact` is whether the selection is exactly the rows
 /// loaded, and `list` is the list on screen.
-pub(crate) fn entries(threads: &[&ThreadSummary], exact: bool, list: &ListId) -> Vec<Entry> {
+pub(crate) fn entries(
+    threads: &[&ThreadSummary],
+    exact: bool,
+    list: &ListId,
+    outlook: bool,
+) -> Vec<Entry> {
     let every = |of: &[&&ThreadSummary], test: fn(&ThreadSummary) -> bool| {
         !of.is_empty() && of.iter().all(|thread| test(thread))
     };
@@ -62,7 +67,7 @@ pub(crate) fn entries(threads: &[&ThreadSummary], exact: bool, list: &ListId) ->
         action: None,
     };
     let reply = |kind| Some(Action::Compose(compose::Action::Reply(kind)));
-    vec![
+    let mut entries = vec![
         if done {
             item(
                 "Mark not done",
@@ -90,33 +95,52 @@ pub(crate) fn entries(threads: &[&ThreadSummary], exact: bool, list: &ListId) ->
             exact && snoozable,
             Some(Action::Remind(remind::Action::Open { button: false })),
         ),
-        if starred {
-            item(
+        match (starred, outlook) {
+            (true, true) => item(
+                "Unflag",
+                's',
+                false,
+                "flag.slash",
+                true,
+                apply(Mutation::Unstar),
+            ),
+            (false, true) => item(
+                "Flag",
+                's',
+                false,
+                "flag",
+                !messages.is_empty(),
+                apply(Mutation::Star),
+            ),
+            (true, false) => item(
                 "Unstar",
                 's',
                 false,
                 "star.slash",
                 true,
                 apply(Mutation::Unstar),
-            )
-        } else {
-            item(
+            ),
+            (false, false) => item(
                 "Star",
                 's',
                 false,
                 "star",
                 !messages.is_empty(),
                 apply(Mutation::Star),
-            )
+            ),
         },
-        item(
+    ];
+    if !outlook {
+        entries.push(item(
             "Label",
             'l',
             false,
             "tag",
             exact && !messages.is_empty(),
             Some(Action::Pick(pickers::Action::OpenLabel)),
-        ),
+        ));
+    }
+    entries.extend([
         separator(),
         item(
             "Reply",
@@ -173,7 +197,7 @@ pub(crate) fn entries(threads: &[&ThreadSummary], exact: bool, list: &ListId) ->
             )
         } else {
             item(
-                "Trash",
+                if outlook { "Delete" } else { "Trash" },
                 '#',
                 false,
                 "trash",
@@ -181,7 +205,8 @@ pub(crate) fn entries(threads: &[&ThreadSummary], exact: bool, list: &ListId) ->
                 apply(Mutation::Trash),
             )
         },
-    ]
+    ]);
+    entries
 }
 
 #[cfg(test)]
@@ -233,7 +258,7 @@ mod tests {
         let mut starred = thread("t1");
         starred.starred = true;
         starred.unread = true;
-        let menu = shown(&entries(&[&starred], true, &ListId::Important));
+        let menu = shown(&entries(&[&starred], true, &ListId::Important, false));
         let titles: Vec<&str> = menu.iter().map(|(title, _)| title.as_str()).collect();
         assert_eq!(
             titles,
@@ -252,19 +277,40 @@ mod tests {
             ]
         );
         assert!(menu.iter().all(|(_, enabled)| *enabled));
+
+        let outlook_menu = shown(&entries(&[&starred], true, &ListId::Important, true));
+        let outlook_titles: Vec<&str> = outlook_menu
+            .iter()
+            .map(|(title, _)| title.as_str())
+            .collect();
+        assert_eq!(
+            outlook_titles,
+            [
+                "Mark done",
+                "Remind me",
+                "Unflag",
+                "—",
+                "Reply",
+                "Reply all",
+                "Forward",
+                "—",
+                "Mark read",
+                "Delete"
+            ]
+        );
     }
 
     #[test]
     fn several_conversations_cant_be_replied_to_and_spam_cant_be_marked_done() {
         let (one, two) = (thread("t1"), thread("t2"));
-        let menu = shown(&entries(&[&one, &two], true, &ListId::Spam));
+        let menu = shown(&entries(&[&one, &two], true, &ListId::Spam, false));
         let off: Vec<&str> = menu
             .iter()
             .filter(|(_, enabled)| !enabled)
             .map(|(title, _)| title.as_str())
             .collect();
         assert_eq!(off, ["Mark done", "Reply", "Reply all", "Forward"]);
-        let not_exact = shown(&entries(&[&one, &two], false, &ListId::Important));
+        let not_exact = shown(&entries(&[&one, &two], false, &ListId::Important, false));
         let off: Vec<&str> = not_exact
             .iter()
             .filter(|(_, enabled)| !enabled)
@@ -281,7 +327,7 @@ mod tests {
     fn a_draft_of_its_own_has_nothing_to_do() {
         let mut draft = thread("d1");
         draft.draft_only = true;
-        let menu = shown(&entries(&[&draft], true, &ListId::Drafts));
+        let menu = shown(&entries(&[&draft], true, &ListId::Drafts, false));
         assert!(
             menu.iter()
                 .filter(|(title, _)| title != "—")

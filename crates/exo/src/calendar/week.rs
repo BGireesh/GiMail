@@ -4,6 +4,7 @@
 use std::collections::BTreeSet;
 
 use egui::{Color32, Id, Order, Rect, Sense, Stroke, Ui, UiBuilder, Vec2, pos2, vec2};
+use exo_store::CalendarProviderKind;
 use exo_ui::{CalendarColor, Family, Font, IconButton, KeyTooltip, TextStyle};
 use jiff::{ToSpan, civil::Date};
 
@@ -80,8 +81,8 @@ const LOADING_SPINNER: f32 = 12.0;
 const LOADING_SPINNER_TOP: f32 = 4.0;
 const LOADING_INK: Color32 = Color32::from_rgb(0xbf, 0xbf, 0xbf);
 const LOADING_NEXT: f32 = 56.0;
-/// The Calendars header's menu: `Sign in with Google` alone, as Exo is Gmail-only.
-const ADD_ITEMS: [&str; 1] = ["Sign in with Google"];
+/// The Calendars header's menu: `Sign in with Google` and `Sign in with Microsoft`.
+const ADD_ITEMS: [&str; 2] = ["Sign in with Google", "Sign in with Microsoft"];
 const SIGNED_OUT_ITEMS: [&str; 2] = ["Sign in again", "Remove account"];
 const ACCOUNT: TextStyle = TextStyle::new(Font::new(Family::Sans, 700), 12.0, 16.0);
 const ROW_PITCH: f32 = 28.0;
@@ -98,6 +99,8 @@ const SIDEBAR_PADDING_BOTTOM: f32 = 28.0;
 
 /// A calendar account in the sidebar's list.
 pub struct ListedAccount {
+    /// Canonical account key (`email` for Google, `microsoft {email}` for Microsoft).
+    pub key: String,
     pub email: String,
     pub state: AccountState,
 }
@@ -108,19 +111,24 @@ pub enum AccountState {
     Calendars(Vec<ListedCalendar>),
     /// `Loading calendars`, since it just signed in.
     Loading,
-    /// Google signed it out, so it shows its header, a warning, and a menu.
+    /// Signed out, so it shows its header, a warning, and a menu.
     SignedOut,
 }
 
 /// A calendar in the sidebar's list.
 pub struct ListedCalendar {
-    /// The calendar account it's listed under.
+    /// Canonical key of the calendar account it's listed under.
     pub account: String,
+    /// Display email of the calendar account.
+    pub account_email: String,
+    pub provider: CalendarProviderKind,
     pub id: String,
     pub name: String,
     pub color: CalendarColor,
     pub shown: bool,
     pub writable: bool,
+    pub supports_meet: bool,
+    pub supports_teams: bool,
 }
 
 /// A calendar row's `…` button in Classic: 12px.
@@ -163,13 +171,13 @@ pub enum WeekAction {
     ToggleCalendar(String),
     /// A colour picked for calendar `id` from its `…`.
     Recolor(String, CalendarColor),
-    /// The Calendars header's `Sign in with Google`.
-    AddAccount,
-    /// A signed-out account's `Sign in again`.
+    /// The Calendars header's `Sign in with Google` or `Sign in with Microsoft`.
+    AddAccount(exo_auth::Provider),
+    /// A signed-out account's `Sign in again`, by canonical account key.
     SignInAgain(String),
-    /// A signed-out account's `Remove account`.
+    /// A signed-out account's `Remove account`, by canonical account key.
     RemoveAccount(String),
-    /// An account's header or caret, which folds its calendars away or back.
+    /// An account's header or caret, which folds its calendars away or back, by canonical key.
     Fold(String),
     /// The footer's gear.
     Settings,
@@ -659,12 +667,13 @@ impl Week {
         for account in page.accounts {
             top = header_top;
             end = top + 16.0;
+            let key = account.key.as_str();
             let email = account.email.as_str();
             let row = Rect::from_min_max(pos2(left, top), pos2(right, top + 16.0));
             let hit = ui
                 .interact(
                     row,
-                    exo_ui::id(ui.ctx(), ("calendar-week-account", email)),
+                    exo_ui::id(ui.ctx(), ("calendar-week-account", key)),
                     Sense::click(),
                 )
                 .on_hover_cursor(egui::CursorIcon::PointingHand);
@@ -681,7 +690,7 @@ impl Week {
                     exo_ui::paint_icon(ui, "legacy/DEPRECATED_warningCircle", icon, DEAUTH_INK);
                     let warning = ui.interact(
                         Rect::from_min_size(icon.min, vec2(DEAUTH, 16.0)),
-                        exo_ui::id(ui.ctx(), ("calendar-week-account-signed-out", email)),
+                        exo_ui::id(ui.ctx(), ("calendar-week-account-signed-out", key)),
                         Sense::click(),
                     );
                     KeyTooltip {
@@ -689,7 +698,7 @@ impl Week {
                         keys: &[],
                     }
                     .show_at(ui, &warning, exo_ui::Placement::Left(14.0));
-                    let menu = AccountMenu::SignedOut(email.to_owned());
+                    let menu = AccountMenu::SignedOut(key.to_owned());
                     if hit.clicked() || warning.clicked() {
                         self.toggle_account_menu(menu.clone());
                     }
@@ -711,7 +720,7 @@ impl Week {
                 AccountState::Loading => None,
                 AccountState::Calendars(calendars) => Some(calendars),
             };
-            let folded = page.folded.contains(email);
+            let folded = page.folded.contains(key);
             ACCOUNT.paint_line(
                 painter,
                 pos2(left, top + 1.0),
@@ -734,12 +743,12 @@ impl Week {
                 .upside_down(folded)
                 .show(
                     ui,
-                    exo_ui::id(ui.ctx(), ("calendar-week-fold", email)),
+                    exo_ui::id(ui.ctx(), ("calendar-week-fold", key)),
                     fold,
                     glyph,
                 );
             if hit.clicked() || caret.clicked() {
-                actions.push(WeekAction::Fold(email.to_owned()));
+                actions.push(WeekAction::Fold(key.to_owned()));
             }
             if folded {
                 header_top = top + ACCOUNT_GAP;
@@ -854,9 +863,10 @@ impl Week {
         if let Some(picked) = shown.clicked {
             self.account_menu = None;
             actions.push(match (menu, picked) {
-                (AccountMenu::Add, _) => WeekAction::AddAccount,
-                (AccountMenu::SignedOut(email), 0) => WeekAction::SignInAgain(email),
-                (AccountMenu::SignedOut(email), _) => WeekAction::RemoveAccount(email),
+                (AccountMenu::Add, 0) => WeekAction::AddAccount(exo_auth::Provider::Google),
+                (AccountMenu::Add, _) => WeekAction::AddAccount(exo_auth::Provider::Microsoft),
+                (AccountMenu::SignedOut(key), 0) => WeekAction::SignInAgain(key),
+                (AccountMenu::SignedOut(key), _) => WeekAction::RemoveAccount(key),
             });
         } else if let Some(hovered) = shown.hovered {
             self.account_menu = Some((menu, hovered));

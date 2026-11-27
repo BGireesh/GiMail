@@ -1,6 +1,6 @@
-//! View Raw Email Data (`|`, the palette's row), which shows the conversation as Gmail sends it
-//! ([`exo_store::Store::thread_source`]) in a read-only text area over the whole page until
-//! Escape. Its text is selected once it's in.
+//! View Raw Email Data (`|`, the palette's row), which shows the conversation as the mail
+//! provider sends it ([`exo_store::Store::thread_source`]) in a read-only text area over the whole
+//! page until Escape. Its text is selected once it's in.
 //!
 //! The text area: `12px monospace` (Courier), black or white at 90% on `#fff` or `#18191a`, no
 //! padding, soft-wrapped (`pre-wrap`, `break-word`), under the page's selection color.
@@ -226,7 +226,7 @@ impl Mail {
     }
 
     /// Opens the viewer on the open thread, or the list's highlighted conversation, empty until
-    /// Gmail answers.
+    /// the provider answers.
     fn raw_source_open(&mut self) {
         let Some(thread) = self.raw_source_thread() else {
             return;

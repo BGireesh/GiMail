@@ -274,6 +274,7 @@ impl EventForm {
                 input.key_pressed(egui::Key::Backspace) || input.key_pressed(egui::Key::Delete),
             )
         });
+        let choices = self.available_meetings(shown.calendars);
         let mut just_opened = false;
         match self.values.meeting.clone() {
             Meeting::None => {
@@ -289,8 +290,9 @@ impl EventForm {
                 if response.clicked() {
                     response.request_focus();
                 }
-                if (response.clicked() && !keys.0)
-                    || (response.has_focus() && keys.0 && self.dropdown.is_none())
+                if !choices.is_empty()
+                    && ((response.clicked() && !keys.0)
+                        || (response.has_focus() && keys.0 && self.dropdown.is_none()))
                 {
                     if self
                         .dropdown
@@ -308,10 +310,16 @@ impl EventForm {
                 if response.clicked() {
                     response.request_focus();
                 }
+                let removable = self.meeting_removable(shown.calendars);
                 // The link, or what will become of it, in a pill that shows when hovered or with the
                 // keyboard: 5px either side of the text and 3px over it, 22px tall, with its cross
-                // (2px after the text) only then.
+                // (2px after the text) only when removable.
                 let text = match &meeting {
+                    Meeting::Existing(link)
+                        if link.contains("teams.microsoft.com/l/meetup-join/") =>
+                    {
+                        "teams.microsoft.com/l/meetup-join/…".to_owned()
+                    }
                     Meeting::Existing(link) => link
                         .trim_start_matches("https://")
                         .trim_start_matches("http://")
@@ -326,12 +334,14 @@ impl EventForm {
                     text_at + vec2(width + PILL_CROSS_GAP, 0.0),
                     vec2(PILL_CROSS_WIDTH, SMALL.line_height),
                 );
+                let pill_right = if removable {
+                    cross.right() + PILL_PADDING
+                } else {
+                    text_at.x + width + PILL_PADDING
+                };
                 let pill = Rect::from_min_max(
                     text_at - vec2(PILL_PADDING, PILL_ABOVE),
-                    pos2(
-                        cross.right() + PILL_PADDING,
-                        text_at.y - PILL_ABOVE + PILL_HEIGHT,
-                    ),
+                    pos2(pill_right, text_at.y - PILL_ABOVE + PILL_HEIGHT),
                 );
                 let focused = response.has_focus();
                 let lit = focused || ui.rect_contains_pointer(pill);
@@ -364,7 +374,7 @@ impl EventForm {
                 };
                 SMALL.paint_line(ui.painter(), text_at, &text, ink, None);
                 let close = "legacy/DEPRECATED_closeV2";
-                let removed = lit && {
+                let removed = removable && lit && {
                     // The glyph's square fills the cross's width.
                     exo_ui::paint_icon(
                         ui,
@@ -380,8 +390,9 @@ impl EventForm {
                     .on_hover_cursor(egui::CursorIcon::PointingHand)
                     .clicked()
                 };
-                if removed || (response.has_focus() && keys.1) {
+                if removable && (removed || (response.has_focus() && keys.1)) {
                     self.values.meeting = Meeting::None;
+                    self.auto_meeting = false;
                 }
                 let tip = self
                     .meeting_link(shown.calendars, shown.me)
@@ -405,14 +416,21 @@ impl EventForm {
             underline(ui, value, palette.border_brand_default);
         }
         if let Some((Dropdown::Meeting, highlighted)) = self.dropdown {
-            row.overlay = Some(Overlay::Menu {
-                below: value,
-                trigger_hovered: response.hovered(),
-                just_opened,
-                which: Dropdown::Meeting,
-                items: vec!["Google Meet".to_owned()],
-                highlighted,
-            });
+            if choices.is_empty() {
+                self.dropdown = None;
+            } else {
+                row.overlay = Some(Overlay::Menu {
+                    below: value,
+                    trigger_hovered: response.hovered(),
+                    just_opened,
+                    which: Dropdown::Meeting,
+                    items: choices
+                        .iter()
+                        .map(|(_, label)| (*label).to_owned())
+                        .collect(),
+                    highlighted: highlighted.min(choices.len() - 1),
+                });
+            }
         }
         response.has_focus()
     }
@@ -530,7 +548,7 @@ impl EventForm {
             } else if enter {
                 if let Some(CalendarRow::Calendar(calendar)) = rows.get(at) {
                     let id = calendar.id.clone();
-                    self.pick_calendar(id);
+                    self.pick_calendar(id, shown.calendars);
                 } else {
                     // With nothing to take, the field keeps the keyboard (egui's Enter lets it
                     // go).
@@ -584,8 +602,25 @@ impl EventForm {
         response.has_focus()
     }
 
-    /// Takes calendar `id`. The field empties and Save takes the keyboard.
-    pub(super) fn pick_calendar(&mut self, id: String) {
+    /// Takes calendar `id`. The field empties, a pending/default meeting link adapts to the newly
+    /// selected calendar's provider capabilities, and Save takes the keyboard.
+    pub(super) fn pick_calendar(&mut self, id: String, calendars: &[super::CalendarOption]) {
+        if self.mode == Mode::Create
+            && let Some(chosen) = calendars.iter().find(|calendar| calendar.id == id)
+        {
+            match self.values.meeting {
+                Meeting::NewMeet if !chosen.supports_meet => {
+                    self.values.meeting = chosen.default_meeting();
+                }
+                Meeting::NewTeams if !chosen.supports_teams => {
+                    self.values.meeting = chosen.default_meeting();
+                }
+                Meeting::None if self.auto_meeting => {
+                    self.values.meeting = chosen.default_meeting();
+                }
+                _ => {}
+            }
+        }
         self.values.calendar = id;
         self.calendar_input.clear();
         self.focus_save = true;

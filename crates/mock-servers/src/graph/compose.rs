@@ -97,7 +97,20 @@ pub async fn create(call: Call, headers: HeaderMap, body: axum::body::Bytes) -> 
         let key = new_draft_locked(&mut world, raw, thread)?;
         return draft_response(&call, &world, key);
     }
-    let message: Map<String, Value> = body_json(&body, "message")?;
+    let mut message: Map<String, Value> = body_json(&body, "message")?;
+    // Open extensions made with the message, which Outlook keeps on it.
+    let mut extensions = Vec::new();
+    if let Some(given) = message.remove("extensions") {
+        let given = given
+            .as_array()
+            .ok_or_else(|| GraphError::unreadable_body("extensions must be a collection"))?;
+        for item in given {
+            let body = item
+                .as_object()
+                .ok_or_else(|| GraphError::unreadable_body("an extension must be an object"))?;
+            super::extensions::add(&mut extensions, super::extensions::from_body(body)?)?;
+        }
+    }
     check_keys(&message, CREATABLE)?;
     let mut world = call.world();
     let mut email = blank(&world);
@@ -115,7 +128,19 @@ pub async fn create(call: Call, headers: HeaderMap, body: axum::body::Bytes) -> 
     if !outlook_only.is_empty() {
         apply_patch_locked(&mut world, key, outlook_only)?;
     }
-    draft_response(&call, &world, key)
+    if extensions.is_empty() {
+        return draft_response(&call, &world, key);
+    }
+    world.graph.extensions.insert(key, extensions);
+    // The new message comes back expanded with its extensions, as Outlook answers.
+    let origin = origin(&world);
+    let view = call.view(&world, &origin);
+    let mut json = view.message_json(key, None)?;
+    super::messages::Expand::parse(Some("extensions"))?.apply(&view, key, &mut json)?;
+    Ok(reply_map(
+        201,
+        entity(view.context("messages/$entity"), json),
+    ))
 }
 
 fn draft_response(call: &Call, world: &World, key: u64) -> Result<Response> {

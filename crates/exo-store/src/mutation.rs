@@ -1,4 +1,4 @@
-//! Triage mutations: what each one sends to Gmail, and how each one is undone.
+//! Triage mutations: the label changes each one makes, and how each one is undone.
 //!
 //! A mutation becomes [`Intent`]s (change labels, star, mark unread, refresh), which [`resolve`]
 //! turns into concrete [`Step`]s against the thread as the user sees it. Steps are what the outbox
@@ -100,23 +100,24 @@ pub(crate) struct Plan {
     pub replace_key: Option<String>,
 }
 
-/// One Gmail call, as persisted in the outbox.
+/// One label change, at the granularity the provider makes it
+/// ([`Provider::apply`](crate::provider::Provider::apply)), as the outbox persists it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "call", rename_all = "snake_case")]
 pub(crate) enum Step {
-    /// `messages.batchModify` removing `labels` from the messages that carry them.
+    /// `labels` off the messages that carry them (Gmail's `messages.batchModify`).
     RemoveFromMessages {
         ids: Vec<String>,
         labels: Vec<String>,
     },
-    /// `threads.modify`.
+    /// Labels on and off every message of the thread (Gmail's `threads.modify`).
     ModifyThread {
         add: Vec<String>,
         remove: Vec<String>,
     },
-    /// `messages.modify` adding one label to one message (star, mark unread).
+    /// One label on one message: a star, or unread (Gmail's `messages.modify`).
     AddToMessage { id: String, label: String },
-    /// `threads.get` for the thread's rows, which replace the local copy's rows (bodies stay).
+    /// The thread's rows read again, which replace the local copy's rows (bodies stay).
     Refresh,
 }
 
@@ -173,13 +174,18 @@ impl Mutation {
                 )
             }),
             Self::MarkNotDone if done => {
-                let muted = muted()?;
                 let mut undo = Vec::new();
-                if view.is_muted(me) {
-                    undo.push(change(&[&muted], &[INBOX]));
+                let mut forward = Vec::new();
+                if let Some(muted) = me.muted_label.as_deref() {
+                    if view.is_muted(me) {
+                        undo.push(change(&[muted], &[INBOX]));
+                    }
+                    forward.push(change(&[INBOX], &[muted]));
+                } else if me.snoozed_label.is_none() {
+                    return Err(Error::NotSynced("the mute label"));
                 }
                 undo.push(change(&[], &[INBOX]));
-                let mut forward = vec![change(&[INBOX], &[&muted]), change(&[INBOX], &[])];
+                forward.push(change(&[INBOX], &[]));
                 forward.extend(returned.map(|label| change(&[], &[label])));
                 Some((refreshed(forward), refreshed(undo)))
             }
@@ -460,8 +466,8 @@ pub(crate) fn change(add: &[&str], remove: &[&str]) -> Intent {
     }
 }
 
-/// Resolves intents into Gmail calls. Every intent sees `view` as it is now, so one snapshot of
-/// the thread serves the whole mutation.
+/// Resolves intents into the provider's label changes. Every intent sees `view` as it is now, so
+/// one snapshot of the thread serves the whole mutation.
 pub(crate) fn resolve(intents: &[Intent], view: &ThreadView, me: &Identity) -> Vec<Step> {
     let mut steps = Vec::new();
     for intent in intents {
@@ -539,6 +545,43 @@ mod tests {
                 &["INBOX", "UNREAD", "CATEGORY_PERSONAL"],
             ),
         ])
+    }
+
+    #[test]
+    fn queued_steps_read_and_write_the_json_the_outbox_stored() {
+        let stored = [
+            (
+                r#"{"call":"remove_from_messages","ids":["a","c"],"labels":["INBOX"]}"#,
+                Step::RemoveFromMessages {
+                    ids: strings(&["a", "c"]),
+                    labels: strings(&["INBOX"]),
+                },
+            ),
+            (
+                r#"{"call":"modify_thread","add":["INBOX"],"remove":["Label_99"]}"#,
+                Step::ModifyThread {
+                    add: strings(&["INBOX"]),
+                    remove: strings(&["Label_99"]),
+                },
+            ),
+            (
+                // What the migration fixture's queued star holds.
+                r#"{"call":"add_to_message","id":"1a1e9b426200015e","label":"STARRED"}"#,
+                Step::AddToMessage {
+                    id: "1a1e9b426200015e".into(),
+                    label: "STARRED".into(),
+                },
+            ),
+            (r#"{"call":"refresh"}"#, Step::Refresh),
+        ];
+        for (json, step) in stored {
+            assert_eq!(
+                serde_json::from_str::<Step>(json).expect("reads"),
+                step,
+                "{json}"
+            );
+            assert_eq!(serde_json::to_string(&step).expect("writes"), json);
+        }
     }
 
     #[test]

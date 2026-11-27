@@ -366,6 +366,31 @@ impl Loader {
         });
     }
 
+    /// Fetches a provider contact photo by locator (such as `outlook://me/photo` or
+    /// `outlook://users/{id}/photo`).
+    pub(crate) async fn contact_photo(&self, locator: &str) -> Option<Vec<u8>> {
+        match self.store.contact_photo(locator).await {
+            Ok(bytes) => bytes.filter(|bytes| !bytes.is_empty()),
+            Err(error) => {
+                log::debug!("loading contact photo {locator}: {error}");
+                None
+            }
+        }
+    }
+
+    /// Checks whether the account has a profile photo set (`Store::my_photo_metadata`) and, when
+    /// it does, downloads its bytes via [`exo_store::Store::contact_photo`].
+    pub(crate) async fn my_photo(&self) -> exo_store::Result<Option<Vec<u8>>> {
+        if self.store.my_photo_metadata().await?.is_none() {
+            return Ok(None);
+        }
+        Ok(self
+            .store
+            .contact_photo("outlook://me/photo")
+            .await?
+            .filter(|bytes| !bytes.is_empty()))
+    }
+
     /// [`url`](Self::url)'s fetch, awaited where it's asked for.
     pub(crate) async fn get(&self, url: &str) -> Option<Vec<u8>> {
         match self.http.bytes(url, MAX_DOWNLOAD).await {

@@ -16,11 +16,12 @@ use toasty::Executor;
 use crate::db::{self, DraftRow, GIVEN_REMINDERS, ReminderRow};
 use crate::drafts::DraftReminder;
 use crate::error::{Error, Result};
-use crate::ids::ThreadId;
 use crate::ids::labels::{SH_SNOOZED, SPAM, TRASH};
+use crate::ids::{ListId, ThreadId};
 use crate::model::ReminderStatus;
 use crate::mutation::{Mutation, Plan, change};
 use crate::outbox::enqueue;
+use crate::provider::{Listing, Selection};
 use crate::store::{Inner, Store, load_view, reindex};
 use crate::view::ThreadView;
 
@@ -305,28 +306,20 @@ impl Store {
         inner.bootstrapped().await?;
         let router = inner.router();
         let me = &router.me;
-        let label = me
-            .snoozed_label
-            .clone()
-            .ok_or(Error::NotSynced("the reminder labels"))?;
         let mut listed: Vec<(String, u64)> = Vec::new();
-        let mut query = gmail::ListQuery {
-            label_ids: vec![label],
-            max_results: Some(100),
-            ..gmail::ListQuery::default()
-        };
+        let mut page = None;
         loop {
-            let page = inner
-                .api
-                .call(crate::quota::Lane::Sync, crate::sync::ATTEMPTS, |gmail| {
-                    gmail.threads(&query)
-                })
-                .await?;
-            listed.extend(page.threads.iter().filter_map(|thread| {
-                Some((thread.id.clone()?, thread.history_id.unwrap_or_default()))
-            }));
-            match page.next_page_token {
-                Some(token) => query.page_token = Some(token),
+            let listing = Listing {
+                selection: Selection::List(&ListId::Reminders),
+                router: &router,
+                page: page.take(),
+                before: None,
+                max: 100,
+            };
+            let found = inner.mail.list(listing, crate::quota::Lane::Sync).await?;
+            listed.extend(found.threads);
+            match found.next {
+                Some(next) => page = Some(next),
                 None => break,
             }
         }
@@ -341,8 +334,8 @@ impl Store {
             write.commit().await?;
             return Ok(Vec::new());
         }
-        for rows in &fetched {
-            if let Some(id) = crate::provider::save_rows(write.exec(), rows).await? {
+        for rows in fetched {
+            if let Some(id) = crate::truth::save_rows(write.exec(), rows).await? {
                 reindex(write.exec(), &id, &router).await?;
             }
         }
@@ -658,8 +651,10 @@ mod tests {
         let store = Store::open(
             &dir,
             "maya@brightmoor.co",
-            gmail::Endpoints::google(),
-            gmail::StaticToken("unused".into()),
+            crate::Remote::gmail(
+                gmail::Endpoints::google(),
+                gmail::StaticToken("unused".into()),
+            ),
         )
         .await
         .expect("opens");
@@ -694,8 +689,8 @@ mod tests {
             }),
             ..Default::default()
         };
-        let parsed = crate::parse::parse(&msg, false).expect("parses");
-        crate::provider::save_message(write.exec(), parsed)
+        let parsed = crate::provider::gmail::parse::parse(&msg, false).expect("parses");
+        crate::truth::save_message(write.exec(), parsed)
             .await
             .expect("saves");
         write.commit().await.expect("commits");
@@ -738,8 +733,10 @@ mod tests {
         let store = Store::open(
             &dir,
             "maya@brightmoor.co",
-            gmail::Endpoints::google(),
-            gmail::StaticToken("unused".into()),
+            crate::Remote::gmail(
+                gmail::Endpoints::google(),
+                gmail::StaticToken("unused".into()),
+            ),
         )
         .await
         .expect("reopens");
@@ -776,8 +773,10 @@ mod tests {
         let store = Store::open(
             &dir,
             "maya@brightmoor.co",
-            gmail::Endpoints::google(),
-            gmail::StaticToken("unused".into()),
+            crate::Remote::gmail(
+                gmail::Endpoints::google(),
+                gmail::StaticToken("unused".into()),
+            ),
         )
         .await
         .expect("reopens");

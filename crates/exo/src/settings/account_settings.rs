@@ -85,7 +85,7 @@ impl State {
             }
         };
         (to != current).then(|| Event::Color {
-            email: account.email.clone(),
+            email: account.key(),
             color: COLORS[to].0,
         })
     }
@@ -175,7 +175,7 @@ pub fn dialog(
             // It stays open, since a click on a color doesn't close it.
             exo_ui::Picked::Color(index) => {
                 *inner = Some(Event::Color {
-                    email: account.email.clone(),
+                    email: account.key(),
                     color: COLORS[index].0,
                 })
             }
@@ -227,7 +227,7 @@ fn list(
         .show(
             ui,
             &mut drag,
-            |index| exo_ui::id(&ctx, ("account-row-shift", &accounts[index].email)),
+            |index| exo_ui::id(&ctx, ("account-row-shift", accounts[index].key())),
             |ui, index, top, is_dragging, row_drag| {
                 let pointer_free = !is_dragging
                     && !covered.is_some_and(|covered| ui.rect_contains_pointer(covered));
@@ -252,7 +252,7 @@ fn list(
     state.drag = drag;
     if let Some((from, to)) = reordered {
         event = Some(Event::Move {
-            email: accounts[from].email.clone(),
+            email: accounts[from].key(),
             to,
         });
     }
@@ -315,10 +315,11 @@ fn row(
         pos2(body.left() - ROW_LEFT, top),
         pos2(body.right() + ROW_RIGHT, top + ROW_HEIGHT),
     );
+    let key = account.key();
     let hovered = pointer_free && ui.rect_contains_pointer(rect);
     let shown = motion::transition(
         &ctx,
-        exo_ui::id(&ctx, ("account-row-hover", &account.email)),
+        exo_ui::id(&ctx, ("account-row-hover", &key)),
         hovered,
         FADE,
         motion::CubicBezier::EASE,
@@ -331,7 +332,7 @@ fn row(
     let swatch_response = ui
         .interact(
             swatch,
-            exo_ui::id(ui.ctx(), ("account-swatch", &account.email)),
+            exo_ui::id(ui.ctx(), ("account-swatch", &key)),
             Sense::click(),
         )
         .on_hover_cursor(egui::CursorIcon::PointingHand);
@@ -358,7 +359,7 @@ fn row(
         let response = ui
             .interact(
                 handle.expand(10.0),
-                exo_ui::id(ui.ctx(), ("account-handle", &account.email)),
+                exo_ui::id(ui.ctx(), ("account-handle", &key)),
                 Sense::drag(),
             )
             .on_hover_cursor(egui::CursorIcon::Grab);
@@ -381,7 +382,7 @@ fn row(
     );
     let response = ui.interact(
         text.expand2(vec2(10.0, 0.0)),
-        exo_ui::id(&ctx, ("account-sign-out", &account.email)),
+        exo_ui::id(&ctx, ("account-sign-out", &key)),
         Sense::click(),
     );
     let response = if hovered {
@@ -397,13 +398,13 @@ fn row(
         ink.gamma_multiply(shown),
         None,
     );
-    (response.clicked() && hovered).then(|| Event::SignOut(account.email.clone()))
+    (response.clicked() && hovered).then_some(Event::SignOut(key))
 }
 
 /// The avatar and the address of a row at `top`.
 fn paint_identity(ui: &Ui, left: f32, top: f32, account: &exo_auth::Account) {
     let avatar = Rect::from_min_size(pos2(left, top + AVATAR_TOP), vec2(AVATAR, AVATAR));
-    match crate::profile_pictures::photo(ui.ctx(), &account.email) {
+    match crate::profile_pictures::photo(ui.ctx(), &account.key()) {
         // The avatar's ring in the account's color: `border-width: 2.5px`, which Chromium floors
         // to 2px.
         Some(photo) => exo_ui::paint_photo_avatar(

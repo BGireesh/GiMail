@@ -225,6 +225,11 @@ pub(crate) struct BodyState {
     /// `includeSignatureOnReplies`, as the account's settings last said
     /// ([`super::signature::includes_content`]).
     pub signature_on_replies: bool,
+    /// Whether this draft belongs to an Outlook account (uses `local_signature` instead of Gmail
+    /// `sendAs` aliases).
+    pub outlook: bool,
+    /// The Outlook account's locally edited signature HTML, if set.
+    pub local_signature: Option<String>,
     /// The address book the body's names were last taken from (the address of the book's `Arc`,
     /// or `None` before the book is read). Autocorrect leaves those names alone. `None` until the
     /// names are taken.
@@ -240,6 +245,8 @@ impl Default for BodyState {
             scroll: super::form::BodyScroll::default(),
             date: None,
             signature_on_replies: true,
+            outlook: false,
+            local_signature: None,
             names_from: None,
             people_source: None,
         }
@@ -602,8 +609,7 @@ impl Open {
     pub fn has_hidden_quote(&self, aliases: &[Alias]) -> bool {
         self.persists_to_gmail()
             && !self.record.quoted_inlined
-            && (self.record.quoted_content.is_some()
-                || signature::of(self.record.from.as_ref(), aliases).is_some())
+            && (self.record.quoted_content.is_some() || signature::of_open(self, aliases).is_some())
     }
 
     /// The draft's Send later time, unless a reply called the send off.

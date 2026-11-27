@@ -45,6 +45,9 @@ pub(crate) fn anyway(open: &Open) -> &'static str {
     }
 }
 
+/// Microsoft's limit on recipients per message.
+const MAX_RECIPIENTS_OUTLOOK: usize = 500;
+
 /// The first problem with sending `open` as `html` at `now`. `from_ok` says whether its From is
 /// one of the account's aliases, and `bypass` what's already been waved through.
 pub(crate) fn check(
@@ -53,6 +56,7 @@ pub(crate) fn check(
     from_ok: bool,
     bypass: Bypass,
     now: jiff::Timestamp,
+    outlook: bool,
 ) -> Option<Problem> {
     let almost = Some("Almost there…");
     let sorry = Some("Sorry!");
@@ -73,11 +77,10 @@ pub(crate) fn check(
             .as_ref()
             .is_none_or(|cid| html.contains(&format!("cid:{cid}")))
     });
-    if files::exceeds_gmail_limit(sent.map(|attachment| attachment.size), html) {
+    if files::exceeds_limit(sent.map(|attachment| attachment.size), html, outlook) {
         return Some(Problem {
             title: sorry,
-            text: "This message is too large for Gmail. Shorten the message or remove attachments."
-                .into(),
+            text: files::too_large_text(outlook).into(),
             kind: Kind::Ok { focus_from: false },
         });
     }
@@ -100,13 +103,19 @@ pub(crate) fn check(
         });
     }
     let count = open.recipients().count();
-    if count > recipients::MAX_RECIPIENTS {
-        let over = count - recipients::MAX_RECIPIENTS;
+    let max_recipients = if outlook {
+        MAX_RECIPIENTS_OUTLOOK
+    } else {
+        recipients::MAX_RECIPIENTS
+    };
+    if count > max_recipients {
+        let over = count - max_recipients;
         let noun = if over == 1 { "recipient" } else { "recipients" };
+        let service = if outlook { "Microsoft" } else { "Gmail" };
         return Some(Problem {
             title: sorry,
             text: format!(
-                "Gmail can only send to 100 recipients at once.\nPlease remove at least {over} {noun}."
+                "{service} can only send to {max_recipients} recipients at once.\nPlease remove at least {over} {noun}."
             ),
             kind: Kind::Ok { focus_from: false },
         });
@@ -264,7 +273,7 @@ mod tests {
 
     fn first(open: &Open, bypass: Bypass) -> Option<Problem> {
         let html = open.editor.html();
-        check(open, &html, true, bypass, jiff::Timestamp::now())
+        check(open, &html, true, bypass, jiff::Timestamp::now(), false)
     }
 
     #[test]
@@ -317,6 +326,40 @@ mod tests {
             first(&many, Bypass::default()).map(|p| p.text).as_deref(),
             Some(
                 "Gmail can only send to 100 recipients at once.\nPlease remove at least 2 recipients."
+            )
+        );
+        // Outlook allows up to 500 recipients, and names Microsoft above that.
+        let html = many.editor.html();
+        assert_eq!(
+            check(
+                &many,
+                &html,
+                true,
+                Bypass::default(),
+                jiff::Timestamp::now(),
+                true
+            ),
+            None
+        );
+        many.record.to = (0..501)
+            .map(|i| Address {
+                name: None,
+                email: format!("p{i}@x.com"),
+            })
+            .collect();
+        assert_eq!(
+            check(
+                &many,
+                &html,
+                true,
+                Bypass::default(),
+                jiff::Timestamp::now(),
+                true
+            )
+            .map(|p| p.text)
+            .as_deref(),
+            Some(
+                "Microsoft can only send to 500 recipients at once.\nPlease remove at least 1 recipient."
             )
         );
     }

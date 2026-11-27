@@ -314,7 +314,7 @@ impl App {
         };
         self.tabs = tabs;
         match active {
-            Parked::Route(route) if self.current() == Some(route.email.as_str()) => {
+            Parked::Route(route) if self.current() == Some(route.account_key()) => {
                 if let Some(mail) = self.mail_mut() {
                     mail.go_to_route(&route);
                 }
@@ -366,13 +366,13 @@ impl App {
             .chain(self.background.iter().map(Away::account))
     }
 
-    /// A handle on `email`'s account, if it's open.
-    fn account_of(&self, email: &str) -> Option<&Account> {
-        self.handles().find(|account| account.email() == email)
+    /// A handle on the account keyed `key`, if it's open.
+    fn account_of(&self, key: &str) -> Option<&Account> {
+        self.handles().find(|account| account.key() == key)
     }
 
-    /// A page on `email`'s account: the one on screen, a tab's, or the one off screen.
-    fn page_of(&self, email: &str) -> Option<&Mail> {
+    /// A page on the account keyed `key`: the one on screen, a tab's, or the one off screen.
+    fn page_of(&self, key: &str) -> Option<&Mail> {
         let off_screen = self.background.iter().filter_map(|away| match away {
             Away::Mail(page) => Some(&**page),
             Away::Account(_) => None,
@@ -381,7 +381,7 @@ impl App {
             .into_iter()
             .chain(self.tabs.pages())
             .chain(off_screen)
-            .find(|page| page.account().email() == email)
+            .find(|page| page.account().key() == key)
     }
 
     /// The screen showing.
@@ -414,9 +414,9 @@ impl App {
             .map(Mail::account)
             .chain(self.background.iter().map(Away::account))
             .filter(move |account| {
-                let email = account.email();
-                let new = !seen.contains(&email);
-                seen.push(email);
+                let key = account.key();
+                let new = !seen.contains(&key);
+                seen.push(key);
                 new
             })
     }
@@ -533,11 +533,11 @@ impl App {
         if let Screen::Mail(mail) = &self.screen
             && let Some(unusable) = mail.account().unusable()
         {
-            let email = mail.account().email().to_owned();
-            let alert = Unopened::new(&ctx, &self.clock.now(), email.clone(), unusable.into());
-            drop(self.close_pages(&email));
+            let key = mail.account().key().to_owned();
+            let alert = Unopened::new(&ctx, &self.clock.now(), key.clone(), unusable.into());
+            drop(self.close_pages(&key));
             self.screen = Screen::Unopened(alert);
-            self.grants.retain(|(open, _)| *open != email);
+            self.grants.retain(|(open, _)| *open != key);
         }
         match &mut self.screen {
             Screen::Mail(mail) => {
@@ -549,20 +549,20 @@ impl App {
                 if let Some(log_in) = alert.show(ui) {
                     // The alert reloads to `/new`. Nothing was on screen before, but another
                     // account still signed in is somewhere to go back to.
-                    let signed_out = alert.email().to_owned();
+                    let signed_out = alert.key().to_owned();
                     let back = self.back(None, Some(&signed_out));
                     self.screen = Screen::LogIn(log_in.with_back(back));
                 }
             }
             Screen::Unopened(alert) => {
                 let choice = alert.show(ui);
-                let email = alert.email().to_owned();
+                let key = alert.email().to_owned();
                 match choice {
-                    Some(Choice::Reload) => self.switch(&ctx, &email),
-                    Some(Choice::ClearCache) => self.clear_cache(&ctx, &email),
+                    Some(Choice::Reload) => self.switch(&ctx, &key),
+                    Some(Choice::ClearCache) => self.clear_cache(&ctx, &key),
                     Some(Choice::Switch(place)) => {
                         if let Some(account) = self.listed().into_iter().nth(place) {
-                            self.switch(&ctx, &account.email);
+                            self.switch(&ctx, &account.key());
                         }
                     }
                     None => {}
@@ -609,14 +609,46 @@ impl App {
         }
     }
 
+    /// Resolves a plain address (from an `exo://{email}/...` link or notification) to `(key, email)`,
+    /// preferring the account on screen when both a Google and Microsoft account share the address.
+    fn resolve_address(&mut self, email: &str) -> (String, String) {
+        if let Some(mail) = self.mail()
+            && (mail.account().key() == email || mail.account().email().eq_ignore_ascii_case(email))
+        {
+            return (
+                mail.account().key().to_owned(),
+                mail.account().email().to_owned(),
+            );
+        }
+        let listed = self.listed();
+        if let Some(account) = listed
+            .iter()
+            .find(|account| account.key() == email)
+            .or_else(|| {
+                listed
+                    .iter()
+                    .find(|account| account.email.eq_ignore_ascii_case(email))
+            })
+        {
+            return (account.key(), account.email.clone());
+        }
+        (email.to_owned(), email.to_owned())
+    }
+
     /// Opens one of Exo's links on the account it names, else on the account on screen. A link that
     /// macOS or another launch handed over opens in that account's tab, else in the tab on screen.
     /// A link clicked in a message (`in_new_tab`) opens in a new tab.
     fn open_link(&mut self, ctx: &egui::Context, link: &crate::links::Link, in_new_tab: bool) {
         match (&link.email, in_new_tab) {
-            (Some(email), true) => self.open_tab(ctx, Parked::Route(Route::home(email.clone()))),
+            (Some(email), true) => {
+                let (key, display) = self.resolve_address(email);
+                self.open_tab(ctx, Parked::Route(Route::home_for(key, display)));
+            }
             (None, true) => self.new_tab(ctx),
-            (Some(email), false) => self.tab_for(ctx, email),
+            (Some(email), false) => {
+                let (key, _) = self.resolve_address(email);
+                self.tab_for(ctx, &key);
+            }
             (None, false) => {}
         }
         if let Screen::Mail(mail) = &mut self.screen {
@@ -632,7 +664,7 @@ impl App {
             self.mail().map(Mail::link)
         } else {
             self.tabs.route(index).and_then(|route| {
-                let account = self.account_of(&route.email)?;
+                let account = self.account_of(route.account_key())?;
                 Some(crate::links::url(
                     &route,
                     &account.snapshot().labels,
@@ -652,33 +684,45 @@ impl App {
         self.kept_week = self.mail().and_then(Mail::calendar_week_to_keep);
     }
 
-    /// Google refused an open account's grant. Its pages close, and it's listed as signed out, so
-    /// switching to it offers to sign it in again. On screen, its mail gives way to "Almost
-    /// there…". What it queued stays in its store's outbox for the next sign-in.
+    /// The provider refused an open account's grant. Its pages close, and it's listed as signed
+    /// out, so switching to it offers to sign it in again. On screen, its mail gives way to
+    /// "Almost there…". What it queued stays in its store's outbox for the next sign-in.
     fn close_refused(&mut self, ctx: &egui::Context) {
         let refused: Vec<String> = self
             .grants
             .iter()
             .filter(|(_, tokens)| tokens.needs_sign_in())
-            .map(|(email, _)| email.clone())
+            .map(|(key, _)| key.clone())
             .collect();
         if refused.is_empty() {
             return;
         }
-        for email in refused {
-            log::warn!("an account was signed out of Google");
-            self.grants.retain(|(open, _)| *open != email);
-            drop(self.close_pages(&email));
-            if self.current() == Some(email.as_str()) {
+        let listed = self.listed();
+        for key in refused {
+            let (email, provider) = listed
+                .iter()
+                .find(|account| account.key() == key)
+                .map(|account| (account.email.clone(), account.provider))
+                .or_else(|| {
+                    self.account_of(&key)
+                        .map(|account| (account.email().to_owned(), account.provider()))
+                })
+                .unwrap_or_else(|| (key.clone(), exo_auth::Provider::Google));
+            log::warn!("an account was signed out of its provider");
+            self.grants.retain(|(open, _)| *open != key);
+            drop(self.close_pages(&key));
+            if self.current() == Some(key.as_str()) {
                 self.screen = Screen::SignedOut(SignedOut::new(
                     ctx,
                     &self.assets.join("images"),
                     &self.clock.now(),
-                    email.clone(),
+                    key.clone(),
+                    email,
+                    provider,
                 ));
             }
             if let Some(sign_in) = &mut self.sign_in
-                && let Err(error) = sign_in.auth().and_then(|auth| auth.mark_signed_out(&email))
+                && let Err(error) = sign_in.auth().and_then(|auth| auth.mark_signed_out(&key))
             {
                 log::error!("listing an account as signed out: {error}");
             }
@@ -686,75 +730,89 @@ impl App {
         self.share_accounts();
     }
 
-    /// Takes every page of `email`'s account but the one on screen out of the tabs (which keep
-    /// their routes) and off screen, for the account to close.
-    fn close_pages(&mut self, email: &str) -> Vec<Away> {
-        let mut pages: Vec<Away> = self
-            .tabs
-            .unpage(email)
-            .into_iter()
-            .map(Away::Mail)
-            .collect();
+    /// Takes every page of the account keyed `key` but the one on screen out of the tabs (which
+    /// keep their routes) and off screen, for the account to close.
+    fn close_pages(&mut self, key: &str) -> Vec<Away> {
+        let mut pages: Vec<Away> = self.tabs.unpage(key).into_iter().map(Away::Mail).collect();
         let (gone, kept) = std::mem::take(&mut self.background)
             .into_iter()
-            .partition::<Vec<_>, _>(|away| away.account().email() == email);
+            .partition::<Vec<_>, _>(|away| away.account().key() == key);
         self.background = kept;
         pages.extend(gone);
         pages
     }
 
     /// Opens what a clicked notification is about, in its account's tab, so another account's
-    /// mail switches to it first.
+    /// mail switches to it first. Matches exact canonical account key before falling back to
+    /// address resolution so dual Google+Microsoft accounts at the same address never cross-route.
     fn clicked(&mut self, ctx: &egui::Context, click: Click) {
-        self.tab_for(ctx, &click.account);
+        let key = if self.account_of(&click.account).is_some()
+            || self
+                .listed()
+                .iter()
+                .any(|account| account.key() == click.account)
+        {
+            click.account
+        } else {
+            self.resolve_address(&click.account).0
+        };
+        self.tab_for(ctx, &key);
         match &mut self.screen {
-            Screen::Mail(mail) if mail.account().email() == click.account => {
-                mail.open_notification(click.open)
-            }
+            Screen::Mail(mail) if mail.account().key() == key => mail.open_notification(click.open),
             _ => log::info!("a notification's account isn't open"),
         }
     }
 
-    /// Shows `email` in the tab on screen: its mail, or the sign-in screen
-    /// offering it when Google signed it out, with a way back to the account on screen. The page
-    /// it replaces stays open off screen, as it was left.
-    fn switch(&mut self, ctx: &egui::Context, email: &str) {
-        if let Some(screen) = self.screen_for(ctx, email, true) {
+    /// Shows the account keyed `key` in the tab on screen: its mail, or the sign-in screen
+    /// offering it when its provider signed it out, with a way back to the account on screen. The
+    /// page it replaces stays open off screen, as it was left.
+    fn switch(&mut self, ctx: &egui::Context, key: &str) {
+        if let Some(screen) = self.screen_for(ctx, key, true) {
             drop(self.show(screen));
         }
     }
 
-    /// What showing `email` puts up: a page of its mail ([`page_for`](Self::page_for), picking up
-    /// the one off screen when `pick_up`); the sign-in screen offering it when Google signed it
-    /// out, with a way back to the account on screen; "Almost there…" when the Keychain won't hand
-    /// its grant over; or "Sorry!" when its store can't be opened. `None` when the account isn't on
-    /// this Mac or can't be opened otherwise.
-    fn screen_for(&mut self, ctx: &egui::Context, email: &str, pick_up: bool) -> Option<Screen> {
-        if self.sign_in.is_some() {
+    /// What showing the account keyed `key` puts up: a page of its mail
+    /// ([`page_for`](Self::page_for), picking up the one off screen when `pick_up`); the sign-in
+    /// screen offering it when its provider signed it out, with a way back to the account on
+    /// screen; "Almost there…" when the Keychain won't hand its grant over; or "Sorry!" when its
+    /// store can't be opened. `None` when the account isn't on this Mac or can't be opened
+    /// otherwise.
+    fn screen_for(&mut self, ctx: &egui::Context, key: &str, pick_up: bool) -> Option<Screen> {
+        let listed_account = if self.sign_in.is_some() {
             let account = self
                 .listed()
                 .into_iter()
-                .find(|account| account.email == email)?;
+                .find(|account| account.key() == key)?;
             if account.signed_out {
                 let previous = self.current().map(str::to_owned);
                 let back = self.back(previous.as_deref(), None);
                 return Some(Screen::LogIn(
                     self.log_in_screen(ctx)
-                        .with_hint(account.email)
+                        .with_hint(account.email, account.provider)
                         .with_back(back),
                 ));
             }
-        }
-        match self.page_for(ctx, email, pick_up) {
+            Some(account)
+        } else {
+            None
+        };
+        match self.page_for(ctx, key, pick_up) {
             Ok(page) => Some(Screen::Mail(page)),
             // As at launch: the Keychain won't hand the grant over.
             Err(MailError::Auth(error @ exo_auth::Error::Secrets(_))) => {
                 log::warn!("reading an account's grant: {error}");
+                let (email, provider) = listed_account.map_or_else(
+                    || (key.to_owned(), exo_auth::Provider::Google),
+                    |account| (account.email, account.provider),
+                );
                 Some(Screen::SignedOut(SignedOut::new(
                     ctx,
                     &self.assets.join("images"),
                     &self.clock.now(),
-                    email.to_owned(),
+                    key.to_owned(),
+                    email,
+                    provider,
                 )))
             }
             Err(MailError::Open(error)) => {
@@ -762,7 +820,7 @@ impl App {
                 Some(Screen::Unopened(Unopened::new(
                     ctx,
                     &self.clock.now(),
-                    email.to_owned(),
+                    key.to_owned(),
                     Reason::of(&error),
                 )))
             }
@@ -773,26 +831,27 @@ impl App {
         }
     }
 
-    /// Shows a teardown saying why `email`'s store couldn't be opened, in place of its mail.
+    /// Shows a teardown saying why `key`'s store couldn't be opened, in place of its mail.
     /// Returns the screen it replaced, as [`show`](Self::show) does.
-    fn unopened(&mut self, ctx: &egui::Context, email: &str, error: &OpenError) -> Option<Screen> {
+    fn unopened(&mut self, ctx: &egui::Context, key: &str, error: &OpenError) -> Option<Screen> {
         log::error!("opening an account: {error}");
-        let alert = Unopened::new(ctx, &self.clock.now(), email.to_owned(), Reason::of(error));
+        let alert = Unopened::new(ctx, &self.clock.now(), key.to_owned(), Reason::of(error));
         self.show(Screen::Unopened(alert))
     }
 
-    /// Clear Cache and Restart for `email`, whose store couldn't be opened. Its store is made
-    /// again, keeping what Gmail doesn't have yet, and its attachment previews go. Then its mail
-    /// opens, to fill from Gmail. Only this account's store is broken, so the others stay.
-    fn clear_cache(&mut self, ctx: &egui::Context, email: &str) {
+    /// Clear Cache and Restart for `key`, whose store couldn't be opened. Its store is made
+    /// again, keeping what the provider doesn't have yet, and its attachment previews go. Then its
+    /// mail opens, to fill from the provider. Only this account's store is broken, so the others
+    /// stay.
+    fn clear_cache(&mut self, ctx: &egui::Context, key: &str) {
         let Some(sign_in) = &self.sign_in else { return };
-        if let Err(error) = sign_in.clear_cache(email) {
-            drop(self.unopened(ctx, email, &OpenError::Store(error)));
+        if let Err(error) = sign_in.clear_cache(key) {
+            drop(self.unopened(ctx, key, &OpenError::Store(error)));
             return;
         }
-        crate::brands::forget(ctx, email);
-        remove_previews(email);
-        self.switch(ctx, email);
+        crate::brands::forget(ctx, key);
+        remove_previews(key);
+        self.switch(ctx, key);
     }
 
     /// The Help menu's Clear Cache and Restart, once confirmed. Every account's mail closes
@@ -816,10 +875,11 @@ impl App {
             return;
         };
         for account in listed {
-            match sign_in.clear_cache(&account.email) {
+            let key = account.key();
+            match sign_in.clear_cache(&key) {
                 Ok(()) => {
-                    crate::brands::forget(ctx, &account.email);
-                    remove_previews(&account.email);
+                    crate::brands::forget(ctx, &key);
+                    remove_previews(&key);
                 }
                 Err(error) => log::error!("clearing an account's cache: {error}"),
             }
@@ -852,13 +912,23 @@ impl App {
                     ..mail.route()
                 }
             }
-            Screen::SignedOut(alert) => Route::home(alert.email().to_owned()),
-            Screen::Unopened(alert) => Route::home(alert.email().to_owned()),
+            Screen::SignedOut(alert) => {
+                Route::home_for(alert.key().to_owned(), alert.email().to_owned())
+            }
+            Screen::Unopened(alert) => {
+                let key = alert.email().to_owned();
+                let display = self
+                    .listed()
+                    .into_iter()
+                    .find(|account| account.key() == key)
+                    .map_or_else(|| key.clone(), |account| account.email);
+                Route::home_for(key, display)
+            }
             Screen::LogIn(_) => return,
         };
         let placeholder = Screen::LogIn(self.log_in_screen(ctx));
         drop(std::mem::replace(&mut self.screen, placeholder));
-        if let Some(account) = self.account_of(&route.email) {
+        if let Some(account) = self.account_of(route.account_key()) {
             account.set_reload_close(false);
         }
         drop(self.go(ctx, route));
@@ -866,17 +936,17 @@ impl App {
 
     /// An account just signed in on the sign-in screen. Its mail opens, with a welcome the first
     /// time it opens on this Mac.
-    fn signed_in(&mut self, ctx: &egui::Context, email: &str) {
+    fn signed_in(&mut self, ctx: &egui::Context, key: &str) {
         let first_time = self
             .sign_in
             .as_ref()
-            .is_some_and(|sign_in| !sign_in.has_store(email));
+            .is_some_and(|sign_in| !sign_in.has_store(key));
         // A new account's notifications start as another account's are on this Mac.
         let notifications_off = self
             .handles()
-            .find(|account| account.email() != email)
+            .find(|account| account.key() != key)
             .map(|account| account.device_settings().disable_notifications);
-        match self.page_for(ctx, email, true) {
+        match self.page_for(ctx, key, true) {
             Ok(mut mail) => {
                 if first_time {
                     if let Some(off) = notifications_off {
@@ -887,7 +957,7 @@ impl App {
                 }
                 drop(self.show(Screen::Mail(mail)));
             }
-            Err(MailError::Open(error)) => drop(self.unopened(ctx, email, &error)),
+            Err(MailError::Open(error)) => drop(self.unopened(ctx, key, &error)),
             Err(error) => {
                 log::error!("opening an account: {error}");
                 if let Screen::LogIn(log_in) = &mut self.screen {
@@ -897,17 +967,17 @@ impl App {
         }
     }
 
-    /// A page on `email`'s mail: the one off screen when `pick_up` (a tab switching to the
-    /// account picks up the page it left there) or when it's an account opened at launch and
+    /// A page on the account keyed `key`: the one off screen when `pick_up` (a tab switching to
+    /// the account picks up the page it left there) or when it's an account opened at launch and
     /// not shown yet; else a new page beside one of its pages; else the account, opened now.
     fn page_for(
         &mut self,
         ctx: &egui::Context,
-        email: &str,
+        key: &str,
         pick_up: bool,
     ) -> Result<Box<Mail>, MailError> {
         let off_screen = self.background.iter().position(|away| {
-            away.account().email() == email && (pick_up || matches!(away, Away::Account(_)))
+            away.account().key() == key && (pick_up || matches!(away, Away::Account(_)))
         });
         if let Some(index) = off_screen {
             return Ok(self.background.swap_remove(index).into_page(
@@ -916,14 +986,14 @@ impl App {
                 &self.clock,
             ));
         }
-        if let Some(page) = self.page_of(email) {
+        if let Some(page) = self.page_of(key) {
             return Ok(page.another_page(&self.assets));
         }
         let sign_in = self.sign_in.as_mut().expect("only sign-in opens accounts");
-        let (account, tokens) = sign_in.open_mail(email, ctx)?;
+        let (account, tokens) = sign_in.open_mail(key, ctx)?;
         // In place of the grant it had when it was open before (View ▸ Reload).
-        self.grants.retain(|(open, _)| open != email);
-        self.grants.push((email.to_owned(), tokens));
+        self.grants.retain(|(open, _)| open != key);
+        self.grants.push((key.to_owned(), tokens));
         Ok(Box::new(Mail::new(
             ctx,
             &self.assets,
@@ -960,15 +1030,15 @@ impl App {
     /// page of its account there before.
     fn leave(&mut self, page: Box<Mail>) {
         self.background
-            .retain(|away| away.account().email() != page.account().email());
+            .retain(|away| away.account().key() != page.account().key());
         self.background.push(Away::Mail(page));
     }
 
     /// The page of a tab that closed goes, saving its drafts, unless it's its account's last page.
     /// That page stays open off screen as it was left, so the account keeps syncing and notifying.
     fn closed(&mut self, page: Box<Mail>) {
-        let email = page.account().email();
-        if self.account_of(email).is_none() {
+        let key = page.account().key();
+        if self.account_of(key).is_none() {
             self.background.push(Away::Mail(page));
         }
     }
@@ -992,7 +1062,7 @@ impl App {
         if let (Screen::Mail(mail), Some(sign_in)) = (&self.screen, &mut self.sign_in)
             && let Err(error) = sign_in
                 .auth()
-                .and_then(|auth| auth.use_account(mail.account().email()))
+                .and_then(|auth| auth.use_account(mail.account().key()))
         {
             log::error!("remembering the account used last: {error}");
         }
@@ -1000,28 +1070,28 @@ impl App {
         self.refresh_picture();
     }
 
-    /// Signs `email` out: forgets its grant, stops it
+    /// Signs `key` out: forgets its grant, stops it
     /// without sending what it holds (the user was asked), and deletes its store and attachment
     /// previews. Signing out of the account on screen shows the next one as launch picks it (open
     /// off screen, or opened now), or the sign-in screen.
-    fn sign_out(&mut self, ctx: &egui::Context, email: &str) {
+    fn sign_out(&mut self, ctx: &egui::Context, key: &str) {
         let Some(sign_in) = &mut self.sign_in else {
             return;
         };
         // Nothing is touched when the grant can't be forgotten, so the account stays signed in.
-        if let Err(error) = sign_in.forget(email) {
+        if let Err(error) = sign_in.forget(key) {
             log::error!("signing an account out: {error}");
             return;
         }
         if let Ok(auth) = sign_in.auth() {
-            self.pictures.forget(auth, email);
+            self.pictures.forget(auth, key);
         }
-        self.grants.retain(|(open, _)| open != email);
+        self.grants.retain(|(open, _)| open != key);
         // Its pages close without sending what it holds, and one handle stops it for every page.
-        let on_screen = self.current() == Some(email);
-        let mut pages = self.close_pages(email);
+        let on_screen = self.current() == Some(key);
+        let mut pages = self.close_pages(key);
         let previews = self
-            .page_of(email)
+            .page_of(key)
             .map(|page| page.preview_cache().to_owned())
             .or_else(|| {
                 pages.iter().find_map(|away| match away {
@@ -1029,7 +1099,7 @@ impl App {
                     Away::Account(_) => None,
                 })
             });
-        let previews = previews.unwrap_or_else(|| crate::attachment_files::default_cache(email));
+        let previews = previews.unwrap_or_else(|| crate::attachment_files::default_cache(key));
         match (self.mail_mut().filter(|_| on_screen), pages.first_mut()) {
             (Some(mail), _) => mail.discard(),
             (None, Some(away)) => away.account_mut().discard(),
@@ -1045,16 +1115,16 @@ impl App {
                 .and_then(|sign_in| sign_in.auth().ok())
                 .and_then(exo_auth::Auth::default_account)
             {
-                self.switch(ctx, &next.email);
+                self.switch(ctx, &next.key());
             }
         }
-        crate::brands::forget(ctx, email);
+        crate::brands::forget(ctx, key);
         if let Some(sign_in) = &self.sign_in {
-            sign_in.delete_store(email);
+            sign_in.delete_store(key);
         }
         let caches = std::iter::once(previews)
-            .chain(crate::account::parts_cache(email))
-            .chain(crate::account::photos_cache(email));
+            .chain(crate::account::parts_cache(key))
+            .chain(crate::account::photos_cache(key));
         for cache in caches {
             if let Err(error) = std::fs::remove_dir_all(&cache)
                 && error.kind() != std::io::ErrorKind::NotFound
@@ -1065,15 +1135,15 @@ impl App {
         self.settle_on_screen();
     }
 
-    /// Signs `email`, not the account on screen, out: at once when it has nothing unsent, else
+    /// Signs `key`, not the account on screen, out: at once when it has nothing unsent, else
     /// after the mail on screen asks (`One last thing…`). Its store says what it hasn't sent, the
     /// calendar's changes included. A store that can't be opened holds nothing Exo can send, so it
     /// goes without asking. Otherwise, nothing happens when what's unsent can't be counted.
-    fn check_sign_out(&mut self, ctx: &egui::Context, email: &str) {
+    fn check_sign_out(&mut self, ctx: &egui::Context, key: &str) {
         let Some(sign_in) = &mut self.sign_in else {
             return;
         };
-        let unsent = match sign_in.unsent(email) {
+        let unsent = match sign_in.unsent(key) {
             Ok(unsent) => unsent,
             Err(MailError::Open(OpenError::Store(error))) if error.unusable().is_some() => {
                 log::warn!("signing an account out without counting what it hasn't sent: {error}");
@@ -1082,11 +1152,11 @@ impl App {
             Err(error) => return log::error!("counting what an account hasn't sent: {error}"),
         };
         let asked = match &mut self.screen {
-            Screen::Mail(mail) => mail.confirm_sign_out(email.to_owned(), unsent),
+            Screen::Mail(mail) => mail.confirm_sign_out(key.to_owned(), unsent),
             Screen::LogIn(_) | Screen::SignedOut(_) | Screen::Unopened(_) => false,
         };
         if !asked {
-            self.sign_out(ctx, email);
+            self.sign_out(ctx, key);
         }
     }
 
@@ -1100,9 +1170,9 @@ impl App {
         self.share_accounts();
     }
 
-    /// The address of the mail on screen.
+    /// The key of the mail on screen (`email` for Google, `microsoft {email}` for Microsoft).
     fn current(&self) -> Option<&str> {
-        self.mail().map(|mail| mail.account().email())
+        self.mail().map(|mail| mail.account().key())
     }
 
     /// The account list, empty when there's no sign-in or it can't be read.
@@ -1125,8 +1195,8 @@ impl App {
         let other = self
             .listed()
             .into_iter()
-            .find(|account| !account.signed_out && Some(account.email.as_str()) != except);
-        other.map(|account| Back::SignedIn(account.email))
+            .find(|account| !account.signed_out && Some(account.key().as_str()) != except);
+        other.map(|account| Back::SignedIn(account.key()))
     }
 
     /// The sign-in screen, decoding its photo off the UI thread and repainting `ctx` when ready.
@@ -1141,13 +1211,13 @@ impl App {
             return;
         }
         let accounts = self.listed();
+        let keys: Vec<String> = accounts.iter().map(exo_auth::Account::key).collect();
         if let Some(auth) = self
             .sign_in
             .as_mut()
             .and_then(|sign_in| sign_in.auth().ok())
         {
-            self.pictures
-                .load(auth, accounts.iter().map(|account| account.email.as_str()));
+            self.pictures.load(auth, keys.iter().map(String::as_str));
         }
         if let Screen::Mail(mail) = &mut self.screen {
             mail.set_accounts(accounts);
@@ -1211,14 +1281,14 @@ impl App {
             && !auth
                 .accounts()
                 .iter()
-                .any(|account| account.email == route.email)
+                .any(|account| account.key() == route.account_key())
         {
             match auth.default_account() {
-                Some(account) => route = Route::home(account.email),
+                Some(account) => route = Route::home_for(account.key(), account.email),
                 None => return self.bring(ctx, Parked::SignIn),
             }
         }
-        let Some(screen) = self.screen_for(ctx, &route.email, false) else {
+        let Some(screen) = self.screen_for(ctx, route.account_key(), false) else {
             return self.bring(ctx, Parked::SignIn);
         };
         let left = self.put(screen);
@@ -1231,18 +1301,23 @@ impl App {
     /// Opens a new tab (⌘T, `+`), last in the strip and on screen. It shows the active tab's
     /// account at its home, else the home of the account used last, else the sign-in screen.
     fn new_tab(&mut self, ctx: &egui::Context) {
-        let email = match self.current() {
-            Some(email) => Some(email.to_owned()),
+        let target = match self.mail() {
+            Some(mail) => Some((
+                mail.account().key().to_owned(),
+                mail.account().email().to_owned(),
+            )),
             None => self
                 .sign_in
                 .as_mut()
                 .and_then(|sign_in| sign_in.auth().ok())
                 .and_then(exo_auth::Auth::default_account)
-                .map(|account| account.email),
+                .map(|account| (account.key(), account.email)),
         };
         self.open_tab(
             ctx,
-            email.map_or(Parked::SignIn, |email| Parked::Route(Route::home(email))),
+            target.map_or(Parked::SignIn, |(key, email)| {
+                Parked::Route(Route::home_for(key, email))
+            }),
         );
     }
 
@@ -1295,19 +1370,28 @@ impl App {
         ctx.request_repaint();
     }
 
-    /// Shows the tab for `email`'s mail: the one on screen if it shows that
-    /// account, else the first that does, else a new one on it. An account not on this Mac
-    /// leaves the tab on screen as it is.
-    fn tab_for(&mut self, ctx: &egui::Context, email: &str) {
-        if self.current() == Some(email)
-            || (self.sign_in.is_some()
-                && !self.listed().iter().any(|account| account.email == email))
-        {
+    /// Shows the tab for the account keyed `key`: the one on screen if it shows that account, else
+    /// the first that does, else a new one on it. An account not on this Mac leaves the tab on
+    /// screen as it is.
+    fn tab_for(&mut self, ctx: &egui::Context, key: &str) {
+        if self.current() == Some(key) {
             return;
         }
-        match self.tabs.find(email) {
+        let display = if self.sign_in.is_some() {
+            let Some(account) = self
+                .listed()
+                .into_iter()
+                .find(|account| account.key() == key)
+            else {
+                return;
+            };
+            account.email
+        } else {
+            key.to_owned()
+        };
+        match self.tabs.find(key) {
             Some(index) => self.activate(ctx, index),
-            None => self.open_tab(ctx, Parked::Route(Route::home(email.to_owned()))),
+            None => self.open_tab(ctx, Parked::Route(Route::home_for(key.to_owned(), display))),
         }
     }
 
@@ -1325,13 +1409,15 @@ impl App {
             .filter_map(|(index, parked)| {
                 let (account, route) = match parked {
                     Parked::Page(page) => (page.account(), page.route()),
-                    Parked::Route(route) => (self.account_of(&route.email)?, route.clone()),
+                    Parked::Route(route) => (self.account_of(route.account_key())?, route.clone()),
                     Parked::SignIn | Parked::Screen(_) => return None,
                 };
                 let who = if several { route.email.as_str() } else { "Exo" };
                 let color = crate::accounts::color_name(
                     &route.email,
-                    listed.iter().find(|account| account.email == route.email),
+                    listed
+                        .iter()
+                        .find(|account| account.key() == route.account_key()),
                 )
                 .to_owned();
                 Some((index, tabs::parked_title(account, &route, who), color))
@@ -1349,18 +1435,19 @@ impl App {
         }
     }
 
-    /// Asks Google for the profile photo of the account on screen each time its mail starts: at
-    /// launch, on switching and after a sign-in.
+    /// Asks the provider for the profile photo of the account on screen each time its mail starts:
+    /// at launch, on switching and after a sign-in.
     fn refresh_picture(&mut self) {
         let (Screen::Mail(mail), Some(sign_in)) = (&self.screen, &mut self.sign_in) else {
             return;
         };
-        let email = mail.account().email();
-        let Some((_, tokens)) = self.grants.iter().find(|(open, _)| open == email) else {
+        let key = mail.account().key();
+        let loader = mail.account().loader();
+        let Some((_, tokens)) = self.grants.iter().find(|(open, _)| open == key) else {
             return;
         };
         if let Ok(auth) = sign_in.auth() {
-            self.pictures.refresh(auth, email, tokens.clone());
+            self.pictures.refresh(auth, key, tokens.clone(), loader);
         }
     }
 }
@@ -1428,7 +1515,7 @@ impl eframe::App for App {
         // page connected to its background. The others sync at the pace of an account no tab shows,
         // whatever the window does.
         for account in self.off_screen() {
-            account.set_presence(if self.tabs.shows(account.email()) {
+            account.set_presence(if self.tabs.shows(account.key()) {
                 Presence::Background
             } else {
                 Presence::OffScreen
@@ -1507,55 +1594,62 @@ fn launch(
     let Some(first) = auth.default_account() else {
         return Ok(log_in_screen(None));
     };
+    let first_key = first.key();
     // Every grant before any store, so the Keychain asks for them all at once, without reading
     // any grant twice.
-    let first_grant = auth.tokens(&first.email);
+    let first_grant = auth.tokens(&first_key);
     let others: Vec<(String, exo_auth::Tokens)> = auth
         .accounts()
         .into_iter()
-        .filter(|account| !account.signed_out && account.email != first.email)
-        .filter_map(|account| match auth.tokens(&account.email) {
-            Ok(tokens) => Some((account.email, tokens)),
-            Err(error) => {
-                log::warn!("reading an account's grant: {error}");
-                None
+        .filter(|account| !account.signed_out && account.key() != first_key)
+        .filter_map(|account| {
+            let key = account.key();
+            match auth.tokens(&key) {
+                Ok(tokens) => Some((key, tokens)),
+                Err(error) => {
+                    log::warn!("reading an account's grant: {error}");
+                    None
+                }
             }
         })
         .collect();
     let mut grants = Vec::new();
     let screen = match first_grant.map_err(MailError::from).and_then(|tokens| {
-        let account = sign_in.open_mail_with_tokens(&first.email, tokens.clone(), ctx)?;
+        let account = sign_in.open_mail_with_tokens(&first_key, tokens.clone(), ctx)?;
         Ok((account, tokens))
     }) {
         Ok((account, tokens)) => {
-            grants.push((first.email, tokens));
+            grants.push((first_key, tokens));
             Screen::Mail(Box::new(Mail::new(ctx, assets, account, clock.clone())))
         }
         // The Keychain won't hand over the grant (say, the user clicked Deny). As with a grant
-        // Google refused, the account signs in again, which writes the Keychain item afresh.
+        // refused by its provider, the account signs in again, which writes the Keychain item
+        // afresh.
         Err(MailError::Auth(error @ exo_auth::Error::Secrets(_))) => {
             log::warn!("reading an account's grant: {error}");
             Screen::SignedOut(SignedOut::new(
                 ctx,
                 &assets.join("images"),
                 &clock.now(),
+                first_key,
                 first.email,
+                first.provider,
             ))
         }
         // Its store can't be opened, so a teardown says why in place of its mail.
         Err(MailError::Open(error)) => {
             log::error!("opening an account: {error}");
             let reason = Reason::of(&error);
-            Screen::Unopened(Unopened::new(ctx, &clock.now(), first.email, reason))
+            Screen::Unopened(Unopened::new(ctx, &clock.now(), first_key, reason))
         }
         Err(error) => return Err(error.into()),
     };
     let mut background = Vec::new();
-    for (email, tokens) in others {
-        match sign_in.open_mail_with_tokens(&email, tokens.clone(), ctx) {
+    for (key, tokens) in others {
+        match sign_in.open_mail_with_tokens(&key, tokens.clone(), ctx) {
             Ok(account) => {
                 background.push(Away::opened(account, clock));
-                grants.push((email, tokens));
+                grants.push((key, tokens));
             }
             Err(error) => log::error!("opening an account: {error}"),
         }
@@ -1567,13 +1661,13 @@ fn launch(
     })
 }
 
-/// Deletes `email`'s attachment previews, kept parts and contact photos, which are caches like
+/// Deletes `key`'s attachment previews, kept parts and contact photos, which are caches like
 /// the mail in its store.
-fn remove_previews(email: &str) {
-    let previews = crate::attachment_files::default_cache(email);
+fn remove_previews(key: &str) {
+    let previews = crate::attachment_files::default_cache(key);
     let caches = std::iter::once(previews)
-        .chain(crate::account::parts_cache(email))
-        .chain(crate::account::photos_cache(email));
+        .chain(crate::account::parts_cache(key))
+        .chain(crate::account::photos_cache(key));
     for cache in caches {
         if let Err(error) = std::fs::remove_dir_all(&cache)
             && error.kind() != std::io::ErrorKind::NotFound
@@ -1605,7 +1699,7 @@ mod tests {
         let open = |name: &str, email: &str| {
             Account::open(
                 &root.join(name),
-                Credentials {
+                Credentials::Gmail {
                     email: email.into(),
                     endpoints: endpoints.clone(),
                     tokens: tokens.clone(),

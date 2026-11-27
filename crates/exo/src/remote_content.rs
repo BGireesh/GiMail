@@ -171,7 +171,12 @@ impl Client {
 /// Whether Gmail is served from this Mac (mock-servers), the only case in which remote content may
 /// come from it too.
 pub(crate) fn serves_gmail_locally(endpoints: &gmail::Endpoints) -> bool {
-    endpoints.gmail.host().is_some_and(|host| match host {
+    serves_locally(&endpoints.gmail)
+}
+
+/// Whether `origin` is this Mac.
+pub(crate) fn serves_locally(origin: &url::Url) -> bool {
+    origin.host().is_some_and(|host| match host {
         url::Host::Domain(name) => name.eq_ignore_ascii_case("localhost"),
         url::Host::Ipv4(ip) => ip.is_loopback(),
         url::Host::Ipv6(ip) => ip.is_loopback(),

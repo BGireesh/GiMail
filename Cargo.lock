@@ -2241,7 +2241,7 @@ dependencies = [
 
 [[package]]
 name = "exo"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "anyhow",
  "arboard",
@@ -2287,6 +2287,7 @@ dependencies = [
  "objc2-quick-look-ui",
  "objc2-system-configuration",
  "objc2-web-kit",
+ "outlook",
  "psl",
  "rcgen",
  "regex",
@@ -2309,7 +2310,7 @@ dependencies = [
 
 [[package]]
 name = "exo-auth"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "base64 0.22.1",
  "getrandom 0.3.4",
@@ -2317,6 +2318,7 @@ dependencies = [
  "jiff",
  "log",
  "mock-servers",
+ "outlook",
  "reqwest",
  "security-framework",
  "serde",
@@ -2329,7 +2331,7 @@ dependencies = [
 
 [[package]]
 name = "exo-commands"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "anyhow",
  "egui",
@@ -2342,7 +2344,7 @@ dependencies = [
 
 [[package]]
 name = "exo-editor"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "anyhow",
  "arboard",
@@ -2361,11 +2363,11 @@ dependencies = [
 
 [[package]]
 name = "exo-fonts"
-version = "0.2.1"
+version = "0.2.2"
 
 [[package]]
 name = "exo-mail"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "anyhow",
  "anyrender",
@@ -2394,7 +2396,7 @@ dependencies = [
 
 [[package]]
 name = "exo-store"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "futures",
  "getrandom 0.3.4",
@@ -2402,7 +2404,9 @@ dependencies = [
  "jiff",
  "libc",
  "log",
+ "mail-parser",
  "mock-servers",
+ "outlook",
  "regex",
  "reqwest",
  "rusqlite",
@@ -2412,11 +2416,12 @@ dependencies = [
  "toasty",
  "toasty-driver-sqlite",
  "tokio",
+ "url",
 ]
 
 [[package]]
 name = "exo-ui"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "egui",
  "egui_extras",
@@ -3189,7 +3194,7 @@ dependencies = [
 
 [[package]]
 name = "gmail"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "base64 0.22.1",
  "futures",
@@ -4442,7 +4447,7 @@ dependencies = [
 
 [[package]]
 name = "mock-servers"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "anyhow",
  "axum",
@@ -5152,6 +5157,26 @@ checksum = "9aa2b01e1d916879f73a53d01d1d6cee68adbb31d6d9177a8cfce093cced1d50"
 dependencies = [
  "futures-core",
  "pin-project-lite",
+]
+
+[[package]]
+name = "outlook"
+version = "0.2.2"
+dependencies = [
+ "base64 0.22.1",
+ "getrandom 0.3.4",
+ "jiff",
+ "log",
+ "mock-servers",
+ "reqwest",
+ "serde",
+ "serde_ignored",
+ "serde_json",
+ "serde_with",
+ "sha2",
+ "thiserror 2.0.21",
+ "tokio",
+ "url",
 ]
 
 [[package]]

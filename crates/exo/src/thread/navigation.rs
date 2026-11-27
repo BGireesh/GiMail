@@ -56,8 +56,10 @@ pub(super) struct ActionState {
     pub(super) hint: Option<footer::Hint>,
     /// Clock time used for relative dates and new-account hints.
     pub(super) now: Zoned,
-    /// Whether Gmail can be reached.
+    /// Whether Gmail/Outlook can be reached.
     pub(super) online: bool,
+    /// Whether the account is Outlook/Microsoft.
+    pub(super) outlook: bool,
     /// Whether headers show full sender names (`showSenderFullNames`).
     pub(super) full_names: bool,
 }
@@ -81,6 +83,7 @@ impl ActionState {
             hint: None,
             now,
             online: true,
+            outlook: false,
             full_names: false,
         }
     }
@@ -119,6 +122,7 @@ impl ThreadView {
         let trash_changed = self.action.trash_shown != context.trash_shown;
         self.action.now = context.now.clone();
         self.action.online = context.online;
+        self.action.outlook = context.outlook;
         self.action.full_names = context.full_names;
         self.action.joined = context.joined;
         self.action.pending = context.pending.get(&self.id).cloned();
@@ -129,6 +133,9 @@ impl ThreadView {
             .calendar_accounts
             .clone_from(&context.calendar_accounts);
         self.invite_state.signed_out.clone_from(&context.signed_out);
+        self.invite_state
+            .outlook_calendars
+            .clone_from(&context.outlook_calendars);
         if trash_changed && self.detail.is_some() {
             self.update_items(false);
         }

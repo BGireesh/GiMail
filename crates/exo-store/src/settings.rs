@@ -142,6 +142,10 @@ pub struct Settings {
     /// Unset reads as on ([`Settings::include_signature_on_replies`]).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub include_signature_on_replies: Option<bool>,
+    /// `localSignature`: HTML signature stored locally for accounts whose provider exposes no
+    /// remote signature setting.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub local_signature: Option<String>,
     /// `convertHyphenToBulletList`: `-` and Space at the start of a line start a bulleted list.
     #[serde(skip_serializing_if = "is_false")]
     pub convert_hyphen_to_bullet_list: bool,
@@ -564,7 +568,7 @@ pub struct AdditionalTimezone {
     pub iana_id: String,
 }
 
-/// `calendarAccounts/{email}`: a Google account whose calendars Exo shows.
+/// `calendarAccounts/{account}`: a Google or Microsoft account whose calendars Exo shows.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct CalendarAccount {
@@ -572,7 +576,7 @@ pub struct CalendarAccount {
     pub email: String,
     /// `authed`: signed in.
     pub authed: bool,
-    /// `provider`: `google`.
+    /// `provider`: `google` or `microsoft`.
     pub provider: String,
     /// `calendars`, by calendar id.
     pub calendars: BTreeMap<String, CalendarSetting>,
@@ -589,20 +593,37 @@ impl Default for CalendarAccount {
     }
 }
 
+impl CalendarAccount {
+    /// Display email address for this entry, falling back to parsing its canonical map `key`
+    /// (`email` for Google, `"microsoft {email}"` for Microsoft) when `email` is empty.
+    #[must_use]
+    pub fn email_for<'a>(&'a self, key: &'a str) -> &'a str {
+        if self.email.is_empty() {
+            crate::calendar::model::CalendarProviderKind::parse_account_key(key).1
+        } else {
+            self.email.as_str()
+        }
+    }
+}
+
 impl Settings {
-    /// Applies `change` to the settings for calendar `id` under calendar account `account`, and
-    /// under every other account that has them. The settings, and the account, are made if new.
+    /// Applies `change` to the settings for calendar `id` under calendar account `account` (a
+    /// canonical key: `email` for Google, `"microsoft {email}"` for Microsoft), and under every
+    /// other account that has them. The settings, and the account, are made if new.
     pub fn update_calendar(
         &mut self,
         account: &str,
         id: &str,
         change: impl Fn(&mut CalendarSetting),
     ) {
+        let (provider, email) =
+            crate::calendar::model::CalendarProviderKind::parse_account_key(account);
         let own = self
             .calendar_accounts
             .entry(account.to_owned())
             .or_insert_with(|| CalendarAccount {
-                email: account.to_owned(),
+                email: email.to_owned(),
+                provider: provider.as_str().to_owned(),
                 ..CalendarAccount::default()
             });
         change(
@@ -1372,5 +1393,28 @@ mod tests {
         );
         let back: Settings = serde_json::from_value(json).expect("parses");
         assert_eq!(back, settings);
+    }
+
+    #[test]
+    fn update_calendar_parses_canonical_account_keys_for_google_and_microsoft() {
+        let mut settings = Settings::default();
+        settings.update_calendar("maya@brightmoor.co", "maya@brightmoor.co", |cal| {
+            cal.show = true;
+        });
+        settings.update_calendar("microsoft maya@brightmoor.co", "AAMkCalPrimary", |cal| {
+            cal.show = true;
+            cal.sync = true;
+        });
+
+        let google = &settings.calendar_accounts["maya@brightmoor.co"];
+        assert_eq!(google.provider, "google");
+        assert_eq!(google.email, "maya@brightmoor.co");
+        assert!(google.calendars["maya@brightmoor.co"].show);
+
+        let microsoft = &settings.calendar_accounts["microsoft maya@brightmoor.co"];
+        assert_eq!(microsoft.provider, "microsoft");
+        assert_eq!(microsoft.email, "maya@brightmoor.co");
+        assert!(microsoft.calendars["AAMkCalPrimary"].show);
+        assert!(microsoft.calendars["AAMkCalPrimary"].sync);
     }
 }

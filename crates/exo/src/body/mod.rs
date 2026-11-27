@@ -1218,8 +1218,10 @@ mod tests {
         let store = exo_store::Store::open_with(
             dir,
             "maya@brightmoor.co",
-            server.endpoints(),
-            gmail::StaticToken(mock_servers::DEV_ACCESS_TOKEN.into()),
+            exo_store::Remote::gmail(
+                server.endpoints(),
+                gmail::StaticToken(mock_servers::DEV_ACCESS_TOKEN.into()),
+            ),
             options,
         )
         .await
@@ -1276,7 +1278,7 @@ mod tests {
             let dir = std::env::temp_dir().join(format!("exo-index-text-cost-{}", std::process::id()));
             let _ = std::fs::remove_dir_all(&dir);
             let options = exo_store::Options { quota: None, ..exo_store::Options::default() };
-            let store = exo_store::Store::open_with(&dir, "maya@brightmoor.co", server.endpoints(), gmail::StaticToken(mock_servers::DEV_ACCESS_TOKEN.into()), options).await.expect("opens");
+            let store = exo_store::Store::open_with(&dir, "maya@brightmoor.co", exo_store::Remote::gmail(server.endpoints(), gmail::StaticToken(mock_servers::DEV_ACCESS_TOKEN.into())), options).await.expect("opens");
             let spent = Spent::default();
             let counted = spent.clone();
             store.index_text_with(Arc::new(move |sources: &[exo_store::TextSource]| {

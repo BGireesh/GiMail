@@ -167,23 +167,31 @@ pub enum AssetError {
     },
 }
 
+/// Process-wide cache of loaded fonts and metrics, so opening multiple contexts (or tests) never
+/// re-reads system font files or rewrites GSUB tables.
+static FONT_BOOK: std::sync::OnceLock<FontBook> = std::sync::OnceLock::new();
+
+fn font_book() -> Result<&'static FontBook, AssetError> {
+    if let Some(book) = FONT_BOOK.get() {
+        return Ok(book);
+    }
+    let mut book = FontBook::load()?;
+    if book.emoji.is_some() {
+        emoji::register_family(&mut book.definitions);
+    }
+    Ok(FONT_BOOK.get_or_init(|| book))
+}
+
 /// Sets `ctx` up to draw Exo: its fonts and icons, colour emoji from the system's emoji font, text
 /// rasterized the way Chromium does on macOS (no hinting, a linear coverage-to-alpha curve), and
 /// SVG rendering.
 pub fn install(ctx: &egui::Context) -> Result<(), AssetError> {
-    let FontBook {
-        mut definitions,
-        metrics,
-        emoji,
-    } = FontBook::load()?;
-    if emoji.is_some() {
-        emoji::register_family(&mut definitions);
-    }
-    ctx.set_fonts(definitions);
-    if let Some(cell) = emoji {
+    let book = font_book()?;
+    ctx.set_fonts(book.definitions.clone());
+    if let Some(cell) = book.emoji {
         emoji::install(ctx, cell);
     }
-    ctx.data_mut(|data| data.insert_temp::<Metrics>(metrics_id(), Arc::new(metrics)));
+    ctx.data_mut(|data| data.insert_temp::<Metrics>(metrics_id(), Arc::clone(&book.metrics)));
     // Calibrated for dark text on light backgrounds; dark themes still need their own check.
     ctx.all_styles_mut(|style| {
         style.visuals.text_options.color_transfer_function = FontColorTransferFunction::Gamma(1.0);

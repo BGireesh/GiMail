@@ -72,6 +72,8 @@ impl Mail {
     }
 
     fn register_settings_commands(&mut self, ctx: &egui::Context) {
+        let outlook = self.account.is_outlook();
+        self.commands.set_outlook(outlook);
         let email_notifications = self
             .account
             .settings()
@@ -81,6 +83,7 @@ impl Mail {
             self.account.settings().theme,
             email_notifications,
             ctx.os(),
+            outlook,
             Action::Settings,
         );
         settings::register_triage(
@@ -122,6 +125,7 @@ impl Mail {
             (self.actionable_sender(), self.own_domains())
         };
         let account_settings = self.account.settings();
+        let outlook = self.account.is_outlook();
         commands::register(
             &mut self.commands,
             &commands::Context {
@@ -135,6 +139,7 @@ impl Mail {
                 sender: sender.as_ref(),
                 own_domains: &own_domains,
                 exact: self.thread.is_some() || self.inbox.is_exact(),
+                outlook,
             },
         );
         if let Some(marks_done) = self.rsvp_rows().filter(|_| self.compose.pane().is_none()) {
@@ -148,6 +153,7 @@ impl Mail {
         filter::register(
             &mut self.commands,
             self.thread.is_none() && self.compose.pane().is_none(),
+            outlook,
         );
         let visible_splits = splits::tabs(account_settings, &self.list, &self.snapshot.counts)
             .iter()
@@ -281,6 +287,7 @@ impl Mail {
         google_apps::register(
             &mut self.commands,
             self.thread.as_ref().and_then(google_apps::target),
+            self.account.is_outlook(),
         );
         links::register(
             &mut self.commands,
@@ -330,7 +337,7 @@ mod tests {
             gmail::Endpoints::mock(&"http://127.0.0.1:9/".parse().expect("mock origin"));
         let acct = account::Account::open(
             &dir,
-            account::Credentials {
+            account::Credentials::Gmail {
                 email: "maya@brightmoor.co".into(),
                 endpoints,
                 tokens: std::sync::Arc::new(gmail::StaticToken("dev".into())),

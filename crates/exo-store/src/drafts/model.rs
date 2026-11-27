@@ -202,8 +202,8 @@ pub struct StoredDraft {
     pub id: String,
     /// Its Gmail thread, once it has one.
     pub thread: Option<ThreadId>,
-    /// Its Gmail draft, once created.
-    pub gmail_id: Option<String>,
+    /// Its draft at the provider, once created.
+    pub draft_id: Option<String>,
     /// The Gmail message of the latest version Gmail has.
     pub message_id: Option<String>,
     /// What compose shows.
@@ -328,7 +328,7 @@ impl From<DraftRow> for StoredDraft {
             complete: complete(&row),
             id: row.id,
             thread: row.thread_id.map(ThreadId::new),
-            gmail_id: row.gmail_id,
+            draft_id: row.draft_id,
             message_id: row.message_id,
             record: row.record.0,
             raw: row.raw,

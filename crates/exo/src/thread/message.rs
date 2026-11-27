@@ -109,8 +109,10 @@ pub(super) struct State {
     pub collapsible: bool,
     /// It holds a draft's form.
     pub composing: bool,
-    /// Gmail can't be reached.
+    /// The provider can't be reached.
     pub offline: bool,
+    /// The account is Outlook/Microsoft.
+    pub outlook: bool,
     /// The header names the sender in full (`showSenderFullNames`).
     pub full_names: bool,
     /// Its reply buttons have labels.
@@ -139,18 +141,18 @@ impl Status {
     }
 
     /// The compact header's text: `Scheduled: ` with the `exact-friendly` date.
-    pub(super) fn title(self, now: &Zoned) -> String {
+    pub(super) fn title(self, now: &Zoned, outlook: bool) -> String {
         match self {
-            Self::Failed(reason) => failure::information(reason).title.to_owned(),
+            Self::Failed(reason) => failure::information(reason, outlook).title.to_owned(),
             Self::Scheduled(at) => format!("Scheduled: {}", friendly::exact_friendly(at, now)),
             Self::Offline => WHEN_ONLINE.to_owned(),
         }
     }
 
     /// A collapsed row's text (`exact-friendly-omit-time` when scheduled).
-    pub(super) fn collapsed_title(self, now: &Zoned) -> String {
+    pub(super) fn collapsed_title(self, now: &Zoned, outlook: bool) -> String {
         match self {
-            Self::Failed(reason) => failure::collapsed_title(reason).to_owned(),
+            Self::Failed(reason) => failure::collapsed_title(reason, outlook).to_owned(),
             Self::Scheduled(at) => {
                 format!("Scheduled: {}", friendly::exact_friendly_omit_time(at, now))
             }
@@ -872,7 +874,7 @@ pub(super) fn collapsed(
     // letter-spacing stays inside the right-aligned box.
     let date_left = match Status::of(message, state) {
         Some(status) => {
-            let title = status.collapsed_title(now);
+            let title = status.collapsed_title(now, state.outlook);
             let left = right
                 - STATUS
                     .single_line(painter, &title, Color32::PLACEHOLDER, None)
@@ -1139,6 +1141,7 @@ fn compact_header(
             id,
             ink,
             state.full_names,
+            state.outlook,
         );
     }
 
@@ -1421,10 +1424,11 @@ fn status_header(
     id: egui::Id,
     ink: &Ink,
     full_names: bool,
+    outlook: bool,
 ) -> Option<Hit> {
     let painter = ui.painter();
     let (left, line) = (layout.inner.left(), card.top() + PADDING_TOP);
-    let title = status.title(now);
+    let title = status.title(now, outlook);
     let slot = status_slot(ui, layout, card, &title);
     STATUS.paint_line(painter, slot.min, &title, status.ink(), None);
     let recover = ui
@@ -1471,8 +1475,9 @@ pub(super) fn failed_tooltip(
     layout: &Layout,
     card: Rect,
     message: &MessageDetail,
+    outlook: bool,
 ) -> Option<&'static str> {
-    let info = failure::information(message.failure?);
+    let info = failure::information(message.failure?, outlook);
     let slot = status_slot(ui, layout, card, info.title);
     let tooltip = TextTooltip {
         text: info.description,

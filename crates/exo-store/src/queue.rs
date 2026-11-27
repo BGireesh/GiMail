@@ -1,14 +1,16 @@
 //! Shared helpers for the store's persistent retry queues: flush serialization, per-queue FIFO
-//! head selection with wake-time calculation, and standard [`Api`] failure disposition.
+//! head selection with wake-time calculation, their backoff, and standard [`Failure`]
+//! disposition.
 
 use std::collections::HashSet;
 use std::hash::Hash;
+use std::time::Duration;
 
 use jiff::Timestamp;
 use tokio::sync::{Mutex, MutexGuard};
 
-use crate::api::{Api, Failure};
-use crate::error::{Error, Result};
+use crate::api::{Failure, from_now};
+use crate::error::{Error, ProviderError, Result};
 
 /// Serializes flushes of a persistent queue so concurrent callers wait their turn rather than
 /// sending the same item twice or racing read-modify-writes.
@@ -75,42 +77,55 @@ pub(crate) enum Disposition<E> {
     Refused(E),
 }
 
-/// Classifies an [`Api`] [`Failure`]: rate-limit hints use their `until` timestamp, offline, auth
-/// and transient failures back off via `api.postpone(failures)`, and permanent 4xx failures are
+/// When a queue retries after `failures` failures, which is `min(120 s, base × 2^failures)` from
+/// now, `base` being the store's first retry delay.
+pub(crate) fn postpone(base: Duration, failures: u32) -> Timestamp {
+    from_now(
+        base.saturating_mul(2u32.saturating_pow(failures.min(16)))
+            .min(Duration::from_secs(120)),
+    )
+}
+
+/// Classifies a [`Failure`]: rate-limit hints use their `until` timestamp, offline, auth and
+/// transient failures back off ([`postpone`] from `base`), and permanent 4xx failures are
 /// refused.
 pub(crate) fn dispose_failure(
-    api: &Api,
+    base: Duration,
     failure: Failure,
     failures: u32,
-) -> Disposition<gmail::Error> {
+) -> Disposition<ProviderError> {
     match failure {
         Failure::Throttled(until) | Failure::SendingLimited(until) => Disposition::Postponed(until),
         Failure::Offline(_) | Failure::Unauthorized(_) | Failure::Transient(_) => {
-            Disposition::Postponed(api.postpone(failures))
+            Disposition::Postponed(postpone(base, failures))
         }
         Failure::Permanent(error) => Disposition::Refused(error),
     }
 }
 
-/// Classifies a store [`Error`] produced by an [`Api`] call: `Throttled { until }`, `Offline`,
-/// `Unauthorized` and transient 5xx responses postpone; permanent `Error::Gmail` responses refuse;
-/// and local/domain errors are returned in `Err` for the caller to handle.
+/// Classifies a store [`Error`] produced by a call: `Throttled { until }`, `Offline`,
+/// `Unauthorized` and transient 5xx responses postpone; the provider's permanent responses
+/// (`Error::Gmail`, `Error::Outlook`) refuse; and local/domain errors are returned in `Err` for
+/// the caller to handle.
 pub(crate) fn dispose_error(
-    api: &Api,
+    base: Duration,
     error: Error,
     failures: u32,
-) -> Result<Disposition<gmail::Error>> {
-    match error {
-        Error::Throttled { until } => Ok(Disposition::Postponed(until)),
+) -> Result<Disposition<ProviderError>> {
+    let error = match error {
+        Error::Throttled { until } => return Ok(Disposition::Postponed(until)),
         Error::Offline(_) | Error::Unauthorized(_) => {
-            Ok(Disposition::Postponed(api.postpone(failures)))
+            return Ok(Disposition::Postponed(postpone(base, failures)));
         }
-        Error::Gmail(error) if matches!(error.status(), Some(500..=599)) => {
-            Ok(Disposition::Postponed(api.postpone(failures)))
-        }
-        Error::Gmail(error) => Ok(Disposition::Refused(error)),
-        other => Err(other),
-    }
+        Error::Gmail(error) => ProviderError::Gmail(error),
+        Error::Outlook(error) => ProviderError::Outlook(error),
+        other => return Err(other),
+    };
+    Ok(if matches!(error.status(), Some(500..=599)) {
+        Disposition::Postponed(postpone(base, failures))
+    } else {
+        Disposition::Refused(error)
+    })
 }
 
 #[cfg(test)]
@@ -122,23 +137,12 @@ mod tests {
     use jiff::SignedDuration;
 
     use super::*;
-    use crate::connection::Debounce;
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     struct Item {
         id: u64,
         queue: &'static str,
         not_before: Option<Timestamp>,
-    }
-
-    fn api_for_test(base: Duration) -> (Api, std::path::PathBuf) {
-        let dir = std::env::temp_dir().join(format!("exo-store-queue-{}", std::process::id()));
-        let _ = std::fs::create_dir_all(&dir);
-        let client = gmail::Client::new(
-            gmail::Endpoints::google(),
-            gmail::StaticToken("unused".into()),
-        );
-        (Api::new(client, base, None, Debounce::default(), &dir), dir)
     }
 
     fn api_error(code: u16, message: &str) -> gmail::Error {
@@ -149,6 +153,10 @@ mod tests {
             status: None,
             details: Vec::new(),
         })
+    }
+
+    fn failed(code: u16, message: &str) -> ProviderError {
+        ProviderError::Gmail(api_error(code, message))
     }
 
     #[test]
@@ -214,16 +222,16 @@ mod tests {
 
     #[test]
     fn dispose_honors_throttle_hints_backs_off_transients_and_refuses_4xx() {
-        let (api, dir) = api_for_test(Duration::from_secs(2));
+        let base = Duration::from_secs(2);
         let throttle_until = Timestamp::now() + SignedDuration::from_secs(90);
 
-        match dispose_failure(&api, Failure::Throttled(throttle_until), 1) {
+        match dispose_failure(base, Failure::Throttled(throttle_until), 1) {
             Disposition::Postponed(until) => assert_eq!(until, throttle_until),
             Disposition::Refused(err) => panic!("unexpected refusal: {err}"),
         }
 
         let before = Timestamp::now();
-        match dispose_failure(&api, Failure::Transient(api_error(503, "unavailable")), 2) {
+        match dispose_failure(base, Failure::Transient(failed(503, "unavailable")), 2) {
             Disposition::Postponed(until) => {
                 let wait = until.duration_since(before);
                 assert!(
@@ -234,13 +242,13 @@ mod tests {
             Disposition::Refused(err) => panic!("unexpected refusal: {err}"),
         }
 
-        match dispose_failure(&api, Failure::Permanent(api_error(400, "bad request")), 1) {
+        match dispose_failure(base, Failure::Permanent(failed(400, "bad request")), 1) {
             Disposition::Refused(err) => assert_eq!(err.status(), Some(400)),
             Disposition::Postponed(until) => panic!("unexpected postpone until {until}"),
         }
 
         match dispose_error(
-            &api,
+            base,
             Error::Throttled {
                 until: throttle_until,
             },
@@ -252,27 +260,25 @@ mod tests {
             Disposition::Refused(err) => panic!("unexpected refusal: {err}"),
         }
 
-        match dispose_error(&api, Error::Offline(api_error(503, "down")), 1).expect("API error") {
+        match dispose_error(base, Error::Offline(failed(503, "down")), 1).expect("API error") {
             Disposition::Postponed(until) => assert!(until > before),
             Disposition::Refused(err) => panic!("unexpected refusal: {err}"),
         }
 
-        match dispose_error(&api, Error::Gmail(api_error(502, "bad gateway")), 1)
+        match dispose_error(base, Error::Gmail(api_error(502, "bad gateway")), 1)
             .expect("API error")
         {
             Disposition::Postponed(until) => assert!(until > before),
             Disposition::Refused(err) => panic!("unexpected refusal: {err}"),
         }
 
-        match dispose_error(&api, Error::Gmail(api_error(404, "gone")), 1).expect("API error") {
+        match dispose_error(base, Error::Gmail(api_error(404, "gone")), 1).expect("API error") {
             Disposition::Refused(err) => assert_eq!(err.status(), Some(404)),
             Disposition::Postponed(until) => panic!("unexpected postpone until {until}"),
         }
 
-        let domain = dispose_error(&api, Error::EventCancelled, 1).expect_err("domain error");
+        let domain = dispose_error(base, Error::EventCancelled, 1).expect_err("domain error");
         assert!(matches!(domain, Error::EventCancelled));
-
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]

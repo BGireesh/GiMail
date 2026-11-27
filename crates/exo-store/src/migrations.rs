@@ -110,6 +110,26 @@ static FILES: &[MigrationFile] = &[
         "0008_indexes.sql",
         include_str!("../migrations/0008_indexes.sql"),
     ),
+    MigrationFile::new(
+        0x2fb0_cc6f_95ad_c585,
+        "0009_sync_cursors.sql",
+        include_str!("../migrations/0009_sync_cursors.sql"),
+    ),
+    MigrationFile::new(
+        0x1d24_d1be_cc78_0192,
+        "0010_versions.sql",
+        include_str!("../migrations/0010_versions.sql"),
+    ),
+    MigrationFile::new(
+        0x1a82_48a1_0d9b_ab81,
+        "0011_provider.sql",
+        include_str!("../migrations/0011_provider.sql"),
+    ),
+    MigrationFile::new(
+        0x5290_4cdf_b640_2a28,
+        "0012_calendar_series_id.sql",
+        include_str!("../migrations/0012_calendar_series_id.sql"),
+    ),
 ];
 
 /// Brings `db`, the file at `path`, to this build's schema.
@@ -189,8 +209,9 @@ mod tests {
     use toasty::stmt::Value;
 
     use super::*;
-    use crate::db::{self, CalendarChangeRow, ReminderRow, query_i64};
-    use crate::{Options, Settings, Store, SyncReport, Theme};
+    use crate::calendar::serde_compat::Compat;
+    use crate::db::{self, CalendarChangeRow, CalendarRow, EventRow, ReminderRow, query_i64};
+    use crate::{CalendarProviderKind, Options, Settings, Store, SyncReport, Theme};
 
     const ACCOUNT: &str = "maya@brightmoor.co";
 
@@ -497,8 +518,10 @@ mod tests {
         Store::open_with(
             dir,
             ACCOUNT,
-            server.endpoints(),
-            gmail::StaticToken(DEV_ACCESS_TOKEN.into()),
+            crate::Remote::gmail(
+                server.endpoints(),
+                gmail::StaticToken(DEV_ACCESS_TOKEN.into()),
+            ),
             options,
         )
         .await
@@ -549,11 +572,18 @@ mod tests {
             .expect("profile")
             .history_id
             .expect("a history id");
-        db::kv_set(&mut db, db::HISTORY_ID, &history)
+        // Where the history id was kept before `0009_sync_cursors.sql`.
+        db::kv_set(&mut db, "history_id", &history)
             .await
             .expect("writes");
-        let before = contents(&mut db).await;
+        let mut before = contents(&mut db).await;
         drop(db);
+        // The history id moves from `kv` to `sync_cursors`, and `kv` says the store is Gmail's.
+        if let Some((_, kv)) = before.get_mut("kv") {
+            kv.retain(|row| row.first().map(String::as_str) != Some("history_id"));
+            kv.push(vec!["provider".into(), "\"gmail\"".into()]);
+            kv.sort();
+        }
 
         let store = store(&dir.0, &server).await;
         let mut db = store.inner.db.clone();
@@ -695,12 +725,14 @@ mod tests {
         let change = crate::CalendarChange::Delete {
             calendar: ACCOUNT.into(),
             id: "e1".into(),
+            series_id: None,
             notify: true,
+            comment: None,
         };
         CalendarChangeRow::create()
             .token(9)
             .queue("q")
-            .change(toasty::Json(change.clone()))
+            .change(toasty::Json(Compat(change.clone())))
             .failures(0)
             .not_before(None::<Timestamp>)
             .exec(&mut db)
@@ -711,7 +743,7 @@ mod tests {
         let kept = CalendarChangeRow::all().exec(&mut db).await.expect("reads");
         assert_eq!(
             kept.iter()
-                .map(|row| (row.token, &row.change.0))
+                .map(|row| (row.token, &row.change.0.0))
                 .collect::<Vec<_>>(),
             [(9, &change)]
         );
@@ -787,6 +819,210 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_sync_cursors_migration_carries_the_history_id_over() {
+        let dir = TempDir::new("migrate-sync-cursors");
+        let mut db = upgraded_fixture(&dir.0).await;
+        assert_eq!(
+            rows(&mut db, "SELECT scope, token FROM sync_cursors").await,
+            [["".to_owned(), "4510408".to_owned()]],
+            "the mailbox's cursor is the history id the fixture had"
+        );
+        assert_eq!(
+            crate::provider::gmail::history_id(
+                &crate::provider::Cursors::load(&mut db)
+                    .await
+                    .expect("reads")
+            ),
+            Some(4_510_408)
+        );
+        assert_eq!(
+            query_i64(&mut db, "SELECT count(*) FROM kv WHERE key = 'history_id'")
+                .await
+                .expect("reads"),
+            0,
+            "kv no longer holds it"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_versions_migration_renames_the_columns_and_keeps_their_values() {
+        let dir = TempDir::new("migrate-versions");
+        let path = fixture(&dir.0);
+        let mut old = db::connect(&path).await.expect("opens the file as it is");
+        let mut was = Vec::new();
+        for sql in [
+            "SELECT id, gmail_id FROM drafts ORDER BY id",
+            "SELECT id, history_id FROM threads ORDER BY id",
+            "SELECT id, history_id FROM messages ORDER BY id",
+        ] {
+            was.push(rows(&mut old, sql).await);
+        }
+        drop(old);
+        let mut db = db::open(&path).await.expect("upgrades");
+        let mut is = Vec::new();
+        for sql in [
+            "SELECT id, draft_id FROM drafts ORDER BY id",
+            "SELECT id, version FROM threads ORDER BY id",
+            "SELECT id, version FROM messages ORDER BY id",
+        ] {
+            is.push(rows(&mut db, sql).await);
+        }
+        assert!(
+            was.iter().all(|rows| !rows.is_empty()),
+            "the fixture has drafts, threads and messages"
+        );
+        assert_eq!(is, was);
+        for (table, column) in [
+            ("drafts", "gmail_id"),
+            ("threads", "history_id"),
+            ("messages", "history_id"),
+        ] {
+            assert!(
+                rows(
+                    &mut db,
+                    &format!(
+                        "SELECT name FROM pragma_table_info('{table}') WHERE name = '{column}'"
+                    )
+                )
+                .await
+                .is_empty(),
+                "{table}.{column} is renamed"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn the_provider_migration_says_an_earlier_exos_store_holds_gmail() {
+        let dir = TempDir::new("migrate-provider");
+        let mut db = upgraded_fixture(&dir.0).await;
+        assert_eq!(
+            db::kv_get::<String>(&mut db, db::PROVIDER)
+                .await
+                .expect("reads")
+                .as_deref(),
+            Some("gmail")
+        );
+        let mut new = new_file(&dir.0).await;
+        assert_eq!(
+            db::kv_get::<String>(&mut new, db::PROVIDER)
+                .await
+                .expect("reads"),
+            None,
+            "a new file records its provider when it first opens"
+        );
+        drop((db, new));
+
+        let outlook = || {
+            crate::Remote::outlook(
+                outlook::Endpoints::microsoft(),
+                outlook::StaticToken(String::new()),
+            )
+        };
+        let gmail = || {
+            crate::Remote::gmail(
+                gmail::Endpoints::google(),
+                gmail::StaticToken(String::new()),
+            )
+        };
+        let error = Store::open(&dir.0, ACCOUNT, outlook())
+            .await
+            .expect_err("Gmail's store isn't opened as Outlook's");
+        assert!(
+            matches!(&error, Error::OtherProvider { found, .. } if found == "gmail"),
+            "{error}"
+        );
+        Store::open(&dir.0, ACCOUNT, gmail())
+            .await
+            .expect("opens as Gmail's");
+        let microsoft = format!("microsoft {ACCOUNT}");
+        drop(
+            Store::open(&dir.0, &microsoft, outlook())
+                .await
+                .expect("a new store opens"),
+        );
+        let error = Store::open(&dir.0, &microsoft, gmail())
+            .await
+            .expect_err("Outlook's store isn't opened as Gmail's");
+        assert!(
+            matches!(&error, Error::OtherProvider { found, .. } if found == "outlook"),
+            "{error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_calendar_series_id_migration_backfills_and_loads_legacy_rows() {
+        let dir = TempDir::new("migrate-calendar-series-id");
+        let path = fixture(&dir.0);
+        let mut db = db::open(&path).await.expect("upgrades");
+
+        // All legacy Google calendar rows from store-0001 deserialize cleanly.
+        let calendars = CalendarRow::all()
+            .exec(&mut db)
+            .await
+            .expect("reads calendars");
+        assert_eq!(calendars.len(), 3);
+        assert!(
+            calendars
+                .iter()
+                .all(|row| row.entry.0.0.provider == CalendarProviderKind::Google)
+        );
+        assert!(
+            calendars
+                .iter()
+                .any(|row| row.entry.0.0.primary && row.entry.0.0.id == ACCOUNT)
+        );
+
+        // All legacy Google event rows deserialize cleanly and have series_id backfilled where
+        // recurringEventId was present.
+        let events = EventRow::all().exec(&mut db).await.expect("reads events");
+        assert!(!events.is_empty(), "fixture has events");
+        for row in &events {
+            assert_eq!(
+                row.series_id, row.event.0.0.recurring_event_id,
+                "indexed series_id matches deserialized event {}",
+                row.id
+            );
+        }
+        assert!(
+            events.iter().any(|row| row.series_id.is_some()),
+            "fixture has recurring instances whose series_id was backfilled"
+        );
+
+        // A raw legacy Google CalendarChange JSON row in calendar_changes loads cleanly too.
+        let legacy_change = serde_json::json!({
+            "Delete": {
+                "calendar": ACCOUNT,
+                "id": "e_legacy_1",
+                "notify": true
+            }
+        })
+        .to_string();
+        set(
+            &mut db,
+            &[&format!(
+                r#"INSERT INTO "calendar_changes" ("token", "queue", "change", "failures", "not_before") VALUES (42, 'q', '{}', 0, NULL)"#,
+                legacy_change.replace('\'', "''")
+            )],
+        )
+        .await;
+        let queued = CalendarChangeRow::all()
+            .exec(&mut db)
+            .await
+            .expect("reads legacy queued change");
+        assert_eq!(queued.len(), 1);
+        assert_eq!(
+            queued[0].change.0.0,
+            crate::CalendarChange::Delete {
+                calendar: ACCOUNT.into(),
+                id: "e_legacy_1".into(),
+                series_id: None,
+                notify: true,
+                comment: None,
+            }
+        );
+    }
+
+    #[tokio::test]
     async fn a_failing_migration_is_rolled_back_named_and_tried_again() {
         let dir = TempDir::new("migrate-failing");
         let path = fixture(&dir.0);
@@ -815,6 +1051,10 @@ mod tests {
                 "0006_calendar_accounts.sql",
                 "0007_bulk_actions.sql",
                 "0008_indexes.sql",
+                "0009_sync_cursors.sql",
+                "0010_versions.sql",
+                "0011_provider.sql",
+                "0012_calendar_series_id.sql",
                 "9002_extra.sql"
             ]
         );
@@ -851,6 +1091,10 @@ mod tests {
                 "0006_calendar_accounts.sql",
                 "0007_bulk_actions.sql",
                 "0008_indexes.sql",
+                "0009_sync_cursors.sql",
+                "0010_versions.sql",
+                "0011_provider.sql",
+                "0012_calendar_series_id.sql",
                 "9002_extra.sql",
                 "9003_remind_at.sql"
             ]

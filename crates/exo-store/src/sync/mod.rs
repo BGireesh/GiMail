@@ -8,41 +8,32 @@ mod bodies;
 mod history;
 
 pub use arrivals::Arrival;
+pub(crate) use backfill::LIST_CAP;
 pub use backfill::RECENT_THREADS;
 #[cfg(test)]
 pub(crate) use backfill::WARMED;
-pub(crate) use backfill::{LIST_CAP, selection};
 
-use std::collections::{HashMap, HashSet};
 use std::sync::atomic::Ordering;
 
-use futures::future;
-use gmail::{Format, Label, LabelListVisibility, Message, MessageListVisibility, MessagePart};
 use tokio::sync::MutexGuard;
 
-use crate::api::{Api, Failure};
 use crate::db::{
-    self, ALIASES, AttachmentRow, BodyRow, EVICTED_BEFORE, HISTORY_ID, IDENTITY, KvRow, LabelRow,
-    ListCursor, ListEntry, MessageRow, ParticipantEntry, TextDue, ThreadRow,
+    self, ALIASES, AttachmentRow, BodyRow, EVICTED_BEFORE, IDENTITY, KvRow, LabelRow, ListCursor,
+    ListEntry, MessageRow, ParticipantEntry, TextDue, ThreadRow,
 };
 use crate::error::Result;
 use crate::ids::ListId;
-use crate::ids::labels::{CHAT, EXO_MUTED, EXO_PARENT, EXO_REMINDER_UNREAD, EXO_SNOOZED};
-use crate::model::Alias;
-use crate::quota::Lane;
+use crate::model::{Alias, LabelKind};
+use crate::provider::{Account, Cursors, Labels, Markers};
 use crate::store::{Inner, Store, reindex_many};
 use crate::view::{Identity, Router};
 
 /// Tries per sync call before giving up.
 pub(crate) const ATTEMPTS: u32 = 5;
-/// The largest `text/html` body Gmail moved to an attachment that's put back in its part.
-const MAX_INLINED_BODY: u32 = 5 * 1024 * 1024;
-/// `messages.get` calls in flight at once for a thread fetched message by message.
-pub(crate) const MESSAGES_AT_ONCE: usize = 10;
 /// The headers a message's row reads (for lists, splits, the search index, the contact pane and
-/// replies), which are all that `format=metadata` asks for. `Content-Type` stands in for the
+/// replies), which are all that fetching a row asks for. `Content-Type` stands in for the
 /// top-level MIME type if Gmail leaves `mimeType` out, and `Content-Class` marks Exchange's
-/// invites ([`needs_structure`]).
+/// invites.
 pub(crate) const ROW_HEADERS: [&str; 16] = [
     "From",
     "To",
@@ -62,10 +53,6 @@ pub(crate) const ROW_HEADERS: [&str; 16] = [
     // What Gmail found of the sender's DMARC, which a brand's logo needs.
     "Authentication-Results",
 ];
-/// Top-level MIME types whose message holds no file or invite, so its row needs none of its
-/// structure. Anything else (`multipart/mixed`, `multipart/related`, `text/calendar`, …) may.
-const BODY_ONLY: [&str; 3] = ["text/plain", "text/html", "multipart/alternative"];
-
 /// How far Gmail's history is applied this session, as the footer shows it.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct SyncProgress {
@@ -171,16 +158,6 @@ impl Store {
     }
 }
 
-/// The ids of Exo's hidden labels, once they exist.
-struct HiddenLabels {
-    /// `[Exo]/Muted`.
-    muted: Option<String>,
-    /// `[Exo]/Is Snoozed`.
-    snoozed: Option<String>,
-    /// `[Exo]/ru`.
-    reminder_unread: Option<String>,
-}
-
 impl Inner {
     /// Takes the sync lock, bootstrapping first if this store hasn't yet.
     pub(crate) async fn lock_sync(&self) -> Result<MutexGuard<'_, ()>> {
@@ -201,132 +178,61 @@ impl Inner {
         Ok(())
     }
 
-    /// Snapshots the history cursor (once per database), then refreshes labels and identity.
+    /// Snapshots the cursors (once per database), then refreshes labels and identity.
     async fn bootstrap(&self) -> Result<()> {
         let mut db = self.db.clone();
-        if db::kv_get::<u64>(&mut db, HISTORY_ID).await?.is_none() {
-            let profile = self
-                .api
-                .call(Lane::Show, ATTEMPTS, |gmail| gmail.profile())
-                .await?;
-            let history_id = profile.history_id.unwrap_or_default();
+        if Cursors::load(&mut db).await?.is_empty() {
+            let cursors = self.mail.start().await?;
             let mut write = self.begin(&mut db).await?;
-            db::kv_set(write.exec(), HISTORY_ID, &history_id).await?;
+            cursors.save(write.exec()).await?;
             // In a new store, threads another store snoozed may be waiting with no reminder here.
             db::kv_set(write.exec(), db::ORPHANED_SNOOZES, &true).await?;
             write.commit().await?;
         }
-        let hidden = self.refresh_labels().await?;
+        let markers = self.refresh_labels().await?;
         // The splits' label names resolve against the labels just listed.
         self.reload_splits(false).await?;
-        self.refresh_identity(hidden).await
+        self.refresh_identity(markers).await
     }
 
-    /// Re-lists labels, creating Exo's hidden ones first if they're missing. Returns their ids.
-    async fn refresh_labels(&self) -> Result<HiddenLabels> {
-        let named = |labels: &[Label], name: &str| {
-            labels
-                .iter()
-                .any(|label| label.name.as_deref() == Some(name))
-        };
-        let mut labels = self
-            .api
-            .call(Lane::Show, ATTEMPTS, |gmail| gmail.labels())
-            .await?
-            .labels;
-        let missing: Vec<&str> = [EXO_PARENT, EXO_MUTED, EXO_SNOOZED, EXO_REMINDER_UNREAD]
-            .into_iter()
-            .filter(|name| !named(&labels, name))
-            .collect();
-        for name in &missing {
-            let hidden = Label {
-                name: Some((*name).to_owned()),
-                label_list_visibility: Some(LabelListVisibility::LabelHide),
-                message_list_visibility: Some(MessageListVisibility::Hide),
-                ..Label::default()
-            };
-            match self
-                .api
-                .call(Lane::Show, ATTEMPTS, |gmail| gmail.create_label(&hidden))
-                .await
-            {
-                // Another client created it meanwhile.
-                Err(Failure::Permanent(error)) if error.status() == Some(409) => {}
-                result => {
-                    result?;
-                }
-            }
-        }
-        if !missing.is_empty() {
-            labels = self
-                .api
-                .call(Lane::Show, ATTEMPTS, |gmail| gmail.labels())
-                .await?
-                .labels;
-        }
-        let id = |name: &str| {
-            labels
-                .iter()
-                .find(|label| label.name.as_deref() == Some(name))
-                .and_then(|label| label.id.clone())
-        };
-        let hidden = HiddenLabels {
-            muted: id(EXO_MUTED),
-            snoozed: id(EXO_SNOOZED),
-            reminder_unread: id(EXO_REMINDER_UNREAD),
-        };
+    /// Re-lists labels, the provider making Exo's markers first if they're missing. Returns the
+    /// markers' keys.
+    async fn refresh_labels(&self) -> Result<Markers> {
+        let Labels { labels, markers } = self.mail.labels().await?;
         let mut db = self.db.clone();
         let mut write = self.begin(&mut db).await?;
         LabelRow::all().delete().exec(write.exec()).await?;
         let mut rows = LabelRow::create_many();
         for label in &labels {
-            let Some(id) = &label.id else { continue };
-            let color = label.color.clone().unwrap_or_default();
             rows = rows.with_item(|row| {
-                row.id(id)
-                    .name(label.name.clone().unwrap_or_else(|| id.clone()))
-                    .system(label.kind == Some(gmail::LabelType::System))
-                    .hidden(label.label_list_visibility == Some(LabelListVisibility::LabelHide))
-                    .text_color(color.text_color)
-                    .background_color(color.background_color)
+                row.id(&label.id)
+                    .name(&label.name)
+                    .system(label.kind == LabelKind::System)
+                    .hidden(label.hidden)
+                    .text_color(label.text_color.clone())
+                    .background_color(label.background_color.clone())
             });
         }
         rows.exec(write.exec()).await?;
         write.publish().await?;
-        Ok(hidden)
+        Ok(markers)
     }
 
-    /// Learns which addresses are "me" (the primary and aliases Gmail treats as the account)
-    /// and Exo's hidden labels. A change re-routes every stored thread.
-    async fn refresh_identity(&self, hidden: HiddenLabels) -> Result<()> {
-        let aliases = self
-            .api
-            .call(Lane::Show, ATTEMPTS, |gmail| gmail.send_as_list())
-            .await?
-            .send_as;
-        let mut addresses = Vec::new();
-        let mut name = None;
-        for alias in &aliases {
-            let primary = alias.is_primary == Some(true);
-            if primary {
-                name = alias.display_name.clone().filter(|name| !name.is_empty());
-            }
-            if primary || alias.treat_as_alias == Some(true) {
-                addresses.extend(
-                    alias
-                        .send_as_email
-                        .as_ref()
-                        .map(|email| email.to_lowercase()),
-                );
-            }
-        }
-        self.save_aliases(&aliases).await?;
+    /// Learns which addresses are "me" and the keys of Exo's markers. A change re-routes every
+    /// stored thread.
+    async fn refresh_identity(&self, markers: Markers) -> Result<()> {
+        let Account {
+            addresses,
+            name,
+            aliases,
+        } = self.mail.account().await?;
+        self.save_aliases(aliases).await?;
         let identity = Identity {
             addresses,
             name,
-            muted_label: hidden.muted,
-            snoozed_label: hidden.snoozed,
-            reminder_unread_label: hidden.reminder_unread,
+            muted_label: markers.muted,
+            snoozed_label: markers.snoozed,
+            reminder_unread_label: markers.reminder_unread,
         };
         if identity == self.me() {
             return Ok(());
@@ -355,28 +261,7 @@ impl Inner {
     }
 
     /// Keeps the account's send-as aliases and their signatures for compose.
-    async fn save_aliases(&self, aliases: &[gmail::SendAs]) -> Result<()> {
-        let aliases: Vec<Alias> = aliases
-            .iter()
-            .filter_map(|alias| {
-                let email = alias.send_as_email.clone()?;
-                let default = alias.is_default == Some(true);
-                let primary = alias.is_primary == Some(true);
-                Some(Alias {
-                    name: alias.display_name.clone().filter(|name| !name.is_empty()),
-                    signature: alias
-                        .signature
-                        .clone()
-                        .filter(|signature| !signature.is_empty()),
-                    active: default
-                        || primary
-                        || alias.verification_status == Some(gmail::VerificationStatus::Accepted),
-                    email,
-                    default,
-                    primary,
-                })
-            })
-            .collect();
+    async fn save_aliases(&self, aliases: Vec<Alias>) -> Result<()> {
         let mut db = self.db.clone();
         if db::kv_get::<Vec<Alias>>(&mut db, ALIASES).await?.as_ref() == Some(&aliases) {
             return Ok(());
@@ -404,7 +289,8 @@ impl Inner {
             .await?;
         ListCursor::all().delete().exec(write.exec()).await?;
         LabelRow::all().delete().exec(write.exec()).await?;
-        KvRow::filter(KvRow::fields().key().in_list([HISTORY_ID, EVICTED_BEFORE]))
+        Cursors::default().save(write.exec()).await?;
+        KvRow::filter(KvRow::fields().key().eq(EVICTED_BEFORE))
             .delete()
             .exec(write.exec())
             .await?;
@@ -412,309 +298,9 @@ impl Inner {
     }
 }
 
-/// `threads.get` in full for `lane`, with large HTML bodies inlined. A thread too large for one
-/// answer comes [message by message](fetch_by_message). `None` when the thread is gone.
-pub(crate) async fn fetch_thread(
-    api: &Api,
-    lane: Lane,
-    attempts: u32,
-    id: &str,
-) -> Result<Option<gmail::Thread>, Failure> {
-    let fetched = api
-        .call(lane, attempts, |gmail| gmail.thread(id, Format::Full, &[]))
-        .await;
-    let mut thread = match fetched {
-        Err(failure) if failure.is_too_large() => {
-            return fetch_by_message(api, lane, attempts, id).await;
-        }
-        fetched => match found(fetched)? {
-            Some(thread) => thread,
-            None => return Ok(None),
-        },
-    };
-    for message in &mut thread.messages {
-        inline_bodies(api, lane, attempts, message).await?;
-    }
-    Ok(Some(thread))
-}
-
-/// Thread `id` as [`fetch_thread`] has it, for a thread Gmail won't send in one answer: its
-/// message ids (`format=minimal`), then each message in full, [`MESSAGES_AT_ONCE`] at a time.
-/// A message gone meanwhile is left out.
-async fn fetch_by_message(
-    api: &Api,
-    lane: Lane,
-    attempts: u32,
-    id: &str,
-) -> Result<Option<gmail::Thread>, Failure> {
-    let fetched = api
-        .call(lane, attempts, |gmail| {
-            gmail.thread(id, Format::Minimal, &[])
-        })
-        .await;
-    let Some(mut thread) = found(fetched)? else {
-        return Ok(None);
-    };
-    let ids: Vec<String> = thread
-        .messages
-        .iter()
-        .filter_map(|message| message.id.clone())
-        .collect();
-    let mut messages = Vec::with_capacity(ids.len());
-    for chunk in ids.chunks(MESSAGES_AT_ONCE) {
-        let fetched = future::try_join_all(
-            chunk
-                .iter()
-                .map(|id| fetch_message(api, lane, attempts, id)),
-        )
-        .await?;
-        messages.extend(fetched.into_iter().flatten());
-    }
-    thread.messages = messages;
-    Ok(Some(thread))
-}
-
-/// A thread fetched for its rows. That's `threads.get` with `format=metadata` (a third of
-/// `full`'s quota units), plus each new message whose row needs its structure, fetched in full.
-pub(crate) struct Rows {
-    pub thread: gmail::Thread,
-    /// The ids of the messages in `thread` fetched in full.
-    pub full: HashSet<String>,
-}
-
-/// Fetches thread `id` for its rows, in `lane`. That's its messages' labels, snippets and
-/// [`ROW_HEADERS`], plus the messages that may hold files or an invite, fetched in full unless
-/// they're among `stored`. The row's icon and `has:attachment`/`filename:` need those messages'
-/// parts. `None` when the thread is gone.
-pub(crate) async fn fetch_rows(
-    api: &Api,
-    lane: Lane,
-    attempts: u32,
-    id: &str,
-    stored: &HashSet<String>,
-) -> Result<Option<Rows>, Failure> {
-    let fetched = api
-        .call(lane, attempts, |gmail| {
-            gmail.thread(id, Format::Metadata, &ROW_HEADERS)
-        })
-        .await;
-    let Some(mut thread) = found(fetched)? else {
-        return Ok(None);
-    };
-    let wanted: Vec<String> = thread
-        .messages
-        .iter()
-        .filter(|message| needs_structure(message))
-        .filter_map(|message| message.id.clone())
-        .filter(|id| !stored.contains(id))
-        .collect();
-    let fetched = future::try_join_all(
-        wanted
-            .iter()
-            .map(|id| fetch_message(api, lane, attempts, id)),
-    )
-    .await?;
-    let mut full = HashSet::new();
-    // A message gone since the thread was read keeps its row until history says so.
-    for message in fetched.into_iter().flatten() {
-        let Some(id) = message.id.clone() else {
-            continue;
-        };
-        if let Some(slot) = thread
-            .messages
-            .iter_mut()
-            .find(|slot| slot.id.as_ref() == Some(&id))
-        {
-            *slot = message;
-            full.insert(id);
-        }
-    }
-    Ok(Some(Rows { thread, full }))
-}
-
-/// Whether a message fetched for its row may hold a file or an invite. It may when its top-level
-/// type isn't one of [`BODY_ONLY`], or when it's an Exchange meeting message, whose invite or
-/// RSVP is a `text/calendar` alternative inside `multipart/alternative` (Outlook's
-/// `Content-Class: urn:content-classes:calendarmessage`). Chats are never stored.
-fn needs_structure(message: &Message) -> bool {
-    let Some(payload) = &message.payload else {
-        return true;
-    };
-    let content_type = || {
-        payload
-            .header("Content-Type")
-            .and_then(|value| value.split(';').next())
-            .map(str::trim)
-    };
-    let mime = payload.mime_type.as_deref().or_else(content_type);
-    let meeting = payload
-        .header("Content-Class")
-        .is_some_and(|class| class.trim().eq_ignore_ascii_case(CALENDAR_MESSAGE));
-    !message.label_ids.iter().any(|label| label == CHAT)
-        && (meeting
-            || !mime.is_some_and(|mime| {
-                BODY_ONLY
-                    .iter()
-                    .any(|plain| mime.eq_ignore_ascii_case(plain))
-            }))
-}
-
-/// The `Content-Class` Exchange gives its meeting requests, updates, cancellations and replies.
-const CALENDAR_MESSAGE: &str = "urn:content-classes:calendarmessage";
-
-/// `messages.get` for message `id`'s row alone (`format=metadata` with [`ROW_HEADERS`], a third
-/// of `full`'s units). `None` when the message is gone.
-pub(crate) async fn fetch_row(
-    api: &Api,
-    lane: Lane,
-    attempts: u32,
-    id: &str,
-) -> Result<Option<Message>, Failure> {
-    found(
-        api.call(lane, attempts, |gmail| {
-            gmail.message(id, Format::Metadata, &ROW_HEADERS)
-        })
-        .await,
-    )
-}
-
-/// `messages.get` in full for `lane`, with large HTML bodies inlined. `None` when the message
-/// is gone.
-pub(crate) async fn fetch_message(
-    api: &Api,
-    lane: Lane,
-    attempts: u32,
-    id: &str,
-) -> Result<Option<Message>, Failure> {
-    let fetched = api
-        .call(lane, attempts, |gmail| gmail.message(id, Format::Full, &[]))
-        .await;
-    let Some(mut message) = found(fetched)? else {
-        return Ok(None);
-    };
-    inline_bodies(api, lane, attempts, &mut message).await?;
-    Ok(Some(message))
-}
-
-/// `None` when Gmail says what was asked for doesn't exist.
-fn found<T>(fetched: Result<T, Failure>) -> Result<Option<T>, Failure> {
-    match fetched {
-        Ok(value) => Ok(Some(value)),
-        Err(failure) if failure.is_not_found() => Ok(None),
-        Err(failure) => Err(failure),
-    }
-}
-
-/// Gmail moves big `text/html` bodies into attachments, so this fetches them back into the
-/// part.
-async fn inline_bodies(
-    api: &Api,
-    lane: Lane,
-    attempts: u32,
-    message: &mut Message,
-) -> Result<(), Failure> {
-    let (Some(message_id), Some(payload)) = (message.id.clone(), message.payload.as_mut()) else {
-        return Ok(());
-    };
-    let wanted: Vec<String> = payload
-        .walk()
-        .filter(|part| part.mime_type.as_deref() == Some("text/html"))
-        .filter_map(|part| {
-            let body = part.body.as_ref()?;
-            let small = body.size.unwrap_or_default() <= MAX_INLINED_BODY;
-            (body.data.is_none() && small).then(|| body.attachment_id.clone())?
-        })
-        .collect();
-    let mut fetched = HashMap::new();
-    for attachment in wanted {
-        let body = api
-            .call(lane, attempts, |gmail| {
-                gmail.attachment(&message_id, &attachment)
-            })
-            .await?;
-        fetched.insert(attachment, body.data);
-    }
-    fill(payload, &mut fetched);
-    Ok(())
-}
-
-fn fill(part: &mut MessagePart, fetched: &mut HashMap<String, Option<Vec<u8>>>) {
-    if let Some(body) = part.body.as_mut()
-        && let Some(data) = body
-            .attachment_id
-            .as_ref()
-            .and_then(|id| fetched.remove(id))
-    {
-        body.data = data;
-    }
-    for child in &mut part.parts {
-        fill(child, fetched);
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use gmail::MessagePartHeader;
-
     use super::*;
-
-    #[test]
-    fn rows_need_the_parts_of_what_may_hold_files_or_invites() {
-        let message = |mime: Option<&str>, content_type: Option<&str>| Message {
-            payload: Some(MessagePart {
-                mime_type: mime.map(str::to_owned),
-                headers: content_type
-                    .map(|value| MessagePartHeader {
-                        name: "Content-Type".into(),
-                        value: value.into(),
-                    })
-                    .into_iter()
-                    .collect(),
-                ..MessagePart::default()
-            }),
-            ..Message::default()
-        };
-        for body_only in ["multipart/alternative", "text/html", "TEXT/PLAIN"] {
-            assert!(
-                !needs_structure(&message(Some(body_only), None)),
-                "{body_only}"
-            );
-        }
-        for structured in [
-            "multipart/mixed",
-            "multipart/related",
-            "multipart/signed",
-            "text/calendar",
-            "application/pdf",
-        ] {
-            assert!(
-                needs_structure(&message(Some(structured), None)),
-                "{structured}"
-            );
-        }
-        assert!(
-            !needs_structure(&message(
-                None,
-                Some("multipart/alternative; boundary=\"b\"")
-            )),
-            "the header stands in for a missing type"
-        );
-        assert!(
-            needs_structure(&message(None, None)),
-            "an unknown type is fetched in full"
-        );
-        let mut outlook = message(Some("multipart/alternative"), None);
-        if let Some(payload) = outlook.payload.as_mut() {
-            payload.headers.push(MessagePartHeader {
-                name: "Content-class".into(),
-                value: "urn:content-classes:calendarmessage".into(),
-            });
-        }
-        assert!(
-            needs_structure(&outlook),
-            "an Exchange invite's calendar part is an alternative"
-        );
-    }
 
     #[tokio::test]
     async fn bankrupt_clears_search_fts_text_due_and_evicted_before() {
@@ -723,8 +309,10 @@ mod tests {
         let store = Store::open(
             &dir,
             "maya@brightmoor.co",
-            gmail::Endpoints::google(),
-            gmail::StaticToken("unused".into()),
+            crate::Remote::gmail(
+                gmail::Endpoints::google(),
+                gmail::StaticToken("unused".into()),
+            ),
         )
         .await
         .expect("opens");
@@ -750,16 +338,17 @@ mod tests {
         };
         {
             let mut write = store.inner.begin(&mut db).await.expect("tx");
-            let parsed = crate::parse::parse(&msg, true).expect("parses");
-            crate::provider::save_message(write.exec(), parsed)
+            let parsed = crate::provider::gmail::parse::parse(&msg, true).expect("parses");
+            crate::truth::save_message(write.exec(), parsed)
                 .await
                 .expect("saves");
             crate::store::reindex(write.exec(), "t1", &store.inner.router())
                 .await
                 .expect("indexes");
-            db::kv_set(write.exec(), HISTORY_ID, &42_u64)
+            crate::provider::gmail::cursors_at(42)
+                .save(write.exec())
                 .await
-                .expect("kv");
+                .expect("cursors");
             db::kv_set(write.exec(), EVICTED_BEFORE, &1_700_000_000_000_i64)
                 .await
                 .expect("kv");
@@ -777,6 +366,10 @@ mod tests {
                 .expect("kv"),
             None,
             "EVICTED_BEFORE cleared"
+        );
+        assert!(
+            Cursors::load(&mut db).await.expect("cursors").is_empty(),
+            "the history cursor cleared"
         );
         let mut s = crate::Search::new("uniquebankruptword");
         assert!(

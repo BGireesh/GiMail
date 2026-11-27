@@ -110,7 +110,7 @@ impl Mail {
         let listed = self
             .accounts
             .iter()
-            .find(|account| account.email == self.account.email());
+            .find(|account| account.key() == self.account.key());
         let account_color = accounts::color_name(self.account.email(), listed);
         // The welcome splash and account setup draw the strip over themselves.
         if self.welcome.is_none() && !self.account_setup_open() {
@@ -216,8 +216,8 @@ impl Mail {
             self.first_run_theme()
                 .unwrap_or(self.account.settings().theme),
         );
-        brands::set_active_account(ctx, self.account.email());
-        people::set_active_account(ctx, self.account.email());
+        brands::set_active_account(ctx, self.account.key());
+        people::set_active_account(ctx, self.account.key());
         self.first_run_frame();
         self.sync_snapshot();
         self.out_of_office_frame(ctx);
@@ -359,6 +359,7 @@ impl Mail {
             self.snapshot.connection.is_online(),
             bulk::status(&bulk_actions),
             self.account.sync_progress(),
+            self.account.is_outlook(),
             now,
         );
         self.footer.paint(ui, pane, rem, self.footer_line.clone());
@@ -427,9 +428,10 @@ impl Mail {
         let current = self
             .accounts
             .iter()
-            .find(|account| account.email == self.account.email());
+            .find(|account| account.key() == self.account.key());
         let view = folders::View {
             email: self.account.email(),
+            account_key: self.account.key(),
             color: current.map_or_else(
                 || accounts::default_color(self.account.email()),
                 accounts::color,

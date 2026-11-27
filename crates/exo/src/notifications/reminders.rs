@@ -14,14 +14,16 @@ use std::{
     time::Duration,
 };
 
-use exo_store::{Settings, Store, StoredEvent};
-use gmail::calendar::Event as ApiEvent;
+use exo_store::{
+    CalendarEvent, ConferenceKind, EventReminders, EventStatus, EventTime, RsvpStatus, Settings,
+    Store, StoredEvent,
+};
 use jiff::{SignedDuration, Timestamp, ToSpan, tz::TimeZone};
 use tokio::sync::watch;
 
 use super::{Click, Notice, Notifier, Open};
 use crate::{
-    calendar::{Rsvp, event_key, my_attendance},
+    calendar::event_key,
     format::dates::{calendar_range_compact, relative_compact},
 };
 
@@ -55,26 +57,20 @@ pub fn calendars(settings: &Settings) -> Vec<String> {
 /// for an event without an id, a time or a title, one I declined, a cancelled one, or one all day.
 pub fn reminders<'a>(stored: &'a StoredEvent, lead: SignedDuration, me: &str) -> Vec<Reminder<'a>> {
     let event = &stored.event;
-    let (Some(start), Some(end)) = (event.start.as_ref(), event.end.as_ref()) else {
+    let (Some(EventTime::Timed { at: start, .. }), Some(EventTime::Timed { at: end, .. })) =
+        (&event.start, &event.end)
+    else {
         return Vec::new();
     };
-    let timed = |time: &gmail::calendar::EventDateTime| {
-        time.date
-            .is_none()
-            .then(|| time.date_time.as_deref()?.parse::<Timestamp>().ok())
-            .flatten()
-    };
-    let (Some(start), Some(end)) = (timed(start), timed(end)) else {
-        return Vec::new();
-    };
+    let (start, end) = (*start, *end);
     let titled = event
         .summary
         .as_deref()
         .is_some_and(|summary| !summary.is_empty());
     if event.id.is_none()
         || !titled
-        || event.status.as_deref() == Some("cancelled")
-        || my_attendance(event, me) == Some(Rsvp::Declined)
+        || event.status == EventStatus::Cancelled
+        || event.my_rsvp(me) == Some(RsvpStatus::Declined)
     {
         return Vec::new();
     }
@@ -85,17 +81,12 @@ pub fn reminders<'a>(stored: &'a StoredEvent, lead: SignedDuration, me: &str) ->
         end,
     };
     match &event.reminders {
-        Some(reminders) if reminders.use_default != Some(true) => reminders
-            .overrides
+        EventReminders::Default => vec![reminder(start - lead)],
+        EventReminders::None => Vec::new(),
+        EventReminders::Custom(minutes) => minutes
             .iter()
-            .filter(|reminder| reminder.method.as_deref() == Some("popup"))
-            .filter_map(|popup| {
-                Some(reminder(
-                    start - SignedDuration::from_mins(i64::from(popup.minutes?)),
-                ))
-            })
+            .map(|&mins| reminder(start - SignedDuration::from_mins(i64::from(mins))))
             .collect(),
-        _ => vec![reminder(start - lead)],
     }
 }
 
@@ -105,8 +96,36 @@ pub fn due(reminder: &Reminder<'_>, now: Timestamp) -> bool {
     reminder.at < now && now <= reminder.start + LATE
 }
 
+/// The plain email address of the calendar account owning `calendar_id`, falling back to
+/// `fallback`. Prefers signed-in accounts when looking up a calendar ID.
+fn calendar_owner<'a>(settings: &'a Settings, calendar_id: &str, fallback: &'a str) -> &'a str {
+    settings
+        .calendar_accounts
+        .iter()
+        .find(|(_, account)| account.authed && account.calendars.contains_key(calendar_id))
+        .or_else(|| {
+            settings
+                .calendar_accounts
+                .iter()
+                .find(|(_, account)| account.calendars.contains_key(calendar_id))
+        })
+        .map_or(fallback, |(key, account)| account.email_for(key))
+}
+
 /// The notification for `reminder` at `now` in `account`, with its times in `tz`.
 pub fn notice(reminder: &Reminder<'_>, account: &str, now: Timestamp, tz: &TimeZone) -> Notice {
+    notice_for(reminder, account, account, now, tz)
+}
+
+/// [`notice`] for an event on a calendar owned by `owner` (which may differ from the primary mail
+/// `account` on cross-provider/secondary calendar accounts).
+pub fn notice_for(
+    reminder: &Reminder<'_>,
+    account: &str,
+    owner: &str,
+    now: Timestamp,
+    tz: &TimeZone,
+) -> Notice {
     let event = &reminder.event.event;
     // A start minutes or seconds away reads 30 s later, unless the notification is late.
     let relative = relative_compact(reminder.start, now);
@@ -116,7 +135,7 @@ pub fn notice(reminder: &Reminder<'_>, account: &str, now: Timestamp, tz: &TimeZ
     } else {
         reminder.start
     };
-    let (provider, link) = conference(event, account);
+    let (provider, link) = conference(event, owner);
     let key = event_key(reminder.event, event, &reminder.start.to_zoned(tz.clone()));
     let (day, end_hour) = (
         reminder.start.to_zoned(tz.clone()).date(),
@@ -152,73 +171,38 @@ pub fn notice(reminder: &Reminder<'_>, account: &str, now: Timestamp, tz: &TimeZ
     }
 }
 
-/// The call's provider as the notification names it, and its link. The link is Calendar's
-/// preferred entry point (video, else phone, else SIP, else the first), and a Meet link opens as
-/// this account.
-fn conference(event: &ApiEvent, me: &str) -> (Option<&'static str>, Option<String>) {
-    let Some(data) = event.conference_data.as_ref() else {
+/// The call's provider as the notification names it, and its link. A Meet link opens as this
+/// account; Teams, Zoom, and other links open directly.
+fn conference(event: &CalendarEvent, me: &str) -> (Option<&'static str>, Option<String>) {
+    let Some(conf) = event.conference.as_ref().filter(|c| !c.pending) else {
         return (None, None);
     };
-    let entries = data
-        .get("entryPoints")
-        .and_then(|entries| entries.as_array())
-        .map(Vec::as_slice)
-        .unwrap_or_default();
-    let kind = |entry: &&serde_json::Value| {
-        entry
-            .get("entryPointType")
-            .and_then(|kind| kind.as_str())
-            .map(str::to_owned)
-    };
-    let Some(entry) = ["video", "phone", "sip"]
-        .iter()
-        .find_map(|wanted| {
-            entries
-                .iter()
-                .find(|entry| kind(entry).as_deref() == Some(wanted))
-        })
-        .or_else(|| entries.first())
-    else {
-        return (None, None);
-    };
-    let link = entry
-        .get("uri")
-        .and_then(|uri| uri.as_str())
-        .map(str::to_owned);
-    let solution = data.get("conferenceSolution");
-    let name = solution
-        .and_then(|solution| solution.get("name"))
-        .and_then(|name| name.as_str())
-        .unwrap_or_default();
-    let meet = solution
-        .and_then(|solution| solution.get("key"))
-        .and_then(|key| key.get("type"))
-        .and_then(|kind| kind.as_str())
-        == Some("hangoutsMeet")
-        || matches!(name, "Google Meet" | "Hangouts Meet");
-    match kind(&entry).as_deref() {
-        Some("video") if name == "Microsoft Teams" => (Some("Microsoft Teams"), link),
-        Some("video") if name == "Zoom Meeting" => (Some("Zoom"), link),
-        Some("video") if meet => {
-            let link = link
-                .and_then(|link| url::Url::parse(&link).ok())
-                .map(|mut link| {
+    if let Some(url) = &conf.join_url {
+        return match &conf.kind {
+            ConferenceKind::Teams => (Some("Microsoft Teams"), Some(url.clone())),
+            ConferenceKind::Zoom => (Some("Zoom"), Some(url.clone())),
+            ConferenceKind::GoogleMeet => {
+                let link = url::Url::parse(url).ok().map(|mut link| {
                     link.query_pairs_mut().append_pair("authuser", me);
                     link.to_string()
                 });
-            (Some("Google Meet"), link)
-        }
-        Some("video") => (Some("Video"), link),
-        Some("phone" | "sip") => (Some("Phone"), link),
-        _ => (None, link),
+                (Some("Google Meet"), link)
+            }
+            ConferenceKind::Other(_) => (Some("Video"), Some(url.clone())),
+        };
     }
+    if let Some(dial) = &conf.dial_in {
+        return (Some("Phone"), Some(dial.clone()));
+    }
+    (None, None)
 }
 
-/// Posts `account`'s calendar notifications from `store` while `notifier` has somewhere to post
-/// them, until the store goes.
+/// Posts calendar notifications from `store` for `account_key` (whose display address is `email`)
+/// while `notifier` has somewhere to post them, until the store goes.
 pub(crate) async fn run(
     store: Store,
-    account: String,
+    account_key: String,
+    email: String,
     notifier: watch::Receiver<Option<Notifier>>,
 ) {
     // Each reminder shows once (by the event's key and its time), remembered until its event is
@@ -265,13 +249,14 @@ pub(crate) async fn run(
         shown.retain(|_, start| now <= *start + LATE);
         let mut due_now = Vec::new();
         for stored in &events {
-            for reminder in reminders(stored, lead, &account)
+            let owner = calendar_owner(&settings, &stored.calendar_id, &email);
+            for reminder in reminders(stored, lead, owner)
                 .into_iter()
                 .filter(|reminder| due(reminder, now))
             {
                 let id = (stored.event.id.clone().unwrap_or_default(), reminder.at);
                 if shown.insert(id, reminder.start).is_none() {
-                    due_now.push(notice(&reminder, &account, now, &tz));
+                    due_now.push(notice_for(&reminder, &account_key, owner, now, &tz));
                 }
             }
         }
@@ -284,9 +269,9 @@ pub(crate) async fn run(
 
 #[cfg(test)]
 mod tests {
-    use exo_store::{CalendarAccount, CalendarNotifications, CalendarSetting};
-    use gmail::calendar::{EventAttendee, EventDateTime, EventReminder, EventReminders};
-    use serde_json::json;
+    use exo_store::{
+        CalendarAccount, CalendarNotifications, CalendarSetting, Conference, EventAttendee,
+    };
 
     use super::*;
 
@@ -304,20 +289,14 @@ mod tests {
     }
 
     fn stored(start: &str, end: &str) -> StoredEvent {
-        let time = |text: &str| {
-            Some(EventDateTime {
-                date_time: Some(at(text).to_string()),
-                ..EventDateTime::default()
-            })
-        };
         StoredEvent {
             calendar_id: ME.into(),
-            event: ApiEvent {
+            event: CalendarEvent {
                 id: Some("evt1".into()),
                 summary: Some("Design review".into()),
-                start: time(start),
-                end: time(end),
-                ..ApiEvent::default()
+                start: Some(EventTime::timed(at(start), None)),
+                end: Some(EventTime::timed(at(end), None)),
+                ..CalendarEvent::default()
             },
             unsynced: false,
         }
@@ -338,44 +317,22 @@ mod tests {
         };
         assert_eq!(times(&event), [at("2026-11-17T09:58")]);
         let mut own = event.clone();
-        own.event.reminders = Some(EventReminders {
-            use_default: Some(false),
-            overrides: vec![
-                EventReminder {
-                    method: Some("popup".into()),
-                    minutes: Some(10),
-                },
-                EventReminder {
-                    method: Some("email".into()),
-                    minutes: Some(30),
-                },
-                EventReminder {
-                    method: Some("popup".into()),
-                    minutes: Some(1),
-                },
-            ],
-        });
+        own.event.reminders = EventReminders::Custom(vec![10, 1]);
         assert_eq!(
             times(&own),
             [at("2026-11-17T09:50"), at("2026-11-17T09:59")],
-            "pop-ups only"
+            "custom reminders only"
         );
-        own.event.reminders = Some(EventReminders {
-            use_default: Some(false),
-            overrides: Vec::new(),
-        });
+        own.event.reminders = EventReminders::None;
         assert!(times(&own).is_empty(), "no reminders, no notification");
-        own.event.reminders = Some(EventReminders {
-            use_default: Some(true),
-            overrides: Vec::new(),
-        });
+        own.event.reminders = EventReminders::Default;
         assert_eq!(times(&own), [at("2026-11-17T09:58")]);
     }
 
     #[test]
     fn some_events_never_notify() {
         let event = stored("2026-11-17T10:00", "2026-11-17T10:30");
-        let quiet = |change: &dyn Fn(&mut ApiEvent)| {
+        let quiet = |change: &dyn Fn(&mut CalendarEvent)| {
             let mut event = event.clone();
             change(&mut event.event);
             reminders(&event, lead(), ME).is_empty()
@@ -385,25 +342,19 @@ mod tests {
             quiet(&|event| event.summary = Some(String::new())),
             "untitled"
         );
-        assert!(quiet(&|event| event.status = Some("cancelled".into())));
+        assert!(quiet(&|event| event.status = EventStatus::Cancelled));
         assert!(
             quiet(&|event| event.attendees = vec![EventAttendee {
                 email: Some(ME.into()),
-                response_status: Some("declined".into()),
+                response_status: RsvpStatus::Declined,
                 ..EventAttendee::default()
             }]),
             "declined"
         );
         assert!(
             quiet(&|event| {
-                event.start = Some(EventDateTime {
-                    date: Some("2026-11-17".into()),
-                    ..EventDateTime::default()
-                });
-                event.end = Some(EventDateTime {
-                    date: Some("2026-11-18".into()),
-                    ..EventDateTime::default()
-                });
+                event.start = Some(EventTime::AllDay(jiff::civil::date(2026, 11, 17)));
+                event.end = Some(EventTime::AllDay(jiff::civil::date(2026, 11, 18)));
             }),
             "all day"
         );
@@ -472,10 +423,13 @@ mod tests {
     fn a_call_names_its_provider_and_joins() {
         let mut event = stored("2026-11-17T10:00", "2026-11-17T10:30");
         event.event.location = Some("Room 4".into());
-        event.event.conference_data = Some(json!({
-            "entryPoints": [{ "entryPointType": "phone", "uri": "tel:+1-555-0100" }, { "entryPointType": "video", "uri": "https://meet.google.com/abc-defg-hij" }],
-            "conferenceSolution": { "key": { "type": "hangoutsMeet" }, "name": "Google Meet" },
-        }));
+        event.event.conference = Some(Conference {
+            kind: ConferenceKind::GoogleMeet,
+            join_url: Some("https://meet.google.com/abc-defg-hij".into()),
+            label: None,
+            pending: false,
+            dial_in: Some("tel:+1-555-0100".into()),
+        });
         let [reminder] = reminders(&event, lead(), ME).try_into().expect("one");
         let notice = notice(&reminder, ME, reminder.at + 1.second(), &tz());
         assert_eq!(
@@ -495,39 +449,42 @@ mod tests {
             Some("https://meet.google.com/abc-defg-hij?authuser=maya%40brightmoor.co")
         );
 
-        let provider = |solution: serde_json::Value, kind: &str| {
-            let event = ApiEvent {
-                conference_data: Some(
-                    json!({ "entryPoints": [{ "entryPointType": kind, "uri": "https://example.com/call" }], "conferenceSolution": solution }),
-                ),
-                ..ApiEvent::default()
+        let provider = |kind: ConferenceKind| {
+            let event = CalendarEvent {
+                conference: Some(Conference {
+                    kind,
+                    join_url: Some("https://example.com/call".into()),
+                    label: None,
+                    pending: false,
+                    dial_in: None,
+                }),
+                ..CalendarEvent::default()
             };
-            conference(&event, ME).0
+            conference(&event, ME)
         };
+        assert_eq!(provider(ConferenceKind::Zoom).0, Some("Zoom"));
         assert_eq!(
-            provider(json!({ "name": "Zoom Meeting" }), "video"),
-            Some("Zoom")
+            provider(ConferenceKind::Teams),
+            (
+                Some("Microsoft Teams"),
+                Some("https://example.com/call".into())
+            )
         );
         assert_eq!(
-            provider(json!({ "name": "Microsoft Teams" }), "video"),
-            Some("Microsoft Teams")
-        );
-        assert_eq!(
-            provider(json!({ "name": "Whereby" }), "video"),
+            provider(ConferenceKind::Other("Whereby".into())).0,
             Some("Video")
         );
-        assert_eq!(provider(json!({}), "sip"), Some("Phone"));
-        assert_eq!(provider(json!({}), "more"), None);
 
         // Phone-only and SIP-only conferences produce Join meeting buttons with valid tel:/sip: URIs.
-        for (kind, uri) in [
-            ("phone", "tel:+1-555-0100"),
-            ("sip", "sip:123456@myprovider.com"),
-        ] {
+        for uri in ["tel:+1-555-0100", "sip:123456@myprovider.com"] {
             let mut dial = stored("2026-11-17T10:00", "2026-11-17T10:30");
-            dial.event.conference_data = Some(json!({
-                "entryPoints": [{ "entryPointType": kind, "uri": uri }],
-            }));
+            dial.event.conference = Some(Conference {
+                kind: ConferenceKind::Other(String::new()),
+                join_url: None,
+                label: None,
+                pending: false,
+                dial_in: Some(uri.into()),
+            });
             let [reminder] = reminders(&dial, lead(), ME).try_into().expect("one");
             let notice = super::notice(&reminder, ME, reminder.at + 1.second(), &tz());
             let Some(Click {
@@ -535,7 +492,7 @@ mod tests {
                 ..
             }) = notice.button
             else {
-                panic!("Join meeting button for {kind}");
+                panic!("Join meeting button for {uri}");
             };
             assert_eq!(super::super::meeting_uri(&got).as_deref(), Some(uri));
         }
@@ -592,5 +549,78 @@ mod tests {
             .calendar_accounts
             .insert("maya.lin@example.com".into(), other(false));
         assert_eq!(calendars(&settings), ["a"]);
+    }
+
+    #[test]
+    fn cross_provider_calendar_uses_owner_email_for_rsvp_and_meet_authuser() {
+        let priya = "priya@brightmoor.co";
+        let mut settings = Settings::default();
+        settings.calendar_accounts.insert(
+            format!("microsoft {ME}"),
+            CalendarAccount {
+                email: ME.into(),
+                provider: "microsoft".into(),
+                authed: true,
+                calendars: [("AAMkPrimary".into(), CalendarSetting::default())].into(),
+            },
+        );
+        settings.calendar_accounts.insert(
+            priya.into(),
+            CalendarAccount {
+                email: priya.into(),
+                provider: "google".into(),
+                authed: true,
+                calendars: [(priya.into(), CalendarSetting::default())].into(),
+            },
+        );
+
+        assert_eq!(calendar_owner(&settings, priya, ME), priya);
+        assert_eq!(calendar_owner(&settings, "AAMkPrimary", ME), ME);
+        assert_eq!(calendar_owner(&settings, "unknown", ME), ME);
+
+        // Declined by Priya suppresses the reminder even though Maya didn't decline.
+        let mut declined = stored("2026-11-17T10:00", "2026-11-17T10:30");
+        declined.calendar_id = priya.into();
+        declined.event.attendees = vec![EventAttendee {
+            email: Some(priya.into()),
+            response_status: RsvpStatus::Declined,
+            ..EventAttendee::default()
+        }];
+        let owner = calendar_owner(&settings, &declined.calendar_id, ME);
+        assert!(reminders(&declined, lead(), owner).is_empty());
+
+        // Google Meet link on Priya's secondary calendar uses Priya for `authuser` while keeping
+        // the notification click routed to the primary Microsoft mail account's canonical key.
+        let primary_key = format!("microsoft {ME}");
+        let mut meet = stored("2026-11-17T10:00", "2026-11-17T10:30");
+        meet.calendar_id = priya.into();
+        meet.event.conference = Some(Conference {
+            kind: ConferenceKind::GoogleMeet,
+            join_url: Some("https://meet.google.com/abc-defg-hij".into()),
+            label: None,
+            pending: false,
+            dial_in: None,
+        });
+        let [reminder] = reminders(&meet, lead(), owner).try_into().expect("one");
+        let built = notice_for(
+            &reminder,
+            &primary_key,
+            owner,
+            reminder.at + 1.second(),
+            &tz(),
+        );
+        assert_eq!(built.click.account, primary_key);
+        let Some(Click {
+            account,
+            open: Open::Event { url: Some(got), .. },
+        }) = built.button
+        else {
+            panic!("expected Join meeting button");
+        };
+        assert_eq!(account, primary_key);
+        assert_eq!(
+            got,
+            "https://meet.google.com/abc-defg-hij?authuser=priya%40brightmoor.co"
+        );
     }
 }

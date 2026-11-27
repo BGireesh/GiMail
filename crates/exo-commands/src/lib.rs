@@ -251,6 +251,12 @@ impl<A: Clone + 'static> Commands<A> {
         self.shortcuts.set_send_and_done(on);
     }
 
+    /// Says whether the account on screen is an Outlook / Microsoft account, which switches the
+    /// shortcuts sheet's wording and hides Gmail-only rows and sections.
+    pub fn set_outlook(&mut self, outlook: bool) {
+        self.shortcuts.set_outlook(outlook);
+    }
+
     /// Opens the shortcuts sheet.
     pub fn open_shortcuts(&mut self) {
         self.palette.close(false);

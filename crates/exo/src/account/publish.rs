@@ -33,11 +33,12 @@ pub struct Snapshot {
     pub counts: crate::splits::Counts,
     /// Whether some thread is muted, which makes the folder drawer list Muted.
     pub muted: bool,
-    /// More rows exist past `threads`, locally or in Gmail.
+    /// More rows exist past `threads`, locally or on the provider.
     pub more: bool,
     /// The list is still being fetched (the first sync, or a backfill of it).
     pub loading: bool,
-    /// Whether every thread of the list is stored, meaning Gmail has none older than the store has.
+    /// Whether every thread of the list is stored, meaning the provider has none older than the
+    /// store has.
     pub complete: bool,
     /// The account's labels.
     pub labels: Vec<Label>,
@@ -199,6 +200,7 @@ async fn contact_brand_status(
     store: &Store,
     email: &str,
     thread: Option<&ThreadId>,
+    provider: exo_auth::Provider,
 ) -> Result<(Option<bool>, Option<Vec<exo_store::Header>>), exo_store::Error> {
     if let Some(id) = thread
         && let Some(detail) = store.thread_headers(id).await?
@@ -211,13 +213,13 @@ async fn contact_brand_status(
                     .is_some_and(|from| from.email.eq_ignore_ascii_case(email))
         });
         if let Some(message) = message {
-            let passed = crate::brands::passed_for(&message.headers, email);
+            let passed = crate::brands::passed_for(&message.headers, email, provider);
             return Ok((Some(passed), passed.then(|| message.headers.clone())));
         }
     }
     match store.latest_headers_from(email).await? {
         Some(headers) => {
-            let passed = crate::brands::passed_for(&headers, email);
+            let passed = crate::brands::passed_for(&headers, email, provider);
             Ok((Some(passed), passed.then_some(headers)))
         }
         None => Ok((None, None)),
@@ -297,14 +299,20 @@ impl Worker {
         email: String,
         thread: Option<ThreadId>,
     ) {
-        let (allowed, passing_headers) =
-            match contact_brand_status(&self.store, &email, thread.as_ref()).await {
-                Ok(status) => status,
-                Err(error) => {
-                    log::warn!("checking a contact's authentication headers: {error}");
-                    (Some(false), None)
-                }
-            };
+        let (allowed, passing_headers) = match contact_brand_status(
+            &self.store,
+            &email,
+            thread.as_ref(),
+            self.brands.provider(),
+        )
+        .await
+        {
+            Ok(status) => status,
+            Err(error) => {
+                log::warn!("checking a contact's authentication headers: {error}");
+                (Some(false), None)
+            }
+        };
         // Their brand's logo, earned when the message on screen passed DMARC, shows once it's had.
         // It's asked for each time they show until then, so a change to the images setting applies.
         if self.brands.logo(&email).is_none()
@@ -389,6 +397,7 @@ impl Worker {
         };
         let chips = Chips::new(&labels);
         let focused = self.focused;
+        let provider = self.brands.provider();
         for (&view_id, view) in &mut self.views {
             let is_focused = view_id == focused;
             let read = async {
@@ -413,7 +422,8 @@ impl Worker {
                 let contact = match &view.contact {
                     Some((email, thread_id)) => {
                         let (allowed, _) =
-                            contact_brand_status(store, email, thread_id.as_ref()).await?;
+                            contact_brand_status(store, email, thread_id.as_ref(), provider)
+                                .await?;
                         Some((
                             email.clone(),
                             thread_id.as_ref().map(|id| id.as_str().to_owned()),

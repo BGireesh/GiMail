@@ -8,6 +8,8 @@ use exo_store::{AttachmentSource, DraftAttachment};
 
 /// Gmail's limit on a whole message.
 const MAX_MESSAGE: u64 = 35_882_577;
+/// Outlook's limit on a whole message (33 MB).
+const MAX_MESSAGE_OUTLOOK: u64 = 33 * 1024 * 1024;
 /// What's left for headers and the like.
 const HEADROOM: u64 = 256 * 1024;
 
@@ -29,6 +31,15 @@ pub(crate) struct Notice {
 const TRY_AGAIN: &str =
     "This can happen if you attach a file while it is being saved. Please try again.";
 
+/// Alert text when a message exceeds the provider's maximum size.
+pub(crate) fn too_large_text(outlook: bool) -> &'static str {
+    if outlook {
+        "This message is too large for Outlook. Shorten the message or remove attachments."
+    } else {
+        "This message is too large for Gmail. Shorten the message or remove attachments."
+    }
+}
+
 /// Adds the files at `paths` to a draft that has `kept` and would send `html`, copying them into
 /// `folder`. Returns the new attachments and the alert to show, if any (later alerts replace
 /// earlier ones).
@@ -37,6 +48,7 @@ pub(crate) fn add(
     kept: &[DraftAttachment],
     html: &str,
     folder: &Path,
+    outlook: bool,
 ) -> (Vec<DraftAttachment>, Option<Notice>) {
     // A folder in a drop attaches nothing.
     if paths.iter().any(|path| path.is_dir()) {
@@ -70,10 +82,8 @@ pub(crate) fn add(
         .iter()
         .map(|attachment| attachment.size)
         .chain(rest.iter().map(|(_, _, size)| size.unwrap_or(0)));
-    if exceeds_gmail_limit(sizes, html) {
-        let text =
-            "This message is too large for Gmail. Shorten the message or remove attachments."
-                .into();
+    if exceeds_limit(sizes, html, outlook) {
+        let text = too_large_text(outlook).into();
         return (Vec::new(), Some(Notice { title: None, text }));
     }
     let mut added = Vec::new();
@@ -112,6 +122,10 @@ pub(crate) fn add(
 /// An image put in the body. Copies `bytes`, a `mime_type` file named `name`, into `folder` as the
 /// inline attachment that the body shows by Content-ID `cid`, unless the message would then be
 /// too large for Gmail.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "inline image metadata, draft context, and provider limit"
+)]
 pub(crate) fn add_inline(
     name: &str,
     mime_type: &str,
@@ -120,16 +134,17 @@ pub(crate) fn add_inline(
     kept: &[DraftAttachment],
     html: &str,
     folder: &Path,
+    outlook: bool,
 ) -> Result<DraftAttachment, Notice> {
     let size = bytes.len() as u64;
-    if exceeds_gmail_limit(
+    if exceeds_limit(
         kept.iter().map(|attachment| attachment.size).chain([size]),
         html,
+        outlook,
     ) {
         return Err(Notice {
             title: None,
-            text: "This message is too large for Gmail. Shorten the message or remove attachments."
-                .into(),
+            text: too_large_text(outlook).into(),
         });
     }
     let uuid = super::factory::uuid_v4();
@@ -207,10 +222,19 @@ fn is_blocked(name: &str) -> bool {
         .is_some_and(|(_, extension)| BLOCKED.contains(&extension.to_ascii_lowercase().as_str()))
 }
 
-/// Whether the message would be over Gmail's limit. It counts each attachment as base64 with line
-/// breaks and part headers, the HTML twice as quoted-printable (the text alternative is about as
-/// long), and headroom.
-pub(crate) fn exceeds_gmail_limit(sizes: impl IntoIterator<Item = u64>, html: &str) -> bool {
+/// Whether the message would be over the provider's limit (Gmail or Outlook). It counts each
+/// attachment as base64 with line breaks and part headers, the HTML twice as quoted-printable
+/// (the text alternative is about as long), and headroom.
+pub(crate) fn exceeds_limit(
+    sizes: impl IntoIterator<Item = u64>,
+    html: &str,
+    outlook: bool,
+) -> bool {
+    let limit = if outlook {
+        MAX_MESSAGE_OUTLOOK
+    } else {
+        MAX_MESSAGE
+    };
     let attachments: u64 = sizes
         .into_iter()
         .map(|size| {
@@ -218,7 +242,12 @@ pub(crate) fn exceeds_gmail_limit(sizes: impl IntoIterator<Item = u64>, html: &s
             base64 + 2 * base64.div_ceil(76) + 512
         })
         .sum();
-    attachments + 2 * quoted_printable_size(html) + HEADROOM > MAX_MESSAGE
+    attachments + 2 * quoted_printable_size(html) + HEADROOM > limit
+}
+
+#[cfg(test)]
+pub(crate) fn exceeds_gmail_limit(sizes: impl IntoIterator<Item = u64>, html: &str) -> bool {
+    exceeds_limit(sizes, html, false)
 }
 
 /// `text`'s size as quoted-printable.
@@ -300,7 +329,7 @@ impl crate::Mail {
                 .events
                 .retain(|event| !matches!(event, egui::Event::Paste(_)))
         });
-        if copied.account != self.account.email() {
+        if copied.account != self.account.key() {
             self.compose_alert_notice(
                 &id,
                 Notice {
@@ -343,7 +372,7 @@ mod tests {
         let tool = write("setup.EXE", b"MZ");
         let blank = write("blank.txt", b"");
         let files = dir.join("files");
-        let (added, notice) = add(&[plan.clone(), tool.clone()], &[], "", &files);
+        let (added, notice) = add(&[plan.clone(), tool.clone()], &[], "", &files, false);
         assert_eq!(added.len(), 1);
         assert_eq!(
             (
@@ -361,15 +390,15 @@ mod tests {
             notice.expect("an alert").text,
             "\"setup.EXE\" has been blocked for security reasons."
         );
-        let (added, notice) = add(std::slice::from_ref(&blank), &[], "", &files);
+        let (added, notice) = add(std::slice::from_ref(&blank), &[], "", &files, false);
         assert!(added.is_empty());
         assert_eq!(notice.expect("an alert").title, Some("File is empty…"));
-        let (_, notice) = add(&[tool, blank], &[], "", &files);
+        let (_, notice) = add(&[tool, blank], &[], "", &files, false);
         assert_eq!(
             notice.expect("an alert").text,
             "2 files have been blocked for security reasons or because they had no content."
         );
-        let (added, notice) = add(&[dir.clone(), plan], &[], "", &files);
+        let (added, notice) = add(&[dir.clone(), plan], &[], "", &files, false);
         assert!(
             added.is_empty()
                 && notice

@@ -1,24 +1,22 @@
-//! Backfill walks a list's `threads.list` pages back in time, fetches the rows of only the
-//! threads that are missing or stale (bodies come after, see `bodies`), and records how far each
-//! list is covered.
+//! Backfill walks a list's pages back in time, fetches the rows of only the threads that are
+//! missing or stale (bodies come after, see `bodies`), and records how far each list is
+//! covered.
 
 use std::collections::{HashMap, HashSet};
 
 use futures::{StreamExt, stream};
-use gmail::ListQuery;
 use jiff::Timestamp;
 
-use super::{ATTEMPTS, Rows, fetch_rows};
+use super::ATTEMPTS;
 use crate::db::{self, ListCursor, ListEntry, MessageRow, ThreadRow};
 use crate::error::{Error, Result};
 use crate::ids::ListId;
-use crate::provider;
+use crate::provider::{Fetched, Listing, Selection};
 use crate::quota::Lane;
-use crate::split::{Me, gmail_search};
 use crate::store::{Inner, Store, load_views, reindex};
-use crate::view::Router;
+use crate::truth;
 
-/// Threads per `threads.list` page. A page holds the sync lock, which the next history check
+/// Threads per page. A page holds the sync lock, which the next history check
 /// waits for, and the rows of ten threads take a few seconds of the budget's refill.
 const PAGE_SIZE: u32 = 10;
 /// `threads.get` calls in flight at once.
@@ -168,31 +166,28 @@ impl Inner {
         } else {
             Lane::Sync
         };
-        let mut query = ListQuery {
-            page_token: cursor.as_ref().and_then(|cursor| cursor.page_token.clone()),
-            max_results: Some(PAGE_SIZE),
-            ..selection(list, &router)?
-        };
         let before = cursor.as_ref().and_then(|cursor| cursor.before);
-        if let Some(before) = before {
-            query.q = Some(listed_before(query.q.as_deref(), before));
-        }
         let page = self
-            .api
-            .call(lane, ATTEMPTS, |gmail| gmail.threads(&query))
+            .mail
+            .list(
+                Listing {
+                    selection: Selection::List(list),
+                    router: &router,
+                    page: cursor.as_ref().and_then(|cursor| cursor.page_token.clone()),
+                    before,
+                    max: PAGE_SIZE,
+                },
+                lane,
+            )
             .await?;
-        let listed: Vec<(String, u64)> = page
-            .threads
-            .iter()
-            .filter_map(|thread| Some((thread.id.clone()?, thread.history_id.unwrap_or_default())))
-            .collect();
+        let listed = page.threads;
         let ids: Vec<String> = listed.iter().map(|(id, _)| id.clone()).collect();
         let fetched = self.fetch_stale(lane, &listed).await?;
 
-        let next = page.next_page_token;
+        let next = page.next;
         let mut write = self.begin(&mut db).await?;
-        for rows in &fetched {
-            if let Some(id) = provider::save_rows(write.exec(), rows).await? {
+        for rows in fetched {
+            if let Some(id) = truth::save_rows(write.exec(), rows).await? {
                 reindex(write.exec(), &id, &router).await?;
             }
         }
@@ -257,13 +252,14 @@ pub(super) struct Page {
 }
 
 impl Inner {
-    /// Fetches in `lane` the rows ([`fetch_rows`]) of the `(id, historyId)` pairs Gmail listed
-    /// that are missing locally or changed since they were stored.
+    /// Fetches in `lane` the rows ([`rows`](crate::provider::Provider::rows)) of the
+    /// `(id, version)` pairs the provider listed that are missing locally or changed since they
+    /// were stored.
     pub(crate) async fn fetch_stale(
         &self,
         lane: Lane,
         listed: &[(String, u64)],
-    ) -> Result<Vec<Rows>> {
+    ) -> Result<Vec<Fetched>> {
         let mut db = self.db.clone();
         let ids: Vec<&str> = listed.iter().map(|(id, _)| id.as_str()).collect();
         let stored: HashMap<String, u64> =
@@ -271,11 +267,11 @@ impl Inner {
                 .exec(&mut db)
                 .await?
                 .into_iter()
-                .map(|thread| (thread.id, thread.history_id))
+                .map(|thread| (thread.id, thread.version))
                 .collect();
         let stale: Vec<String> = listed
             .iter()
-            .filter(|(id, history_id)| stored.get(id).is_none_or(|stored| history_id > stored))
+            .filter(|(id, version)| stored.get(id).is_none_or(|stored| version > stored))
             .map(|(id, _)| id.clone())
             .collect();
         // What a changed thread already has is never fetched in full again.
@@ -286,11 +282,11 @@ impl Inner {
         {
             messages.entry(row.thread_id).or_default().insert(row.id);
         }
-        let api = &self.api;
+        let mail = &self.mail;
         let fetched = stream::iter(stale)
             .map(|id| {
                 let stored = messages.remove(&id).unwrap_or_default();
-                async move { fetch_rows(api, lane, ATTEMPTS, &id, &stored).await }
+                async move { mail.rows(&id, &stored, lane, ATTEMPTS).await }
             })
             .buffer_unordered(FETCH_CONCURRENCY)
             .collect::<Vec<_>>()
@@ -302,10 +298,10 @@ impl Inner {
 }
 
 impl Store {
-    /// Brings the latest conversations with `email` into the store from Gmail, for when local
-    /// mail doesn't reach back far enough. It fetches the newest [`RECENT_THREADS`] threads
-    /// matching `(from:… OR to:… OR cc:… OR bcc:…) AND -in:DRAFT`, unless they're stored and
-    /// current, through the store's retry policy. [`recent_threads`](Self::recent_threads) then
+    /// Brings the latest conversations with `email` into the store from the provider, for when
+    /// local mail doesn't reach back far enough. It fetches the newest [`RECENT_THREADS`]
+    /// threads from, to, copying or blind-copying `email`, drafts left out, unless they're stored
+    /// and current, through the store's retry policy. [`recent_threads`](Self::recent_threads) then
     /// lists them.
     ///
     /// # Errors
@@ -314,22 +310,20 @@ impl Store {
         let inner = &self.inner;
         // Saving a thread needs the account's identity, but it doesn't need to wait for a sync.
         inner.bootstrapped().await?;
-        let query = ListQuery {
-            q: Some(format!(
-                "(from:{email} OR to:{email} OR cc:{email} OR bcc:{email}) AND -in:DRAFT"
-            )),
-            max_results: Some(RECENT_THREADS),
-            ..ListQuery::default()
-        };
-        let page = inner
-            .api
-            .call(Lane::Show, ATTEMPTS, |gmail| gmail.threads(&query))
-            .await?;
-        let listed: Vec<(String, u64)> = page
-            .threads
-            .iter()
-            .filter_map(|thread| Some((thread.id.clone()?, thread.history_id.unwrap_or_default())))
-            .collect();
+        let listed = inner
+            .mail
+            .list(
+                Listing {
+                    selection: Selection::Contact(email),
+                    router: &inner.router(),
+                    page: None,
+                    before: None,
+                    max: RECENT_THREADS,
+                },
+                Lane::Show,
+            )
+            .await?
+            .threads;
         let fetched = inner.fetch_stale(Lane::Show, &listed).await?;
         if fetched.is_empty() {
             return Ok(());
@@ -337,8 +331,8 @@ impl Store {
         let router = inner.router();
         let mut db = inner.db.clone();
         let mut write = inner.begin(&mut db).await?;
-        for rows in &fetched {
-            if let Some(id) = provider::save_rows(write.exec(), rows).await? {
+        for rows in fetched {
+            if let Some(id) = truth::save_rows(write.exec(), rows).await? {
                 reindex(write.exec(), &id, &router).await?;
             }
         }
@@ -364,16 +358,6 @@ fn passes(splits: &[&str], on_screen: Option<&ListId>) -> Vec<(ListId, Limit)> {
     passes
 }
 
-/// `q` narrowed to threads with mail before `before` (epoch milliseconds). Gmail's `before:`
-/// takes seconds, so the time is rounded up to leave out nothing before it.
-fn listed_before(q: Option<&str>, before: i64) -> String {
-    let seconds = before.saturating_add(999).div_euclid(1000);
-    match q {
-        Some(q) => format!("({q}) before:{seconds}"),
-        None => format!("before:{seconds}"),
-    }
-}
-
 fn finished(cursor: &ListCursor, limit: Limit) -> bool {
     cursor.complete
         || match limit {
@@ -385,61 +369,9 @@ fn finished(cursor: &ListCursor, limit: Limit) -> bool {
         }
 }
 
-/// What Gmail is asked to list for `list`.
-pub(crate) fn selection(list: &ListId, router: &Router) -> Result<ListQuery> {
-    let me = &router.me;
-    let query = |q: String| ListQuery {
-        q: Some(q),
-        ..ListQuery::default()
-    };
-    let labels = |id: &str| ListQuery {
-        label_ids: vec![id.to_owned()],
-        ..ListQuery::default()
-    };
-    Ok(match list {
-        ListId::All => ListQuery {
-            include_spam_trash: true,
-            ..ListQuery::default()
-        },
-        ListId::Inbox | ListId::Important | ListId::Other | ListId::Split(_) => {
-            let me = Me {
-                addresses: &me.addresses,
-                name: me.name.as_deref(),
-            };
-            query(gmail_search(list.key(), &router.splits.defined, &me))
-        }
-        ListId::Done => query("-in:INBOX".into()),
-        ListId::Muted => labels(
-            me.muted_label
-                .as_deref()
-                .ok_or(Error::NotSynced("the mute label"))?,
-        ),
-        // Every reminder is local (`db::coverage`), so this only fetches what the label has.
-        ListId::Reminders => labels(
-            me.snoozed_label
-                .as_deref()
-                .ok_or(Error::NotSynced("the reminder labels"))?,
-        ),
-        other => labels(other.key()),
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_pass_past_evicted_mail_lists_what_came_before_it() {
-        assert_eq!(
-            listed_before(None, 1_700_000_000_001),
-            "before:1700000001",
-            "up to the second after"
-        );
-        assert_eq!(
-            listed_before(Some("in:inbox OR label:vip"), 1_700_000_000_000),
-            "(in:inbox OR label:vip) before:1700000000"
-        );
-    }
 
     #[test]
     fn the_list_on_screen_goes_first() {

@@ -35,7 +35,11 @@ pub(crate) const PICKER: &[Region] = &[Region::CalendarColorPicker];
 pub(crate) struct FormState {
     create: bool,
     all_day: bool,
-    meet: bool,
+    outlook: bool,
+    supports_meet: bool,
+    supports_teams: bool,
+    meeting_present: bool,
+    meeting_removable: bool,
     /// The event's own meeting link has the keyboard.
     link_focused: bool,
     /// While About has the keyboard, the formatting keys that apply to it, by their place in
@@ -47,8 +51,9 @@ pub(crate) struct FormState {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct State {
     form: Option<FormState>,
-    /// An alert or dialog: how many actions, and the selected one.
-    prompt: Option<(usize, usize)>,
+    /// An alert or dialog: how many actions, the selected one, and whether a note textarea has
+    /// keyboard focus.
+    prompt: Option<(usize, usize, bool)>,
     /// Calendar Settings is up.
     options: bool,
     /// The open thread's invite card: whether it has the keyboard, or can take it.
@@ -67,6 +72,11 @@ pub(crate) struct State {
 impl crate::Mail {
     /// What the calendar registers this frame besides its standing keys.
     pub(crate) fn calendar_state(&self) -> State {
+        let calendars = self
+            .calendar
+            .form
+            .as_ref()
+            .map(|_| self.calendar_writable());
         State {
             form: self.calendar.form.as_ref().map(|form| {
                 let about = form.about_focused().then(|| {
@@ -78,15 +88,33 @@ impl crate::Mail {
                         .fold(0u16, |mask, (at, _)| mask | 1 << at);
                     (formats, editor.wants_escape(), editor.wants_tab())
                 });
+                let cal = calendars
+                    .as_deref()
+                    .and_then(|list| list.iter().find(|cal| cal.id == form.values.calendar));
+                let provider = cal.map_or_else(
+                    || self.calendar_provider(&form.values.calendar),
+                    |cal| cal.provider,
+                );
+                let outlook = provider == exo_store::CalendarProviderKind::Microsoft;
+                let (supports_meet, supports_teams) = match cal {
+                    Some(cal) => (cal.supports_meet, cal.supports_teams),
+                    None => (!outlook, outlook),
+                };
                 FormState {
                     create: form.mode == Mode::Create,
                     all_day: form.values.all_day,
-                    meet: form.values.meeting == Meeting::NewMeet,
+                    outlook,
+                    supports_meet,
+                    supports_teams,
+                    meeting_present: form.values.meeting != Meeting::None,
+                    meeting_removable: form.meeting_removable(calendars.as_deref().unwrap_or(&[])),
                     link_focused: form.meeting_link_focused(),
                     about,
                 }
             }),
-            prompt: self.calendar_prompt_actions(),
+            prompt: self
+                .calendar_prompt_actions()
+                .map(|(count, selected)| (count, selected, self.calendar_cancel_note_focused())),
             options: self.calendar.options_open,
             invite: self.thread.as_ref().and_then(|thread| {
                 if thread.invite_focused() {
@@ -282,6 +310,8 @@ pub(crate) fn register(
             "Meeting Link Settings",
             "Zoom Links",
             "Google Meet Links",
+            "Teams Links",
+            "Microsoft Teams Links",
             "Conference Links",
             "Conference Calls",
             "Video Calls",
@@ -296,23 +326,36 @@ pub(crate) fn register(
                 .regions(&[Region::Dialog]),
         );
     }
-    if let Some((count, selected)) = state.prompt {
-        crate::notice::register_alert_keys(
-            commands,
-            action(Action::Prompt(selected)),
-            action(Action::Prompt(count - 1)),
-            |step| action(Action::PromptSelect(step)),
-        );
-        commands.add(
-            Command::shortcut("CALENDAR_ALERT_UP", action(Action::PromptChoose(-1)))
-                .key("up")
-                .regions(ALERT),
-        );
-        commands.add(
-            Command::shortcut("CALENDAR_ALERT_DOWN", action(Action::PromptChoose(1)))
-                .key("down")
-                .regions(ALERT),
-        );
+    if let Some((count, selected, note_focused)) = state.prompt {
+        if note_focused {
+            commands.add(
+                Command::shortcut("ALERT_CONFIRM", action(Action::Prompt(selected)))
+                    .key("mod+enter")
+                    .regions(ALERT),
+            );
+            commands.add(
+                Command::shortcut("ALERT_ESCAPE", action(Action::Prompt(count - 1)))
+                    .key("esc")
+                    .regions(ALERT),
+            );
+        } else {
+            crate::notice::register_alert_keys(
+                commands,
+                action(Action::Prompt(selected)),
+                action(Action::Prompt(count - 1)),
+                |step| action(Action::PromptSelect(step)),
+            );
+            commands.add(
+                Command::shortcut("CALENDAR_ALERT_UP", action(Action::PromptChoose(-1)))
+                    .key("up")
+                    .regions(ALERT),
+            );
+            commands.add(
+                Command::shortcut("CALENDAR_ALERT_DOWN", action(Action::PromptChoose(1)))
+                    .key("down")
+                    .regions(ALERT),
+            );
+        }
     }
     match state.invite {
         // With no draft to go to, an invite card takes the keyboard.
@@ -716,27 +759,52 @@ fn register_form(commands: &mut Commands<AppAction>, form: FormState) {
             .default_score(20.0)
             .icon("data/calendar"),
     );
-    let verb = if form.meet { "Remove" } else { "Add" };
-    commands.add(
-        Command::new(
-            "CALENDAR_CREATE_CONFERENCE_MEET",
-            format!("{verb} Google Meet Link"),
-            action(Action::FormMeet),
-        )
-        .aliases(
-            [
-                "Google Meet",
-                "Google Video",
-                "Google Hangouts",
-                "G.co",
-                "GMeet",
-            ]
-            .map(|name| format!("{verb} {name}")),
-        )
-        .icon("data/g-suite"),
-    );
+    if form.supports_meet && (!form.meeting_present || form.meeting_removable) {
+        let verb = if form.meeting_present {
+            "Remove"
+        } else {
+            "Add"
+        };
+        commands.add(
+            Command::new(
+                "CALENDAR_CREATE_CONFERENCE_MEET",
+                format!("{verb} Google Meet Link"),
+                action(Action::FormMeet),
+            )
+            .aliases(
+                [
+                    "Google Meet",
+                    "Google Video",
+                    "Google Hangouts",
+                    "G.co",
+                    "GMeet",
+                ]
+                .map(|name| format!("{verb} {name}")),
+            )
+            .icon("data/g-suite"),
+        );
+    }
+    if form.supports_teams && (!form.meeting_present || form.meeting_removable) {
+        let verb = if form.meeting_present {
+            "Remove"
+        } else {
+            "Add"
+        };
+        commands.add(
+            Command::new(
+                "CALENDAR_CREATE_CONFERENCE_TEAMS",
+                format!("{verb} Microsoft Teams Link"),
+                action(Action::FormMeet),
+            )
+            .aliases(
+                ["Microsoft Teams", "Teams", "MS Teams", "Teams Call"]
+                    .map(|name| format!("{verb} {name}")),
+            )
+            .icon("data/microsoft-teams"),
+        );
+    }
     // What only Google Calendar's own editor does: it opens with the form's event.
-    if form.create {
+    if form.create && !form.outlook {
         let external: [(&str, &str, &[&str]); 11] = [
             ("EDIT_CALENDAR_EVENT", "Edit event in Google Calendar", &[]),
             ("EDIT_CALENDAR_PERMISSIONS", "Change Guest Permissions", &[]),

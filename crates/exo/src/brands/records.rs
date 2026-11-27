@@ -1,30 +1,28 @@
-//! What a brand's logo rests on: Gmail's DMARC verdict on a message (its own
+//! What a brand's logo rests on: the mail provider's DMARC verdict on a message (its own
 //! `Authentication-Results`), and the sending domain's DMARC and BIMI records in DNS.
 
+use exo_auth::Provider;
 use exo_store::Header;
 use mail_parser::{Address, MessageParser};
 
-/// The domain whose policy Gmail applied to a message that passed DMARC.
+/// The domain whose policy the provider applied to a message that passed DMARC.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Passed {
     /// The `From` address's domain, lower-cased, aligned with `header.from`.
     pub(super) domain: String,
 }
 
-/// Gmail's verdict in `headers`: a single RFC 5322 `From` header naming one mailbox, and Gmail's
-/// own `Authentication-Results` (the first naming `mx.google.com`, which Gmail adds above any the
-/// message came with) saying `dmarc=pass` for an aligned `header.from` under a policy that
-/// quarantines or rejects mail that fails (the subdomain policy for a subdomain).
-pub(super) fn passed(headers: &[Header]) -> Option<Passed> {
+/// The provider's verdict in `headers`: a single RFC 5322 `From` header naming one mailbox, and
+/// the provider's own `Authentication-Results` saying `dmarc=pass` for an aligned `header.from`.
+///
+/// For Google (`mx.google.com`), the inline policy comment must quarantine or reject failing mail
+/// (the subdomain policy for a subdomain). For Microsoft / Exchange Online (an `*.outlook.com` /
+/// `outlook.com` authserv-id, or Exchange's authserv-id-less header starting with an RFC 8601
+/// method because Exchange renames incoming external headers to `Authentication-Results-Original`),
+/// an inline policy comment is enforced when present and DNS `_dmarc` enforces policy otherwise.
+pub(super) fn passed(headers: &[Header], provider: Provider) -> Option<Passed> {
     let from_domain = single_from_domain(headers)?;
-    let results = headers.iter().find_map(|header| {
-        let value = header
-            .name
-            .eq_ignore_ascii_case("Authentication-Results")
-            .then_some(header.value.as_str())?;
-        let (server, results) = value.split_once(';')?;
-        (server.split_whitespace().next()? == "mx.google.com").then_some(results)
-    })?;
+    let results = auth_results(headers, provider)?;
     let dmarc = outside_comments(results)
         .into_iter()
         .find(|(method, _)| method.trim().starts_with("dmarc="))?;
@@ -47,13 +45,87 @@ pub(super) fn passed(headers: &[Header]) -> Option<Passed> {
             .map(str::to_uppercase)
     };
     let organization = psl::domain_str(&from_domain).unwrap_or(&from_domain);
-    let policy = match tag("sp") {
-        Some(policy) if organization != from_domain => policy,
-        _ => tag("p")?,
+    let inline_policy = match tag("sp") {
+        Some(policy) if organization != from_domain => Some(policy),
+        _ => tag("p"),
     };
-    matches!(policy.as_str(), "QUARANTINE" | "REJECT").then_some(Passed {
+    let policy_ok = match (provider, inline_policy.as_deref()) {
+        (_, Some("QUARANTINE" | "REJECT")) => true,
+        (_, Some(_)) => false,
+        // Gmail always includes `(p=... sp=...)`; Exchange Online typically emits `dmarc=pass
+        // action=none header.from=...` without a policy comment, so DNS `_dmarc` enforces it.
+        (Provider::Microsoft, None) => true,
+        (Provider::Google, None) => false,
+    };
+    policy_ok.then_some(Passed {
         domain: from_domain,
     })
+}
+
+/// The results portion of the `Authentication-Results` header added by `provider`.
+///
+/// Exchange Online renames any incoming `Authentication-Results` header to
+/// `Authentication-Results-Original` before prepending its own, so for Microsoft accounts only the
+/// topmost `Authentication-Results` header is inspected (preventing fallthrough to lower forged
+/// headers when the topmost header is untrusted).
+fn auth_results(headers: &[Header], provider: Provider) -> Option<&str> {
+    let mut auth_headers = headers.iter().filter_map(|header| {
+        header
+            .name
+            .eq_ignore_ascii_case("Authentication-Results")
+            .then_some(header.value.as_str())
+    });
+    match provider {
+        Provider::Google => auth_headers.find_map(|value| {
+            let (server, results) = value.split_once(';')?;
+            (server.split_whitespace().next()? == "mx.google.com").then_some(results)
+        }),
+        Provider::Microsoft => exchange_auth_results(auth_headers.next()?),
+    }
+}
+
+/// Extracts the results section from an Exchange Online `Authentication-Results` header value,
+/// accepting either an `outlook.com` / `*.outlook.com` authserv-id or Exchange's authserv-id-less
+/// format (`spf=...; dkim=...; dmarc=...; compauth=...`). Rejects any untrusted explicit
+/// authserv-id.
+fn exchange_auth_results(value: &str) -> Option<&str> {
+    let first = value.split(';').next()?.trim();
+    if first.is_empty() {
+        return None;
+    }
+    let token = first.split_whitespace().next()?;
+    if let Some((method, _)) = token.split_once('=') {
+        return is_auth_method(method).then_some(value);
+    }
+    let (_, results) = value.split_once(';')?;
+    is_exchange_authserv_id(token).then_some(results)
+}
+
+/// Whether `server` is a Microsoft Exchange Online / EOP authserv-id (`outlook.com` or a valid
+/// subdomain such as `*.protection.outlook.com` or `*.prod.outlook.com`).
+fn is_exchange_authserv_id(server: &str) -> bool {
+    let lower = server.trim_end_matches('.').to_ascii_lowercase();
+    lower == "outlook.com"
+        || lower
+            .strip_suffix(".outlook.com")
+            .is_some_and(|prefix| !prefix.is_empty() && !prefix.ends_with('.'))
+}
+
+/// Whether `method` is a recognized RFC 8601 / Exchange Online authentication method name.
+fn is_auth_method(method: &str) -> bool {
+    matches!(
+        method.to_ascii_lowercase().as_str(),
+        "spf"
+            | "dkim"
+            | "dmarc"
+            | "compauth"
+            | "arc"
+            | "auth"
+            | "iprev"
+            | "sender-id"
+            | "dkim-adsp"
+            | "bimi"
+    )
 }
 
 /// The lower-cased domain of the one mailbox in `headers`' sole `From` header, or `None` when
@@ -178,18 +250,54 @@ fn tags(record: &str) -> Vec<(String, String)> {
         .collect()
 }
 
-/// Whether `record` is a DMARC record (`v=DMARC1` first) that applies its policy to all of the
-/// mail that fails (`pct=100`, the default).
-pub(super) fn dmarc_applies_to_all(record: &str) -> bool {
+/// Whether `record` starts with `v=DMARC1`.
+fn is_dmarc_record(record: &str) -> bool {
+    tags(record)
+        .first()
+        .map(|(tag, value)| (tag.as_str(), value.as_str()))
+        == Some(("v", "DMARC1"))
+}
+
+/// Whether `records` (all TXT strings at `_dmarc`) contain exactly one `v=DMARC1` record
+/// (RFC 7489 §6.6.3 treats multiple DMARC records as invalid / no policy) and that sole record
+/// enforces `quarantine` or `reject` on all failing mail.
+pub(super) fn dmarc_records_enforce(records: &[String], org_fallback: bool) -> bool {
+    let mut dmarc = records.iter().filter(|record| is_dmarc_record(record));
+    let Some(sole) = dmarc.next() else {
+        return false;
+    };
+    dmarc.next().is_none() && dmarc_enforces(sole, org_fallback)
+}
+
+/// Whether `record` is a DMARC record (`v=DMARC1` first) that enforces `quarantine` or `reject`
+/// on all failing mail (`pct=100`, the default). When `org_fallback` is true (a subdomain fell
+/// back to its organizational domain's `_dmarc` record), `sp=` overrides `p=` per RFC 7489.
+pub(super) fn dmarc_enforces(record: &str, org_fallback: bool) -> bool {
     let tags = tags(record);
     let version = tags
         .first()
         .map(|(tag, value)| (tag.as_str(), value.as_str()));
-    version == Some(("v", "DMARC1"))
-        && tags
-            .iter()
-            .find(|(tag, _)| tag == "pct")
-            .is_none_or(|(_, pct)| pct == "100")
+    if version != Some(("v", "DMARC1")) {
+        return false;
+    }
+    let pct_all = tags
+        .iter()
+        .find(|(tag, _)| tag == "pct")
+        .is_none_or(|(_, pct)| pct == "100");
+    if !pct_all {
+        return false;
+    }
+    let tag = |name: &str| {
+        tags.iter()
+            .find(|(tag, _)| tag == name)
+            .map(|(_, value)| value.to_ascii_lowercase())
+    };
+    let policy = if org_fallback {
+        tag("sp").or_else(|| tag("p"))
+    } else {
+        tag("p")
+    };
+    matches!(policy.as_deref(), Some("quarantine" | "reject"))
 }
 
 /// A BIMI assertion record's logo and certificate (`l=` and `a=`), each an HTTPS URL.
@@ -243,21 +351,102 @@ mod tests {
     fn gmails_dmarc_pass_under_an_enforcing_policy_counts() {
         let gmail = "mx.google.com;\r\n       dkim=pass header.i=@brand.example header.s=s1;\r\n       spf=pass (google.com: domain of bounce@brand.example designates 192.0.2.1 as permitted sender) smtp.mailfrom=bounce@brand.example;\r\n       dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=Brand.example";
         assert_eq!(
-            passed(&results(gmail)),
+            passed(&results(gmail), Provider::Google),
             Some(Passed {
                 domain: "brand.example".into()
             })
         );
+        assert_eq!(
+            passed(&results(gmail), Provider::Microsoft),
+            None,
+            "Exchange accounts reject Gmail's authserv-id"
+        );
         let monitoring = gmail.replace("p=REJECT sp=REJECT", "p=NONE sp=NONE");
         assert_eq!(
-            passed(&results(&monitoring)),
+            passed(&results(&monitoring), Provider::Google),
             None,
             "p=none enforces nothing"
         );
         let failed = gmail.replace("dmarc=pass", "dmarc=fail");
-        assert_eq!(passed(&results(&failed)), None);
+        assert_eq!(passed(&results(&failed), Provider::Google), None);
         let forged = gmail.replace("mx.google.com", "mx.attacker.example");
-        assert_eq!(passed(&results(&forged)), None, "only Gmail's own counts");
+        assert_eq!(
+            passed(&results(&forged), Provider::Google),
+            None,
+            "only Gmail's own counts"
+        );
+    }
+
+    #[test]
+    fn exchange_dmarc_pass_accepts_eop_headers_and_rejects_forged_ones() {
+        let with_eop = "spfeop.protection.outlook.com; spf=pass (sender IP is 192.0.2.1) smtp.mailfrom=brand.example; dkim=pass (signature was verified) header.d=brand.example; dmarc=pass action=none header.from=Brand.example; compauth=pass reason=100";
+        assert_eq!(
+            passed(&results(with_eop), Provider::Microsoft),
+            Some(Passed {
+                domain: "brand.example".into()
+            })
+        );
+        assert_eq!(
+            passed(&results(with_eop), Provider::Google),
+            None,
+            "Google accounts reject Exchange's authserv-id"
+        );
+
+        let with_prod = "BL0PR02MB4567.namprd02.prod.outlook.com; dmarc=pass action=none header.from=brand.example";
+        assert_eq!(
+            passed(&results(with_prod), Provider::Microsoft),
+            Some(Passed {
+                domain: "brand.example".into()
+            })
+        );
+
+        let authserv_less = "spf=pass (sender IP is 192.0.2.1) smtp.mailfrom=brand.example; dkim=pass header.d=brand.example; dmarc=pass action=none header.from=brand.example; compauth=pass reason=100";
+        assert_eq!(
+            passed(&results(authserv_less), Provider::Microsoft),
+            Some(Passed {
+                domain: "brand.example".into()
+            })
+        );
+
+        // `dmarc=bestguesspass` means no published DMARC record and must be rejected.
+        let best_guess = with_eop.replace("dmarc=pass", "dmarc=bestguesspass");
+        assert_eq!(passed(&results(&best_guess), Provider::Microsoft), None);
+
+        // Explicit inline `p=NONE` is rejected even on Exchange.
+        let inline_none =
+            "eur01.protection.outlook.com; dmarc=pass (p=NONE) header.from=brand.example";
+        assert_eq!(passed(&results(inline_none), Provider::Microsoft), None);
+
+        // Forged authserv-ids, lookalike suffixes, and bogus method tokens are rejected.
+        for forged in [
+            "mx.attacker.example; dmarc=pass action=none header.from=brand.example",
+            "fakeoutlook.com; dmarc=pass action=none header.from=brand.example",
+            "protection.outlook.com.evil.example; dmarc=pass action=none header.from=brand.example",
+            "evil=host.example; dmarc=pass action=none header.from=brand.example",
+        ] {
+            assert_eq!(
+                passed(&results(forged), Provider::Microsoft),
+                None,
+                "forged header must be rejected: {forged}"
+            );
+        }
+
+        // A top Exchange `dmarc=fail` does not fall through to an older `dmarc=pass` below.
+        let stacked = vec![
+            Header {
+                name: "From".into(),
+                value: "\"Brand\" <news@brand.example>".into(),
+            },
+            Header {
+                name: "Authentication-Results".into(),
+                value: "spfeop.protection.outlook.com; dmarc=fail action=oreject header.from=brand.example".into(),
+            },
+            Header {
+                name: "Authentication-Results".into(),
+                value: with_eop.into(),
+            },
+        ];
+        assert_eq!(passed(&stacked, Provider::Microsoft), None);
     }
 
     #[test]
@@ -265,12 +454,18 @@ mod tests {
         let mail =
             "mx.google.com; dmarc=pass (p=REJECT sp=NONE dis=NONE) header.from=news.brand.co.uk";
         assert_eq!(
-            passed(&message_headers("Brand <news@news.brand.co.uk>", mail)),
+            passed(
+                &message_headers("Brand <news@news.brand.co.uk>", mail),
+                Provider::Google
+            ),
             None
         );
         let enforced = mail.replace("sp=NONE", "sp=QUARANTINE");
         assert_eq!(
-            passed(&message_headers("Brand <news@news.brand.co.uk>", &enforced)),
+            passed(
+                &message_headers("Brand <news@news.brand.co.uk>", &enforced),
+                Provider::Google
+            ),
             Some(Passed {
                 domain: "news.brand.co.uk".into()
             })
@@ -283,60 +478,75 @@ mod tests {
             "mx.google.com; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=brand.example";
         // Missing From header is rejected.
         assert_eq!(
-            passed(&[Header {
-                name: "Authentication-Results".into(),
-                value: gmail.into(),
-            }]),
+            passed(
+                &[Header {
+                    name: "Authentication-Results".into(),
+                    value: gmail.into(),
+                }],
+                Provider::Google
+            ),
             None
         );
         // Multiple From headers are rejected.
         assert_eq!(
-            passed(&[
-                Header {
-                    name: "From".into(),
-                    value: "news@brand.example".into(),
-                },
-                Header {
-                    name: "From".into(),
-                    value: "spoof@paypal.com".into(),
-                },
-                Header {
-                    name: "Authentication-Results".into(),
-                    value: gmail.into(),
-                },
-            ]),
+            passed(
+                &[
+                    Header {
+                        name: "From".into(),
+                        value: "news@brand.example".into(),
+                    },
+                    Header {
+                        name: "From".into(),
+                        value: "spoof@paypal.com".into(),
+                    },
+                    Header {
+                        name: "Authentication-Results".into(),
+                        value: gmail.into(),
+                    },
+                ],
+                Provider::Google
+            ),
             None
         );
         // Multiple mailboxes or RFC 5322 group syntax in From are rejected.
         assert_eq!(
-            passed(&message_headers(
-                "news@brand.example, spoof@paypal.com",
-                gmail
-            )),
+            passed(
+                &message_headers("news@brand.example, spoof@paypal.com", gmail),
+                Provider::Google
+            ),
             None
         );
         assert_eq!(
-            passed(&message_headers("Brand: news@brand.example;", gmail)),
+            passed(
+                &message_headers("Brand: news@brand.example;", gmail),
+                Provider::Google
+            ),
             None
         );
         // Unaligned From vs Authentication-Results header.from is rejected.
         assert_eq!(
-            passed(&message_headers("Security <security@paypal.com>", gmail)),
+            passed(
+                &message_headers("Security <security@paypal.com>", gmail),
+                Provider::Google
+            ),
             None
         );
         assert_eq!(
-            passed(&message_headers(
-                "a@one.co.uk",
-                "mx.google.com; dmarc=pass (p=REJECT sp=REJECT) header.from=two.co.uk"
-            )),
+            passed(
+                &message_headers(
+                    "a@one.co.uk",
+                    "mx.google.com; dmarc=pass (p=REJECT sp=REJECT) header.from=two.co.uk"
+                ),
+                Provider::Google
+            ),
             None
         );
         // Organizational-domain alignment passes and returns From's domain.
         assert_eq!(
-            passed(&message_headers(
-                "Alerts <alerts@mail.brand.example>",
-                gmail
-            )),
+            passed(
+                &message_headers("Alerts <alerts@mail.brand.example>", gmail),
+                Provider::Google
+            ),
             Some(Passed {
                 domain: "mail.brand.example".into()
             })
@@ -345,11 +555,60 @@ mod tests {
 
     #[test]
     fn records_are_read_by_their_tags() {
-        assert!(dmarc_applies_to_all(
-            "v=DMARC1; p=reject; rua=mailto:d@brand.example"
+        assert!(dmarc_enforces(
+            "v=DMARC1; p=reject; rua=mailto:d@brand.example",
+            false
         ));
-        assert!(!dmarc_applies_to_all("v=DMARC1; p=quarantine; pct=50"));
-        assert!(!dmarc_applies_to_all("v=spf1 -all"));
+        assert!(dmarc_enforces("v=DMARC1; p=quarantine; pct=100", false));
+        assert!(!dmarc_enforces("v=DMARC1; p=none; pct=100", false));
+        assert!(!dmarc_enforces("v=DMARC1; p=quarantine; pct=50", false));
+        assert!(!dmarc_enforces("v=spf1 -all", false));
+        // On organizational-domain fallback, `sp=` overrides `p=`.
+        assert!(!dmarc_enforces("v=DMARC1; p=reject; sp=none", true));
+        assert!(dmarc_enforces("v=DMARC1; p=none; sp=quarantine", true));
+        assert!(dmarc_enforces("v=DMARC1; p=reject", true));
+        // RFC 7489 §6.6.3: multiple DMARC records must be discarded (no policy enforced).
+        assert!(dmarc_records_enforce(
+            &[
+                "v=spf1 -all".into(),
+                "v=DMARC1; p=reject; rua=mailto:d@brand.example".into(),
+            ],
+            false
+        ));
+        assert!(!dmarc_records_enforce(
+            &["v=DMARC1; p=reject".into(), "v=DMARC1; p=none".into(),],
+            false
+        ));
+        // Malformed empty-label Exchange authserv-ids are rejected.
+        assert!(!is_exchange_authserv_id(".outlook.com"));
+        assert!(!is_exchange_authserv_id("a..outlook.com"));
+        assert!(is_exchange_authserv_id("outlook.com"));
+        assert!(is_exchange_authserv_id(
+            "NAM11-CO1-obe.outbound.protection.outlook.com"
+        ));
+        // On Microsoft, an untrusted topmost Authentication-Results must not fall through to a
+        // lower forged header.
+        assert_eq!(
+            passed(
+                &[
+                    Header {
+                        name: "From".into(),
+                        value: "news@brand.example".into(),
+                    },
+                    Header {
+                        name: "Authentication-Results".into(),
+                        value: "mx.attacker.example; dmarc=pass header.from=brand.example".into(),
+                    },
+                    Header {
+                        name: "Authentication-Results".into(),
+                        value: "spf=pass; dmarc=pass action=none header.from=brand.example; compauth=pass"
+                            .into(),
+                    },
+                ],
+                Provider::Microsoft
+            ),
+            None
+        );
         assert_eq!(
             bimi("v=BIMI1; l=https://brand.example/logo.svg; a=https://brand.example/vmc.pem"),
             Some(Bimi {

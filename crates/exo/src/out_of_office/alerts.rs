@@ -28,10 +28,13 @@ pub enum Alert {
     SaveFailed,
     /// Closing a changed form.
     Discard,
-    /// A file was pasted in the message, with `email` for the Gmail settings link.
+    /// A file was pasted in the message, with `email` for the Gmail settings link (omitted on
+    /// Outlook).
     PastedFile {
         /// The account's address.
         email: String,
+        /// Whether this is an Outlook account.
+        outlook: bool,
     },
     /// Out-of-office days are coming up, and whether `Don't show this again` is checked.
     Nudge {
@@ -101,7 +104,10 @@ impl Alert {
                 "Sorry! We were unable to sync your Out of Office Reply settings with your email provider. Please try again later.",
             )],
             Self::Discard => vec![text("Your settings will not be saved.")],
-            Self::PastedFile { .. } => vec![vec![
+            Self::PastedFile { outlook: true, .. } => vec![text(
+                "Outlook doesn't support adding images to automatic replies.",
+            )],
+            Self::PastedFile { outlook: false, .. } => vec![vec![
                 ("To add an image, go to ".into(), Run::Text),
                 ("Gmail settings".into(), Run::Link),
                 (" and update your Vacation Responder.".into(), Run::Text),
@@ -147,10 +153,13 @@ impl Alert {
         }
     }
 
-    /// The Gmail settings link of a pasted file's alert.
+    /// The Gmail settings link of a pasted file's alert (`None` on Outlook).
     pub fn link(&self) -> Option<String> {
         match self {
-            Self::PastedFile { email } => Some(crate::settings::gmail_settings_url(email)),
+            Self::PastedFile {
+                email,
+                outlook: false,
+            } => Some(crate::settings::gmail_settings_url(email)),
             _ => None,
         }
     }
@@ -296,6 +305,7 @@ mod tests {
     fn a_pasted_file_links_to_gmails_settings() {
         let alert = Alert::PastedFile {
             email: "maya@brightmoor.co".into(),
+            outlook: false,
         };
         assert_eq!(
             alert.text(&TimeZone::UTC),
@@ -307,6 +317,7 @@ mod tests {
         );
         let plus = Alert::PastedFile {
             email: "alice+work@example.com".into(),
+            outlook: false,
         };
         assert_eq!(
             plus.link().as_deref(),
@@ -314,5 +325,14 @@ mod tests {
                 "https://mail.google.com/?shxr=0&authuser=alice%2Bwork%40example.com#settings/general"
             )
         );
+        let outlook = Alert::PastedFile {
+            email: "maya@brightmoor.co".into(),
+            outlook: true,
+        };
+        assert_eq!(
+            outlook.text(&TimeZone::UTC),
+            "Outlook doesn't support adding images to automatic replies."
+        );
+        assert_eq!(outlook.link(), None);
     }
 }

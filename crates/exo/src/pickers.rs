@@ -132,6 +132,8 @@ pub struct Pickers {
     creating: Option<Creation>,
     /// The last block's undo token and what it blocked, which its undo unblocks.
     blocked: Option<(crate::account::UndoToken, String)>,
+    /// Whether the account is Outlook/Microsoft (determines alert copy).
+    outlook: bool,
 }
 
 /// An alert the pickers show: a confirmation, or the offline alert.
@@ -210,6 +212,14 @@ struct Creation {
 }
 
 impl Pickers {
+    /// Picker state for an account (`outlook` selects Outlook copy on alerts).
+    pub(crate) fn new(outlook: bool) -> Self {
+        Self {
+            outlook,
+            ..Self::default()
+        }
+    }
+
     /// Asks before running bulk action `plan`, and the first of `actions` runs it.
     pub(crate) fn confirm_bulk(
         &mut self,
@@ -280,8 +290,9 @@ impl Pickers {
 
     /// Offers to block `from` for `thread`, which has nothing to unsubscribe from.
     pub(crate) fn confirm_block_instead(&mut self, from: String, thread: String) {
+        let verb = if self.outlook { "delete" } else { "trash" };
         let text = format!(
-            "There isn't an unsubscribe link here.\n\nWould you like to block instead? This will trash all messages, including any future messages, from {}.",
+            "There isn't an unsubscribe link here.\n\nWould you like to block instead? This will {verb} all messages, including any future messages, from {}.",
             exo_ui::wbrise(&from)
         );
         self.alert = Some(Alert {
@@ -339,14 +350,24 @@ impl Pickers {
         });
     }
 
-    /// Calendar refused an invite card's answer. The alert offers to try in Gmail, or to go to the
-    /// conversation.
+    /// Calendar refused an invite card's answer. The alert offers to try in Gmail or Outlook, or
+    /// to go to the conversation.
     pub(crate) fn rsvp_failed(&mut self, thread: String) {
-        let text = "We couldn't RSVP due to an error in Gmail. Please try opening this message in Gmail to save your RSVP.".to_owned();
+        let (text, open) = if self.outlook {
+            (
+                "We couldn't RSVP due to an error in Outlook. Please try opening this message in Outlook to save your RSVP.".to_owned(),
+                "Open in Outlook",
+            )
+        } else {
+            (
+                "We couldn't RSVP due to an error in Gmail. Please try opening this message in Gmail to save your RSVP.".to_owned(),
+                "Open in Gmail",
+            )
+        };
         self.alert = Some(Alert {
             title: "Sorry!".into(),
             text,
-            actions: vec!["Open in Gmail", "See Message"],
+            actions: vec![open, "See Message"],
             selected: 0,
             keys: None,
             then: Some(Then::RsvpFailed(thread)),
@@ -458,6 +479,7 @@ pub fn move_palette(
     labels: &[Label],
     unified: bool,
     recent: std::collections::BTreeMap<String, String>,
+    outlook: bool,
 ) -> SubPalette<commands::Action> {
     let built_in = [
         "SH_IMPORTANT",
@@ -467,11 +489,12 @@ pub fn move_palette(
         "SPAM",
         "SH_ARCHIVED",
     ]
-    .map(|id| (id.to_owned(), label_name(id, labels).to_owned()));
+    .map(|id| (id.to_owned(), label_name(id, labels, outlook).to_owned()));
     let destinations: Vec<(String, String)> = built_in
         .into_iter()
         .chain(
-            crate::lists::listed_labels(labels).map(|label| (label.id.clone(), label.name.clone())),
+            crate::lists::listed_labels_for(labels, outlook)
+                .map(|label| (label.id.clone(), label.name.clone())),
         )
         .collect();
     let names: Vec<String> = destinations.iter().map(|(_, name)| name.clone()).collect();
@@ -519,7 +542,7 @@ pub fn move_palette(
     .footer(move |query| {
         let query = query.trim();
         creatable(query, names.iter().map(String::as_str))
-            .then(|| create_row(query, footer_threads.clone(), Some(from.clone())))
+            .then(|| create_row(query, footer_threads.clone(), Some(from.clone()), outlook))
     })
 }
 
@@ -533,7 +556,7 @@ pub fn label_palette(
 ) -> SubPalette<commands::Action> {
     let candidates: Vec<(String, String)> = std::iter::once((
         "STARRED".to_owned(),
-        label_name("STARRED", labels).to_owned(),
+        label_name("STARRED", labels, false).to_owned(),
     ))
     .chain(crate::lists::listed_labels(labels).map(|label| (label.id.clone(), label.name.clone())))
     .collect();
@@ -594,7 +617,7 @@ pub fn label_palette(
     .footer(move |query| {
         let query = query.trim();
         creatable(query, names.iter().map(String::as_str))
-            .then(|| create_row(query, ids.clone(), None))
+            .then(|| create_row(query, ids.clone(), None, false))
     })
 }
 
@@ -641,20 +664,22 @@ fn spam_palette(sender: &Sender, own: &[String]) -> SubPalette<commands::Action>
     SubPalette::new("MARK_SPAM", "Mark Spam", "data/spam", rows).hide_input()
 }
 
-/// `Create label “{name}”`.
+/// `Create label “{name}”` (or `Create folder “{name}”` on Outlook).
 fn create_row(
     name: &str,
     threads: Vec<String>,
     moving: Option<Option<String>>,
+    outlook: bool,
 ) -> Command<commands::Action> {
     let action = Action::Create {
         name: name.to_owned(),
         threads,
         moving,
     };
+    let kind = if outlook { "folder" } else { "label" };
     Command::new(
         "CREATE_LABEL",
-        format!("Create label “{name}”"),
+        format!("Create {kind} “{name}”"),
         commands::Action::Pick(action),
     )
 }
@@ -662,6 +687,7 @@ fn create_row(
 impl Mail {
     /// Carries out a picker's `action`.
     pub(crate) fn pick(&mut self, action: Action, now: f64) {
+        let outlook = self.account.is_outlook();
         match action {
             Action::OpenMove => {
                 let threads = crate::actionable(self.thread.as_ref(), &self.inbox)
@@ -675,9 +701,11 @@ impl Mail {
                     &self.snapshot.labels,
                     settings.unified_inbox,
                     settings.labels_last_used.clone(),
+                    outlook,
                 );
                 self.commands.open_sub_palette(palette);
             }
+            Action::OpenLabel if outlook => {}
             Action::OpenLabel => {
                 let threads = crate::actionable(self.thread.as_ref(), &self.inbox);
                 let palette = label_palette(
@@ -732,9 +760,12 @@ impl Mail {
                         )
                     };
                     rows.push(row(&sender.email, false));
-                    if let Some(domain) = sender
-                        .domain
-                        .filter(|domain| !crate::format::names::is_popular_domain(domain))
+                    // Outlook Focused Inbox overrides apply per sender address, not to bare
+                    // domains.
+                    if !outlook
+                        && let Some(domain) = sender
+                            .domain
+                            .filter(|domain| !crate::format::names::is_popular_domain(domain))
                     {
                         rows.push(row(&domain, true));
                     }
@@ -755,8 +786,8 @@ impl Mail {
                 self.triage_threads(&ids, Mutation::AddLabel(id), None, 0, now);
             }
             Action::RemoveLabel(id) => {
-                let text =
-                    (id == "INBOX").then(|| crate::triage_copy::toast(&Mutation::MarkDone, &[]));
+                let text = (id == "INBOX")
+                    .then(|| crate::triage_copy::toast(&Mutation::MarkDone, &[], outlook));
                 let ids = self.actionable_ids();
                 self.triage_threads(&ids, Mutation::RemoveLabel(id), text, 0, now);
             }
@@ -766,9 +797,14 @@ impl Mail {
                 moving,
             } => {
                 self.commands.close_palette();
+                let (title, noun) = if outlook {
+                    ("Create Folder", "folder")
+                } else {
+                    ("Create Label", "label")
+                };
                 self.pickers.alert = Some(Alert {
-                    title: "Create Label".into(),
-                    text: format!("Would you like to create the label \"{name}\"?"),
+                    title: title.into(),
+                    text: format!("Would you like to create the {noun} \"{name}\"?"),
                     actions: vec!["Create", "Cancel"],
                     selected: 0,
                     keys: None,
@@ -779,6 +815,7 @@ impl Mail {
                     })),
                 });
             }
+            Action::MarkSpam if outlook => self.triage(Mutation::Spam, now),
             Action::MarkSpam => {
                 let threads = crate::actionable(self.thread.as_ref(), &self.inbox);
                 let reportable = matches!(threads[..], [thread] if !thread.has_label("SPAM"))
@@ -795,6 +832,7 @@ impl Mail {
                     return;
                 };
                 self.commands.close_palette();
+                let verb = if outlook { "Delete" } else { "Trash" };
                 self.pickers.alert = Some(Alert {
                     title: if domain {
                         "Block domain"
@@ -803,7 +841,7 @@ impl Mail {
                     }
                     .into(),
                     text: format!(
-                        "Trash all messages, including any future messages, from {}?",
+                        "{verb} all messages, including any future messages, from {}?",
                         exo_ui::wbrise(&from)
                     ),
                     actions: vec!["Block", "Cancel"],
@@ -812,6 +850,7 @@ impl Mail {
                     then: Some(Then::Block { from, thread, spam }),
                 });
             }
+            Action::MoveSender { domain: true, .. } if outlook => {}
             Action::MoveSender {
                 from,
                 domain,
@@ -839,6 +878,7 @@ impl Mail {
                 });
             }
             Action::RemoveFromList(direction) => self.remove_from_list(direction, now),
+            Action::RemoveAll if outlook => {}
             Action::RemoveAll => self.remove_all_labels(now),
             Action::Alert(index) => {
                 let Some(alert) = self.pickers.alert.take() else {
@@ -866,10 +906,14 @@ impl Mail {
                     (0, Some(Then::SignOut(email))) => {
                         self.request = Some(crate::accounts::Request::SignOut(email))
                     }
-                    (0, Some(Then::RsvpFailed(thread))) => self.open_url(
-                        &crate::google_apps::App::Message(thread)
-                            .url(self.account.email(), &crate::compose::uuid_v4()),
-                    ),
+                    (0, Some(Then::RsvpFailed(thread))) => {
+                        let app = if outlook {
+                            crate::google_apps::App::Outlook
+                        } else {
+                            crate::google_apps::App::Message(thread)
+                        };
+                        self.open_url(&app.url(self.account.email(), &crate::compose::uuid_v4()));
+                    }
                     (1, Some(Then::RsvpFailed(thread))) => self.open_thread(thread),
                     (
                         0,
@@ -955,7 +999,7 @@ impl Mail {
             .collect()
     }
 
-    /// Blocks `from`: it joins the block list, `thread` goes to Trash at once, and a Gmail filter
+    /// Blocks `from`: it joins the block list, `thread` goes to Trash at once, and a provider rule
     /// and a relabel trash everything from them, now and later.
     fn block(&mut self, from: String, thread: String, spam: bool, now: f64) {
         self.account
@@ -983,7 +1027,7 @@ impl Mail {
         }
     }
 
-    /// Moves `thread` to Other (or Important) and, through a Gmail filter and a relabel,
+    /// Moves `thread` to Other (or Important) and, through a provider rule and a relabel,
     /// everything from `from` in the inbox and to come.
     fn move_sender(&mut self, from: String, other: bool, thread: String, now: f64) {
         let to = if other { "SH_OTHER" } else { "SH_IMPORTANT" };
@@ -1064,7 +1108,12 @@ impl Mail {
         now: f64,
     ) {
         self.remember_label(&to);
-        let text = move_toast(from.as_deref(), &to, &self.snapshot.labels);
+        let text = move_toast(
+            from.as_deref(),
+            &to,
+            &self.snapshot.labels,
+            self.account.is_outlook(),
+        );
         let blocked = match to.as_str() {
             "INBOX" => Some("Inbox"),
             "SH_IMPORTANT" => Some("Important"),
@@ -1108,9 +1157,10 @@ impl Mail {
             return;
         }
         let ids: Vec<String> = threads.iter().map(|thread| thread.id.clone()).collect();
+        let outlook = self.account.is_outlook();
         let text = match label.as_str() {
             "INBOX" => "Marked as Done.".to_owned(),
-            label => match label_name(label, &self.snapshot.labels) {
+            label => match label_name(label, &self.snapshot.labels, outlook) {
                 "" => "Removed from label.".to_owned(),
                 name => format!("Removed from {name}."),
             },
@@ -1200,9 +1250,15 @@ impl Mail {
                     then: None,
                 });
             }
-            _ => self
-                .commands
-                .toast(Toast::new("Sorry! Failed to create label.").kind(ToastKind::Error)),
+            _ => {
+                let message = if self.account.is_outlook() {
+                    "Sorry! Failed to create folder."
+                } else {
+                    "Sorry! Failed to create label."
+                };
+                self.commands
+                    .toast(Toast::new(message).kind(ToastKind::Error));
+            }
         }
     }
 
@@ -1316,6 +1372,7 @@ mod tests {
             &labels(),
             true,
             Default::default(),
+            false,
         );
         assert_eq!(
             titles(&palette, ""),
@@ -1336,8 +1393,27 @@ mod tests {
             &labels(),
             false,
             Default::default(),
+            false,
         );
         assert_eq!(titles(&split, "")[..4], ["Spam", "Trash", "Done", "Other"]);
+    }
+
+    #[test]
+    fn outlook_move_uses_folder_names_and_hides_deleted_items_subfolders() {
+        let mut list = labels();
+        list.push(label("Label_del", "Deleted Items/Old"));
+        let palette = move_palette(
+            vec!["t".into()],
+            Some("INBOX".into()),
+            &list,
+            true,
+            Default::default(),
+            true,
+        );
+        let shown = titles(&palette, "");
+        assert_eq!(shown[..3], ["Junk Email", "Deleted Items", "Done"]);
+        assert!(!shown.iter().any(|name| name.contains("Deleted Items/")));
+        assert_eq!(titles(&palette, "BrandNew"), ["Create folder “BrandNew”"]);
     }
 
     #[test]
@@ -1353,6 +1429,7 @@ mod tests {
             &labels(),
             true,
             recent,
+            false,
         );
         assert_eq!(
             titles(&palette, "")[..3],
@@ -1372,40 +1449,40 @@ mod tests {
     fn move_toasts_say_when_threads_leave_the_inbox() {
         let labels = labels();
         assert_eq!(
-            move_toast(Some("INBOX"), "Label_1", &labels),
+            move_toast(Some("INBOX"), "Label_1", &labels, false),
             "Moved and Marked Done."
         );
         assert_eq!(
-            move_toast(Some("INBOX"), "TRASH", &labels),
+            move_toast(Some("INBOX"), "TRASH", &labels, false),
             "Moved and Marked Done."
         );
         assert_eq!(
-            move_toast(Some("SH_ARCHIVED"), "Label_1", &labels),
+            move_toast(Some("SH_ARCHIVED"), "Label_1", &labels, false),
             "Moved to Projects."
         );
         assert_eq!(
-            move_toast(Some("Label_2"), "SH_ARCHIVED", &labels),
+            move_toast(Some("Label_2"), "SH_ARCHIVED", &labels, false),
             "Moved and Marked Done."
         );
         assert_eq!(
-            move_toast(Some("SH_IMPORTANT"), "SH_OTHER", &labels),
+            move_toast(Some("SH_IMPORTANT"), "SH_OTHER", &labels, false),
             "Moved to Other."
         );
         assert_eq!(
-            move_toast(Some("SH_SNOOZED"), "INBOX", &labels),
+            move_toast(Some("SH_SNOOZED"), "INBOX", &labels, false),
             "Reminder removed and moved to Inbox."
         );
         assert_eq!(
-            crate::triage_copy::move_text(Some("SH_SNOOZED"), "Label_1", &labels, true),
+            crate::triage_copy::move_text(Some("SH_SNOOZED"), "Label_1", &labels, true, false),
             "Reminder removed and moving to Projects."
         );
         assert_eq!(
-            move_toast(Some("SH_SNOOZED"), "SH_ARCHIVED", &labels),
+            move_toast(Some("SH_SNOOZED"), "SH_ARCHIVED", &labels, false),
             "Moved and Marked Done.",
             "done comes first"
         );
         assert_eq!(
-            move_toast(Some("Label_2"), "SPAM", &labels),
+            move_toast(Some("Label_2"), "SPAM", &labels, false),
             "Marked as Spam."
         );
     }
@@ -1482,7 +1559,7 @@ mod tests {
             gmail::Endpoints::mock(&"http://127.0.0.1:9/".parse().expect("mock origin"));
         let account = crate::account::Account::open(
             &dir,
-            crate::account::Credentials {
+            crate::account::Credentials::Gmail {
                 email: "maya@brightmoor.co".into(),
                 endpoints,
                 tokens: std::sync::Arc::new(gmail::StaticToken("dev".into())),

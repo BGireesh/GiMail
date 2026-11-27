@@ -181,14 +181,15 @@ pub(crate) fn register(commands: &mut Commands<commands::Action>, os: egui::os::
 fn switcher(
     ctx: &egui::Context,
     accounts: &[exo_auth::Account],
-    current: &str,
+    current_key: &str,
 ) -> SubPalette<commands::Action> {
-    let (ctx, accounts, current) = (ctx.clone(), accounts.to_vec(), current.to_owned());
+    let (ctx, accounts, current_key) = (ctx.clone(), accounts.to_vec(), current_key.to_owned());
     let rows = move |_: &str| {
         let row = |(index, account): (usize, &exo_auth::Account)| {
-            let photo = crate::profile_pictures::photo(&ctx, &account.email);
+            let key = account.key();
+            let photo = crate::profile_pictures::photo(&ctx, &key);
             let row = Command::new(
-                account.email.clone(),
+                key.clone(),
                 account.email.clone(),
                 commands::Action::Accounts(Action::Switch(index)),
             )
@@ -198,7 +199,7 @@ fn switcher(
             } else {
                 row
             };
-            if account.email == current {
+            if key == current_key {
                 row.in_use()
             } else {
                 row
@@ -236,7 +237,7 @@ impl Mail {
     pub(crate) fn joined(&self) -> Option<jiff::Timestamp> {
         self.accounts
             .iter()
-            .find(|account| account.email == self.account.email())
+            .find(|account| account.key() == self.account.key())
             .and_then(|account| account.joined)
     }
 
@@ -245,23 +246,19 @@ impl Mail {
         match action {
             Action::SignOut => self.sign_out(),
             Action::OpenSwitcher => {
-                let switcher = switcher(&self.ctx, &self.accounts, self.account.email());
+                let switcher = switcher(&self.ctx, &self.accounts, self.account.key());
                 self.commands.open_sub_palette(switcher);
             }
             Action::Switch(index) => {
-                let Some(email) = self
-                    .accounts
-                    .get(index)
-                    .map(|account| account.email.clone())
-                else {
+                let Some(key) = self.accounts.get(index).map(exo_auth::Account::key) else {
                     return;
                 };
-                if email == self.account.email() {
+                if key == self.account.key() {
                     // The account on screen goes home and to the top.
                     let home = splits::home(self.account.settings());
                     self.run(commands::Action::Go(home), now);
                 } else {
-                    self.request = Some(Request::Switch(email));
+                    self.request = Some(Request::Switch(key));
                 }
             }
             Action::Add => self.request = Some(Request::Add),
@@ -274,10 +271,10 @@ impl Mail {
     pub(crate) fn account_settings_event(&mut self, event: crate::settings::AccountEvent) {
         use crate::settings::AccountEvent;
         self.request = Some(match event {
-            AccountEvent::SignOut(email) if email == self.account.email() => {
+            AccountEvent::SignOut(key) if key == self.account.key() => {
                 return self.sign_out();
             }
-            AccountEvent::SignOut(email) => Request::CheckSignOut(email),
+            AccountEvent::SignOut(key) => Request::CheckSignOut(key),
             AccountEvent::Move { email, to } => Request::Move { email, to },
             AccountEvent::Color { email, color } => Request::Color { email, color },
             AccountEvent::Add => Request::Add,
@@ -297,10 +294,10 @@ impl Mail {
         if !std::mem::take(&mut self.signing_out) {
             return;
         }
-        let email = self.account.email().to_owned();
+        let key = self.account.key().to_owned();
         match confirm_text(unsent) {
-            Some(text) => self.pickers.confirm_sign_out(email, text),
-            None => self.request = Some(Request::SignOut(email)),
+            Some(text) => self.pickers.confirm_sign_out(key, text),
+            None => self.request = Some(Request::SignOut(key)),
         }
     }
 

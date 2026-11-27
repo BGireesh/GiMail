@@ -116,6 +116,24 @@ pub fn teams_meeting(origin: &url::Url, calendar: &str, event: &str) -> Value {
     })
 }
 
+/// The properties Outlook keeps beside `calendar`'s `event`: its series', then its own.
+pub fn stored(outlook: &super::Outlook, calendar: &str, event: &Event) -> Map<String, Value> {
+    let get = |id: Option<&String>| {
+        id.and_then(|id| outlook.events.get(&(calendar.to_owned(), id.clone())))
+    };
+    let mut stored = get(event.recurring_event_id.as_ref())
+        .cloned()
+        .unwrap_or_default();
+    if let Some(own) = get(event.id.as_ref()) {
+        stored.extend(own.clone());
+    }
+    // A series' own transaction isn't its occurrences'.
+    if event.recurring_event_id.is_some() && get(event.id.as_ref()).is_none() {
+        stored.remove("transactionId");
+    }
+    stored
+}
+
 /// Outlook's HTML body for a calendar description, which the calendar keeps as HTML.
 fn html_body(description: &str) -> String {
     if description.trim_start().starts_with("<html") {
@@ -185,20 +203,7 @@ impl View<'_> {
 
     /// The properties Outlook keeps on `event` itself: its series', then its own.
     fn event_stored(&self, calendar: &str, event: &Event) -> Map<String, Value> {
-        let get = |id: Option<&String>| {
-            id.and_then(|id| self.outlook.events.get(&(calendar.to_owned(), id.clone())))
-        };
-        let mut stored = get(event.recurring_event_id.as_ref())
-            .cloned()
-            .unwrap_or_default();
-        if let Some(own) = get(event.id.as_ref()) {
-            stored.extend(own.clone());
-        }
-        // A series' own transaction isn't its occurrences'.
-        if event.recurring_event_id.is_some() && get(event.id.as_ref()).is_none() {
-            stored.remove("transactionId");
-        }
-        stored
+        stored(self.outlook, calendar, event)
     }
 
     /// Who owns `calendar`: the signed-in user for their own, else the calendar itself, by name

@@ -1,9 +1,10 @@
 //! Opening, hosting and wiring the event form and Calendar Settings dialog.
 //!
 //! Saving, deleting, series splitting, Undo and confirmation prompts live in [`super::save`], and
-//! Google Calendar event construction and patching live in [`super::patch`].
+//! calendar event construction and patching live in [`super::patch`].
 
 use egui::{Rect, Ui, pos2, vec2};
+use exo_store::CalendarProviderKind;
 use jiff::{ToSpan, Zoned};
 
 use super::{
@@ -24,11 +25,27 @@ impl crate::Mail {
             .filter(|calendar| calendar.writable)
             .map(|calendar| CalendarOption {
                 account: calendar.account,
+                email: calendar.account_email,
                 id: calendar.id,
                 name: calendar.name,
                 color: calendar.color,
+                provider: calendar.provider,
+                supports_meet: calendar.supports_meet,
+                supports_teams: calendar.supports_teams,
             })
             .collect()
+    }
+
+    /// Whether Calendar Settings automatically adds a meeting link to new events.
+    pub(super) fn calendar_auto_meeting(&self) -> bool {
+        matches!(
+            self.account
+                .settings()
+                .meeting_links
+                .default_meeting_link
+                .as_deref(),
+            Some("google" | "teamsForBusiness")
+        )
     }
 
     /// A new event's form for `when` (in the week view when `week`), on the primary calendar.
@@ -39,12 +56,43 @@ impl crate::Mail {
         all_day: bool,
         week: bool,
     ) {
-        let form = EventForm::create(self.calendar_new_values(when, all_day), week);
+        let mut form = EventForm::create(self.calendar_new_values(when, all_day), week);
+        form.auto_meeting = self.calendar_auto_meeting();
         self.calendar_open_form(form);
     }
 
     /// A new event's values for `when`.
-    fn calendar_new_values(&self, when: Option<(Zoned, Zoned)>, all_day: bool) -> Values {
+    pub(super) fn calendar_new_values(
+        &self,
+        when: Option<(Zoned, Zoned)>,
+        all_day: bool,
+    ) -> Values {
+        let writable = self.calendar_writable();
+        let primary = writable.first();
+        let calendar = primary.map_or_else(
+            || {
+                if self.account.is_outlook() {
+                    "primary".to_owned()
+                } else {
+                    self.account.email().to_owned()
+                }
+            },
+            |cal| cal.id.clone(),
+        );
+        let meeting = if self.calendar_auto_meeting() {
+            primary.map_or_else(
+                || {
+                    if self.account.is_outlook() {
+                        Meeting::NewTeams
+                    } else {
+                        Meeting::NewMeet
+                    }
+                },
+                CalendarOption::default_meeting,
+            )
+        } else {
+            Meeting::None
+        };
         Values {
             title: String::new(),
             when,
@@ -52,20 +100,8 @@ impl crate::Mail {
             guests: Vec::new(),
             location: String::new(),
             about: String::new(),
-            // A Meet link when Google Meet is the default meeting link.
-            meeting: if self
-                .account
-                .settings()
-                .meeting_links
-                .default_meeting_link
-                .as_deref()
-                == Some("google")
-            {
-                Meeting::NewMeet
-            } else {
-                Meeting::None
-            },
-            calendar: self.account.email().to_owned(),
+            meeting,
+            calendar,
             repeat: None,
         }
     }
@@ -92,7 +128,9 @@ impl crate::Mail {
                 organizer: false,
             })
             .collect();
-        self.calendar_open_form(EventForm::create(values, false));
+        let mut form = EventForm::create(values, false);
+        form.auto_meeting = self.calendar_auto_meeting();
+        self.calendar_open_form(form);
         if self
             .calendar
             .form
@@ -271,14 +309,27 @@ impl crate::Mail {
             (Setting::Declined, calendar.show_declined_events),
             (Setting::SecondaryZone, calendar.show_additional_timezones),
         ];
-        // The mail account first, then the others by address.
-        let email = self.account.email();
-        let mut emails: Vec<&String> = settings
+        // The mail account first, then the others by address (keyed by canonical account key so
+        // dual-provider same-email accounts stay distinct).
+        let own_key = self.account.key().to_owned();
+        let own_email = self.account.email();
+        let mut others: Vec<(&str, &str)> = settings
             .calendar_accounts
-            .keys()
-            .filter(|address| *address != email)
+            .iter()
+            .filter(|(key, _)| key.as_str() != own_key)
+            .map(|(key, account)| {
+                let email = if account.email.is_empty() {
+                    exo_auth::Account::parse_key(key).1
+                } else {
+                    account.email.as_str()
+                };
+                (key.as_str(), email)
+            })
             .collect();
-        emails.sort_by_key(|address| address.to_lowercase());
+        others.sort_by(|(key_a, email_a), (key_b, email_b)| {
+            (email_a.to_lowercase(), key_a.to_lowercase())
+                .cmp(&(email_b.to_lowercase(), key_b.to_lowercase()))
+        });
         let color = |address: &str| {
             self.accounts()
                 .iter()
@@ -288,14 +339,16 @@ impl crate::Mail {
                     crate::accounts::color,
                 )
         };
-        let accounts: Vec<super::options::ShownAccount<'_>> = std::iter::once(email)
-            .chain(emails.into_iter().map(String::as_str))
-            .map(|address| super::options::ShownAccount {
-                email: address,
-                color: color(address),
-                primary: address == email,
-            })
-            .collect();
+        let accounts: Vec<super::options::ShownAccount<'_>> =
+            std::iter::once((own_key.as_str(), own_email))
+                .chain(others)
+                .map(|(key, email)| super::options::ShownAccount {
+                    key,
+                    email,
+                    color: color(email),
+                    primary: key == own_key,
+                })
+                .collect();
         let shown = super::options::Shown {
             options,
             zone: zone.as_deref(),
@@ -335,16 +388,15 @@ impl crate::Mail {
                     settings.meeting_links.default_meeting_link = link.clone()
                 }),
                 OptionsAction::Close => self.calendar.options_open = false,
-                // Adding an account closes the dialog, opens the week view, and starts Google's
-                // consent.
-                OptionsAction::SignIn => {
+                // Adding an account closes the dialog, opens the week view, and starts OAuth.
+                OptionsAction::SignIn(provider) => {
                     self.calendar.options_open = false;
                     if self.calendar.week.is_none() {
                         self.calendar_run(super::Action::OpenWeek);
                     }
-                    self.calendar_sign_in(None, super::accounts::SignInFor::List);
+                    self.calendar_sign_in(provider, None, super::accounts::SignInFor::List);
                 }
-                OptionsAction::Remove(email) => self.account.remove_calendar_account(&email),
+                OptionsAction::Remove(key) => self.account.remove_calendar_account(&key),
                 // Notification settings, in this dialog's place.
                 OptionsAction::Notifications => {
                     self.calendar.options_open = false;
@@ -719,12 +771,16 @@ impl crate::Mail {
     }
 
     /// The external editor: Google Calendar's own new-event page with the form's title, times,
-    /// guests, place and notes, as this account.
+    /// guests, place and notes, as the calendar's account.
     pub(super) fn calendar_open_external(&mut self) {
         let Some(form) = &self.calendar.form else {
             return;
         };
+        if self.calendar_provider(&form.values.calendar) == CalendarProviderKind::Microsoft {
+            return;
+        }
         let values = &form.values;
+        let authuser = self.calendar_account(&values.calendar);
         let Ok(mut link) =
             url::Url::parse("https://calendar.google.com/calendar/render?action=TEMPLATE")
         else {
@@ -743,7 +799,7 @@ impl crate::Mail {
             .map(|guest| guest.email.as_str())
             .collect();
         link.query_pairs_mut()
-            .append_pair("authuser", self.account.email())
+            .append_pair("authuser", &authuser)
             .append_pair("text", &values.title)
             .append_pair("dates", &dates)
             .append_pair("add", &guests.join(","))
