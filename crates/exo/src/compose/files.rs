@@ -59,7 +59,7 @@ pub(crate) fn add(
         .iter()
         .map(|path| (path.clone(), name(path)))
         .collect();
-    add_named(&named, kept, html, folder)
+    add_named(&named, kept, html, folder, outlook)
 }
 
 /// Adds files to a draft as [`add`] does, each the file at its path attached under its name: a
@@ -69,6 +69,7 @@ pub(crate) fn add_named(
     kept: &[DraftAttachment],
     html: &str,
     folder: &Path,
+    outlook: bool,
 ) -> (Vec<DraftAttachment>, Option<Notice>) {
     let named: Vec<(&PathBuf, String, Option<u64>)> = files
         .iter()

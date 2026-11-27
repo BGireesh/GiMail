@@ -597,7 +597,7 @@ mod tests {
     fn a_bare_n_offers_notes_and_still_the_labels_it_names() {
         // Before notes, `n` offered the labels it names. It still does, after `notes:`.
         assert_eq!(
-            replacements(&suggest("n", &labels(), &[vec![]])),
+            replacements(&suggest("n", &labels(), &[vec![]], false)),
             [
                 "notes:",
                 "in:newsletters",
@@ -607,7 +607,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            replacements(&suggest("ne", &labels(), &[vec![]])),
+            replacements(&suggest("ne", &labels(), &[vec![]], false)),
             ["in:newsletters", "in:done"],
             "a word no operator starts is as it was"
         );
@@ -618,7 +618,7 @@ mod tests {
             name: "notices".into(),
         });
         assert_eq!(
-            replacements(&suggest("no", &with_notices, &[vec![]])),
+            replacements(&suggest("no", &with_notices, &[vec![]], false)),
             ["notes:", "in:notices"]
         );
     }
@@ -626,19 +626,19 @@ mod tests {
     #[test]
     fn notes_are_offered_as_an_operator_and_a_has_value() {
         assert_eq!(
-            replacements(&suggest("no", &labels(), &[vec![]])),
+            replacements(&suggest("no", &labels(), &[vec![]], false)),
             ["notes:"]
         );
         assert_eq!(
-            replacements(&suggest("has:", &labels(), &[vec![]])),
+            replacements(&suggest("has:", &labels(), &[vec![]], false)),
             ["has:attachment", "has:notes"]
         );
         assert_eq!(
-            replacements(&suggest("has:n", &labels(), &[vec![]])),
+            replacements(&suggest("has:n", &labels(), &[vec![]], false)),
             ["has:notes"]
         );
         assert!(
-            suggest("notes:", &labels(), &[]).is_empty(),
+            suggest("notes:", &labels(), &[], false).is_empty(),
             "a value follows"
         );
     }

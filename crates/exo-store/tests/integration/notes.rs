@@ -1009,8 +1009,10 @@ async fn note_changes_are_backed_up_on_their_own_a_burst_in_one_write() {
     let store = Store::open_with(
         dir,
         ACCOUNT,
-        harness.server.endpoints(),
-        gmail::StaticToken(mock_servers::DEV_ACCESS_TOKEN.into()),
+        exo_store::Remote::gmail(
+            harness.server.endpoints(),
+            gmail::StaticToken(mock_servers::DEV_ACCESS_TOKEN.into()),
+        ),
         Options {
             notes_backup_pace: std::time::Duration::from_millis(300),
             ..support::options()
