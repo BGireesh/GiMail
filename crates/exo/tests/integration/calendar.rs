@@ -2429,9 +2429,9 @@ fn a_colleague_who_stops_sharing_is_forgotten_and_an_offline_refresh_keeps_the_c
         fetched_at: nine,
         from: nine,
         to: nine,
-        events: vec![gmail::calendar::Event {
+        events: vec![exo_store::CalendarEvent {
             summary: Some(summary.into()),
-            ..gmail::calendar::Event::default()
+            ..exo_store::CalendarEvent::default()
         }],
     };
     let mut app = support::start_with_cached_guests(
