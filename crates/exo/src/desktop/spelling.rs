@@ -283,6 +283,24 @@ mod macos {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             let mut document = Document::new();
+            // Ask for completions before checking or correcting: on a fresh `AppleSpell` daemon,
+            // `check`/`correction` starts loading the language model asynchronously and leaves an
+            // in-flight placeholder that makes an immediate `completions` call return empty. Still
+            // wait briefly in case the other test acquired the lock first and kicked off that load.
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            let completions = loop {
+                let words = document.completions("I saw it yesterd", 9..16);
+                if !words.is_empty() || std::time::Instant::now() >= deadline {
+                    break words;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            };
+            assert_eq!(
+                completions.first().map(String::as_str),
+                Some("yesterday"),
+                "{completions:?} (language: {})",
+                NSSpellChecker::sharedSpellChecker().language()
+            );
             assert_eq!(
                 document.correction("I saw teh cat", 6..9).as_deref(),
                 Some("the")
@@ -291,13 +309,6 @@ mod macos {
                 document.correction("I saw the cat", 6..9),
                 None,
                 "nothing to correct"
-            );
-            let completions = document.completions("I saw it yesterd", 9..16);
-            assert_eq!(
-                completions.first().map(String::as_str),
-                Some("yesterday"),
-                "{completions:?} (language: {})",
-                NSSpellChecker::sharedSpellChecker().language()
             );
         }
     }

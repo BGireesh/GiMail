@@ -236,6 +236,9 @@ fn wait_for_alert(app: &mut Fixture, alert: Alert) {
         app.harness.run_steps(1);
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
+    // `notice()` reads the updater's state directly, so draw a frame once `alert` is up to
+    // register `Region::Alert` before any key presses.
+    app.harness.run_steps(1);
 }
 
 #[test]
