@@ -42,6 +42,9 @@ pub(crate) struct Departure {
     pub(super) list: ListId,
     /// Where the cursor goes from a row that leaves: 1 down, -1 up (`[` and `]`), 0 auto.
     pub(super) direction: isize,
+    /// Whether the action triages (Mark Done, Remind Me, Trash, Spam, Move), so an open
+    /// conversation it leaves in the list still moves on as Auto Advance says.
+    pub(super) moves_on: bool,
 }
 
 /// Right-pane contact tracking and hover-settle state private to [`crate::Mail`].
