@@ -2177,14 +2177,9 @@ fn listed_colleagues_are_cached_on_launch() {
         ];
         for event in &cached.events {
             let start = event.start.as_ref().expect("a start");
-            let day = match (&start.date, &start.date_time) {
-                (Some(day), _) => day.parse().expect("a date"),
-                (None, Some(at)) => at
-                    .parse::<jiff::Timestamp>()
-                    .expect("a time")
-                    .to_zoned(ny.clone())
-                    .date(),
-                (None, None) => panic!("{event:?} has no start"),
+            let day = match start {
+                exo_store::EventTime::AllDay(day) => *day,
+                exo_store::EventTime::Timed { at, .. } => at.to_zoned(ny.clone()).date(),
             };
             assert!(window.contains(&day), "{event:?} is in the window");
         }
