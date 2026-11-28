@@ -443,6 +443,11 @@ impl Notes {
             .map(|(id, _)| id.as_str())
     }
 
+    /// The note the thread last scrolled to and flashed, whether or not it still flashes.
+    pub fn revealed(&self) -> Option<&str> {
+        self.flash.as_ref().map(|(id, _)| id.as_str())
+    }
+
     /// How far into its flash note `id` is, from 0 to 1, while it flashes.
     fn flash_progress(&self, id: &str) -> Option<f32> {
         let (flashing, at) = self.flash.as_ref()?;

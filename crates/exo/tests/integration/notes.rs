@@ -589,9 +589,9 @@ fn clicking_a_timeline_entry_reveals_the_note() {
         .expect("the note is listed");
     app.click(entry.center());
     assert_eq!(
-        app.mail().flashing_note(),
+        app.mail().revealed_note(),
         Some(id.as_str()),
-        "the note flashes"
+        "the note is revealed"
     );
     app.wait(1.2);
     assert_eq!(app.mail().flashing_note(), None, "for a second");

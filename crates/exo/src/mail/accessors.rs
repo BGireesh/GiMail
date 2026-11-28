@@ -251,6 +251,12 @@ impl Mail {
         self.notes.flashing()
     }
 
+    /// The note last revealed (scrolled to and flashed), even once its one-second flash is over:
+    /// a test's settle can let more than a second of app time pass (for tests).
+    pub fn revealed_note(&self) -> Option<&str> {
+        self.notes.revealed()
+    }
+
     /// Whether the right pane shows its Notes tab: a thread is open and the tab was last shown.
     pub fn notes_tab(&self) -> bool {
         self.thread.is_some() && self.account.device_settings().notes_tab
