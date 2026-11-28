@@ -273,7 +273,8 @@ fn state_of(app: &App) -> String {
     };
     format!(
         "alert {:?}, prompt {:?}, add calendar {:?}, answer {:?}, toast {:?}, hint {:?}, \
-         thread open {}, invite focused {:?}",
+         thread open {}, invite focused {:?}, can focus invite {:?}, thread region {:?}, \
+         focused message {:?}",
         mail.alert(),
         mail.calendar_prompt(),
         mail.calendar_add_calendar(),
@@ -282,6 +283,9 @@ fn state_of(app: &App) -> String {
         mail.hint_text(),
         mail.thread().is_some(),
         mail.thread().map(exo::thread::ThreadView::invite_focused),
+        mail.thread().map(exo::thread::ThreadView::can_focus_invite),
+        mail.thread().map(exo::thread::ThreadView::region),
+        mail.thread().and_then(exo::thread::ThreadView::focused),
     )
 }
 
