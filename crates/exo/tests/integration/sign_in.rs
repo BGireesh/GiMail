@@ -2626,6 +2626,9 @@ fn answer_yes(app: &mut Harness<'_, App>) {
                 .and_then(exo::Mail::thread)
                 .is_some_and(exo::thread::ThreadView::can_focus_invite)
     });
+    // A frame's keys go to the commands the frame before registered, so one more frame lets
+    // Tab's command for the card be registered before Tab arrives.
+    app.run_steps(1);
     press(app, Key::Tab);
     press(app, Key::Enter);
     run_until(app, "the RSVP alert", |app| {
