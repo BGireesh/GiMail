@@ -2612,9 +2612,15 @@ fn answer_yes(app: &mut Harness<'_, App>) {
     run_until(app, "Add Calendar", |app| {
         add_calendar(app).as_deref() == Some(BEA)
     });
-    // Tab goes to the invite card, which shows once the invitation is read.
+    // Tab goes to the invite card once it can take the keyboard: the invitation is read and its
+    // message has the focus. The answer alone can show before then, and a slow runner's Tab
+    // would land nowhere.
     run_until(app, "the invite card", |app| {
         app.mail().and_then(exo::Mail::invite_answer).is_some()
+            && app
+                .mail()
+                .and_then(exo::Mail::thread)
+                .is_some_and(exo::thread::ThreadView::can_focus_invite)
     });
     press(app, Key::Tab);
     press(app, Key::Enter);
