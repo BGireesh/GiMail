@@ -306,3 +306,73 @@ fn answering_an_answered_invitation_again_marks_it_done() {
     assert_eq!(calendar_answer(&app).as_deref(), Some("declined"));
     assert!(!listed(&app, INVITATION));
 }
+
+#[test]
+fn mark_done_in_all_mail_filtered_by_unread_moves_on_to_the_next_conversation() {
+    let mut app = start("auto-advance-all-mail");
+    app.key(Key::G);
+    app.key(Key::A);
+    app.press(Key::U, Modifiers::SHIFT);
+    let unread = app.subjects();
+    assert!(unread.len() > 1, "several unread conversations: {unread:?}");
+    app.key(Key::Enter);
+    let opened = open_subject(&app);
+    assert!(!opened.is_empty(), "a conversation is open");
+    app.key(Key::E);
+    app.settle();
+    assert!(
+        listed(&app, &opened),
+        "a done conversation stays in All Mail"
+    );
+    let next = open_subject(&app);
+    assert!(
+        !next.is_empty() && next != opened,
+        "Auto Advance opens the conversation below, not {next:?}"
+    );
+}
+
+#[test]
+fn mark_done_in_all_mail_with_auto_advance_off_goes_back_to_the_list() {
+    let mut app = start_with_settings("auto-advance-all-mail-off", &|settings| {
+        settings.desktop_auto_advance = AutoAdvance::Off
+    });
+    app.key(Key::G);
+    app.key(Key::A);
+    app.key(Key::Enter);
+    assert!(app.mail().thread().is_some());
+    app.key(Key::E);
+    app.settle();
+    assert!(app.mail().thread().is_none(), "back to the list");
+}
+
+#[test]
+fn starring_in_all_mail_stays_on_the_conversation() {
+    let mut app = start("auto-advance-all-mail-star");
+    app.key(Key::G);
+    app.key(Key::A);
+    app.key(Key::Enter);
+    let opened = open_subject(&app);
+    app.key(Key::S);
+    app.settle();
+    assert_eq!(open_subject(&app), opened, "only triage moves on");
+}
+
+#[test]
+fn mark_done_on_an_open_search_result_moves_on_to_the_next_result() {
+    let mut app = start("auto-advance-search");
+    app.key(Key::Slash);
+    app.type_text("in:inbox");
+    app.key(Key::Enter);
+    let results = app.subjects();
+    assert!(results.len() > 1, "several results: {results:?}");
+    app.key(Key::Enter);
+    let opened = open_subject(&app);
+    assert!(!opened.is_empty(), "the result opens");
+    app.key(Key::E);
+    app.settle();
+    let next = open_subject(&app);
+    assert!(
+        !next.is_empty() && next != opened,
+        "Auto Advance opens the next result, not {next:?}"
+    );
+}

@@ -203,11 +203,18 @@ impl Mail {
         let unpredicted = ids
             .iter()
             .filter(|id| self.search.is_none() && !stays && !leaving.contains(id));
+        let moves_on = moves_on(&mutation);
+        // Search results stay put, so an open result that was triaged moves on at once.
+        let open = self.thread.as_ref().map(|thread| thread.id().to_owned());
+        let open_result_moves_on = self.search.is_some()
+            && moves_on
+            && open.is_some_and(|open| ids.contains(&open) && !leaving.contains(&open));
         self.departing.extend(unpredicted.map(|id| Departure {
             thread: id.clone(),
             applied,
             list: self.list.clone(),
             direction,
+            moves_on,
         }));
         let text = text.unwrap_or_else(|| {
             triage_copy::toast(&mutation, &self.snapshot.labels, self.account.is_outlook())
@@ -225,7 +232,26 @@ impl Mail {
         if !leaving.is_empty() {
             self.dismiss_and_advance(&leaving, direction, now);
         }
+        if open_result_moves_on {
+            self.move_on_from_open(direction);
+        }
         Some(token)
+    }
+
+    /// Moves on from an open conversation that a triage left in the list (in All Mail, Done,
+    /// a label, or a search): to the next one in `direction` (`[`, `]`), else the way Auto Advance
+    /// goes, or back to the list when Auto Advance is off.
+    fn move_on_from_open(&mut self, direction: isize) {
+        let toward = if direction != 0 {
+            direction
+        } else {
+            self.account.settings().desktop_auto_advance.direction()
+        };
+        if toward == 0 {
+            self.close_thread();
+        } else {
+            self.step(toward);
+        }
     }
 
     /// Slides `leaving` out of the list and moves on. The cursor goes to the next conversation in
@@ -289,7 +315,13 @@ impl Mail {
             .collect();
         let direction = due.first().map_or(0, |departure| departure.direction);
         if gone.is_empty() {
-            if direction != 0 {
+            let open = self.thread.as_ref().map(|thread| thread.id().to_owned());
+            let open_moves_on = due.iter().any(|departure| {
+                departure.moves_on && open.as_deref() == Some(departure.thread.as_str())
+            });
+            if open_moves_on {
+                self.move_on_from_open(direction);
+            } else if direction != 0 {
                 self.step(direction);
             }
             return;
@@ -406,4 +438,17 @@ impl Mail {
             now,
         );
     }
+}
+
+/// Whether `mutation` triages a conversation, which Auto Advance moves on from even when the
+/// conversation stays in the list. Starring, read state and labels don't.
+fn moves_on(mutation: &Mutation) -> bool {
+    matches!(
+        mutation,
+        Mutation::MarkDone
+            | Mutation::Trash
+            | Mutation::Spam
+            | Mutation::Move { .. }
+            | Mutation::Remind { .. }
+    )
 }
