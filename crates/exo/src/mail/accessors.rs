@@ -407,10 +407,11 @@ impl Mail {
         self.settings.dialog_open()
     }
 
-    /// Whether nothing is in flight: the account is idle and every body on screen is laid out and
-    /// painted. For screenshots and tests.
+    /// Whether nothing is in flight: the account is idle, every body on screen is laid out and
+    /// painted, and no file is still on its way into a note. For screenshots and tests.
     pub fn is_idle(&self) -> bool {
         self.account.is_idle()
+            && self.notes.files_idle()
             && self.ui_tasks.is_idle()
             && self.bodies.is_idle()
             && self.snippets.is_idle()

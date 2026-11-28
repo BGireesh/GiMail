@@ -492,6 +492,12 @@ impl Notes {
         })
     }
 
+    /// Whether no file is on its way into a note, or the ones that are are held on purpose
+    /// ([`Self::hold_adding`]). For tests and screenshots, which wait for the app to go quiet.
+    pub fn files_idle(&self) -> bool {
+        self.adder.pending.is_empty() || self.adder.held.load(Ordering::SeqCst)
+    }
+
     /// Holds the files being added (`true`) where they are, before they're kept, until called
     /// with `false` (tests).
     pub fn hold_adding(&self, held: bool) {
