@@ -105,7 +105,12 @@ pub(super) fn gmail_part(
 }
 
 /// A leaf's Gmail search, empty for one Gmail can't be asked about.
-fn gmail_leaf(token: &Token, labels: &LabelIndex, me: &[String], important: Option<&str>) -> String {
+fn gmail_leaf(
+    token: &Token,
+    labels: &LabelIndex,
+    me: &[String],
+    important: Option<&str>,
+) -> String {
     let minus = if token.negated { "-" } else { "" };
     let value = if token.quoted {
         format!("\"{}\"", token.value())

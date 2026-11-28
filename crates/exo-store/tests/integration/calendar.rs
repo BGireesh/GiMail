@@ -6,9 +6,8 @@
 use crate::support;
 
 use exo_store::{
-    CachedGuest, Calendar, CalendarChange, CalendarEvent as Event, CalendarOutcome,
-    CalendarRemote, EventAttendee, EventPatch, EventTime, InviteLinks, Refusal, RsvpStatus,
-    StoredEvent,
+    CachedGuest, Calendar, CalendarChange, CalendarEvent as Event, CalendarOutcome, CalendarRemote,
+    EventAttendee, EventPatch, EventTime, InviteLinks, Refusal, RsvpStatus, StoredEvent,
 };
 use gmail::calendar::{Event as GoogleEvent, EventDateTime as GoogleDateTime};
 use jiff::{SignedDuration, Timestamp, ToSpan, civil::date, tz::TimeZone};

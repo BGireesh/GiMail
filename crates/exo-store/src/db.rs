@@ -348,7 +348,8 @@ pub(crate) struct GuestCacheRow {
     /// Rows written before the provider-neutral calendar model hold Google's event JSON, which
     /// [`Compat`](crate::calendar::serde_compat::Compat) still reads.
     #[column(type = text)]
-    pub events: Json<Vec<crate::calendar::serde_compat::Compat<crate::calendar::model::CalendarEvent>>>,
+    pub events:
+        Json<Vec<crate::calendar::serde_compat::Compat<crate::calendar::model::CalendarEvent>>>,
 }
 
 /// A change to the calendar that the provider doesn't have yet. Not provider truth, like the

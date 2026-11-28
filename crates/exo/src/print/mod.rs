@@ -302,7 +302,11 @@ impl Printout {
 
     /// The document that prints for `page`, as HTML: everything a printout holds.
     pub fn html(&self, page: Page) -> String {
-        document::html(&self.on(page), self.block_draft_remote_content.unwrap_or(false)).html
+        document::html(
+            &self.on(page),
+            self.block_draft_remote_content.unwrap_or(false),
+        )
+        .html
     }
 }
 

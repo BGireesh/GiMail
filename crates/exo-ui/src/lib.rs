@@ -109,8 +109,7 @@ pub use icon_button::IconButton;
 pub use icons::{
     icon_rect, icon_size, icon_svg, paint_dots_spinner, paint_icon, paint_icon_on,
     paint_icon_rotated, paint_icon_stroked, paint_icon_two_tone, paint_icon_two_tone_on,
-    paint_loading_spinner,
-    paint_spinner,
+    paint_loading_spinner, paint_spinner,
 };
 pub use keycap::{KEYCAP_ARROW, KEYCAP_BASELINE, KEYCAP_GAP, KeycapColors, Keycaps, keycap_label};
 pub use label_chip::{LabelChip, chip_hover};

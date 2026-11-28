@@ -21,8 +21,8 @@ mod structure;
 use std::collections::HashMap;
 
 pub(crate) use fts::{FTS_ANCHOR, Fts, Recheck, tokenize_email};
-pub(crate) use structure::{Cond, NoteTerm, Structure};
 pub(crate) use kql::participants as participants_kql;
+pub(crate) use structure::{Cond, NoteTerm, Structure};
 
 use self::eval::Matcher;
 use self::gmail::{GmailPart, gmail_part, gmail_query};

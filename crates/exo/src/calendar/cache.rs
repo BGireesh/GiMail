@@ -56,7 +56,11 @@ pub fn keep_window(events: Vec<Event>, today: Date, tz: &TimeZone) -> Vec<Event>
 /// When an event starting at `start` and ending at `end` (exclusive) is under way, in `tz`: an
 /// all-day event from the start of its first day to the start of its end date (the next day
 /// without one), a timed one from its start to its end (a moment, without one).
-fn span(start: &EventTime, end: Option<&EventTime>, tz: &TimeZone) -> Option<(Timestamp, Timestamp)> {
+fn span(
+    start: &EventTime,
+    end: Option<&EventTime>,
+    tz: &TimeZone,
+) -> Option<(Timestamp, Timestamp)> {
     match start {
         EventTime::AllDay(first) => {
             let last = match end {

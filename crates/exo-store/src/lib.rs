@@ -66,6 +66,7 @@ pub use address_book::ScoredContact;
 pub use brands::{BrandCheck, BrandRecord};
 pub use bulk::{BulkTarget, ListCutoff, Progress, Relabelled, Scope, SenderRule, SenderRuleUndo};
 pub use bulk_log::{BulkRecord, BulkState, LoggedBulk};
+pub use calendar::CachedGuest;
 pub use calendar::model::{
     AccessRole, AccountCalendar, Calendar, CalendarEvent, CalendarProviderKind, Conference,
     ConferenceKind, ConferencePatch, EventAttachment, EventAttendee, EventCategory, EventPatch,
@@ -77,7 +78,6 @@ pub use calendar::outbox::{
 };
 pub use calendar::provider::CalendarRemote;
 pub use calendar::recurrence::{End as RecurrenceEnd, Frequency, Nth, Recurrence};
-pub use calendar::CachedGuest;
 pub use connection::{Connection, Debounce, Outage};
 pub use contacts::{ContactList, PhotoMetadata, ProviderContact, ProviderContacts};
 pub use drafts::{
