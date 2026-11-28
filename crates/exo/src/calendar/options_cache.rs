@@ -153,7 +153,11 @@ impl CacheChange {
 /// A time's name, as `5:30 PM`.
 fn time(minute: u16) -> String {
     let hour = minute / 60 % 24;
-    let clock = if hour.is_multiple_of(12) { 12 } else { hour % 12 };
+    let clock = if hour.is_multiple_of(12) {
+        12
+    } else {
+        hour % 12
+    };
     format!(
         "{clock}:{:02} {}",
         minute % 60,

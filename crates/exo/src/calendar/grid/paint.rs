@@ -182,7 +182,11 @@ pub(super) fn paint_day_headers(painter: &Painter, frame: &Frame, grid: &Grid<'_
 fn paint_heads(
     painter: &Painter,
     frame: &Frame,
-    heads: &[(String, exo_ui::CalendarColor, crate::calendar::guests::Marker)],
+    heads: &[(
+        String,
+        exo_ui::CalendarColor,
+        crate::calendar::guests::Marker,
+    )],
 ) {
     use crate::calendar::guests::{self, Marker};
     const SWATCH: f32 = 10.0;

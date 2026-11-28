@@ -5,7 +5,7 @@
 use regex::Regex;
 
 use super::fts::{
-    Fts, default_exclusions, fts5_prefix_or_phrase, fts5_value, fts_token, full_table_match,
+    Fts, default_exclusions, fts_token, fts5_prefix_or_phrase, fts5_value, full_table_match,
     is_anywhere, recheck_of,
 };
 use super::{Kind, LabelIndex, Node, Token};

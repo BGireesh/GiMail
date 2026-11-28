@@ -40,8 +40,8 @@ mod when_edit;
 pub(crate) use event::{Rsvp, unique_key as event_key};
 pub(crate) use invites::invite_event;
 pub(crate) use keys::{
-    PICKER, PICKER_ROW, register, register_cache_keys, register_focus_cycle,
-    register_picker_keys, share_availability_command,
+    PICKER, PICKER_ROW, register, register_cache_keys, register_focus_cycle, register_picker_keys,
+    share_availability_command,
 };
 pub(crate) use share::Target;
 pub use sync::CalendarSync;

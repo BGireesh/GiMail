@@ -113,7 +113,14 @@ impl Store {
             .fetched_at(cached.fetched_at.as_millisecond())
             .start_ms(cached.from.as_millisecond())
             .to_ms(cached.to.as_millisecond())
-            .events(Json(cached.events.iter().cloned().map(Compat).collect::<Vec<_>>()))
+            .events(Json(
+                cached
+                    .events
+                    .iter()
+                    .cloned()
+                    .map(Compat)
+                    .collect::<Vec<_>>(),
+            ))
             .exec(write.exec())
             .await?;
         // The account's views don't show the cache, so this wakes none of them.

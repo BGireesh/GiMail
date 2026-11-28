@@ -5,8 +5,9 @@ use exo_commands::Hint;
 use exo_store::{ListId, Mutation};
 
 use crate::{
-    Mail, accounts, attachment_files, body, commands::Action, compose, is_valid_tel, links, mailbox,
-    notes, remind,
+    Mail, accounts, attachment_files, body,
+    commands::Action,
+    compose, is_valid_tel, links, mailbox, notes, remind,
     thread::{self, ThreadView},
     unsubscribe,
 };
