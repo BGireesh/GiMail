@@ -250,7 +250,8 @@ fn run_until(harness: &mut Harness<'_, App>, what: &str, done: impl Fn(&App) -> 
     while !done(harness.state()) {
         assert!(
             started.elapsed() < Duration::from_secs(60),
-            "timed out waiting for {what}"
+            "timed out waiting for {what}; {}",
+            state_of(harness.state())
         );
         if last_tick.elapsed() < Duration::from_secs_f64(FRAME) {
             let now = harness.ctx.input(|i| i.time);
@@ -263,6 +264,25 @@ fn run_until(harness: &mut Harness<'_, App>, what: &str, done: impl Fn(&App) -> 
         }
         std::thread::sleep(Duration::from_millis(5));
     }
+}
+
+/// What the app shows, for a wait that timed out.
+fn state_of(app: &App) -> String {
+    let Some(mail) = app.mail() else {
+        return "no mail screen".to_owned();
+    };
+    format!(
+        "alert {:?}, prompt {:?}, add calendar {:?}, answer {:?}, toast {:?}, hint {:?}, \
+         thread open {}, invite focused {:?}",
+        mail.alert(),
+        mail.calendar_prompt(),
+        mail.calendar_add_calendar(),
+        mail.invite_answer(),
+        mail.toast_text(),
+        mail.hint_text(),
+        mail.thread().is_some(),
+        mail.thread().map(exo::thread::ThreadView::invite_focused),
+    )
 }
 
 fn press(harness: &mut Harness<'_, App>, key: Key) {
