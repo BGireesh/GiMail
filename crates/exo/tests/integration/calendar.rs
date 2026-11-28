@@ -2277,7 +2277,12 @@ fn synced(app: &Fixture, email: &str) -> Option<jiff::Timestamp> {
 
 #[test]
 fn calendar_settings_say_when_each_colleague_was_synced_and_resync_one_on_demand() {
-    let mut app = support::start_with_settings("calendar-cached-resync", &cache_on(&[PRIYA, LENA]));
+    // Google answers a little late, so a re-sync is still on its way when the test looks.
+    let mut app = support::start_with_latency(
+        "calendar-cached-resync",
+        &cache_on(&[PRIYA, LENA]),
+        std::time::Duration::from_millis(300),
+    );
     let nine = new_york("2026-11-17T09:00").timestamp();
     assert_eq!(
         synced(&app, PRIYA),

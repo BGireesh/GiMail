@@ -250,7 +250,8 @@ fn run_until(harness: &mut Harness<'_, App>, what: &str, done: impl Fn(&App) -> 
     while !done(harness.state()) {
         assert!(
             started.elapsed() < Duration::from_secs(60),
-            "timed out waiting for {what}"
+            "timed out waiting for {what}; {}",
+            state_of(harness.state())
         );
         if last_tick.elapsed() < Duration::from_secs_f64(FRAME) {
             let now = harness.ctx.input(|i| i.time);
@@ -263,6 +264,29 @@ fn run_until(harness: &mut Harness<'_, App>, what: &str, done: impl Fn(&App) -> 
         }
         std::thread::sleep(Duration::from_millis(5));
     }
+}
+
+/// What the app shows, for a wait that timed out.
+fn state_of(app: &App) -> String {
+    let Some(mail) = app.mail() else {
+        return "no mail screen".to_owned();
+    };
+    format!(
+        "alert {:?}, prompt {:?}, add calendar {:?}, answer {:?}, toast {:?}, hint {:?}, \
+         thread open {}, invite focused {:?}, can focus invite {:?}, thread region {:?}, \
+         focused message {:?}",
+        mail.alert(),
+        mail.calendar_prompt(),
+        mail.calendar_add_calendar(),
+        mail.invite_answer(),
+        mail.toast_text(),
+        mail.hint_text(),
+        mail.thread().is_some(),
+        mail.thread().map(exo::thread::ThreadView::invite_focused),
+        mail.thread().map(exo::thread::ThreadView::can_focus_invite),
+        mail.thread().map(exo::thread::ThreadView::region),
+        mail.thread().and_then(exo::thread::ThreadView::focused),
+    )
 }
 
 fn press(harness: &mut Harness<'_, App>, key: Key) {
@@ -2592,10 +2616,19 @@ fn answer_yes(app: &mut Harness<'_, App>) {
     run_until(app, "Add Calendar", |app| {
         add_calendar(app).as_deref() == Some(BEA)
     });
-    // Tab goes to the invite card, which shows once the invitation is read.
+    // Tab goes to the invite card once it can take the keyboard: the invitation is read and its
+    // message has the focus. The answer alone can show before then, and a slow runner's Tab
+    // would land nowhere.
     run_until(app, "the invite card", |app| {
         app.mail().and_then(exo::Mail::invite_answer).is_some()
+            && app
+                .mail()
+                .and_then(exo::Mail::thread)
+                .is_some_and(exo::thread::ThreadView::can_focus_invite)
     });
+    // A frame's keys go to the commands the frame before registered, so one more frame lets
+    // Tab's command for the card be registered before Tab arrives.
+    app.run_steps(1);
     press(app, Key::Tab);
     press(app, Key::Enter);
     run_until(app, "the RSVP alert", |app| {

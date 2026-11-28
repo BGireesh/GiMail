@@ -303,9 +303,9 @@ fn opening_a_result_reveals_the_note() {
         Some(thread.as_str())
     );
     assert_eq!(
-        app.mail().flashing_note(),
+        app.mail().revealed_note(),
         Some(id.as_str()),
-        "the note flashes"
+        "the note is revealed"
     );
     assert_eq!(app.mail().note_highlights(), ["zebra"]);
     app.wait(1.2);
@@ -346,7 +346,7 @@ fn opening_a_result_reveals_the_note_in_the_pane() {
     search_for(&mut app, "zebra");
     app.key(Key::Enter);
     assert!(app.mail().notes_tab(), "the pane shows the notes");
-    assert_eq!(app.mail().flashing_note(), Some(id.as_str()));
+    assert_eq!(app.mail().revealed_note(), Some(id.as_str()));
     let pane = app.mail().right_pane();
     assert!(
         app.mail()
